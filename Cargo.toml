@@ -1,6 +1,6 @@
 [package]
 name = "rsille"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -14,3 +14,27 @@ criterion = "0.4"
 [[bench]]
 name = "set"
 harness = false
+
+[[example]]
+name = "turtle1"
+path = "examples/turtle/turtle1.rs"
+
+[[example]]
+name = "turtle2"
+path = "examples/turtle/turtle2.rs"
+
+[[example]]
+name = "turtle3"
+path = "examples/turtle/turtle3.rs"
+
+[[example]]
+name = "turtle4"
+path = "examples/turtle/turtle4.rs"
+
+[[example]]
+name = "turtle5"
+path = "examples/turtle/turtle5.rs"
+
+[[example]]
+name = "turtle6"
+path = "examples/turtle/turtle6.rs"

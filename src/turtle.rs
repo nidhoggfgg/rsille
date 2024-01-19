@@ -2,20 +2,24 @@ use crate::Canvas;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Turtle {
+    home_x: f64,
+    home_y: f64,
     x: f64,
     y: f64,
-    rotation: f64,
-    brush_on: bool,
+    heading: f64,
+    pen_on: bool,
     canvas: Canvas,
 }
 
 impl Turtle {
     pub fn new(x: f64, y: f64) -> Self {
         Self {
+            home_x: x,
+            home_y: y,
             x,
             y,
-            rotation: 0.0,
-            brush_on: true,
+            heading: 0.0,
+            pen_on: true,
             canvas: Canvas::new(),
         }
     }
@@ -28,26 +32,74 @@ impl Turtle {
         self.canvas.get_lines()
     }
 
+    pub fn penup(&mut self) {
+        self.pen_on = false;
+    }
+
     pub fn up(&mut self) {
-        self.brush_on = false;
+        self.penup();
+    }
+
+    pub fn pendown(&mut self) {
+        self.pen_on = true;
     }
 
     pub fn down(&mut self) {
-        self.brush_on = true;
+        self.pendown();
     }
 
     pub fn forward(&mut self, step: f64) {
-        let (sr, cr) = self.rotation.to_radians().sin_cos();
+        let (sr, cr) = self.heading.to_radians().sin_cos();
         let x = self.x + cr * step;
         let y = self.y + sr * step;
-        let prev_brush = self.brush_on;
-        self.brush_on = true;
-        self.move_to(x, y);
-        self.brush_on = prev_brush;
+        let prev_brush = self.pen_on;
+        self.pen_on = true;
+        self.goto(x, y);
+        self.pen_on = prev_brush;
     }
 
-    pub fn move_to(&mut self, x: f64, y: f64) {
-        if self.brush_on {
+    pub fn fd(&mut self, step: f64) {
+        self.forward(step);
+    }
+
+    pub fn backward(&mut self, step: f64) {
+        self.forward(-step);
+    }
+
+    pub fn back(&mut self, step: f64) {
+        self.backward(step);
+    }
+
+    pub fn bk(&mut self, step: f64) {
+        self.backward(step);
+    }
+
+    pub fn right(&mut self, angle: f64) {
+        self.heading += angle;
+    }
+
+    pub fn rt(&mut self, angle: f64) {
+        self.right(angle);
+    }
+
+    pub fn left(&mut self, angle: f64) {
+        self.heading -= angle;
+    }
+
+    pub fn lt(&mut self, angle: f64) {
+        self.left(angle);
+    }
+
+    pub fn circle(&mut self, raduis: f64, extent: f64, steps: usize) {
+        let angle = extent / steps as f64;
+        for _ in 0..steps {
+            self.forward(2.0 * raduis * (angle / 2.0).to_radians().sin());
+            self.left(angle);
+        }
+    }
+
+    pub fn goto(&mut self, x: f64, y: f64) {
+        if self.pen_on {
             self.canvas.line(self.x, self.y, x, y);
         }
 
@@ -55,20 +107,25 @@ impl Turtle {
         self.y = y;
     }
 
-    pub fn go_to(&mut self, x: f64, y: f64) {
+    pub fn teleport(&mut self, x: f64, y: f64) {
         self.x = x;
         self.y = y;
     }
 
-    pub fn right(&mut self, angle: f64) {
-        self.rotation += angle;
+    pub fn home(&mut self) {
+        self.x = self.home_x;
+        self.y = self.home_y;
     }
 
-    pub fn left(&mut self, angle: f64) {
-        self.rotation -= angle;
+    pub fn position(&self) -> (f64, f64) {
+        (self.x, self.y)
     }
 
-    pub fn back(&mut self, step: f64) {
-        self.forward(-step)
+    pub fn pos(&self) -> (f64, f64) {
+        self.position()
+    }
+
+    pub fn heading(&self) -> f64 {
+        self.heading
     }
 }
