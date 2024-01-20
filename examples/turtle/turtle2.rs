@@ -7,5 +7,5 @@ fn main() {
         t.right(144.0);
     }
 
-    println!("{}", t.frame());
+    println!("{}", t.draw());
 }

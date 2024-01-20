@@ -11,5 +11,5 @@ fn main() {
         t.right(60.0);
     }
 
-    println!("{}", t.frame());
+    println!("{}", t.draw());
 }

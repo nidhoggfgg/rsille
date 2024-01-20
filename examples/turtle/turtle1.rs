@@ -10,5 +10,5 @@ fn main() {
         }
     }
 
-    println!("{}", t.frame());
+    println!("{}", t.draw());
 }

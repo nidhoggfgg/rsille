@@ -9,5 +9,5 @@ fn main() {
         length += 0.05;
     }
 
-    println!("{}", t.frame());
+    println!("{}", t.draw());
 }

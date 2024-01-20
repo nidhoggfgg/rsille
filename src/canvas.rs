@@ -34,7 +34,7 @@ impl Canvas {
         }
     }
 
-    pub fn frame(&mut self) -> String {
+    pub fn draw(&mut self) -> String {
         self.pixels
             .iter()
             .map(|row| row.iter().map(|p| p.get()).collect::<String>())
@@ -42,7 +42,7 @@ impl Canvas {
             .join("\n")
     }
 
-    pub fn get_lines(&mut self) -> Vec<String> {
+    pub fn lines(&mut self) -> Vec<String> {
         self.pixels
             .iter()
             .map(|row| row.iter().map(|p| p.get()).collect::<String>())

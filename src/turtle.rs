@@ -24,12 +24,12 @@ impl Turtle {
         }
     }
 
-    pub fn frame(&mut self) -> String {
-        self.canvas.frame()
+    pub fn draw(&mut self) -> String {
+        self.canvas.draw()
     }
 
-    pub fn get_lines(&mut self) -> Vec<String> {
-        self.canvas.get_lines()
+    pub fn lines(&mut self) -> Vec<String> {
+        self.canvas.lines()
     }
 
     pub fn penup(&mut self) {
