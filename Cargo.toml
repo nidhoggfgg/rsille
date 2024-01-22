@@ -16,6 +16,14 @@ name = "set"
 harness = false
 
 [[example]]
+name = "cube"
+path = "examples/object3d/cube.rs"
+
+[[example]]
+name = "otc"
+path = "examples/object3d/otc.rs"
+
+[[example]]
 name = "turtle1"
 path = "examples/turtle/turtle1.rs"
 
