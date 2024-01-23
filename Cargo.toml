@@ -24,25 +24,9 @@ name = "otc"
 path = "examples/object3d/otc.rs"
 
 [[example]]
-name = "turtle1"
-path = "examples/turtle/turtle1.rs"
+name = "turtle-flower"
+path = "examples/turtle/turtle-flower.rs"
 
 [[example]]
-name = "turtle2"
-path = "examples/turtle/turtle2.rs"
-
-[[example]]
-name = "turtle3"
-path = "examples/turtle/turtle3.rs"
-
-[[example]]
-name = "turtle4"
-path = "examples/turtle/turtle4.rs"
-
-[[example]]
-name = "turtle5"
-path = "examples/turtle/turtle5.rs"
-
-[[example]]
-name = "turtle6"
-path = "examples/turtle/turtle6.rs"
+name = "turtle-multi"
+path = "examples/turtle/turtle-multi.rs"
