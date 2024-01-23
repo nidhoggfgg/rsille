@@ -22,14 +22,12 @@ fn get_pixel(x: f64, y: f64) -> u32 {
 }
 
 fn make_braille_unchecked(p: u32) -> char {
-    unsafe {
-        char::from_u32_unchecked(BASE_CHAR + p)
-    }
+    unsafe { char::from_u32_unchecked(BASE_CHAR + p) }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd)]
 pub struct Pixel {
-    code: u32
+    code: u32,
 }
 
 impl Pixel {

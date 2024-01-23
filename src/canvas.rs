@@ -2,8 +2,8 @@ use std::cmp;
 
 use crate::{braille::Pixel, utils::normalize};
 
-fn get_pos(x: f64, y: f64) -> (usize, usize) {
-    (y.round() as usize / 4, x.round() as usize / 2)
+pub trait Draw {
+    fn draw(&self, canvas: &mut Canvas, x: f64, y: f64);
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -34,7 +34,11 @@ impl Canvas {
         }
     }
 
-    pub fn draw(&mut self) -> String {
+    pub fn draw(&mut self, target: &dyn Draw, x: f64, y: f64) {
+        target.draw(self, x, y);
+    }
+
+    pub fn frame(&mut self) -> String {
         self.pixels
             .iter()
             .map(|row| row.iter().map(|p| p.get()).collect::<String>())
@@ -120,3 +124,6 @@ impl Canvas {
     }
 }
 
+fn get_pos(x: f64, y: f64) -> (usize, usize) {
+    (y.round() as usize / 4, x.round() as usize / 2)
+}

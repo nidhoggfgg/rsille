@@ -1,4 +1,4 @@
-use rsille::object3d::Object3D;
+use rsille::{object3d::Object3D, Canvas, Draw};
 
 // generate the vertices(6) of cube and sides(12) of cube
 // the sides contain the index of the vertice
@@ -48,6 +48,7 @@ fn gen_rotate(k: i32) -> (f64, f64, f64) {
 
 fn main() {
     let side_len = 40.0;
+    let mut canvas = Canvas::new();
     let mut object = gen_octahedron(side_len);
     let mut k = 0;
     // hide the cursor and clear screen
@@ -55,7 +56,9 @@ fn main() {
     loop {
         let (rx, ry, rz) = gen_rotate(k);
         object.rotate_xyz(rx, ry, rz);
-        println!("\x1B[H{}", object.draw(side_len + 5.0, side_len + 5.0));
+        canvas.clear();
+        object.draw(&mut canvas, side_len + 5.0, side_len + 5.0);
+        println!("\x1B[H{}", canvas.frame());
         std::thread::sleep(std::time::Duration::from_millis(32));
         k += 1;
     }

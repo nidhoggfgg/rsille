@@ -1,7 +1,8 @@
-use rsille::Turtle;
+use rsille::{Canvas, Turtle};
 
 fn main() {
-    let mut t = Turtle::new(15.0, 15.0);
+    let mut canvas = Canvas::new();
+    let mut t = Turtle::new();
     for _ in 0..6 {
         for _ in 0..3 {
             t.forward(10.0);
@@ -11,5 +12,6 @@ fn main() {
         t.right(60.0);
     }
 
-    println!("{}", t.draw());
+    canvas.draw(&t, 15.0, 15.0);
+    println!("{}", canvas.frame());
 }

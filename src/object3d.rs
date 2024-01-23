@@ -1,4 +1,4 @@
-use crate::Canvas;
+use crate::{canvas::Draw, Canvas};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Point3D {
@@ -70,7 +70,6 @@ impl Point3D {
 pub struct Object3D {
     vertices: Vec<Point3D>,
     sides: Vec<(usize, usize)>,
-    canvas: Canvas,
 }
 
 impl Object3D {
@@ -78,7 +77,6 @@ impl Object3D {
         Self {
             vertices: Vec::new(),
             sides: Vec::new(),
-            canvas: Canvas::new(),
         }
     }
 
@@ -91,20 +89,7 @@ impl Object3D {
         Self {
             vertices,
             sides: Vec::new(),
-            canvas: Canvas::new(),
         }
-    }
-
-    pub fn draw(&mut self, move_x: f64, move_z: f64) -> String {
-        self.canvas.clear();
-        self.draw_impl(move_x, move_z);
-        self.canvas.draw()
-    }
-
-    pub fn lines(&mut self, move_x: f64, move_z: f64) -> Vec<String> {
-        self.canvas.clear();
-        self.draw_impl(move_x, move_z);
-        self.canvas.lines()
     }
 
     pub fn sides(&self) -> Vec<(f64, f64, f64)> {
@@ -133,46 +118,15 @@ impl Object3D {
             p.rotate_xyz(angle_x, angle_y, angle_z);
         }
     }
+}
 
-    fn draw_impl(&mut self, move_x: f64, move_z: f64) {
+impl Draw for Object3D {
+    fn draw(&self, canvas: &mut Canvas, x: f64, y: f64) {
         for s in &self.sides {
             let (v1, v2) = (self.vertices[s.0], self.vertices[s.1]);
-            let (x1, y1) = (move_x + v1.x, move_z + v1.z);
-            let (x2, y2) = (move_x + v2.x, move_z + v2.z);
-            self.canvas.line(x1, y1, x2, y2);
+            let (x1, y1) = (x + v1.x, y + v1.z);
+            let (x2, y2) = (x + v2.x, y + v2.z);
+            canvas.line(x1, y1, x2, y2);
         }
-
-        // it's .... bad, add argument move_x, move_z works much better
-        // if self.vertices.is_empty() {
-        //     return;
-        // }
-        // let px = self
-        //     .vertices
-        //     .iter()
-        //     .min_by_key(|&p| p.x.partial_cmp(&p.x).unwrap_or(std::cmp::Ordering::Equal))
-        //     .unwrap()
-        //     .x
-        //     .abs()
-        //     .round() + 1.0;
-        // let py = self
-        //     .vertices
-        //     .iter()
-        //     .min_by_key(|&p| p.y.partial_cmp(&p.y).unwrap_or(std::cmp::Ordering::Equal))
-        //     .unwrap()
-        //     .y
-        //     .abs()
-        //     .round() + 1.0;
-        // let pz = self
-        //     .vertices
-        //     .iter()
-        //     .min_by_key(|&p| p.z.partial_cmp(&p.z).unwrap_or(std::cmp::Ordering::Equal))
-        //     .unwrap()
-        //     .z
-        //     .abs()
-        //     .round() + 1.0;
-        // for s in &self.sides {
-        //     let (v1, v2) = (self.vertices[s.0], self.vertices[s.1]);
-        //     self.canvas.line(px*2.0 + v1.x, pz * 2.0 + v1.z, px * 2.0 + v2.x, pz * 2.0 + v2.z);
-        // }
     }
 }

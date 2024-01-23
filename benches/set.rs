@@ -9,7 +9,7 @@ fn render_10000(size: i32) {
         for i in 0..size {
             c.set(size_f, i as f64);
         }
-        c.draw();
+        c.frame();
     }
 }
 

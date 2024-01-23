@@ -1,7 +1,9 @@
-use rsille::Turtle;
+use rsille::{Canvas, Turtle};
 
 fn main() {
-    let mut t = Turtle::new(30.0, 60.0);
+    let mut canvas = Canvas::new();
+    let mut t = Turtle::new();
     t.circle(30.0, 360.0, 100);
-    println!("{}", t.draw());
+    canvas.draw(&t, 30.0, 60.0);
+    println!("{}", canvas.frame());
 }

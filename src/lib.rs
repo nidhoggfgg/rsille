@@ -1,8 +1,9 @@
 mod braille;
 mod canvas;
-mod utils;
-mod turtle;
 pub mod object3d;
+mod turtle;
+mod utils;
 
 pub use canvas::Canvas;
+pub use canvas::Draw;
 pub use turtle::Turtle;
