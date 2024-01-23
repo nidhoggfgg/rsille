@@ -1,4 +1,4 @@
-use rsille::{object3d::Object3D, Canvas, Draw};
+use rsille::{Object3D, Canvas, Draw};
 
 // generate the vertices(6) of cube and sides(12) of cube
 // the sides contain the index of the vertice
