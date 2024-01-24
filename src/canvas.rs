@@ -39,11 +39,7 @@ impl Canvas {
     }
 
     pub fn frame(&mut self) -> String {
-        self.pixels
-            .iter()
-            .map(|row| row.iter().map(|p| p.get()).collect::<String>())
-            .collect::<Vec<String>>()
-            .join("\n")
+        self.lines().join("\n")
     }
 
     pub fn lines(&mut self) -> Vec<String> {
@@ -57,12 +53,6 @@ impl Canvas {
         let width = self.width;
         let height = self.height;
         self.pixels = vec![vec![Pixel::zero(); width]; height];
-    }
-
-    pub fn del_new(&mut self) {
-        self.pixels = Vec::new();
-        self.width = 0;
-        self.height = 0;
     }
 
     pub fn set(&mut self, x: f64, y: f64) {
@@ -102,10 +92,10 @@ impl Canvas {
         }
     }
 
-    // +-+    +--+    +--+
-    // | | -> |  | -> |  |
-    // +-+    +--+    |  |
-    //                +--+
+    // +--+    +----+    +----+
+    // |  | -> |    | -> |    |
+    // +--+    +----+    |    |
+    //                  +----+
     fn pad_row_col(&mut self, row: usize, col: usize) {
         if self.width <= col {
             for r in &mut self.pixels {

@@ -1,4 +1,4 @@
-use rsille::{Object3D, Canvas, Draw};
+use rsille::{Canvas, Object3D};
 
 // generate the vertices(6) of cube and sides(12) of cube
 // the sides contain the index of the vertice
@@ -40,11 +40,11 @@ fn gen_cube(side_len: f64) -> Object3D {
 }
 
 // just make the rotate looks more "random"
-fn gen_rotate(k: i32) -> (f64, f64, f64) {
+fn gen(k: i32) -> (f64, f64, f64, f64) {
     match k {
-        k if k % 2 == 0 => (1.0, 2.0, 3.0),
-        k if k % 5 == 0 => (2.0, 3.0, 4.0),
-        _ => (3.0, 4.0, 5.0),
+        k if k % 3 == 0 => (1.0, 2.0, 3.0, 1.05),
+        k if k % 3 == 1 => (2.0, 3.0, 4.0, 0.92),
+        _ => (3.0, 4.0, 5.0, 1.03),
     }
 }
 
@@ -56,10 +56,11 @@ fn main() {
     // hide the cursor and clear screen
     println!("\x1B[?25l\x1B[2J");
     loop {
-        let (rx, ry, rz) = gen_rotate(k);
-        object.rotate_xyz(rx, ry, rz);
+        let (rx, ry, rz, f) = gen(k);
+        object.rotate(rx, ry, rz);
+        object.zoom_new(f);
         canvas.clear();
-        object.draw(&mut canvas, side_len, side_len);
+        canvas.draw(&object, side_len, side_len);
         println!("\x1B[H{}", canvas.frame());
         std::thread::sleep(std::time::Duration::from_millis(32));
         k += 1;

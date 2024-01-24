@@ -1,4 +1,4 @@
-use rsille::{Object3D, Canvas, Draw};
+use rsille::{Canvas, Draw, Object3D};
 
 // generate the vertices(6) of cube and sides(12) of cube
 // the sides contain the index of the vertice
@@ -55,7 +55,7 @@ fn main() {
     println!("\x1B[?25l\x1B[2J");
     loop {
         let (rx, ry, rz) = gen_rotate(k);
-        object.rotate_xyz(rx, ry, rz);
+        object.rotate(rx, ry, rz);
         canvas.clear();
         object.draw(&mut canvas, side_len + 5.0, side_len + 5.0);
         println!("\x1B[H{}", canvas.frame());

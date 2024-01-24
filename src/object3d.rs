@@ -1,4 +1,4 @@
-use crate::{canvas::Draw, Canvas};
+use crate::{canvas::Draw, utils::{check_zoom, mean, MIN_DIFFERENCE}, Canvas};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Point3D {
@@ -25,7 +25,7 @@ impl Point3D {
     }
 
     // see https://en.wikipedia.org/wiki/Rotation_matrix for more information
-    pub fn rotate_xyz(&mut self, anlge_x: f64, anlge_y: f64, angle_z: f64) {
+    pub fn rotate(&mut self, anlge_x: f64, anlge_y: f64, angle_z: f64) {
         // let (x, y, z) = (self.x, self.y, self.z);
         // let (sx, cx) = anlge_x.to_radians().sin_cos();
         // let (sy, cy) = anlge_y.to_radians().sin_cos();
@@ -42,6 +42,32 @@ impl Point3D {
         self.rotate_x(anlge_x);
         self.rotate_y(anlge_y);
         self.rotate_z(angle_z);
+    }
+
+    pub fn rotate_new(&self, anlge_x: f64, anlge_y: f64, angle_z: f64) -> Self {
+        let mut point = *self; // = self.clone()
+        point.rotate(anlge_x, anlge_y, angle_z);
+        point
+    }
+
+    pub fn zoom(&mut self, center: Self, factor: f64) {
+        check_zoom(factor);
+        self.x = (self.x - center.x) * factor;
+        self.y = (self.y - center.y) * factor;
+        self.z = (self.z - center.z) * factor;
+    }
+
+    pub fn zoom_new(&self, center: Self, factor: f64) -> Point3D {
+        check_zoom(factor);
+        let dx = (self.x - center.x) * factor;
+        let dy = (self.y - center.y) * factor;
+        let dz = (self.z - center.y) * factor;
+
+        Self {
+            x: dx,
+            y: dy,
+            z: dz,
+        }
     }
 
     pub fn rotate_x(&mut self, angle: f64) {
@@ -70,6 +96,7 @@ impl Point3D {
 pub struct Object3D {
     vertices: Vec<Point3D>,
     sides: Vec<(usize, usize)>,
+    center: Point3D,
 }
 
 impl Object3D {
@@ -77,6 +104,7 @@ impl Object3D {
         Self {
             vertices: Vec::new(),
             sides: Vec::new(),
+            center: Point3D::new(0.0, 0.0, 0.0),
         }
     }
 
@@ -86,10 +114,13 @@ impl Object3D {
             let point = Point3D::new(p.0, p.1, p.2);
             vertices.push(point);
         }
-        Self {
+        let mut obj = Self {
             vertices,
             sides: Vec::new(),
-        }
+            center: Point3D::new(0.0, 0.0, 0.0),
+        };
+        obj.calc_center();
+        obj
     }
 
     pub fn sides(&self) -> Vec<(f64, f64, f64)> {
@@ -100,23 +131,67 @@ impl Object3D {
         for p in points {
             self.vertices.push(Point3D::from(*p));
         }
+        self.calc_center();
     }
 
     pub fn add_sides(&mut self, sides: &[(usize, usize)]) {
         let vn = self.vertices.len();
         for side in sides {
             if vn <= side.0 || vn <= side.1 {
-                panic!()
+                panic!("wrong add sides!");
             }
 
             self.sides.push(*side);
         }
     }
 
-    pub fn rotate_xyz(&mut self, angle_x: f64, angle_y: f64, angle_z: f64) {
+    pub fn rotate(&mut self, angle_x: f64, angle_y: f64, angle_z: f64) {
         for p in &mut self.vertices {
-            p.rotate_xyz(angle_x, angle_y, angle_z);
+            p.rotate(angle_x, angle_y, angle_z);
         }
+    }
+
+    pub fn rotate_new(&self, angle_x: f64, angle_y: f64, angle_z: f64) -> Self {
+        let mut obj = self.clone();
+        obj.rotate(angle_x, angle_y, angle_z);
+        obj
+    }
+
+    pub fn zoom(&mut self, factor: f64) {
+        check_zoom(factor);
+        self.vertices.iter_mut().for_each(|v| v.zoom(self.center, factor));
+    }
+
+    pub fn zoom_new(&self, factor: f64) -> Self {
+        check_zoom(factor);
+        let points = self.vertices.iter().map(|v| v.zoom_new(self.center, factor)).collect();
+        Self {
+            vertices: points,
+            sides: self.sides.clone(),
+            center: self.center,
+        }
+    }
+
+    fn calc_center(&mut self) {
+        let (mut xs, mut ys, mut zs) = (Vec::new(), Vec::new(), Vec::new());
+        for p in &self.vertices {
+            xs.push(p.x);
+            ys.push(p.y);
+            zs.push(p.z);
+        }
+        let (mut mx, mut my, mut mz) = (mean(&xs), mean(&ys), mean(&zs));
+
+        // forbide the lost of f64
+        if (mx - self.center.x) < MIN_DIFFERENCE {
+            mx = self.center.x;
+        }
+        if (my - self.center.y) < MIN_DIFFERENCE {
+            my = self.center.y;
+        }
+        if (mz - self.center.z) < MIN_DIFFERENCE {
+            mz = self.center.z;
+        }
+        self.center = Point3D::new(mx, my, mz);
     }
 }
 

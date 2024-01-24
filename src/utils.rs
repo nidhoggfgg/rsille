@@ -1,3 +1,31 @@
+pub const MIN_ZOOM: f64 = 0.001;
+pub const MIN_DIFFERENCE: f64 = 1E-10;
+
 pub fn normalize(v: f64) -> usize {
     v.round() as usize
 }
+
+pub fn mean(a: &[f64]) -> f64 {
+    let sum = a.iter().sum::<f64>();
+    println!("{}", sum);
+    sum / a.len() as f64
+}
+
+pub fn check_zoom(v: f64) {
+    if v <= MIN_ZOOM {
+        panic!("zoom too small!");
+    }
+}
+
+// a multi-type mean function, but it's too complex
+// pub fn mean<'a, T>(a: &'a [T]) -> f64
+// where
+//     T: 'a
+//         + std::iter::Sum<&'a T>
+//         + std::iter::Sum<&'a T>
+//         + std::ops::Div<Output = f64>
+//         + std::convert::From<usize>,
+// {
+//     let sum = a.iter().sum::<T>();
+//     sum / a.len().try_into().expect("")
+// }
