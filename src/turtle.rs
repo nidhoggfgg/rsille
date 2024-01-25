@@ -1,4 +1,4 @@
-use crate::{canvas::Draw, Canvas};
+use crate::{canvas::Paint, Canvas};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Turtle {
@@ -142,8 +142,8 @@ fn forward(canvas: &mut Canvas, x: f64, y: f64, heading: f64, step: f64) -> (f64
     (tx, ty)
 }
 
-impl Draw for Turtle {
-    fn draw(&self, canvas: &mut Canvas, x: f64, y: f64) {
+impl Paint for Turtle {
+    fn paint(&self, canvas: &mut Canvas, x: f64, y: f64) {
         use Procedure::*;
         let (home_x, home_y) = (x, y);
         let (mut pen, mut heading, mut x, mut y) = (true, 0.0, x, y);

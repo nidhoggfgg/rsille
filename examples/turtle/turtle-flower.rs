@@ -10,6 +10,6 @@ fn main() {
             t.forward(8.0);
         }
     }
-    canvas.draw(&t, 100.0, 100.0);
+    canvas.paint(&t, 100.0, 100.0);
     println!("{}", canvas.frame());
 }

@@ -2,8 +2,8 @@ use std::cmp;
 
 use crate::{braille::Pixel, utils::normalize};
 
-pub trait Draw {
-    fn draw(&self, canvas: &mut Canvas, x: f64, y: f64);
+pub trait Paint {
+    fn paint(&self, canvas: &mut Canvas, x: f64, y: f64);
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -34,8 +34,8 @@ impl Canvas {
         }
     }
 
-    pub fn draw(&mut self, target: &dyn Draw, x: f64, y: f64) {
-        target.draw(self, x, y);
+    pub fn paint(&mut self, target: &dyn Paint, x: f64, y: f64) {
+        target.paint(self, x, y);
     }
 
     pub fn frame(&mut self) -> String {

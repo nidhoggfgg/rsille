@@ -1,4 +1,4 @@
-use crate::{canvas::Draw, utils::{check_zoom, mean, MIN_DIFFERENCE}, Canvas};
+use crate::{canvas::Paint, utils::{check_zoom, mean, MIN_DIFFERENCE}, Canvas};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Point3D {
@@ -94,7 +94,8 @@ impl Point3D {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Object3D {
-    vertices: Vec<Point3D>,
+    origin_vertices: Vec<Point3D>,
+    zoomed_vertices: Option<Vec<Point3D>>,
     sides: Vec<(usize, usize)>,
     center: Point3D,
 }
@@ -102,40 +103,46 @@ pub struct Object3D {
 impl Object3D {
     pub fn new() -> Self {
         Self {
-            vertices: Vec::new(),
+            origin_vertices: Vec::new(),
+            zoomed_vertices: None,
             sides: Vec::new(),
             center: Point3D::new(0.0, 0.0, 0.0),
         }
     }
 
-    pub fn from(points: &[(f64, f64, f64)]) -> Self {
-        let mut vertices = Vec::new();
-        for p in points {
-            let point = Point3D::new(p.0, p.1, p.2);
-            vertices.push(point);
-        }
-        let mut obj = Self {
-            vertices,
-            sides: Vec::new(),
-            center: Point3D::new(0.0, 0.0, 0.0),
-        };
-        obj.calc_center();
-        obj
-    }
+    // pub fn from(points: &[(f64, f64, f64)]) -> Self {
+    //     let mut vertices = Vec::new();
+    //     for p in points {
+    //         let point = Point3D::new(p.0, p.1, p.2);
+    //         vertices.push(point);
+    //     }
+    //     let mut obj = Self {
+    //         origin_vertices: vertices,
+    //         zoomed_vertices: None,
+    //         sides: Vec::new(),
+    //         center: Point3D::new(0.0, 0.0, 0.0),
+    //     };
+    //     obj.calc_center();
+    //     obj
+    // }
 
-    pub fn sides(&self) -> Vec<(f64, f64, f64)> {
-        self.vertices.iter().map(|p| p.get()).collect()
+    pub fn vertices(&self) -> Vec<(f64, f64, f64)> {
+        self.origin_vertices.iter().map(|p| p.get()).collect()
     }
 
     pub fn add_points(&mut self, points: &[(f64, f64, f64)]) {
         for p in points {
-            self.vertices.push(Point3D::from(*p));
+            self.origin_vertices.push(Point3D::from(*p));
         }
         self.calc_center();
     }
 
+    pub fn sides(&self) -> Vec<(usize, usize)> {
+        self.sides.clone()
+    }
+
     pub fn add_sides(&mut self, sides: &[(usize, usize)]) {
-        let vn = self.vertices.len();
+        let vn = self.origin_vertices.len();
         for side in sides {
             if vn <= side.0 || vn <= side.1 {
                 panic!("wrong add sides!");
@@ -146,7 +153,7 @@ impl Object3D {
     }
 
     pub fn rotate(&mut self, angle_x: f64, angle_y: f64, angle_z: f64) {
-        for p in &mut self.vertices {
+        for p in &mut self.origin_vertices {
             p.rotate(angle_x, angle_y, angle_z);
         }
     }
@@ -159,14 +166,18 @@ impl Object3D {
 
     pub fn zoom(&mut self, factor: f64) {
         check_zoom(factor);
-        self.vertices.iter_mut().for_each(|v| v.zoom(self.center, factor));
+        let mut vertices = self.origin_vertices.clone();
+        vertices.iter_mut().for_each(|v| v.zoom(self.center, factor));
+        self.zoomed_vertices = Some(vertices);
     }
 
     pub fn zoom_new(&self, factor: f64) -> Self {
         check_zoom(factor);
-        let points = self.vertices.iter().map(|v| v.zoom_new(self.center, factor)).collect();
+        let mut points: Vec<Point3D> = self.origin_vertices.clone();
+        points.iter_mut().for_each(|v| v.zoom(self.center, factor));
         Self {
-            vertices: points,
+            origin_vertices: points,
+            zoomed_vertices: None,
             sides: self.sides.clone(),
             center: self.center,
         }
@@ -174,7 +185,7 @@ impl Object3D {
 
     fn calc_center(&mut self) {
         let (mut xs, mut ys, mut zs) = (Vec::new(), Vec::new(), Vec::new());
-        for p in &self.vertices {
+        for p in &self.origin_vertices {
             xs.push(p.x);
             ys.push(p.y);
             zs.push(p.z);
@@ -195,10 +206,15 @@ impl Object3D {
     }
 }
 
-impl Draw for Object3D {
-    fn draw(&self, canvas: &mut Canvas, x: f64, y: f64) {
+impl Paint for Object3D {
+    fn paint(&self, canvas: &mut Canvas, x: f64, y: f64) {
+        let points = if let Some(p) = &self.zoomed_vertices {
+            p
+        } else {
+            &self.origin_vertices
+        };
         for s in &self.sides {
-            let (v1, v2) = (self.vertices[s.0], self.vertices[s.1]);
+            let (v1, v2) = (points[s.0], points[s.1]);
             let (x1, y1) = (x + v1.x, y + v1.z);
             let (x2, y2) = (x + v2.x, y + v2.z);
             canvas.line(x1, y1, x2, y2);
