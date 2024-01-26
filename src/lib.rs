@@ -1,7 +1,7 @@
 mod braille;
 mod canvas;
 #[cfg(feature = "color")]
-mod color;
+pub mod color;
 mod defaults;
 mod object3d;
 mod turtle;

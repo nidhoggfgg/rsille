@@ -1,8 +1,9 @@
-use rsille::{Canvas, Turtle};
+use rsille::{color::TermColor, Canvas, Turtle};
 
 fn star5() -> (Turtle, (f64, f64)) {
     let mut t = Turtle::new();
     for _ in 0..5 {
+        t.color(TermColor::C16(rsille::color::Color16::Red));
         t.forward(100.0);
         t.right(144.0);
     }
@@ -12,7 +13,8 @@ fn star5() -> (Turtle, (f64, f64)) {
 fn spiral() -> (Turtle, (f64, f64)) {
     let mut t = Turtle::new();
     let mut length = 1.0;
-    for _ in 0..150 {
+    for i in 0..150 {
+        t.color(TermColor::Crgb(100+i, 255-i, 60+i));
         t.forward(length);
         t.right(10.0);
         length += 0.05;
@@ -22,14 +24,16 @@ fn spiral() -> (Turtle, (f64, f64)) {
 
 fn circle() -> (Turtle, (f64, f64)) {
     let mut t = Turtle::new();
+    t.color(TermColor::C256(123));
     t.circle(30.0, 360.0, 100);
     (t, (130.0, 80.0))
 }
 
 fn star6() -> (Turtle, (f64, f64)) {
     let mut t = Turtle::new();
-    for _ in 0..6 {
-        for _ in 0..3 {
+    for i in 0..6 {
+        for j in 0..3 {
+            t.color(TermColor::C256(i*20 + j * 5));
             t.forward(10.0);
             t.left(120.0);
         }

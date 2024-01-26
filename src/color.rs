@@ -3,7 +3,7 @@ use core::fmt;
 use crate::braille::{Pixel, PixelOp};
 
 #[derive(Debug, Clone, Copy)]
-pub struct Colored {
+pub(crate) struct Colored {
     pixel: Pixel,
     color: TermColor,
 }
@@ -38,7 +38,7 @@ impl fmt::Display for Colored {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum TermColor {
     C16(Color16),
     C256(u8),
@@ -61,7 +61,7 @@ impl fmt::Display for TermColor {
 }
 
 #[rustfmt::skip]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Color16 {
     Black        = 30,
     Red          = 31,

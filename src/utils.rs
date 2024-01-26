@@ -1,3 +1,5 @@
+use core::fmt;
+
 pub const MIN_ZOOM: f64 = 0.001;
 pub const MIN_DIFFERENCE: f64 = 1E-10;
 
@@ -29,3 +31,21 @@ pub fn check_zoom(v: f64) {
 //     let sum = a.iter().sum::<T>();
 //     sum / a.len().try_into().expect("")
 // }
+
+#[derive(Debug, Clone)]
+pub struct RsilleErr {
+    msg: String,
+}
+
+#[allow(unused)]
+impl RsilleErr {
+    fn new(msg: String) -> Self {
+        Self { msg }
+    }
+}
+
+impl fmt::Display for RsilleErr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.msg)
+    }
+}

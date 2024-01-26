@@ -67,12 +67,22 @@ impl Canvas {
         let height = self.height;
         let vec = make_vec(width);
         self.pixels = vec![vec; height];
+        #[cfg(feature = "color")]
+        print!("{}", TermColor::Unset);
     }
 
     pub fn set(&mut self, x: f64, y: f64) {
         let (row, col) = get_pos(x, y);
         self.pad_row_col(row, col);
         self.pixels[row][col].set(x, y);
+    }
+
+    #[cfg(feature = "color")]
+    pub fn set_with_color(&mut self, x: f64, y: f64, color: TermColor) {
+        let (row, col) = get_pos(x, y);
+        self.pad_row_col(row, col);
+        self.pixels[row][col].set(x, y);
+        self.pixels[row][col].set_color(color);
     }
 
     pub fn toggle(&mut self, x: f64, y: f64) {
@@ -107,16 +117,35 @@ impl Canvas {
     }
 
     #[cfg(feature = "color")]
-    pub fn set_color(&mut self, x: f64, y: f64, color: TermColor) {
-        let (row, col) = get_pos(x, y);
-        self.pad_row_col(row, col);
-        self.pixels[row][col].set_color(color);
+    pub fn line_with_color(&mut self, x1: f64, y1: f64, x2: f64, y2: f64, color: TermColor) {
+        let (x1, y1) = (normalize(x1), normalize(y1));
+        let (x2, y2) = (normalize(x2), normalize(y2));
+        let d = |v1, v2| {
+            if v1 <= v2 {
+                (v2 - v1, 1.0)
+            } else {
+                (v1 - v2, -1.0)
+            }
+        };
+
+        let (xdiff, xdir) = d(x1, x2);
+        let (ydiff, ydif) = d(y1, y2);
+        let r = cmp::max(xdiff, ydiff);
+
+        for i in 0..=r {
+            let r = r as f64;
+            let i = i as f64;
+            let (xd, yd) = (xdiff as f64, ydiff as f64);
+            let x = x1 as f64 + i * xd / r * xdir;
+            let y = y1 as f64 + i * yd / r * ydif;
+            self.set_with_color(x, y, color);
+        }
     }
 
     // +--+    +----+    +----+
     // |  | -> |    | -> |    |
     // +--+    +----+    |    |
-    //                  +----+
+    //                   +----+
     fn pad_row_col(&mut self, row: usize, col: usize) {
         if self.width <= col {
             for r in &mut self.pixels {

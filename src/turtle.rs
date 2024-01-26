@@ -1,5 +1,8 @@
 use crate::{canvas::Paint, Canvas};
 
+#[cfg(feature = "color")]
+use crate::color::TermColor;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Turtle {
     procedures: Vec<Procedure>,
@@ -102,6 +105,11 @@ impl Turtle {
         // self.y = self.home_y;
     }
 
+    #[cfg(feature = "color")]
+    pub fn color(&mut self, color: TermColor) {
+        self.add_procedure(Procedure::Color(color));
+    }
+
     // pub fn position(&self) -> (f64, f64) {
     //     (self.x, self.y)
     // }
@@ -131,9 +139,11 @@ enum Procedure {
     Home,
     Goto(f64, f64),          // (x, y)
     Circle(f64, f64, usize), // (radius, extent, steps)
+    #[cfg(feature = "color")]
+    Color(TermColor),
 }
 
-// using closure is worse
+#[cfg(not(feature = "color"))]
 fn forward(canvas: &mut Canvas, x: f64, y: f64, heading: f64, step: f64) -> (f64, f64) {
     let (sr, cr) = heading.to_radians().sin_cos();
     let tx = x + cr * step;
@@ -142,6 +152,16 @@ fn forward(canvas: &mut Canvas, x: f64, y: f64, heading: f64, step: f64) -> (f64
     (tx, ty)
 }
 
+#[cfg(feature = "color")]
+fn forward(canvas: &mut Canvas, x: f64, y: f64, heading: f64, step: f64, color: TermColor) -> (f64, f64) {
+    let (sr, cr) = heading.to_radians().sin_cos();
+    let tx = x + cr * step;
+    let ty = y + sr * step;
+    canvas.line_with_color(x, y, tx, ty, color);
+    (tx, ty)
+}
+
+#[cfg(not(feature = "color"))]
 impl Paint for Turtle {
     fn paint(&self, canvas: &mut Canvas, x: f64, y: f64) {
         use Procedure::*;
@@ -188,6 +208,64 @@ impl Paint for Turtle {
                         );
                         heading -= angle;
                     }
+                }
+            }
+        }
+    }
+}
+
+#[cfg(feature = "color")]
+impl Paint for Turtle {
+    fn paint(&self, canvas: &mut Canvas, x: f64, y: f64) {
+        use Procedure::*;
+        let (home_x, home_y) = (x, y);
+        let (mut pen, mut heading, mut x, mut y) = (true, 0.0, x, y);
+        let mut color = TermColor::None;
+
+        for p in &self.procedures {
+            match p {
+                PenDown => {
+                    pen = true;
+                }
+                PenUp => {
+                    pen = false;
+                }
+                Forward(step) => {
+                    (x, y) = forward(canvas, x, y, heading, *step, color);
+                }
+                Right(angle) => {
+                    heading += angle;
+                }
+                Teleport(tx, ty) => {
+                    x = *tx;
+                    y = *ty;
+                }
+                Home => {
+                    (x, y) = (home_x, home_y);
+                }
+                Goto(tx, ty) => {
+                    if pen {
+                        canvas.line_with_color(x, y, *tx, *ty, color);
+                    }
+                    x = *tx;
+                    y = *ty;
+                }
+                Circle(radius, extent, steps) => {
+                    let angle = extent / *steps as f64;
+                    for _ in 0..*steps {
+                        (x, y) = forward(
+                            canvas,
+                            x,
+                            y,
+                            heading,
+                            2.0 * radius * (angle / 2.0).to_radians().sin(),
+                            color
+                        );
+                        heading -= angle;
+                    }
+                }
+                Color(c) => {
+                    color = *c;
                 }
             }
         }
