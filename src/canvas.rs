@@ -1,4 +1,5 @@
 use std::cmp;
+use std::fmt::Write;
 
 use crate::{
     braille::{Pixel, PixelOp},
@@ -54,7 +55,10 @@ impl Canvas {
     pub fn lines(&mut self) -> Vec<String> {
         self.pixels
             .iter()
-            .map(|row| row.iter().map(|p| format!("{}", *p)).collect::<String>())
+            .map(|row| row.iter().fold(String::new(), |mut out, p| {
+                let _ = write!(out, "{}", *p);
+                out
+            }))
             .collect()
     }
 
