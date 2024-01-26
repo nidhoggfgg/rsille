@@ -1,23 +1,31 @@
 use std::cmp;
 
-use crate::{braille::Pixel, utils::normalize};
+use crate::{
+    braille::{Pixel, PixelOp},
+    utils::normalize,
+};
+
+#[cfg(feature = "color")]
+use crate::color::{Colored, TermColor};
 
 pub trait Paint {
     fn paint(&self, canvas: &mut Canvas, x: f64, y: f64);
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct Canvas {
-    pixels: Vec<Vec<Pixel>>,
     width: usize,
     height: usize,
+    #[cfg(not(feature = "color"))]
+    pixels: Vec<Vec<Pixel>>,
+    #[cfg(feature = "color")]
+    pixels: Vec<Vec<Colored>>,
 }
 
 impl Canvas {
     pub fn new() -> Self {
         let pixels = Vec::new();
-        let width = 0;
-        let height = 0;
+        let (width, height) = (0, 0);
         Self {
             pixels,
             width,
@@ -26,7 +34,8 @@ impl Canvas {
     }
 
     pub fn with_capcity(width: usize, height: usize) -> Self {
-        let pixels = vec![vec![Pixel::zero(); width]; height];
+        let vec = make_vec(width);
+        let pixels = vec![vec; height];
         Self {
             pixels,
             width,
@@ -45,14 +54,15 @@ impl Canvas {
     pub fn lines(&mut self) -> Vec<String> {
         self.pixels
             .iter()
-            .map(|row| row.iter().map(|p| p.get()).collect::<String>())
+            .map(|row| row.iter().map(|p| format!("{}", *p)).collect::<String>())
             .collect()
     }
 
     pub fn clear(&mut self) {
         let width = self.width;
         let height = self.height;
-        self.pixels = vec![vec![Pixel::zero(); width]; height];
+        let vec = make_vec(width);
+        self.pixels = vec![vec; height];
     }
 
     pub fn set(&mut self, x: f64, y: f64) {
@@ -92,6 +102,13 @@ impl Canvas {
         }
     }
 
+    #[cfg(feature = "color")]
+    pub fn set_color(&mut self, x: f64, y: f64, color: TermColor) {
+        let (row, col) = get_pos(x, y);
+        self.pad_row_col(row, col);
+        self.pixels[row][col].set_color(color);
+    }
+
     // +--+    +----+    +----+
     // |  | -> |    | -> |    |
     // +--+    +----+    |    |
@@ -100,14 +117,16 @@ impl Canvas {
         if self.width <= col {
             for r in &mut self.pixels {
                 let pad_num = col - r.len() + 1;
-                r.append(&mut vec![Pixel::zero(); pad_num]);
+                let mut vec = make_vec(pad_num);
+                r.append(&mut vec);
             }
             self.width = col + 1;
         }
 
         if self.height <= row {
             let pad_num = row - self.height + 1;
-            let mut pad = vec![vec![Pixel::zero(); self.width]; pad_num];
+            let vec = make_vec(self.width);
+            let mut pad = vec![vec; pad_num];
             self.pixels.append(&mut pad);
             self.height = row + 1;
         }
@@ -116,4 +135,14 @@ impl Canvas {
 
 fn get_pos(x: f64, y: f64) -> (usize, usize) {
     (y.round() as usize / 4, x.round() as usize / 2)
+}
+
+#[cfg(not(feature = "color"))]
+fn make_vec(len: usize) -> Vec<Pixel> {
+    vec![Pixel::new(); len]
+}
+
+#[cfg(feature = "color")]
+fn make_vec(len: usize) -> Vec<Colored> {
+    vec![Colored::new(Pixel::new(), TermColor::None); len]
 }

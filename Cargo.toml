@@ -11,6 +11,11 @@ edition = "2021"
 [dev-dependencies]
 criterion = "0.4"
 
+[features]
+default = ["term"]
+term = ["color"]
+color = []
+
 [[bench]]
 name = "set"
 harness = false

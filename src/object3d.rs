@@ -1,6 +1,8 @@
-use crate::{canvas::Paint, utils::{check_zoom, mean, MIN_DIFFERENCE}, Canvas};
+use crate::{
+    canvas::Paint, utils::{check_zoom, mean, MIN_DIFFERENCE}, Canvas
+};
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy)]
 pub struct Point3D {
     pub x: f64,
     pub y: f64,
@@ -92,12 +94,12 @@ impl Point3D {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct Object3D {
     origin_vertices: Vec<Point3D>,
     zoomed_vertices: Option<Vec<Point3D>>,
-    sides: Vec<(usize, usize)>,
     center: Point3D,
+    sides: Vec<(usize, usize)>,
 }
 
 impl Object3D {
@@ -167,7 +169,9 @@ impl Object3D {
     pub fn zoom(&mut self, factor: f64) {
         check_zoom(factor);
         let mut vertices = self.origin_vertices.clone();
-        vertices.iter_mut().for_each(|v| v.zoom(self.center, factor));
+        vertices
+            .iter_mut()
+            .for_each(|v| v.zoom(self.center, factor));
         self.zoomed_vertices = Some(vertices);
     }
 
