@@ -12,7 +12,7 @@ pub struct Imgille {
 impl Imgille {
     pub fn new(path: &str) -> Result<Self, RsilleErr> {
         let err = Err(RsilleErr::new(format!("can't open image: {}", path)));
-        let img = if let Ok(reader) = ImageReader::open(&path) {
+        let img = if let Ok(reader) = ImageReader::open(path) {
             if let Ok(img) = reader.decode() {
                 img
             } else {
@@ -52,18 +52,13 @@ impl Paint for Imgille {
         let (iw, ih) = (img.width(), img.height());
         for ny in 0..ih {
             for nx in 0..iw {
-                #[cfg(not(feature = "color"))]
-                canvas.set(x + nx as f64, y + ny as f64);
-                #[cfg(feature = "color")]
-                {
-                    use crate::color::TermColor;
-                    let pixel = img.get_pixel(nx, ny);
-                    canvas.set_colorful(
-                        x + nx as f64,
-                        y + ny as f64,
-                        TermColor::Crgb(pixel[0], pixel[1], pixel[2]),
-                    );
-                }
+                use crate::color::TermColor;
+                let pixel = img.get_pixel(nx, ny);
+                canvas.set_colorful(
+                    x + nx as f64,
+                    y + ny as f64,
+                    TermColor::Crgb(pixel[0], pixel[1], pixel[2]),
+                );
             }
         }
         Ok(())

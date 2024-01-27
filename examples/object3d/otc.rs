@@ -109,12 +109,16 @@ fn main() {
         object.rotate(angle);
         object.zoom(zoom);
         canvas.clear();
-        object.paint(&mut canvas, 1.6 * side_len, 1.6 * side_len).unwrap();
+        object
+            .paint(&mut canvas, 1.6 * side_len, 1.6 * side_len)
+            .unwrap();
         #[cfg(feature = "color")]
         {
             object_colurful.rotate(angle);
             object_colurful.zoom(zoom);
-            object_colurful.paint(&mut canvas, 4.2 * side_len, 1.6 * side_len).unwrap();
+            object_colurful
+                .paint(&mut canvas, 4.2 * side_len, 1.6 * side_len)
+                .unwrap();
         }
         println!("\x1B[H{}", canvas.frame());
         std::thread::sleep(std::time::Duration::from_millis(32));

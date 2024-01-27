@@ -46,7 +46,10 @@ impl Canvas {
 
     pub fn paint(&mut self, target: &dyn Paint, x: f64, y: f64) -> Result<(), RsilleErr> {
         if x < 0.0 || y < 0.0 {
-            return Err(RsilleErr::new(format!("can't paint on postion {:#?}!", (x, y))));
+            return Err(RsilleErr::new(format!(
+                "can't paint on postion {:#?}!",
+                (x, y)
+            )));
         }
         target.paint(self, x, y)?;
         Ok(())
