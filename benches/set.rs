@@ -26,7 +26,7 @@ fn criterion_benchmark(bencher: &mut Criterion) {
     c.clear();
     bencher.bench_function("500 * 500", |b| b.iter(|| render(500, &mut c)));
     c.clear();
-    bencher.bench_function("1000 * 1000", |b| b.iter(||render(1000, &mut c)));
+    bencher.bench_function("1000 * 1000", |b| b.iter(|| render(1000, &mut c)));
     c.clear();
 }
 

@@ -1,5 +1,7 @@
 use crate::{
-    canvas::Paint, utils::{check_zoom, mean, MIN_DIFFERENCE}, Canvas
+    canvas::Paint,
+    utils::{check_zoom, mean, MIN_DIFFERENCE},
+    Canvas,
 };
 
 #[cfg(feature = "color")]

@@ -10,7 +10,7 @@ fn main() {
         t.right(10.0);
         for j in 0..36 {
             #[cfg(feature = "color")]
-            t.color(TermColor::Crgb(60+i*5, 190-j*5, 220));
+            t.color(TermColor::Crgb(60 + i * 5, 190 - j * 5, 220));
             t.right(10.0);
             t.forward(8.0);
         }

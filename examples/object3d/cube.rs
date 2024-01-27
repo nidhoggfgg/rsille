@@ -109,7 +109,8 @@ fn main() {
         object.zoom(f);
         canvas.clear();
         canvas.paint(&object, 1.5 * side_len, 1.5 * side_len);
-        #[cfg(feature = "color")]{
+        #[cfg(feature = "color")]
+        {
             object_colorful.rotate(rx, ry, rz);
             object_colorful.zoom(f);
             canvas.paint(&object_colorful, 4.0 * side_len, 1.5 * side_len);

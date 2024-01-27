@@ -19,7 +19,7 @@ fn spiral() -> (Turtle, (f64, f64)) {
     let mut length = 1.0;
     for i in 0..150 {
         #[cfg(feature = "color")]
-        t.color(TermColor::Crgb(100+i, 255-i, 60+i));
+        t.color(TermColor::Crgb(100 + i, 255 - i, 60 + i));
         t.forward(length);
         t.right(10.0);
         length += 0.05;
@@ -40,7 +40,7 @@ fn star6() -> (Turtle, (f64, f64)) {
     for i in 0..6 {
         for j in 0..3 {
             #[cfg(feature = "color")]
-            t.color(TermColor::C256(i*20 + j * 5));
+            t.color(TermColor::C256(i * 20 + j * 5));
             t.forward(10.0);
             t.left(120.0);
         }

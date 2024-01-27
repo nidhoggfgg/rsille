@@ -153,7 +153,14 @@ fn forward(canvas: &mut Canvas, x: f64, y: f64, heading: f64, step: f64) -> (f64
 }
 
 #[cfg(feature = "color")]
-fn forward(canvas: &mut Canvas, x: f64, y: f64, heading: f64, step: f64, color: TermColor) -> (f64, f64) {
+fn forward(
+    canvas: &mut Canvas,
+    x: f64,
+    y: f64,
+    heading: f64,
+    step: f64,
+    color: TermColor,
+) -> (f64, f64) {
     let (sr, cr) = heading.to_radians().sin_cos();
     let tx = x + cr * step;
     let ty = y + sr * step;
@@ -259,7 +266,7 @@ impl Paint for Turtle {
                             y,
                             heading,
                             2.0 * radius * (angle / 2.0).to_radians().sin(),
-                            color
+                            color,
                         );
                         heading -= angle;
                     }
