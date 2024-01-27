@@ -1,4 +1,4 @@
-use rsille::{Canvas, Object3D, Paint};
+use rsille::{object3d::Object3D, Canvas, Paint};
 
 // generate the vertices(6) of cube and sides(12) of cube
 // the sides contain the index of the vertice
@@ -20,20 +20,22 @@ fn gen_octahedron(side_len: f64) -> Object3D {
         points.push((x, y, z));
     }
     object.add_points(&points);
-    object.add_sides(&[
-        (0, 1),
-        (0, 2),
-        (0, 3),
-        (0, 4),
-        (5, 1),
-        (5, 2),
-        (5, 3),
-        (5, 4),
-        (1, 2),
-        (2, 3),
-        (3, 4),
-        (4, 1),
-    ]);
+    object
+        .add_sides(&[
+            (0, 1),
+            (0, 2),
+            (0, 3),
+            (0, 4),
+            (5, 1),
+            (5, 2),
+            (5, 3),
+            (5, 4),
+            (1, 2),
+            (2, 3),
+            (3, 4),
+            (4, 1),
+        ])
+        .unwrap();
     object
 }
 
@@ -58,20 +60,22 @@ fn gen_octahedron_colorful(side_len: f64) -> Object3D {
         points.push((x, y, z));
     }
     object.add_points(&points);
-    object.add_sides_with_color(&[
-        ((0, 1), TermColor::C256(100)),
-        ((0, 2), TermColor::C256(120)),
-        ((0, 3), TermColor::C256(140)),
-        ((0, 4), TermColor::C256(160)),
-        ((5, 1), TermColor::C256(180)),
-        ((5, 2), TermColor::C256(200)),
-        ((5, 3), TermColor::C256(200)),
-        ((5, 4), TermColor::C256(180)),
-        ((1, 2), TermColor::C256(160)),
-        ((2, 3), TermColor::C256(140)),
-        ((3, 4), TermColor::C256(120)),
-        ((4, 1), TermColor::C256(100)),
-    ]);
+    object
+        .add_sides_colorful(&[
+            ((0, 1), TermColor::C256(100)),
+            ((0, 2), TermColor::C256(120)),
+            ((0, 3), TermColor::C256(140)),
+            ((0, 4), TermColor::C256(160)),
+            ((5, 1), TermColor::C256(180)),
+            ((5, 2), TermColor::C256(200)),
+            ((5, 3), TermColor::C256(200)),
+            ((5, 4), TermColor::C256(180)),
+            ((1, 2), TermColor::C256(160)),
+            ((2, 3), TermColor::C256(140)),
+            ((3, 4), TermColor::C256(120)),
+            ((4, 1), TermColor::C256(100)),
+        ])
+        .unwrap();
     object
 }
 
@@ -101,14 +105,14 @@ fn main() {
     // hide the cursor and clear screen
     println!("\x1B[?25l\x1B[2J");
     loop {
-        let ((rx, ry, rz), zoom) = gen(k);
-        object.rotate(rx, ry, rz);
+        let (angle, zoom) = gen(k);
+        object.rotate(angle);
         object.zoom(zoom);
         canvas.clear();
         object.paint(&mut canvas, 1.6 * side_len, 1.6 * side_len);
         #[cfg(feature = "color")]
         {
-            object_colurful.rotate(rx, ry, rz);
+            object_colurful.rotate(angle);
             object_colurful.zoom(zoom);
             object_colurful.paint(&mut canvas, 4.2 * side_len, 1.6 * side_len);
         }

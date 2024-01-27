@@ -106,8 +106,13 @@ impl Turtle {
     }
 
     #[cfg(feature = "color")]
-    pub fn color(&mut self, color: TermColor) {
+    pub fn colorful(&mut self, color: TermColor) {
         self.add_procedure(Procedure::Color(color));
+    }
+
+    #[cfg(feature = "color")]
+    pub fn color(&mut self, color: TermColor) {
+        self.colorful(color);
     }
 
     // pub fn position(&self) -> (f64, f64) {
@@ -139,6 +144,7 @@ enum Procedure {
     Home,
     Goto(f64, f64),          // (x, y)
     Circle(f64, f64, usize), // (radius, extent, steps)
+
     #[cfg(feature = "color")]
     Color(TermColor),
 }
@@ -146,10 +152,9 @@ enum Procedure {
 #[cfg(not(feature = "color"))]
 fn forward(canvas: &mut Canvas, x: f64, y: f64, heading: f64, step: f64) -> (f64, f64) {
     let (sr, cr) = heading.to_radians().sin_cos();
-    let tx = x + cr * step;
-    let ty = y + sr * step;
-    canvas.line(x, y, tx, ty);
-    (tx, ty)
+    let txy = (x + cr * step, y + sr * step);
+    canvas.line((x, y), txy);
+    txy
 }
 
 #[cfg(feature = "color")]
@@ -162,10 +167,9 @@ fn forward(
     color: TermColor,
 ) -> (f64, f64) {
     let (sr, cr) = heading.to_radians().sin_cos();
-    let tx = x + cr * step;
-    let ty = y + sr * step;
-    canvas.line_with_color(x, y, tx, ty, color);
-    (tx, ty)
+    let txy = (x + cr * step, y + sr * step);
+    canvas.line_colorful((x, y), txy, color);
+    txy
 }
 
 #[cfg(not(feature = "color"))]
@@ -198,7 +202,7 @@ impl Paint for Turtle {
                 }
                 Goto(tx, ty) => {
                     if pen {
-                        canvas.line(x, y, *tx, *ty);
+                        canvas.line((x, y), (*tx, *ty));
                     }
                     x = *tx;
                     y = *ty;
@@ -252,7 +256,7 @@ impl Paint for Turtle {
                 }
                 Goto(tx, ty) => {
                     if pen {
-                        canvas.line_with_color(x, y, *tx, *ty, color);
+                        canvas.line_colorful((x, y), (*tx, *ty), color);
                     }
                     x = *tx;
                     y = *ty;

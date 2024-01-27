@@ -1,6 +1,6 @@
 use crate::{
     canvas::Paint,
-    utils::{check_zoom, mean, MIN_DIFFERENCE},
+    utils::{check_zoom, mean, RsilleErr, MIN_DIFFERENCE},
     Canvas,
 };
 
@@ -34,7 +34,7 @@ impl Point3D {
     }
 
     // see https://en.wikipedia.org/wiki/Rotation_matrix for more information
-    pub fn rotate(&mut self, anlge_x: f64, anlge_y: f64, angle_z: f64) {
+    pub fn rotate(&mut self, angle: (f64, f64, f64)) {
         // let (x, y, z) = (self.x, self.y, self.z);
         // let (sx, cx) = anlge_x.to_radians().sin_cos();
         // let (sy, cy) = anlge_y.to_radians().sin_cos();
@@ -48,14 +48,14 @@ impl Point3D {
         // self.y = sz * t1 + cz * t2;
         // self.z = cz * t3 - sy * x;
 
-        self.rotate_x(anlge_x);
-        self.rotate_y(anlge_y);
-        self.rotate_z(angle_z);
+        self.rotate_x(angle.0);
+        self.rotate_y(angle.1);
+        self.rotate_z(angle.2);
     }
 
-    pub fn rotate_new(&self, anlge_x: f64, anlge_y: f64, angle_z: f64) -> Self {
-        let mut point = *self; // = self.clone()
-        point.rotate(anlge_x, anlge_y, angle_z);
+    pub fn rotate_new(&self, angle: (f64, f64, f64)) -> Self {
+        let mut point = *self;
+        point.rotate(angle);
         point
     }
 
@@ -125,22 +125,6 @@ impl Object3D {
         }
     }
 
-    // pub fn from(points: &[(f64, f64, f64)]) -> Self {
-    //     let mut vertices = Vec::new();
-    //     for p in points {
-    //         let point = Point3D::new(p.0, p.1, p.2);
-    //         vertices.push(point);
-    //     }
-    //     let mut obj = Self {
-    //         origin_vertices: vertices,
-    //         zoomed_vertices: None,
-    //         sides: Vec::new(),
-    //         center: Point3D::new(0.0, 0.0, 0.0),
-    //     };
-    //     obj.calc_center();
-    //     obj
-    // }
-
     pub fn vertices(&self) -> Vec<(f64, f64, f64)> {
         self.origin_vertices.iter().map(|p| p.get()).collect()
     }
@@ -159,11 +143,11 @@ impl Object3D {
         return self.sides.keys().cloned().collect();
     }
 
-    pub fn add_sides(&mut self, sides: &[(usize, usize)]) {
+    pub fn add_sides(&mut self, sides: &[(usize, usize)]) -> Result<(), RsilleErr> {
         let vn = self.origin_vertices.len();
         for side in sides {
             if vn <= side.0 || vn <= side.1 {
-                panic!("wrong add sides!");
+                return Err(RsilleErr::new("wrong add sides!".to_string()));
             }
 
             #[cfg(not(feature = "color"))]
@@ -171,35 +155,40 @@ impl Object3D {
             #[cfg(feature = "color")]
             self.sides.insert(*side, TermColor::None);
         }
+        Ok(())
     }
 
     #[cfg(feature = "color")]
-    pub fn add_sides_with_color(&mut self, sides: &[((usize, usize), TermColor)]) {
+    pub fn add_sides_colorful(
+        &mut self,
+        sides: &[((usize, usize), TermColor)],
+    ) -> Result<(), RsilleErr> {
         let vn = self.origin_vertices.len();
         for (side, color) in sides {
             if vn <= side.0 || vn <= side.1 {
-                panic!("wrong add sides!");
+                return Err(RsilleErr::new("wrong add sides!".to_string()));
             }
             self.sides.insert(*side, *color);
         }
+        Ok(())
     }
 
     #[cfg(feature = "color")]
-    pub fn set_side_color(&mut self, side: (usize, usize), color: TermColor) {
+    pub fn set_side_colorful(&mut self, side: (usize, usize), color: TermColor) {
         if self.sides.contains_key(&side) {
             self.sides.insert(side, color);
         }
     }
 
-    pub fn rotate(&mut self, angle_x: f64, angle_y: f64, angle_z: f64) {
+    pub fn rotate(&mut self, angle: (f64, f64, f64)) {
         for p in &mut self.origin_vertices {
-            p.rotate(angle_x, angle_y, angle_z);
+            p.rotate(angle);
         }
     }
 
-    pub fn rotate_new(&self, angle_x: f64, angle_y: f64, angle_z: f64) -> Self {
+    pub fn rotate_new(&self, angle: (f64, f64, f64)) -> Self {
         let mut obj = self.clone();
-        obj.rotate(angle_x, angle_y, angle_z);
+        obj.rotate(angle);
         obj
     }
 
@@ -257,16 +246,16 @@ impl Paint for Object3D {
         #[cfg(not(feature = "color"))]
         for side in &self.sides {
             let (v1, v2) = (points[side.0], points[side.1]);
-            let (x1, y1) = (x + v1.x, y + v1.z);
-            let (x2, y2) = (x + v2.x, y + v2.z);
-            canvas.line(x1, y1, x2, y2);
+            let xy1 = (x + v1.x, y + v1.z);
+            let xy2 = (x + v2.x, y + v2.z);
+            canvas.line(xy1, xy2);
         }
         #[cfg(feature = "color")]
         for (side, color) in &self.sides {
             let (v1, v2) = (points[side.0], points[side.1]);
-            let (x1, y1) = (x + v1.x, y + v1.z);
-            let (x2, y2) = (x + v2.x, y + v2.z);
-            canvas.line_with_color(x1, y1, x2, y2, *color);
+            let xy1 = (x + v1.x, y + v1.z);
+            let xy2 = (x + v2.x, y + v2.z);
+            canvas.line_colorful(xy1, xy2, *color);
         }
     }
 }

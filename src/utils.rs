@@ -37,9 +37,8 @@ pub struct RsilleErr {
     msg: String,
 }
 
-#[allow(unused)]
 impl RsilleErr {
-    fn new(msg: String) -> Self {
+    pub fn new(msg: String) -> Self {
         Self { msg }
     }
 }
