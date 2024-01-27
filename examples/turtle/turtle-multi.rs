@@ -54,7 +54,7 @@ fn main() {
     let mut canvas = Canvas::new();
     let things = vec![star5(), spiral(), circle(), star6()];
     for (t, (x, y)) in things {
-        canvas.paint(&t, x, y);
+        canvas.paint(&t, x, y).unwrap();
     }
     println!("{}", canvas.frame());
 }

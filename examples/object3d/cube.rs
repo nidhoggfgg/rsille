@@ -112,12 +112,12 @@ fn main() {
         object.rotate(angle);
         object.zoom(f);
         canvas.clear();
-        canvas.paint(&object, 1.5 * side_len, 1.5 * side_len);
+        canvas.paint(&object, 1.5 * side_len, 1.5 * side_len).unwrap();
         #[cfg(feature = "color")]
         {
             object_colorful.rotate(angle);
             object_colorful.zoom(f);
-            canvas.paint(&object_colorful, 4.0 * side_len, 1.5 * side_len);
+            canvas.paint(&object_colorful, 4.0 * side_len, 1.5 * side_len).unwrap();
         }
         println!("\x1B[H{}", canvas.frame());
         std::thread::sleep(std::time::Duration::from_millis(32));

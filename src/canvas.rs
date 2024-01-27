@@ -3,14 +3,14 @@ use std::fmt::Write;
 
 use crate::{
     braille::{Pixel, PixelOp},
-    utils::normalize,
+    utils::{normalize, RsilleErr},
 };
 
 #[cfg(feature = "color")]
 use crate::color::{Colored, TermColor};
 
 pub trait Paint {
-    fn paint(&self, canvas: &mut Canvas, x: f64, y: f64);
+    fn paint(&self, canvas: &mut Canvas, x: f64, y: f64) -> Result<(), RsilleErr>;
 }
 
 #[derive(Debug, Clone)]
@@ -44,8 +44,12 @@ impl Canvas {
         }
     }
 
-    pub fn paint(&mut self, target: &dyn Paint, x: f64, y: f64) {
-        target.paint(self, x, y);
+    pub fn paint(&mut self, target: &dyn Paint, x: f64, y: f64) -> Result<(), RsilleErr> {
+        if x < 0.0 || y < 0.0 {
+            return Err(RsilleErr::new(format!("can't paint on postion {:#?}!", (x, y))));
+        }
+        target.paint(self, x, y)?;
+        Ok(())
     }
 
     pub fn frame(&mut self) -> String {

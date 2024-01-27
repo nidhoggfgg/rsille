@@ -1,4 +1,4 @@
-use crate::{canvas::Paint, Canvas};
+use crate::{canvas::Paint, utils::RsilleErr, Canvas};
 
 #[cfg(feature = "color")]
 use crate::color::TermColor;
@@ -174,7 +174,7 @@ fn forward(
 
 #[cfg(not(feature = "color"))]
 impl Paint for Turtle {
-    fn paint(&self, canvas: &mut Canvas, x: f64, y: f64) {
+    fn paint(&self, canvas: &mut Canvas, x: f64, y: f64) -> Result<(), RsilleErr> {
         use Procedure::*;
         let (home_x, home_y) = (x, y);
         let (mut pen, mut heading, mut x, mut y) = (true, 0.0, x, y);
@@ -222,12 +222,13 @@ impl Paint for Turtle {
                 }
             }
         }
+        Ok(())
     }
 }
 
 #[cfg(feature = "color")]
 impl Paint for Turtle {
-    fn paint(&self, canvas: &mut Canvas, x: f64, y: f64) {
+    fn paint(&self, canvas: &mut Canvas, x: f64, y: f64) -> Result<(), RsilleErr> {
         use Procedure::*;
         let (home_x, home_y) = (x, y);
         let (mut pen, mut heading, mut x, mut y) = (true, 0.0, x, y);
@@ -280,5 +281,6 @@ impl Paint for Turtle {
                 }
             }
         }
+        Ok(())
     }
 }

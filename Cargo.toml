@@ -6,14 +6,17 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-
+image = { version = "0.24.8", optional = true }
+[target.'cfg(not(target_os = "windows"))'.dependencies]
+libc = { version = "0.2.152", optional = true }
 
 [dev-dependencies]
 criterion = "0.4"
 
 [features]
-default = ["term"]
-term = ["color"]
+default = ["img"]
+term = ["libc"]
+img = ["term", "image", "color"]
 color = []
 
 [[bench]]
@@ -35,3 +38,8 @@ path = "examples/turtle/turtle-flower.rs"
 [[example]]
 name = "turtle-multi"
 path = "examples/turtle/turtle-multi.rs"
+
+[[example]]
+name = "imgille"
+path = "examples/imgille.rs"
+

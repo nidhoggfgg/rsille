@@ -237,7 +237,7 @@ impl Object3D {
 }
 
 impl Paint for Object3D {
-    fn paint(&self, canvas: &mut Canvas, x: f64, y: f64) {
+    fn paint(&self, canvas: &mut Canvas, x: f64, y: f64) -> Result<(), RsilleErr> {
         let points = if let Some(p) = &self.zoomed_vertices {
             p
         } else {
@@ -257,5 +257,6 @@ impl Paint for Object3D {
             let xy2 = (x + v2.x, y + v2.z);
             canvas.line_colorful(xy1, xy2, *color);
         }
+        Ok(())
     }
 }
