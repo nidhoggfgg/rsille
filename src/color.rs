@@ -34,7 +34,7 @@ impl PixelOp for Colored {
 
 impl fmt::Display for Colored {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}{}", self.color, self.pixel)
+        write!(f, "{}{}{}", self.color, self.pixel, TermColor::Unset)
     }
 }
 

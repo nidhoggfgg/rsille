@@ -2,6 +2,11 @@ use crate::{
     canvas::Paint, utils::{check_zoom, mean, MIN_DIFFERENCE}, Canvas
 };
 
+#[cfg(feature = "color")]
+use crate::color::TermColor;
+#[cfg(feature = "color")]
+use std::collections::HashMap;
+
 #[derive(Debug, Clone, Copy)]
 pub struct Point3D {
     pub x: f64,
@@ -99,7 +104,10 @@ pub struct Object3D {
     origin_vertices: Vec<Point3D>,
     zoomed_vertices: Option<Vec<Point3D>>,
     center: Point3D,
+    #[cfg(not(feature = "color"))]
     sides: Vec<(usize, usize)>,
+    #[cfg(feature = "color")]
+    sides: HashMap<(usize, usize), TermColor>,
 }
 
 impl Object3D {
@@ -107,8 +115,11 @@ impl Object3D {
         Self {
             origin_vertices: Vec::new(),
             zoomed_vertices: None,
-            sides: Vec::new(),
             center: Point3D::new(0.0, 0.0, 0.0),
+            #[cfg(not(feature = "color"))]
+            sides: Vec::new(),
+            #[cfg(feature = "color")]
+            sides: HashMap::new(),
         }
     }
 
@@ -140,7 +151,10 @@ impl Object3D {
     }
 
     pub fn sides(&self) -> Vec<(usize, usize)> {
-        self.sides.clone()
+        #[cfg(not(feature = "color"))]
+        return self.sides.clone();
+        #[cfg(feature = "color")]
+        return self.sides.keys().cloned().collect();
     }
 
     pub fn add_sides(&mut self, sides: &[(usize, usize)]) {
@@ -150,7 +164,28 @@ impl Object3D {
                 panic!("wrong add sides!");
             }
 
+            #[cfg(not(feature = "color"))]
             self.sides.push(*side);
+            #[cfg(feature = "color")]
+            self.sides.insert(*side, TermColor::None);
+        }
+    }
+
+    #[cfg(feature = "color")]
+    pub fn add_sides_with_color(&mut self, sides: &[((usize, usize), TermColor)]) {
+        let vn = self.origin_vertices.len();
+        for (side, color) in sides {
+            if vn <= side.0 || vn <= side.1 {
+                panic!("wrong add sides!");
+            }
+            self.sides.insert(*side, *color);
+        }
+    }
+
+    #[cfg(feature = "color")]
+    pub fn set_side_color(&mut self, side: (usize, usize), color: TermColor) {
+        if self.sides.contains_key(&side) {
+            self.sides.insert(side, color);
         }
     }
 
@@ -217,11 +252,19 @@ impl Paint for Object3D {
         } else {
             &self.origin_vertices
         };
-        for s in &self.sides {
-            let (v1, v2) = (points[s.0], points[s.1]);
+        #[cfg(not(feature = "color"))]
+        for side in &self.sides {
+            let (v1, v2) = (points[side.0], points[side.1]);
             let (x1, y1) = (x + v1.x, y + v1.z);
             let (x2, y2) = (x + v2.x, y + v2.z);
             canvas.line(x1, y1, x2, y2);
+        }
+        #[cfg(feature = "color")]
+        for (side, color) in &self.sides {
+            let (v1, v2) = (points[side.0], points[side.1]);
+            let (x1, y1) = (x + v1.x, y + v1.z);
+            let (x2, y2) = (x + v2.x, y + v2.z);
+            canvas.line_with_color(x1, y1, x2, y2, *color);
         }
     }
 }
