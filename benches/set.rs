@@ -28,6 +28,8 @@ fn criterion_benchmark(bencher: &mut Criterion) {
     c.clear();
     bencher.bench_function("1000 * 1000", |b| b.iter(|| render(1000, &mut c)));
     c.clear();
+    bencher.bench_function("3000 * 3000", |b| b.iter(|| render(3000, &mut c)));
+    c.clear();
 }
 
 criterion_group!(benches, criterion_benchmark);

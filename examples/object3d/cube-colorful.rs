@@ -1,7 +1,5 @@
-use rsille::{object3d::Object3D, Canvas};
+use rsille::{color::TermColor, object3d::Object3D, Canvas};
 
-// generate the vertices(6) of cube and sides(12) of cube
-// the sides contain the index of the vertice
 fn gen_cube(side_len: f64) -> Object3D {
     #[rustfmt::skip]
     let a = [
@@ -24,19 +22,19 @@ fn gen_cube(side_len: f64) -> Object3D {
     }
     object.add_points(&points);
     object
-        .add_sides(&[
-            (0, 1),
-            (1, 4),
-            (4, 2),
-            (2, 0),
-            (3, 5),
-            (5, 7),
-            (7, 6),
-            (6, 3),
-            (1, 5),
-            (4, 7),
-            (2, 6),
-            (0, 3),
+        .add_sides_colorful(&[
+            ((0, 1), TermColor::C256(240)),
+            ((1, 4), TermColor::C256(220)),
+            ((4, 2), TermColor::C256(200)),
+            ((2, 0), TermColor::C256(180)),
+            ((3, 5), TermColor::C256(160)),
+            ((5, 7), TermColor::C256(140)),
+            ((7, 6), TermColor::C256(140)),
+            ((6, 3), TermColor::C256(160)),
+            ((1, 5), TermColor::C256(180)),
+            ((4, 7), TermColor::C256(200)),
+            ((2, 6), TermColor::C256(220)),
+            ((0, 3), TermColor::C256(240)),
         ])
         .unwrap();
     object
@@ -55,7 +53,7 @@ fn gen(k: i32) -> ((f64, f64, f64), f64) {
     } else {
         1.6 - (k % 60 - 30) as f64 * 0.02
     };
-    return (rotate, zoom);
+    (rotate, zoom)
 }
 
 fn main() {

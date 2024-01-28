@@ -18,15 +18,6 @@ const PIXEL_MAP: [[u32; 2]; 4] = [[0x01, 0x08],
 // braille unicode characters starts at 0x2800
 const BASE_CHAR: u32 = 0x2800;
 
-fn get_pixel(x: f64, y: f64) -> u32 {
-    let (x, y) = (normalize(x), normalize(y));
-    PIXEL_MAP[y % 4][x % 2]
-}
-
-fn make_braille_unchecked(p: u32) -> char {
-    unsafe { char::from_u32_unchecked(BASE_CHAR + p) }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd)]
 pub struct Pixel {
     code: u32,
@@ -42,6 +33,7 @@ pub trait PixelOp {
     fn unset(&mut self, x: f64, y: f64);
     fn set(&mut self, x: f64, y: f64);
     fn toggle(&mut self, x: f64, y: f64);
+    fn fill(&mut self);
 }
 
 impl PixelOp for Pixel {
@@ -63,10 +55,23 @@ impl PixelOp for Pixel {
             self.set(x, y);
         }
     }
+
+    fn fill(&mut self) {
+        self.code = 0xff;
+    }
 }
 
 impl fmt::Display for Pixel {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", make_braille_unchecked(self.code))
     }
+}
+
+fn get_pixel(x: f64, y: f64) -> u32 {
+    let (x, y) = (normalize(x), normalize(y));
+    PIXEL_MAP[y % 4][x % 2]
+}
+
+fn make_braille_unchecked(p: u32) -> char {
+    unsafe { char::from_u32_unchecked(BASE_CHAR + p) }
 }

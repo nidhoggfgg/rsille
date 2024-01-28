@@ -100,6 +100,20 @@ impl Canvas {
         self.pixels[row][col].toggle(x, y);
     }
 
+    pub fn set_fill(&mut self, x: f64, y: f64) {
+        let (row, col) = (y.round() as usize, x.round() as usize);
+        self.pad_row_col(row, col);
+        self.pixels[row][col].fill();
+    }
+
+    #[cfg(feature = "color")]
+    pub fn set_fill_colorful(&mut self, x: f64, y: f64, color: TermColor) {
+        let (row, col) = (y.round() as usize, x.round() as usize);
+        self.pad_row_col(row, col);
+        self.pixels[row][col].fill();
+        self.pixels[row][col].set_color(color);
+    }
+
     pub fn line(&mut self, xy1: (f64, f64), xy2: (f64, f64)) {
         let (x1, y1) = (normalize(xy1.0), normalize(xy1.1));
         let (x2, y2) = (normalize(xy2.0), normalize(xy2.1));

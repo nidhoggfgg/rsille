@@ -1,48 +1,6 @@
-use rsille::{object3d::Object3D, Canvas, Paint};
+use rsille::{object3d::Object3D, Canvas, Paint, color::TermColor};
 
-// generate the vertices(6) of cube and sides(12) of cube
-// the sides contain the index of the vertice
 fn gen_octahedron(side_len: f64) -> Object3D {
-    #[rustfmt::skip]
-    let a = [
-        ( 0,  0,  1),
-        ( 1,  0,  0),
-        ( 0,  1,  0),
-        (-1,  0,  0),
-        ( 0, -1,  0),
-        ( 0,  0, -1),
-    ];
-    let mut points = Vec::new();
-    let mut object = Object3D::new();
-    for i in a {
-        let x = side_len * i.0 as f64;
-        let y = side_len * i.1 as f64;
-        let z = side_len * i.2 as f64;
-        points.push((x, y, z));
-    }
-    object.add_points(&points);
-    object
-        .add_sides(&[
-            (0, 1),
-            (0, 2),
-            (0, 3),
-            (0, 4),
-            (5, 1),
-            (5, 2),
-            (5, 3),
-            (5, 4),
-            (1, 2),
-            (2, 3),
-            (3, 4),
-            (4, 1),
-        ])
-        .unwrap();
-    object
-}
-
-#[cfg(feature = "color")]
-fn gen_octahedron_colorful(side_len: f64) -> Object3D {
-    use rsille::color::TermColor;
 
     let a = [
         (0, 0, 1),
@@ -100,8 +58,6 @@ fn main() {
     let side_len = 40.0;
     let mut canvas = Canvas::new();
     let mut object = gen_octahedron(side_len);
-    #[cfg(feature = "color")]
-    let mut object_colurful = gen_octahedron_colorful(side_len);
     let mut k = 0;
     // hide the cursor and clear screen
     println!("\x1B[?25l\x1B[2J");
@@ -113,14 +69,6 @@ fn main() {
         object
             .paint(&mut canvas, 1.6 * side_len, 1.6 * side_len)
             .unwrap();
-        #[cfg(feature = "color")]
-        {
-            object_colurful.rotate(angle);
-            object_colurful.zoom(zoom);
-            object_colurful
-                .paint(&mut canvas, 4.2 * side_len, 1.6 * side_len)
-                .unwrap();
-        }
         println!("\x1B[H{}", canvas.frame());
         std::thread::sleep(std::time::Duration::from_millis(32));
         k += 1;

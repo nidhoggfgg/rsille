@@ -13,5 +13,6 @@ mod utils;
 
 pub use canvas::Canvas;
 pub use canvas::Paint;
+#[cfg(feature = "img")]
 pub use image::Imgille;
 pub use turtle::Turtle;

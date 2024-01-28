@@ -10,11 +10,19 @@ fn main() {
         let imgille = if let Ok(img) = Imgille::new(path) {
             img
         } else {
-            panic!("can't make imgille");
+            println!("useage: [{}] <path>", args[0]);
+            return;
         };
         canvas.paint(&imgille, 0.0, 0.0).unwrap();
         println!("{}", canvas.frame());
     } else {
         println!("useage: [{}] <path>", args[0]);
     }
+
+    // for debug
+    // let path = "test-files/a.jpeg";
+    // let mut canvas = Canvas::new();
+    // let img = Imgille::new(path).unwrap();
+    // canvas.paint(&img, 0.0, 0.0).unwrap();
+    // println!("{}", canvas.frame());
 }

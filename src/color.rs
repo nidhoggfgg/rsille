@@ -30,6 +30,10 @@ impl PixelOp for Colored {
     fn toggle(&mut self, x: f64, y: f64) {
         self.pixel.toggle(x, y);
     }
+
+    fn fill(&mut self) {
+        self.pixel.fill();
+    }
 }
 
 impl fmt::Display for Colored {
