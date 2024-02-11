@@ -9,7 +9,6 @@ pub fn normalize(v: f64) -> usize {
 
 pub fn mean(a: &[f64]) -> f64 {
     let sum = a.iter().sum::<f64>();
-    println!("{}", sum);
     sum / a.len() as f64
 }
 

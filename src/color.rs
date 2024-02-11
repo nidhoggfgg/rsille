@@ -1,3 +1,7 @@
+//! Colors in Terminal
+//!
+//!
+
 use core::fmt;
 
 use crate::braille::{Pixel, PixelOp};
@@ -42,12 +46,20 @@ impl fmt::Display for Colored {
     }
 }
 
+/// Colors in Terminal
+///
+/// it support 16 colors or 256 colors or rgb color
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum TermColor {
+    /// the 16 colors in terminal
     C16(Color16),
+    /// the 256 colors in terminal
     C256(u8),
+    /// the rgb colors in terminal, may not work in some console
     Crgb(u8, u8, u8),
+    /// no color
     None,
+    /// reset the color
     Unset,
 }
 
@@ -64,7 +76,9 @@ impl fmt::Display for TermColor {
     }
 }
 
+/// The 16 colors in Terminal
 #[rustfmt::skip]
+#[allow(missing_docs)]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Color16 {
     Black        = 30,

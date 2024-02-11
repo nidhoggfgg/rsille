@@ -1,7 +1,5 @@
-use rsille::{object3d::Object3D, Canvas, Paint};
+use rsille::{object3d::Object3D, term, Canvas, Paint};
 
-// generate the vertices(6) of cube and sides(12) of cube
-// the sides contain the index of the vertice
 fn gen_octahedron(side_len: f64) -> Object3D {
     #[rustfmt::skip]
     let a = [
@@ -40,46 +38,6 @@ fn gen_octahedron(side_len: f64) -> Object3D {
     object
 }
 
-#[cfg(feature = "color")]
-fn gen_octahedron_colorful(side_len: f64) -> Object3D {
-    use rsille::color::TermColor;
-
-    let a = [
-        (0, 0, 1),
-        (1, 0, 0),
-        (0, 1, 0),
-        (-1, 0, 0),
-        (0, -1, 0),
-        (0, 0, -1),
-    ];
-    let mut points = Vec::new();
-    let mut object = Object3D::new();
-    for i in a {
-        let x = side_len * i.0 as f64;
-        let y = side_len * i.1 as f64;
-        let z = side_len * i.2 as f64;
-        points.push((x, y, z));
-    }
-    object.add_points(&points);
-    object
-        .add_sides_colorful(&[
-            ((0, 1), TermColor::C256(100)),
-            ((0, 2), TermColor::C256(120)),
-            ((0, 3), TermColor::C256(140)),
-            ((0, 4), TermColor::C256(160)),
-            ((5, 1), TermColor::C256(180)),
-            ((5, 2), TermColor::C256(200)),
-            ((5, 3), TermColor::C256(200)),
-            ((5, 4), TermColor::C256(180)),
-            ((1, 2), TermColor::C256(160)),
-            ((2, 3), TermColor::C256(140)),
-            ((3, 4), TermColor::C256(120)),
-            ((4, 1), TermColor::C256(100)),
-        ])
-        .unwrap();
-    object
-}
-
 // just make the rotate looks more "random"
 fn gen(k: i32) -> ((f64, f64, f64), f64) {
     let rotate = match k {
@@ -93,18 +51,17 @@ fn gen(k: i32) -> ((f64, f64, f64), f64) {
     } else {
         1.6 - (k % 60 - 30) as f64 * 0.02
     };
-    return (rotate, zoom);
+    (rotate, zoom)
 }
 
 fn main() {
     let side_len = 40.0;
     let mut canvas = Canvas::new();
     let mut object = gen_octahedron(side_len);
-    #[cfg(feature = "color")]
-    let mut object_colurful = gen_octahedron_colorful(side_len);
     let mut k = 0;
-    // hide the cursor and clear screen
-    println!("\x1B[?25l\x1B[2J");
+    term::clear();
+    term::disable_wrap();
+    term::hide_cursor();
     loop {
         let (angle, zoom) = gen(k);
         object.rotate(angle);
@@ -113,16 +70,13 @@ fn main() {
         object
             .paint(&mut canvas, 1.6 * side_len, 1.6 * side_len)
             .unwrap();
-        #[cfg(feature = "color")]
-        {
-            object_colurful.rotate(angle);
-            object_colurful.zoom(zoom);
-            object_colurful
-                .paint(&mut canvas, 4.2 * side_len, 1.6 * side_len)
-                .unwrap();
+        term::move_to(0, 0);
+        // let s = canvas.frame();
+        // println!("{}", s);
+        for line in canvas.get_lines() {
+            println!("{}", line);
         }
-        println!("\x1B[H{}", canvas.frame());
-        std::thread::sleep(std::time::Duration::from_millis(32));
+        std::thread::sleep(std::time::Duration::from_millis(64));
         k += 1;
     }
 }

@@ -1,7 +1,6 @@
-use rsille::{object3d::Object3D, Canvas, Paint, color::TermColor};
+use rsille::{color::TermColor, object3d::Object3D, term, Canvas, Paint};
 
 fn gen_octahedron(side_len: f64) -> Object3D {
-
     let a = [
         (0, 0, 1),
         (1, 0, 0),
@@ -51,7 +50,7 @@ fn gen(k: i32) -> ((f64, f64, f64), f64) {
     } else {
         1.6 - (k % 60 - 30) as f64 * 0.02
     };
-    return (rotate, zoom);
+    (rotate, zoom)
 }
 
 fn main() {
@@ -59,8 +58,9 @@ fn main() {
     let mut canvas = Canvas::new();
     let mut object = gen_octahedron(side_len);
     let mut k = 0;
-    // hide the cursor and clear screen
-    println!("\x1B[?25l\x1B[2J");
+    term::clear();
+    term::disable_wrap();
+    term::hide_cursor();
     loop {
         let (angle, zoom) = gen(k);
         object.rotate(angle);
@@ -69,7 +69,8 @@ fn main() {
         object
             .paint(&mut canvas, 1.6 * side_len, 1.6 * side_len)
             .unwrap();
-        println!("\x1B[H{}", canvas.frame());
+        term::move_to(0, 0);
+        println!("{}", canvas.frame());
         std::thread::sleep(std::time::Duration::from_millis(32));
         k += 1;
     }

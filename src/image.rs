@@ -4,12 +4,16 @@ use image::{
     imageops::FilterType::Lanczos3, io::Reader as ImageReader, DynamicImage, GenericImageView,
 };
 
+/// A paintable
+///
+/// NOTE: when the image is big (like 3840*3840), please use release build
 #[derive(Debug, Clone)]
 pub struct Imgille {
     img: DynamicImage,
 }
 
 impl Imgille {
+    /// construct a new object contains the picture
     pub fn new(path: &str) -> Result<Self, RsilleErr> {
         let err = Err(RsilleErr::new(format!("can't open image: {}", path)));
         let img = if let Ok(reader) = ImageReader::open(path) {

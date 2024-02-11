@@ -1,4 +1,4 @@
-use rsille::{object3d::Object3D, Canvas};
+use rsille::{object3d::Object3D, term, Canvas};
 
 // generate the vertices(6) of cube and sides(12) of cube
 // the sides contain the index of the vertice
@@ -55,7 +55,7 @@ fn gen(k: i32) -> ((f64, f64, f64), f64) {
     } else {
         1.6 - (k % 60 - 30) as f64 * 0.02
     };
-    return (rotate, zoom);
+    (rotate, zoom)
 }
 
 fn main() {
@@ -63,8 +63,9 @@ fn main() {
     let mut canvas = Canvas::new();
     let mut object = gen_cube(side_len);
     let mut k = 0;
-    // hide the cursor and clear screen
-    println!("\x1B[?25l\x1B[2J");
+    term::clear();
+    term::disable_wrap();
+    term::hide_cursor();
     loop {
         let (angle, f) = gen(k);
         object.rotate(angle);
@@ -73,7 +74,8 @@ fn main() {
         canvas
             .paint(&object, 1.5 * side_len, 1.5 * side_len)
             .unwrap();
-        println!("\x1B[H{}", canvas.frame());
+        term::move_to(0, 0);
+        println!("{}", canvas.frame());
         std::thread::sleep(std::time::Duration::from_millis(32));
         k += 1;
     }

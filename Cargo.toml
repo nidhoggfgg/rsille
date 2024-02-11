@@ -1,7 +1,12 @@
 [package]
 name = "rsille"
-version = "0.2.0"
+version = "1.0.0"
 edition = "2021"
+authors = ["nidhoggfgg <nidhoggfgg@gmail.com>"]
+description = "A full feature braille code art lib"
+keywords = ["braille", "terminal", "tui", "turtle"]
+readme = "README.md"
+# repository = ""
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -15,13 +20,18 @@ criterion = "0.4"
 
 [features]
 default = ["img"]
-term = ["libc"]
-img = ["term", "image", "color"]
-color = []
+img = ["termsize", "image", "color"]
+color = ["ansi"]
+termsize = ["libc"]
+ansi = []
 
 [[bench]]
 name = "set"
 harness = false
+
+[[example]]
+name = "obj-mix"
+path = "examples/object3d/obj-mix.rs"
 
 [[example]]
 name = "cube"
@@ -50,4 +60,3 @@ path = "examples/turtle/turtle-multi.rs"
 [[example]]
 name = "imgille"
 path = "examples/imgille.rs"
-
