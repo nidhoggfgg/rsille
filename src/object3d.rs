@@ -340,4 +340,3 @@ impl Point3D {
         self.y = x * s + y * c;
     }
 }
-

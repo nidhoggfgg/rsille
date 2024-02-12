@@ -1,4 +1,4 @@
-use rsille::{Canvas, Turtle, color::TermColor};
+use rsille::{color::TermColor, Canvas, Turtle};
 
 fn main() {
     let mut canvas = Canvas::new();
