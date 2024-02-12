@@ -1,8 +1,10 @@
 # Rsille 🎨
 
-The rsille is a Rust library for drawing graphics in the terminal. It leverages Braille code to provide an 8x resolution equivalent to ASCII art, enabling you to create beautiful graphics right in your terminal. This library offers an API and functionality similar to the turtle module in Python, while also supporting rendering of 3D objects.
+The rsille is a Rust library for drawing graphics in the terminal.
+It leverages Braille code to provide an 8x resolution equivalent to ASCII art, enabling you to create beautiful graphics right in your terminal.
+This library offers an API and functionality similar to the turtle module in Python, while also supporting rendering of 3D objects.
 
-![3d objects](imgs/objects3d.gif)
+![3d objects](https://github.com/nidhoggfgg/rsille/raw/main/imgs/objects3d.gif)
 
 ## Features
 
@@ -11,9 +13,21 @@ The rsille is a Rust library for drawing graphics in the terminal. It leverages 
 - Supports basic 2D graphics drawing and 3D object rendering.
 - Lightweight and easy to integrate into your Rust projects.
 
+## Try it
+
+If you want to see some examples, you can just try it without coding
+```
+git clone https://github.com/nidhoggfgg/rsille.git
+cd rsille
+cargo run --example cube
+```
+
+You will see a rotating cube, and there is more examples.
+You can just use `cargo run --example` to find some examples or see hte `examples` dir for more information.
+
 ## Installation
 
-To use the Terminal Graphics Library in your Rust project, simply add the following dependency to your `Cargo.toml` file:
+To use the rsille in your Rust project, simply add the following dependency to your `Cargo.toml` file:
 
 ```toml
 [dependencies]
@@ -39,11 +53,11 @@ fn main() {
 
 ## Examples
 
-You can find more example code and in the `examples` directory, showcasing various features and use cases of the Terminal Graphics Library.
+You can find more example code and in the `examples` directory, showcasing various features and use cases of the rsille.
 
 and some example pictures:
-![lena](imgs/lena.png)
-![turtle-multi](imgs/turtle-multi.png)
+![lena](https://github.com/nidhoggfgg/rsille/raw/main/imgs/lena.png)
+![turtle-multi](https://github.com/nidhoggfgg/rsille/raw/main/imgs/turtle-multi.png)
 
 ## License
 
