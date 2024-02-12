@@ -18,11 +18,4 @@ fn main() {
     } else {
         println!("useage: [{}] <path>", args[0]);
     }
-
-    // for debug
-    // let path = "test-files/a.jpeg";
-    // let mut canvas = Canvas::new();
-    // let img = Imgille::new(path).unwrap();
-    // canvas.paint(&img, 0.0, 0.0).unwrap();
-    // println!("{}", canvas.frame());
 }

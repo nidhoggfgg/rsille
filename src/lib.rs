@@ -11,29 +11,25 @@
 //! draw the sin(x)
 //! ```
 //! use rsille::Canvas;
-//! fn main() {
-//!     let mut c = Canvas::new();
-//!     for x in 0..1800 {
-//!         let x = x as f64;
-//!         c.set(x / 10.0, 15.0 + x.to_radians().sin() * 10.0);
-//!     }
-//!     println!("{}", c.frame());
+//! let mut c = Canvas::new();
+//! for x in 0..1800 {
+//!     let x = x as f64;
+//!     c.set(x / 10.0, 15.0 + x.to_radians().sin() * 10.0);
 //! }
+//! println!("{}", c.frame());
 //! ```
 //!
 //! draw a star
 //! ```
 //! use rsille::{Turtle, Canvas};
-//! fn main() {
-//!     let mut c = Canvas::new();
-//!     let mut t = Turtle::new();
-//!     for _ in 0..5 {
-//!         t.forward(100.0);
-//!         t.right(144.0);
-//!     }
-//!     c.paint(&t, 0.0, 30.0);
-//!     println!("{}", c.frame());
+//! let mut c = Canvas::new();
+//! let mut t = Turtle::new();
+//! for _ in 0..5 {
+//!     t.forward(100.0);
+//!     t.right(144.0);
 //! }
+//! c.paint(&t, 0.0, 30.0);
+//! println!("{}", c.frame());
 //! ```
 //!
 //! It's inspired by [drawille], but it has more features and fast

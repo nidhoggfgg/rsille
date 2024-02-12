@@ -1,4 +1,4 @@
-//! Point and Object in 3D
+//! Object in 3D
 
 use crate::{
     canvas::Paint,
@@ -10,120 +10,6 @@ use crate::{
 use crate::color::TermColor;
 #[cfg(feature = "color")]
 use std::collections::HashMap;
-
-/// point in 3D
-///
-/// support rotate and zoom, not paintable
-#[derive(Debug, Clone, Copy)]
-pub struct Point3D {
-    pub(crate) x: f64,
-    pub(crate) y: f64,
-    pub(crate) z: f64,
-}
-
-impl Point3D {
-    /// construct a new point
-    pub fn new(x: f64, y: f64, z: f64) -> Self {
-        Self { x, y, z }
-    }
-
-    /// similar to new, but use a tuple
-    pub fn from(xyz: (f64, f64, f64)) -> Self {
-        Self {
-            x: xyz.0,
-            y: xyz.1,
-            z: xyz.2,
-        }
-    }
-
-    /// get the coordinate
-    pub fn get(&self) -> (f64, f64, f64) {
-        (self.x, self.y, self.z)
-    }
-
-    /// rotate the point, see [wiki] for more information
-    ///
-    /// [wiki]: <https://en.wikipedia.org/wiki/Rotation_matrix>
-    pub fn rotate(&mut self, angle: (f64, f64, f64)) {
-        self.rotate_x(angle.0);
-        self.rotate_y(angle.1);
-        self.rotate_z(angle.2);
-
-        // let (x, y, z) = (self.x, self.y, self.z);
-        // let (sx, cx) = anlge_x.to_radians().sin_cos();
-        // let (sy, cy) = anlge_y.to_radians().sin_cos();
-        // let (sz, cz) = angle_z.to_radians().sin_cos();
-        // let (t1, t2, t3) = (
-        //     x * cy + y * sx * sy + z * cx * sy,
-        //     y * cx - z * sx,
-        //     y * sx + z * cx,
-        // );
-        // self.x = cz * t1 - sz * t2;
-        // self.y = sz * t1 + cz * t2;
-        // self.z = cz * t3 - sy * x;
-    }
-
-    /// similar to [rotate] but don't change the original point and return the rotated point
-    ///
-    /// [rotate]: struct.Point3D.html#method.rotate
-    pub fn rotate_new(&self, angle: (f64, f64, f64)) -> Self {
-        let mut point = *self;
-        point.rotate(angle);
-        point
-    }
-
-    /// Zoom coordinate of the point with the center
-    ///
-    /// It will change the coordinate, so don't call it many times, precision errors of f64 are cumulative!
-    ///
-    /// In most time, you shouldn't use it, just use the [`zoom`](struct.Object3D.html#method.zoom) in Object3D
-    pub fn zoom(&mut self, center: Self, factor: f64) {
-        check_zoom(factor);
-        self.x = (self.x - center.x) * factor;
-        self.y = (self.y - center.y) * factor;
-        self.z = (self.z - center.z) * factor;
-    }
-
-    /// Zoom coordinate of the point with the center and return a new point
-    ///
-    /// It won't change the original point, so the precision error isn't matter
-    pub fn zoom_new(&self, center: Self, factor: f64) -> Point3D {
-        check_zoom(factor);
-        let dx = (self.x - center.x) * factor;
-        let dy = (self.y - center.y) * factor;
-        let dz = (self.z - center.y) * factor;
-
-        Self {
-            x: dx,
-            y: dy,
-            z: dz,
-        }
-    }
-
-    /// rotate by an angle about the x axis
-    pub fn rotate_x(&mut self, angle: f64) {
-        let (s, c) = angle.to_radians().sin_cos();
-        let (y, z) = (self.y, self.z);
-        self.y = y * c - z * s;
-        self.z = y * s + z * c;
-    }
-
-    /// rotate by an angle about the y axis
-    pub fn rotate_y(&mut self, angle: f64) {
-        let (s, c) = angle.to_radians().sin_cos();
-        let (x, z) = (self.x, self.z);
-        self.x = x * c + z * s;
-        self.z = -x * s + z * c;
-    }
-
-    /// rotate by an angle about the z axis
-    pub fn rotate_z(&mut self, anlge: f64) {
-        let (s, c) = anlge.to_radians().sin_cos();
-        let (x, y) = (self.x, self.y);
-        self.x = x * c - y * s;
-        self.y = x * s + y * c;
-    }
-}
 
 /// # A paintable Object in 3D
 ///
@@ -339,3 +225,119 @@ impl Paint for Object3D {
         Ok(())
     }
 }
+
+/// point in 3D
+///
+/// support rotate and zoom, not paintable
+#[derive(Debug, Clone, Copy)]
+struct Point3D {
+    pub(crate) x: f64,
+    pub(crate) y: f64,
+    pub(crate) z: f64,
+}
+
+#[allow(unused)]
+impl Point3D {
+    /// construct a new point
+    fn new(x: f64, y: f64, z: f64) -> Self {
+        Self { x, y, z }
+    }
+
+    /// similar to new, but use a tuple
+    fn from(xyz: (f64, f64, f64)) -> Self {
+        Self {
+            x: xyz.0,
+            y: xyz.1,
+            z: xyz.2,
+        }
+    }
+
+    /// get the coordinate
+    fn get(&self) -> (f64, f64, f64) {
+        (self.x, self.y, self.z)
+    }
+
+    /// rotate the point, see [wiki] for more information
+    ///
+    /// [wiki]: <https://en.wikipedia.org/wiki/Rotation_matrix>
+    fn rotate(&mut self, angle: (f64, f64, f64)) {
+        self.rotate_x(angle.0);
+        self.rotate_y(angle.1);
+        self.rotate_z(angle.2);
+
+        // let (x, y, z) = (self.x, self.y, self.z);
+        // let (sx, cx) = anlge_x.to_radians().sin_cos();
+        // let (sy, cy) = anlge_y.to_radians().sin_cos();
+        // let (sz, cz) = angle_z.to_radians().sin_cos();
+        // let (t1, t2, t3) = (
+        //     x * cy + y * sx * sy + z * cx * sy,
+        //     y * cx - z * sx,
+        //     y * sx + z * cx,
+        // );
+        // self.x = cz * t1 - sz * t2;
+        // self.y = sz * t1 + cz * t2;
+        // self.z = cz * t3 - sy * x;
+    }
+
+    /// similar to [rotate] but don't change the original point and return the rotated point
+    ///
+    /// [rotate]: struct.Point3D.html#method.rotate
+    fn rotate_new(&self, angle: (f64, f64, f64)) -> Self {
+        let mut point = *self;
+        point.rotate(angle);
+        point
+    }
+
+    /// Zoom coordinate of the point with the center
+    ///
+    /// It will change the coordinate, so don't call it many times, precision errors of f64 are cumulative!
+    ///
+    /// In most time, you shouldn't use it, just use the [`zoom`](struct.Object3D.html#method.zoom) in Object3D
+    fn zoom(&mut self, center: Self, factor: f64) {
+        check_zoom(factor);
+        self.x = (self.x - center.x) * factor;
+        self.y = (self.y - center.y) * factor;
+        self.z = (self.z - center.z) * factor;
+    }
+
+    /// Zoom coordinate of the point with the center and return a new point
+    ///
+    /// It won't change the original point, so the precision error isn't matter
+    fn zoom_new(&self, center: Self, factor: f64) -> Point3D {
+        check_zoom(factor);
+        let dx = (self.x - center.x) * factor;
+        let dy = (self.y - center.y) * factor;
+        let dz = (self.z - center.y) * factor;
+
+        Self {
+            x: dx,
+            y: dy,
+            z: dz,
+        }
+    }
+
+    /// rotate by an angle about the x axis
+    fn rotate_x(&mut self, angle: f64) {
+        let (s, c) = angle.to_radians().sin_cos();
+        let (y, z) = (self.y, self.z);
+        self.y = y * c - z * s;
+        self.z = y * s + z * c;
+    }
+
+    /// rotate by an angle about the y axis
+    fn rotate_y(&mut self, angle: f64) {
+        let (s, c) = angle.to_radians().sin_cos();
+        let (x, z) = (self.x, self.z);
+        self.x = x * c + z * s;
+        self.z = -x * s + z * c;
+    }
+
+    /// rotate by an angle about the z axis
+    fn rotate_z(&mut self, anlge: f64) {
+        let (s, c) = anlge.to_radians().sin_cos();
+        let (x, y) = (self.x, self.y);
+        self.x = x * c - y * s;
+        self.y = x * s + y * c;
+    }
+}
+
