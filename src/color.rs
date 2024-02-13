@@ -1,6 +1,6 @@
 //! Colors in Terminal
 //!
-//!
+//! just use and see the [`TermColor`](enum.TermColor.html)
 
 use core::fmt;
 
@@ -13,11 +13,11 @@ pub(crate) struct Colored {
 }
 
 impl Colored {
-    pub fn new(pixel: Pixel, color: TermColor) -> Self {
+    pub(crate) fn new(pixel: Pixel, color: TermColor) -> Self {
         Self { pixel, color }
     }
 
-    pub fn set_color(&mut self, color: TermColor) {
+    pub(crate) fn set_color(&mut self, color: TermColor) {
         self.color = color;
     }
 }
@@ -57,9 +57,9 @@ pub enum TermColor {
     C256(u8),
     /// the rgb colors in terminal, may not work in some console
     Crgb(u8, u8, u8),
-    /// no color
+    /// no color, it won't change the color of output
     None,
-    /// reset the color
+    /// reset the color, it will change the color of output
     Unset,
 }
 

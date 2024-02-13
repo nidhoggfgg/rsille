@@ -19,7 +19,24 @@ pub trait Paint {
 
 /// The basic canvas
 ///
+/// ## Example
 ///
+/// draw the `y = 1.5*sin(x)` and `y = cos(x)`
+/// ```
+/// use rsille::Canvas;
+/// let mut c = Canvas::new();
+/// for x in 0..1000 {
+///     let x = x as f64;
+///     c.set(x / 10.0, 15.0 + x.to_radians().sin() * 15.0);
+///     c.set(x / 10.0, 15.0 + x.to_radians().cos() * 10.0);
+/// }
+/// println!("{}", c.frame());
+/// ```
+///
+/// ## NOTE
+/// don't worry about the `x` and `y` in the canvas, it's not the location in the terminal.
+/// use the `x` and `y` of your own algorithms, but don't let it less than `0`
+
 #[derive(Debug, Clone)]
 pub struct Canvas {
     width: usize,
@@ -34,6 +51,7 @@ pub struct Canvas {
 
 impl Canvas {
     /// make a new empty canvas
+    ///
     /// the size of the canvas will auto increase
     pub fn new() -> Self {
         let pixels = Vec::new();
@@ -46,6 +64,7 @@ impl Canvas {
     }
 
     /// make a new empty canvas with the size
+    ///
     /// the size of the canvas also would auto increase
     pub fn with_capcity(width: usize, height: usize) -> Self {
         let vec = make_vec(width);
@@ -104,6 +123,7 @@ impl Canvas {
     }
 
     /// draw a dot on (x, y)
+    ///
     /// just use the (x, y) in your object, the algorithm will find the right location
     pub fn set(&mut self, x: f64, y: f64) {
         let (row, col) = get_pos(x, y);
@@ -122,6 +142,7 @@ impl Canvas {
     }
 
     /// if the (x, y) is already set, then unset it
+    ///
     /// if the (x, y) is unset, then set it
     pub fn toggle(&mut self, x: f64, y: f64) {
         let (row, col) = get_pos(x, y);
@@ -130,8 +151,10 @@ impl Canvas {
     }
 
     /// fill ⣿ at the (x, y)
-    /// the (x, y) is the real location on canvas, it's hard to use
-    /// don't use it unless you know what you are doing!
+    ///
+    /// the (x, y) is the real location on canvas, it's hard to use it rightly
+    ///
+    /// so don't use it unless you know what you are doing!
     pub fn set_fill(&mut self, x: f64, y: f64) {
         let (row, col) = (y.round() as usize, x.round() as usize);
         self.pad_row_col(row, col);
@@ -139,6 +162,7 @@ impl Canvas {
     }
 
     /// similar to [`set_fill`](struct.Canvas.html#method.set_fill), but support color
+    ///
     /// don't use it unless you know what you are doing!
     #[cfg(feature = "color")]
     pub fn set_fill_colorful(&mut self, x: f64, y: f64, color: TermColor) {

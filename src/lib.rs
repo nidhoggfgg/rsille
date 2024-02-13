@@ -1,5 +1,4 @@
 #![warn(missing_docs)]
-#![allow(clippy::needless_doctest_main)]
 //! This crate is a rust lib for making [braille] art.
 //!
 //! You can use the basic canvas to paint something,
@@ -28,7 +27,7 @@
 //!     t.forward(100.0);
 //!     t.right(144.0);
 //! }
-//! c.paint(&t, 0.0, 30.0);
+//! c.paint(&t, 0.0, 30.0).unwrap();
 //! println!("{}", c.frame());
 //! ```
 //!

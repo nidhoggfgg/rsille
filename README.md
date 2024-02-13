@@ -23,7 +23,7 @@ cargo run --example cube
 ```
 
 You will see a rotating cube, and there is more examples.
-You can just use `cargo run --example` to find some examples or see hte `examples` dir for more information.
+You can just use `cargo run --example` to find some examples or see the `examples` dir for more information.
 
 ## Installation
 

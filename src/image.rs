@@ -4,9 +4,27 @@ use image::{
     imageops::FilterType::Lanczos3, io::Reader as ImageReader, DynamicImage, GenericImageView,
 };
 
-/// A paintable
+/// Paint the image on canvas
 ///
-/// NOTE: when the image is big (like 3840*3840), please use release build
+/// ## Example
+///
+/// paint the image
+/// ```no_run
+/// use rsille::{Canvas, Imgille};
+/// let path = "path/to/image";
+/// let mut canvas = Canvas::new();
+/// let imgille = Imgille::new(path).unwrap();
+/// canvas.paint(&imgille, 0.0, 0.0).unwrap();
+/// println!("{}", canvas.frame());
+/// ```
+///
+/// ## NOTE
+///
+/// you can always paint on (0.0, 0.0).
+/// but if you want, you can move it to other place on the canvas!
+///
+/// when the image is big (like 3840*3840), please use release build
+
 #[derive(Debug, Clone)]
 pub struct Imgille {
     img: DynamicImage,

@@ -1,4 +1,19 @@
 //! Object in 3D
+//!
+//! ## Example
+//!
+//! draw a line
+//! ```
+//! use rsille::{object3d::Object3D, Canvas};
+//! let mut canvas = Canvas::new();
+//! let mut object = Object3D::new();
+//! let points = [(-10.0, -10.0, -10.0), (10.0, 10.0, 10.0)];
+//! let sides = [(0, 1)]; // connect these 2 point
+//! object.add_points(&points);
+//! object.add_sides(&sides).unwrap();
+//! canvas.paint(&object, 0.0, 0.0).unwrap();
+//! println!("{}", canvas.frame());
+//! ```
 
 use crate::{
     canvas::Paint,
@@ -16,20 +31,6 @@ use std::collections::HashMap;
 /// make object easy and easy to do something like rotate, zoom and more
 /// also, it support colorful output
 ///
-/// ## Example
-///
-/// draw a line
-/// ```
-/// use rsille::{object3d::Object3D, Canvas};
-/// let mut canvas = Canvas::new();
-/// let mut object = Object3D::new();
-/// let points = [(-1.0, -1.0, -1.0), (1.0, 1.0, 1.0)];
-/// let sides = [(0, 1)];
-/// object.add_points(&points);
-/// object.add_sides(&sides);
-/// canvas.paint(&object, 0.0, 0.0).unwrap();
-/// println!("{}", canvas.frame());
-/// ```
 
 #[derive(Debug, Clone)]
 pub struct Object3D {
