@@ -18,6 +18,9 @@ pub fn check_zoom(v: f64) {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct Offset(pub usize, pub usize);
+
 // a multi-type mean function, but it's too complex
 // pub fn mean<'a, T>(a: &'a [T]) -> f64
 // where

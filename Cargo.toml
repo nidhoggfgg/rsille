@@ -57,7 +57,3 @@ path = "examples/turtle/turtle-flower.rs"
 [[example]]
 name = "turtle-multi"
 path = "examples/turtle/turtle-multi.rs"
-
-[[example]]
-name = "imgille"
-path = "examples/imgille.rs"

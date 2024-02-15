@@ -40,6 +40,9 @@
 mod braille;
 mod canvas;
 mod defaults;
+#[allow(missing_docs)]
+#[allow(unused)]
+pub mod lifegame;
 pub mod object3d;
 mod turtle;
 mod utils;
