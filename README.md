@@ -31,7 +31,7 @@ To use the rsille in your Rust project, simply add the following dependency to y
 
 ```toml
 [dependencies]
-rsille = "1.0.0"
+rsille = "1.1.0"
 ```
 
 ## Usage

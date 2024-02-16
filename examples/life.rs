@@ -4,13 +4,12 @@ use rsille::{lifegame::LifeGame, term, Canvas};
 
 fn main() {
     let args: Vec<String> = env::args().collect();
-    // if args.len() != 2 {
-    //     println!("useage: [{}] <path>", args[0]);
-    //     return
-    // }
-    let path = "examples/files/112p15_synth.rle";
+    if args.len() != 2 {
+        println!("useage: [{}] <path>", args[0]);
+        return;
+    }
     let mut canvas = Canvas::new();
-    let mut lg = if let Ok(lg) = LifeGame::from(path) {
+    let mut lg = if let Ok(lg) = LifeGame::from_path(&args[1]) {
         lg
     } else {
         println!("can't parse {}!", args[1]);
@@ -24,6 +23,6 @@ fn main() {
         term::move_to(0, 0);
         println!("{}", canvas.frame());
         lg.next();
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        std::thread::sleep(std::time::Duration::from_millis(64));
     }
 }

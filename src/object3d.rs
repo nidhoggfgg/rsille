@@ -31,7 +31,6 @@ use std::collections::HashMap;
 /// make object easy and easy to do something like rotate, zoom and more
 /// also, it support colorful output
 ///
-
 #[derive(Debug, Clone)]
 pub struct Object3D {
     origin_vertices: Vec<Point3D>,

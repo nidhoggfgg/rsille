@@ -31,6 +31,13 @@
 //! println!("{}", c.frame());
 //! ```
 //!
+//! ## Extra
+//! useful things can paint on canvas:
+//! 1. [`Object3d`](object3d/index.html) the 3d object
+//! 2. [`Turtle`](struct.Turtle.html) similar to the turtle in python
+//! 3. [`Imagille`](struct.Imgille.html) paint image to braille code
+//! 4. [`Lifegame`](lifegame/index.html) the life game in braille code
+//!
 //! It's inspired by [drawille], but it has more features and fast
 //!
 //! [braille]: http://www.alanwood.net/unicode/braille_patterns.html
@@ -40,7 +47,6 @@
 mod braille;
 mod canvas;
 mod defaults;
-#[allow(missing_docs)]
 #[allow(unused)]
 pub mod lifegame;
 pub mod object3d;

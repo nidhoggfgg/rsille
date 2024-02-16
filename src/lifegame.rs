@@ -1,67 +1,136 @@
-use std::{fs, ops::RangeBounds};
+//! the life game
+//!
+//! easy to build a life game and paint on the canvas
+//!
+//! ## Example
+//!
+//! ```no_run
+//! use rsille::{lifegame::LifeGame, term, Canvas};
+//!
+//! let mut canvas = Canvas::new();
+//! let mut lg = LifeGame::from_path("path/to/rle").unwrap();
+//! term::clear();
+//! loop {
+//!     canvas.clear();
+//!     canvas.paint(&lg, 0.0, 0.0).unwrap();
+//!     term::move_to(0, 0);
+//!     println!("{}", canvas.frame());
+//!     lg.next();
+//!     std::thread::sleep(std::time::Duration::from_millis(64));
+//! }
+//!```
+use std::{collections::HashMap, fs, iter::Peekable, ops::RangeBounds, usize};
 
 use crate::{
     utils::{Offset, RsilleErr},
     Paint,
 };
 
-type Grid = Vec<Vec<bool>>;
+// same as HashSet<(isize, isize)>
+// but when using inplace algorithms, just simply change () to bool or u8
+type LiveCells = HashMap<(isize, isize), ()>;
 
+/// the life game
+///
+/// it support `rle` file download from the internet!
+///
+/// ## Example
+///
+/// ```no_run
+/// use rsille::{lifegame::LifeGame, term, Canvas};
+///
+/// let mut canvas = Canvas::new();
+/// let mut lg = LifeGame::from_path("path/to/rle").unwrap();
+/// term::clear();
+/// loop {
+///     canvas.clear();
+///     canvas.paint(&lg, 0.0, 0.0).unwrap();
+///     term::move_to(0, 0);
+///     println!("{}", canvas.frame());
+///     lg.next();
+///     std::thread::sleep(std::time::Duration::from_millis(64));
+/// }
+///```
 #[derive(Debug, Clone)]
 pub struct LifeGame {
     offset: Offset,
-    grid: Grid,
+    cells: LiveCells,
+    boundless: bool,
 }
 
 impl LifeGame {
+    /// return a new life game
     pub fn new() -> Self {
         Self {
-            offset: Offset(0, 0),
-            grid: Vec::new(),
+            offset: (0, 0),
+            cells: Default::default(),
+            boundless: true,
         }
     }
 
-    pub fn from(path: &str) -> Result<LifeGame, RsilleErr> {
-        let err = Err(RsilleErr::new(format!("can't open rle file: {}", path)));
-        let Ok(rle) = fs::read_to_string(path) else {
-            return err;
-        };
-        let grid = parse(&rle)?;
-        Ok(Self {
-            offset: Offset(0, 0),
-            grid,
-        })
+    /// read the `rle` format string and build a life game from it
+    ///
+    /// return `err` when can't parse the rle string
+    pub fn from(rle: &str) -> Result<Self, RsilleErr> {
+        parse(rle)
     }
 
+    /// read the `rle` file and build a life game from it
+    ///
+    /// return `err` when can't parse the rle file or can't open file
+    pub fn from_path(path: &str) -> Result<Self, RsilleErr> {
+        let Ok(rle) = fs::read_to_string(path) else {
+            return Err(RsilleErr::new(format!("can't open rle file: {}", path)));
+        };
+        Self::from(&rle)
+    }
+
+    /// the next moment of the cells
+    ///
+    /// it will clone whole cells, maybe i will impl an inplace algorithm later.
+    /// and this algorithm is slow, maybe i would impl a better one
     pub fn next(&mut self) {
-        let mut next = self.grid.clone();
-        for (y, cs) in self.grid.iter().enumerate() {
-            for (x, _) in cs.iter().enumerate() {
-                let count = self.count_neighbors(x, y);
-                // neibor == 3 then alive
-                if count == 3 {
-                    next[y][x] = true;
-                }
-                // neibor < 2 or 4 <= neibor then dead
-                if !(2..4).contains(&count) {
-                    next[y][x] = false
+        let mut next = self.cells.clone();
+        for cell in self.cells.keys() {
+            let (x, y) = *cell;
+            for dy in -1..=1 {
+                for dx in -1..=1 {
+                    let neibor = self.count_neighbors(x + dx, y + dy);
+                    if neibor == 3 {
+                        next.insert((x + dx, y + dy), ());
+                    }
+
+                    if !(2..4).contains(&neibor) {
+                        next.remove(&(x + dx, y + dy));
+                    }
                 }
             }
         }
+        self.cells = next;
+
+        // deal the offset
+        let offset_x = self.cells.keys().min_by_key(|c| c.0).unwrap().0;
+        let offset_y = self.cells.keys().min_by_key(|c| c.1).unwrap().1;
+        if offset_x < 0 && self.offset.0 < offset_x.unsigned_abs() {
+            self.offset.0 = offset_x.unsigned_abs();
+        }
+        if offset_y < 0 && self.offset.1 < offset_y.unsigned_abs() {
+            self.offset.1 = offset_y.unsigned_abs();
+        }
     }
 
-    fn count_neighbors(&self, x: usize, y: usize) -> usize {
+    fn count_neighbors(&self, x: isize, y: isize) -> usize {
         let mut count = 0;
-        let (height, width) = (self.grid.len() as isize, self.grid[0].len() as isize);
-        for i in -1..=1 {
-            for j in -1..=1 {
-                if i == 0 && j == 0 {
+        for dy in -1..=1 {
+            for dx in -1..=1 {
+                // the cell itself
+                if dy == 0 && dx == 0 {
                     continue;
                 }
-                let neighbor_x = x as isize + j;
-                let neighbor_y = y as isize + i;
-                if 0 <= neighbor_x && neighbor_x < width && 0 <= neighbor_y && neighbor_y < height {
-                    count += self.grid[neighbor_y as usize][neighbor_x as usize] as usize;
+                let neighbor_x = x + dx;
+                let neighbor_y = y + dy;
+                if self.cells.contains_key(&(neighbor_x, neighbor_y)) {
+                    count += 1;
                 }
             }
         }
@@ -71,72 +140,49 @@ impl LifeGame {
 
 impl Paint for LifeGame {
     fn paint(&self, canvas: &mut crate::Canvas, x: f64, y: f64) -> Result<(), RsilleErr> {
-        for (iy, cs) in self.grid.iter().enumerate() {
-            for (ix, c) in cs.iter().enumerate() {
-                if *c {
-                    canvas.set(ix as f64 + x, iy as f64 + y);
-                }
-            }
+        let (dx, dy) = self.offset;
+        let (dx, dy) = (dx as isize, dy as isize);
+        for cell in self.cells.keys() {
+            canvas.set(x + (cell.0 + dx) as f64, y + (cell.1 + dy) as f64);
         }
         Ok(())
     }
 }
 
-fn parse(rle: &str) -> Result<Grid, RsilleErr> {
+fn parse(rle: &str) -> Result<LifeGame, RsilleErr> {
     let mut lines = rle.lines().peekable();
-    let mut grid = Vec::new();
-    let mut width = 0;
-    let mut height = 0;
-
-    // width and height
-    // skip comments and rules
-    while let Some(line) = lines.peek() {
-        if line.starts_with('#') {
-            lines.next();
-            continue;
-        }
-        if line.starts_with('x') {
-            let s: Vec<&str> = line.split(',').collect();
-            width = (s[0].split('=').collect::<Vec<&str>>())[1]
-                .trim()
-                .parse()
-                .unwrap();
-            height = (s[1].split('=').collect::<Vec<&str>>())[1]
-                .trim()
-                .parse()
-                .unwrap();
-            grid = vec![vec![false; width]; height];
-            break;
-        }
-    }
-    if width == 0 || height == 0 {
-        return Err(RsilleErr::new("can't parse width or height".to_string()));
-    }
-
+    let mut cells = HashMap::new();
+    // read the head
+    let (width, height) = read_head(&mut lines)?;
     // parse
-    let mut x = 0;
-    let mut y = 0;
+    let (mut x, mut y) = (0_isize, 0_isize);
+    let mut count = 0_isize;
     for line in lines {
-        if line.starts_with('#') || line.starts_with('x') {
-            continue;
-        }
         let mut chars = line.chars().peekable();
         loop {
             let Some(c) = chars.next() else {
                 break;
             };
             match c {
-                'b' => x += 1,
+                'b' => {
+                    for _ in 0..=count {
+                        x += 1;
+                    }
+                    count = 0;
+                }
                 'o' => {
-                    grid[y][x] = true;
-                    x += 1;
+                    for _ in 0..=count {
+                        cells.insert((x, y), ());
+                        x += 1;
+                    }
+                    count = 0;
                 }
                 '$' => {
                     y += 1;
                     x = 0;
                 }
                 '!' => break,
-                '0'..='9' => {
+                '1'..='9' => {
                     let mut count_str = String::new();
                     count_str.push(c);
                     while let Some(digit) = chars.peek() {
@@ -147,12 +193,41 @@ fn parse(rle: &str) -> Result<Grid, RsilleErr> {
                             break;
                         }
                     }
-                    let count: usize = count_str.parse().unwrap();
-                    x += count - 1;
+                    count = count_str.parse().unwrap();
+                    count -= 1;
                 }
                 _ => (),
             }
         }
     }
-    Ok(grid)
+    Ok(LifeGame {
+        offset: (0, 0),
+        cells,
+        boundless: false,
+    })
+}
+
+fn read_head<'a, I>(lines: &mut Peekable<I>) -> Result<(usize, usize), RsilleErr>
+where
+    I: Iterator<Item = &'a str>,
+{
+    while let Some(line) = lines.peek() {
+        if line.starts_with('#') {
+            lines.next();
+            continue;
+        }
+        if line.starts_with('x') {
+            let s: Vec<&str> = line.split(',').collect();
+            let width = (s[0].split('=').collect::<Vec<&str>>())[1]
+                .trim()
+                .parse()
+                .unwrap();
+            let height = (s[1].split('=').collect::<Vec<&str>>())[1]
+                .trim()
+                .parse()
+                .unwrap();
+            return Ok((width, height));
+        }
+    }
+    Err(RsilleErr::new("can't parse width or height".to_string()))
 }
