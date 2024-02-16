@@ -7,6 +7,8 @@ This library offers an API and functionality similar to the turtle module in Pyt
 <div align="center">
   <img src="https://github.com/nidhoggfgg/rsille/raw/main/imgs/objects3d.gif" width="200" alt="3d object">
   <img src="https://github.com/nidhoggfgg/rsille/raw/main/imgs/lifegame.gif" width="200" alt="life game">
+  <img src="https://github.com/nidhoggfgg/rsille/raw/main/imgs/lena.png" width="200" alt="lena">
+  <img src="https://github.com/nidhoggfgg/rsille/raw/main/imgs/turtle-multi.png" width="200" alt="turtle">
 </div>
 
 ## Features
@@ -57,10 +59,6 @@ fn main() {
 ## Examples
 
 You can find more example code and in the `examples` directory, showcasing various features and use cases of the rsille.
-
-and some example pictures:
-![lena](https://github.com/nidhoggfgg/rsille/raw/main/imgs/lena.png)
-![turtle-multi](https://github.com/nidhoggfgg/rsille/raw/main/imgs/turtle-multi.png)
 
 ## License
 
