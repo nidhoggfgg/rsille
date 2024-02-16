@@ -4,7 +4,10 @@ The rsille is a Rust library for drawing graphics in the terminal.
 It leverages Braille code to provide an 8x resolution equivalent to ASCII art, enabling you to create beautiful graphics right in your terminal.
 This library offers an API and functionality similar to the turtle module in Python, while also supporting rendering of 3D objects.
 
-![3d objects](https://github.com/nidhoggfgg/rsille/raw/main/imgs/objects3d.gif)
+<div align="center">
+  <img src="https://github.com/nidhoggfgg/rsille/raw/main/imgs/objects3d.gif" width="200" alt="3d object">
+  <img src="https://github.com/nidhoggfgg/rsille/raw/main/imgs/lifegame.gif" width="200" alt="life game">
+</div>
 
 ## Features
 
