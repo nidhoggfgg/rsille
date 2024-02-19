@@ -5,7 +5,7 @@ It leverages Braille code to provide an 8x resolution equivalent to ASCII art, e
 This library offers an API and functionality similar to the turtle module in Python, while also supporting rendering of 3D objects.
 
 <div align="center">
-  <img src="https://github.com/nidhoggfgg/rsille/raw/main/imgs/objects3d.gif" width="200" alt="anime">
+  <img src="https://github.com/nidhoggfgg/rsille/raw/main/imgs/anime.gif" width="200" alt="anime">
   <img src="https://github.com/nidhoggfgg/rsille/raw/main/imgs/objects.gif" width="200" alt="3d object">
   <img src="https://github.com/nidhoggfgg/rsille/raw/main/imgs/lifegame.gif" width="200" alt="life game">
 </div>
