@@ -24,11 +24,13 @@ fn criterion_benchmark(bencher: &mut Criterion) {
     c.clear();
     bencher.bench_function("100 * 100", |b| b.iter(|| render(100, &mut c)));
     c.clear();
-    bencher.bench_function("500 * 500", |b| b.iter(|| render(500, &mut c)));
+    bencher.bench_function("500 * 500 huge", |b| b.iter(|| render(500, &mut c)));
     c.clear();
-    bencher.bench_function("1000 * 1000", |b| b.iter(|| render(1000, &mut c)));
+    bencher.bench_function("1000 * 1000 crazy", |b| b.iter(|| render(1000, &mut c)));
     c.clear();
-    bencher.bench_function("3000 * 3000", |b| b.iter(|| render(3000, &mut c)));
+    bencher.bench_function("3000 * 3000 impossible", |b| {
+        b.iter(|| render(3000, &mut c))
+    });
     c.clear();
 }
 

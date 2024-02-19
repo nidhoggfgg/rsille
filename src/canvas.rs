@@ -10,11 +10,18 @@ use crate::{
 use crate::color::{Colored, TermColor};
 
 /// implement this for painting on [`Canvas`](struct.Canvas.html)
-pub trait Paint {
+pub trait Paint: Send + 'static {
     /// paint the object on the canvas
     /// usually, you shouldn't call this by yourself
     /// just implement this and use the [`paint`](struct.Canvas.html#method.paint) in [`Canvas`](struct.Canvas.html)
     fn paint(&self, canvas: &mut Canvas, x: f64, y: f64) -> Result<(), RsilleErr>;
+}
+
+// this is just for err: "Box<T> not impl Paint" xd
+impl<T: Paint + ?Sized> Paint for Box<T> {
+    fn paint(&self, canvas: &mut Canvas, x: f64, y: f64) -> Result<(), RsilleErr> {
+        canvas.paint(self, x, y)
+    }
 }
 
 /// The basic canvas

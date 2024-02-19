@@ -5,21 +5,13 @@
 //! ## Example
 //!
 //! ```no_run
-//! use rsille::{lifegame::LifeGame, term, Canvas};
-//!
-//! let mut canvas = Canvas::new();
-//! let mut lg = LifeGame::from_path("path/to/rle").unwrap();
-//! term::clear();
-//! loop {
-//!     canvas.clear();
-//!     canvas.paint(&lg, 0.0, 0.0).unwrap();
-//!     term::move_to(0, 0);
-//!     println!("{}", canvas.frame());
-//!     lg.next();
-//!     std::thread::sleep(std::time::Duration::from_millis(64));
-//! }
+//! use rsille::{lifegame::LifeGame, Animation};
+//! let lg = LifeGame::from_path("path/to/rle").unwrap();
+//! let mut anime = Animation::new();
+//! anime.push(lg, |lg: &mut LifeGame| lg.update(), (0.0, 0.0));
+//! anime.run();
 //!```
-use std::{collections::HashMap, fs, iter::Peekable, ops::RangeBounds, usize};
+use std::{collections::HashMap, fs, iter::Peekable, usize};
 
 use crate::{
     utils::{Offset, RsilleErr},
@@ -37,25 +29,17 @@ type LiveCells = HashMap<(isize, isize), ()>;
 /// ## Example
 ///
 /// ```no_run
-/// use rsille::{lifegame::LifeGame, term, Canvas};
-///
-/// let mut canvas = Canvas::new();
-/// let mut lg = LifeGame::from_path("path/to/rle").unwrap();
-/// term::clear();
-/// loop {
-///     canvas.clear();
-///     canvas.paint(&lg, 0.0, 0.0).unwrap();
-///     term::move_to(0, 0);
-///     println!("{}", canvas.frame());
-///     lg.next();
-///     std::thread::sleep(std::time::Duration::from_millis(64));
-/// }
-///```
+/// use rsille::{lifegame::LifeGame, Animation};
+/// let lg = LifeGame::from_path("path/to/rle").unwrap();
+/// let mut anime = Animation::new();
+/// anime.push(lg, |lg: &mut LifeGame| lg.update(), (0.0, 0.0));
+/// anime.run();
+/// ```
 #[derive(Debug, Clone)]
 pub struct LifeGame {
     offset: Offset,
     cells: LiveCells,
-    boundless: bool,
+    // boundless: bool,
 }
 
 impl LifeGame {
@@ -64,7 +48,7 @@ impl LifeGame {
         Self {
             offset: (0, 0),
             cells: Default::default(),
-            boundless: true,
+            // boundless: true,
         }
     }
 
@@ -89,7 +73,7 @@ impl LifeGame {
     ///
     /// it will clone whole cells, maybe i will impl an inplace algorithm later.
     /// and this algorithm is slow, maybe i would impl a better one
-    pub fn next(&mut self) {
+    pub fn update(&mut self) -> bool {
         let mut next = self.cells.clone();
         for cell in self.cells.keys() {
             let (x, y) = *cell;
@@ -117,6 +101,7 @@ impl LifeGame {
         if offset_y < 0 && self.offset.1 < offset_y.unsigned_abs() {
             self.offset.1 = offset_y.unsigned_abs();
         }
+        false
     }
 
     fn count_neighbors(&self, x: isize, y: isize) -> usize {
@@ -153,7 +138,8 @@ fn parse(rle: &str) -> Result<LifeGame, RsilleErr> {
     let mut lines = rle.lines().peekable();
     let mut cells = HashMap::new();
     // read the head
-    let (width, height) = read_head(&mut lines)?;
+    // let (width, height) = read_head(&mut lines)?;
+    let _ = read_head(&mut lines)?;
     // parse
     let (mut x, mut y) = (0_isize, 0_isize);
     let mut count = 0_isize;
@@ -203,7 +189,7 @@ fn parse(rle: &str) -> Result<LifeGame, RsilleErr> {
     Ok(LifeGame {
         offset: (0, 0),
         cells,
-        boundless: false,
+        // boundless: false,
     })
 }
 

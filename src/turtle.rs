@@ -1,9 +1,18 @@
-use crate::{canvas::Paint, utils::RsilleErr, Canvas};
+// TODO: remove the color feature
+// TODO: remove the extra things for animation in Turtle
+
+use std::f64::consts::PI;
+
+use crate::{
+    canvas::Paint,
+    utils::{RsilleErr, MIN_DIFFERENCE},
+    Canvas,
+};
 
 #[cfg(feature = "color")]
 use crate::color::TermColor;
 
-/// # The turtle impl of braille code in Rust
+/// The turtle impl of braille code in Rust
 ///
 /// all the api is similar to turtle in Python
 ///
@@ -16,24 +25,49 @@ use crate::color::TermColor;
 ///
 /// ## Example
 ///
-/// ```rust
+/// just paint it
+/// ```
 /// use rsille::{Turtle, Canvas};
-///
 /// let mut canvas = Canvas::new();
 /// let mut t = Turtle::new();
 /// let mut length = 1.0;
-/// for i in 0..150 {
+/// for _ in 0..150 {
 ///     t.forward(length);
 ///     t.right(10.0);
 ///     length += 0.05;
 /// }
-/// canvas.paint(&t, 30.0, 30.0).unwrap();
+/// canvas.paint(&t, 50.0, 50.0).unwrap();
 /// println!("{}", canvas.frame());
-///
 /// ```
+///
+/// or a animation
+/// ```
+/// use rsille::{Turtle, Animation};
+/// let mut anime = Animation::new();
+/// let mut t = Turtle::new();
+/// let mut length = 1.0;
+/// for _ in 0..150 {
+///     t.forward(length);
+///     t.right(10.0);
+///     length += 0.05;
+/// }
+/// t.anime();
+/// anime.push(t, move |t: &mut Turtle| t.update(), (50.0, 50.0));
+/// anime.run();
+/// ```
+///
+/// NOTE:
+///
+/// There isn't position or heading function,
+/// because the position and heading can't know until paint it!
+/// When you call forward or circle or any other method, it will only record the procedure.
+/// Then in the paint function, it will do those procedures and paint the canvas.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Turtle {
     procedures: Vec<Procedure>,
+    anime_proc: Option<Vec<Procedure>>,
+    anime_step: f64,
+    frame_count: usize,
 }
 
 impl Turtle {
@@ -41,6 +75,9 @@ impl Turtle {
     pub fn new() -> Self {
         Self {
             procedures: Vec::new(),
+            anime_proc: None,
+            anime_step: 10.0,
+            frame_count: 0,
         }
     }
 
@@ -49,7 +86,7 @@ impl Turtle {
         self.add_procedure(Procedure::PenUp);
     }
 
-    /// equal to [`penup`](struct.Turtle.html#method.penup)
+    /// alias: [`penup`](struct.Turtle.html#method.penup)
     pub fn up(&mut self) {
         self.penup();
     }
@@ -59,7 +96,7 @@ impl Turtle {
         self.add_procedure(Procedure::PenDown);
     }
 
-    /// equal to [`pendown`](struct.Turtle.html#method.pendown)
+    /// alias: [`pendown`](struct.Turtle.html#method.pendown)
     pub fn down(&mut self) {
         self.pendown();
     }
@@ -70,23 +107,24 @@ impl Turtle {
         self.add_procedure(Procedure::Forward(step));
     }
 
-    /// equal to [`forward`](struct.Turtle.html#method.forward)
+    /// alias: [`forward`](struct.Turtle.html#method.forward)
     pub fn fd(&mut self, step: f64) {
         self.forward(step);
     }
 
-    /// Move the turtle backward by distance, opposite to the direction the turtle is headed. Do not change the turtle’s heading.
+    /// Move the turtle backward by distance, opposite to the direction the turtle is headed.
+    /// It won't change the turtle’s heading.
     /// * `step` - the distance
     pub fn backward(&mut self, step: f64) {
         self.forward(-step);
     }
 
-    /// equal to [`backward`](struct.Turtle.html#method.backward)
+    /// alias: [`backward`](struct.Turtle.html#method.backward)
     pub fn back(&mut self, step: f64) {
         self.backward(step);
     }
 
-    /// equal to [`backward`](struct.Turtle.html#method.backward)
+    /// alias: [`backward`](struct.Turtle.html#method.backward)
     pub fn bk(&mut self, step: f64) {
         self.backward(step);
     }
@@ -97,7 +135,7 @@ impl Turtle {
         self.add_procedure(Procedure::Right(angle));
     }
 
-    /// equal to [`right`](struct.Turtle.html#method.right)
+    /// alias: [`right`](struct.Turtle.html#method.right)
     pub fn rt(&mut self, angle: f64) {
         self.right(angle);
     }
@@ -108,7 +146,7 @@ impl Turtle {
         self.right(-angle);
     }
 
-    /// equal to [`left`](struct.Turtle.html#method.left)
+    /// alias: [`left`](struct.Turtle.html#method.left)
     pub fn lt(&mut self, angle: f64) {
         self.left(angle);
     }
@@ -117,8 +155,18 @@ impl Turtle {
     /// The center is radius units left of the turtle;
     /// * `extent` – an angle – determines which part of the circle is drawn. If extent is not a full circle, one endpoint of the arc is the current pen position.
     /// * `radius` - Draw the arc in counterclockwise direction if radius is positive, otherwise in clockwise direction. Finally the direction of the turtle is changed by the amount of extent.
+    pub fn circle(&mut self, radius: f64, extent: f64) {
+        self.add_procedure(Procedure::Circle(radius, extent, 100));
+    }
+
+    /// Draw a circle with given radius.
+    /// The center is radius units left of the turtle;
+    /// * `extent` – an angle – determines which part of the circle is drawn. If extent is not a full circle, one endpoint of the arc is the current pen position.
+    /// * `radius` - Draw the arc in counterclockwise direction if radius is positive, otherwise in clockwise direction. Finally the direction of the turtle is changed by the amount of extent.
     /// * `steps` - Suggest 100. As the circle is approximated by an inscribed regular polygon, steps determines the number of steps to use.
-    pub fn circle(&mut self, radius: f64, extent: f64, steps: usize) {
+    ///
+    /// suggest use [`circle`](struct.Turtle.html#method.circle)
+    pub fn circle_with_steps(&mut self, radius: f64, extent: f64, steps: usize) {
         self.add_procedure(Procedure::Circle(radius, extent, steps));
     }
 
@@ -147,23 +195,101 @@ impl Turtle {
         self.add_procedure(Procedure::Color(color));
     }
 
-    /// equal to [`colorful`](struct.Turtle.html#method.colorful)
+    /// alias: [`colorful`](struct.Turtle.html#method.colorful)
     #[cfg(feature = "color")]
     pub fn color(&mut self, color: TermColor) {
         self.colorful(color);
     }
 
-    // pub fn position(&self) -> (f64, f64) {
-    //     (self.x, self.y)
-    // }
+    /// Build the Turtle for animation
+    ///
+    /// If you don't need the animation, then don't call this method
+    pub fn anime(&mut self) {
+        use Procedure::*;
+        let mut anime_proc = Vec::new();
+        let astep = self.anime_step;
+        for p in &self.procedures {
+            match p {
+                PenDown | PenUp | Right(_) | Teleport(_, _) | Home => {
+                    anime_proc.push(*p);
+                }
+                Forward(step) => {
+                    let mut step = *step;
+                    while step > astep {
+                        anime_proc.push(Forward(astep));
+                        step -= astep;
+                    }
+                    // forbide the lost of f64
+                    if (step - astep).abs() < MIN_DIFFERENCE {
+                        anime_proc.push(Forward(astep));
+                    } else {
+                        anime_proc.push(Forward(step));
+                    }
+                }
+                Goto(_, _) => {
+                    // FIXME: make the goto anime
+                    anime_proc.push(*p);
+                }
+                Circle(radius, extent, steps) => {
+                    let mut extent = *extent;
+                    if PI * radius * extent <= 180.0 * astep {
+                        anime_proc.push(*p);
+                    } else {
+                        let e = 180.0 * astep / (PI * radius);
+                        while extent > e {
+                            anime_proc.push(Circle(*radius, e, *steps));
+                            extent -= e;
+                        }
+                        if (extent - e).abs() > MIN_DIFFERENCE {
+                            anime_proc.push(Circle(*radius, extent, *steps));
+                        }
+                    }
+                }
+                _ => anime_proc.push(*p),
+            }
+        }
+        self.anime_proc = Some(anime_proc);
+    }
 
-    // pub fn pos(&self) -> (f64, f64) {
-    //     self.position()
-    // }
+    /// Generate the next frame of the animation
+    ///
+    /// return true if the animation is over
+    ///
+    /// If you don't need the animation, don't need to call this method.
+    /// And you should call [`anime`](struct.Turtle.html#method.anime) first
+    pub fn update(&mut self) -> bool {
+        use Procedure::*;
+        if let Some(procs) = &self.anime_proc {
+            if self.frame_count >= procs.len() {
+                return true;
+            }
+            while let Some(p) = procs.get(self.frame_count) {
+                match p {
+                    Forward(_) | Goto(_, _) | Circle(_, _, _) => {
+                        self.frame_count += 1;
+                        break;
+                    }
+                    _ => {
+                        self.frame_count += 1;
+                    }
+                }
+            }
+        }
+        false
+    }
 
-    // pub fn heading(&self) -> f64 {
-    //     self.heading
-    // }
+    /// Set the step of the animation
+    ///
+    /// The default of Turtle is 10.0, if you want to change it, you can call this method
+    ///
+    /// For example:
+    /// * *forward(100.0) -> forward(10.0) * 10*
+    /// * but *forward(5.0) -> forward(5.0)*
+    ///
+    /// Beacuse like *forward(5.0), right(10.0), forward(5.0)* can't fold to *forward(10.0), right(10.0)*
+    pub fn set_anime_step(&mut self, step: f64) {
+        self.anime_step = step;
+    }
 
     fn add_procedure(&mut self, p: Procedure) {
         self.procedures.push(p);
@@ -221,8 +347,13 @@ impl Paint for Turtle {
         use Procedure::*;
         let (home_x, home_y) = (x, y);
         let (mut pen, mut heading, mut x, mut y) = (true, 0.0, x, y);
+        let procs = if let Some(procs) = &self.anime_proc {
+            &procs[0..self.frame_count]
+        } else {
+            &self.procedures
+        };
 
-        for p in &self.procedures {
+        for p in procs {
             match p {
                 PenDown => {
                     pen = true;
@@ -277,8 +408,13 @@ impl Paint for Turtle {
         let (home_x, home_y) = (x, y);
         let (mut pen, mut heading, mut x, mut y) = (true, 0.0, x, y);
         let mut color = TermColor::None;
+        let procs = if let Some(procs) = &self.anime_proc {
+            &procs[0..self.frame_count]
+        } else {
+            &self.procedures
+        };
 
-        for p in &self.procedures {
+        for p in procs {
             match p {
                 PenDown => {
                     pen = true;

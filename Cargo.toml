@@ -1,10 +1,10 @@
 [package]
 name = "rsille"
-version = "1.1.0"
+version = "1.2.0"
 edition = "2021"
 authors = ["nidhoggfgg <nidhoggfgg@gmail.com>"]
 description = "A full feature braille code art lib"
-keywords = ["braille", "terminal", "tui", "turtle"]
+keywords = ["braille", "terminal", "tui", "turtle", "animation", "art"]
 readme = "README.md"
 license = "MIT"
 repository = "https://github.com/nidhoggfgg/rsille.git"
@@ -29,6 +29,10 @@ ansi = []
 [[bench]]
 name = "set"
 harness = false
+
+[[example]]
+name = "anime-mix"
+path = "examples/anime/mix.rs"
 
 [[example]]
 name = "obj-mix"

@@ -1,4 +1,4 @@
-use crate::{lifegame::LifeGame, object3d::Object3D, Canvas, Turtle};
+use crate::{lifegame::LifeGame, object3d::Object3D, Animation, Canvas, Turtle};
 
 // i don't think my Canvas, Objects3D... need a Default trait
 // but for making clippy shut up, so add those never used code
@@ -21,6 +21,12 @@ impl Default for Turtle {
 }
 
 impl Default for LifeGame {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Default for Animation {
     fn default() -> Self {
         Self::new()
     }

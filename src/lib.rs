@@ -44,15 +44,16 @@
 //! [turtle]: https://docs.python.org/3/library/turtle.html
 //! [drawille]: https://github.com/asciimoo/drawille
 
+mod anime;
 mod braille;
 mod canvas;
 mod defaults;
-#[allow(unused)]
 pub mod lifegame;
 pub mod object3d;
 mod turtle;
 mod utils;
 
+pub use anime::Animation;
 pub use canvas::Canvas;
 pub use canvas::Paint;
 pub use turtle::Turtle;

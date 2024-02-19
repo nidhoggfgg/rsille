@@ -25,7 +25,7 @@ fn spiral() -> (Turtle, (f64, f64)) {
 fn circle() -> (Turtle, (f64, f64)) {
     let mut t = Turtle::new();
     t.color(TermColor::C256(123));
-    t.circle(30.0, 360.0, 100);
+    t.circle(30.0, 360.0);
     (t, (130.0, 80.0))
 }
 
