@@ -1,60 +1,50 @@
-//! some useful function to print styles in terminal
+//! Some useful function to print styles in terminal
+//！
+//! ## NOTE:
+//!
+//! Many functions put some escape sequences to the stdout,
+//! so use them only when you know what you are doing
 
-#[cfg(feature = "termsize")]
-use crate::utils::RsilleErr;
+use crossterm::{cursor, execute, terminal};
+
+use crate::utils::{to_rsille_err, RsilleErr};
 
 /// get the (width, height) of terminal
-#[cfg(feature = "termsize")]
-pub fn get_terminal_size() -> Result<(usize, usize), RsilleErr> {
-    use std::mem;
-    unsafe {
-        let mut winsize: libc::winsize = mem::zeroed();
-        if libc::ioctl(libc::STDOUT_FILENO, libc::TIOCGWINSZ, &mut winsize) == 0 {
-            Ok((winsize.ws_col as usize, winsize.ws_row as usize))
-        } else {
-            Err(RsilleErr::new("can't get terminal size".to_string()))
-        }
-    }
+pub fn get_terminal_size() -> Result<(u16, u16), RsilleErr> {
+    terminal::size().map_err(|e| RsilleErr::new(format!("can't get terminal size: {}", e)))
+}
+
+/// check the terminal is in raw mode or not
+pub fn is_raw_mode() -> Result<bool, RsilleErr> {
+    terminal::is_raw_mode_enabled().map_err(to_rsille_err)
 }
 
 /// clear the screen
 pub fn clear() {
-    print!("\x1B[2J\x1B[H");
+    execute!(std::io::stdout(), terminal::Clear(terminal::ClearType::All)).unwrap();
 }
 
 /// hide the cursor
-///
-/// not defined by the specification, may not work in multiplexers like tmux
 pub fn hide_cursor() {
-    print!("\x1B[?25l");
+    execute!(std::io::stdout(), cursor::Hide).unwrap();
 }
 
 /// show the cursor
-///
-/// not defined by the specification, may not work in multiplexers like tmux
 pub fn show_cursor() {
-    print!("\x1B[?25h");
+    execute!(std::io::stdout(), cursor::Show).unwrap();
 }
 
 /// move cursor to (x, y)
 pub fn move_to(x: u32, y: u32) {
-    if x == 0 && y == 0 {
-        print!("\x1B[H");
-    } else {
-        print!("\x1B[{y};{x}H");
-    }
+    execute!(std::io::stdout(), cursor::MoveTo(x as u16, y as u16)).unwrap();
 }
 
 /// when output is longer than the terminal width, put the rest output in next line (default)
-///
-/// not defined by the specification, may not work in multiplexers like tmux
 pub fn enable_wrap() {
-    print!("\x1B[?7h");
+    execute!(std::io::stdout(), terminal::EnableLineWrap).unwrap();
 }
 
 /// when output is longer than the terminal width, don't put the rest output in next line
-///
-/// not defined by the specification, may not work in multiplexers like tmux
 pub fn disable_wrap() {
-    print!("\x1B[?7l");
+    execute!(std::io::stdout(), terminal::DisableLineWrap).unwrap();
 }

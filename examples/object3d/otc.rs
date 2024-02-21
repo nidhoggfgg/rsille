@@ -1,4 +1,4 @@
-use rsille::{object3d::Object3D, term, Canvas, Paint};
+use rsille::{extra::Object3D, Animation};
 
 fn gen_octahedron(side_len: f64) -> Object3D {
     #[rustfmt::skip]
@@ -56,27 +56,19 @@ fn gen(k: i32) -> ((f64, f64, f64), f64) {
 
 fn main() {
     let side_len = 40.0;
-    let mut canvas = Canvas::new();
-    let mut object = gen_octahedron(side_len);
+    let mut anime = Animation::new();
+    let object = gen_octahedron(side_len);
     let mut k = 0;
-    term::clear();
-    term::disable_wrap();
-    term::hide_cursor();
-    loop {
-        let (angle, zoom) = gen(k);
-        object.rotate(angle);
-        object.zoom(zoom);
-        canvas.clear();
-        object
-            .paint(&mut canvas, 1.6 * side_len, 1.6 * side_len)
-            .unwrap();
-        term::move_to(0, 0);
-        // let s = canvas.frame();
-        // println!("{}", s);
-        for line in canvas.get_lines() {
-            println!("{}", line);
-        }
-        std::thread::sleep(std::time::Duration::from_millis(64));
-        k += 1;
-    }
+    anime.push(
+        object,
+        move |obj| {
+            let (angle, zoom) = gen(k);
+            obj.rotate(angle);
+            obj.zoom(zoom);
+            k += 1;
+            false
+        },
+        (1.6 * side_len, 1.6 * side_len),
+    );
+    anime.run();
 }

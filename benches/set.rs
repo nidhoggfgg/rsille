@@ -8,7 +8,7 @@ fn render(size: i32, c: &mut Canvas) {
     for i in 0..size {
         c.set(size_f, i as f64);
     }
-    c.frame();
+    c.render();
     // }
 }
 

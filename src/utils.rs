@@ -1,4 +1,5 @@
 use core::fmt;
+use std::error::Error;
 
 pub const MIN_ZOOM: f64 = 0.001;
 pub const MIN_DIFFERENCE: f64 = 1E-10;
@@ -36,6 +37,10 @@ pub type Offset = (usize, usize);
 #[derive(Debug, Clone)]
 pub struct RsilleErr {
     msg: String,
+}
+
+pub fn to_rsille_err<E: Error>(e: E) -> RsilleErr {
+    RsilleErr::new(e.to_string())
 }
 
 impl RsilleErr {

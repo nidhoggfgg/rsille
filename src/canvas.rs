@@ -1,19 +1,19 @@
 use std::cmp;
-use std::fmt::Write;
+use std::io::Write;
+
+use crossterm::{cursor::MoveToNextLine, queue, style::Print};
 
 use crate::{
-    braille::{Pixel, PixelOp},
-    utils::{normalize, RsilleErr},
+    braille::PixelOp,
+    term::is_raw_mode,
+    utils::{normalize, to_rsille_err, RsilleErr},
 };
 
-#[cfg(feature = "color")]
-use crate::color::{Colored, TermColor};
+use crate::color::{Color, Colored};
 
 /// implement this for painting on [`Canvas`](struct.Canvas.html)
 pub trait Paint: Send + 'static {
     /// paint the object on the canvas
-    /// usually, you shouldn't call this by yourself
-    /// just implement this and use the [`paint`](struct.Canvas.html#method.paint) in [`Canvas`](struct.Canvas.html)
     fn paint(&self, canvas: &mut Canvas, x: f64, y: f64) -> Result<(), RsilleErr>;
 }
 
@@ -37,10 +37,13 @@ impl<T: Paint + ?Sized> Paint for Box<T> {
 ///     c.set(x / 10.0, 15.0 + x.to_radians().sin() * 15.0);
 ///     c.set(x / 10.0, 15.0 + x.to_radians().cos() * 10.0);
 /// }
-/// println!("{}", c.frame());
+/// println!("{}", c.render());
 /// ```
 ///
 /// ## NOTE
+///
+/// take a look at the [`extra`](extra/index.html) module, it has some useful things can paint on the canvas
+///
 /// don't worry about the `x` and `y` in the canvas, it's not the location in the terminal.
 /// use the `x` and `y` of your own algorithms, but don't let it less than `0`
 
@@ -48,11 +51,6 @@ impl<T: Paint + ?Sized> Paint for Box<T> {
 pub struct Canvas {
     width: usize,
     height: usize,
-
-    #[cfg(not(feature = "color"))]
-    pixels: Vec<Vec<Pixel>>,
-
-    #[cfg(feature = "color")]
     pixels: Vec<Vec<Colored>>,
 }
 
@@ -100,22 +98,63 @@ impl Canvas {
         Ok(())
     }
 
+    /// print the canvas to the terminal
+    ///
+    /// if you want to print the canvas to a buffer, use the [`print_on`](struct.Canvas.html#method.print_on)
+    pub fn print(&self) -> Result<(), RsilleErr> {
+        let is_raw = is_raw_mode()?;
+        let mut stdout = std::io::stdout();
+        self.print_on(&mut stdout, is_raw)?;
+        Ok(())
+    }
+
+    /// print the canvas to the buffer
+    ///
+    /// if you want to print the canvas to the terminal, use the [`print`](struct.Canvas.html#method.print)
+    pub fn print_on<W>(&self, w: &mut W, is_raw: bool) -> Result<(), RsilleErr>
+    where
+        W: Write,
+    {
+        self.print_impl(w, is_raw).map_err(to_rsille_err)
+    }
+
+    fn print_impl<W>(&self, w: &mut W, is_raw: bool) -> std::io::Result<()>
+    where
+        W: Write,
+    {
+        for row in &self.pixels {
+            for p in row {
+                p.queue(w)?;
+            }
+            if is_raw {
+                // queue!(w, Print("\r\n"))?;
+                queue!(w, MoveToNextLine(1))?;
+            } else {
+                queue!(w, Print("\n"))?;
+            }
+        }
+        w.flush()?;
+        Ok(())
+    }
+
     /// return the string prepare to print
-    pub fn frame(&mut self) -> String {
+    pub fn render(&self) -> String {
         self.get_lines().join("\n")
     }
 
     /// return the lines of the canvas
-    pub fn get_lines(&mut self) -> Vec<String> {
-        self.pixels
-            .iter()
-            .map(|row| {
-                row.iter().fold(String::new(), |mut out, p| {
-                    let _ = write!(out, "{}", *p);
-                    out
-                })
-            })
-            .collect()
+    pub fn get_lines(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        for row in &self.pixels {
+            let mut buffer = Vec::new();
+            for p in row {
+                p.queue(&mut buffer)
+                    .expect("Internal error: please report this issue!");
+            }
+            buffer.flush().unwrap();
+            out.push(String::from_utf8(buffer).unwrap());
+        }
+        out
     }
 
     /// clear the canvas
@@ -124,9 +163,6 @@ impl Canvas {
         let height = self.height;
         let vec = make_vec(width);
         self.pixels = vec![vec; height];
-
-        // #[cfg(feature = "color")]
-        // print!("{}", TermColor::Unset);
     }
 
     /// draw a dot on (x, y)
@@ -140,12 +176,11 @@ impl Canvas {
 
     /// similar to [`set`](struct.Canvas.html#method.set)
     /// but it's support color
-    #[cfg(feature = "color")]
-    pub fn set_colorful(&mut self, x: f64, y: f64, color: TermColor) {
+    pub fn set_colorful(&mut self, x: f64, y: f64, color: Color) {
         let (row, col) = get_pos(x, y);
         self.pad_row_col(row, col);
         self.pixels[row][col].set(x, y);
-        self.pixels[row][col].set_color(color);
+        self.pixels[row][col].set_foregound_color(color);
     }
 
     /// if the (x, y) is already set, then unset it
@@ -159,7 +194,7 @@ impl Canvas {
 
     /// fill ⣿ at the (x, y)
     ///
-    /// the (x, y) is the real location on canvas, it's hard to use it rightly
+    /// the (x, y) is the location on canvas, it's hard to use it rightly
     ///
     /// so don't use it unless you know what you are doing!
     pub fn set_fill(&mut self, x: f64, y: f64) {
@@ -171,12 +206,11 @@ impl Canvas {
     /// similar to [`set_fill`](struct.Canvas.html#method.set_fill), but support color
     ///
     /// don't use it unless you know what you are doing!
-    #[cfg(feature = "color")]
-    pub fn set_fill_colorful(&mut self, x: f64, y: f64, color: TermColor) {
+    pub fn set_fill_colorful(&mut self, x: f64, y: f64, color: Color) {
         let (row, col) = (y.round() as usize, x.round() as usize);
         self.pad_row_col(row, col);
         self.pixels[row][col].fill();
-        self.pixels[row][col].set_color(color);
+        self.pixels[row][col].set_foregound_color(color);
     }
 
     /// draw a line on the canvas
@@ -209,9 +243,8 @@ impl Canvas {
 
     /// draw a line on the canvas with the color
     /// * `xy1` - the start location
-    /// * `xy2` = the end location
-    #[cfg(feature = "color")]
-    pub fn line_colorful(&mut self, xy1: (f64, f64), xy2: (f64, f64), color: TermColor) {
+    /// * `xy2` - the end location
+    pub fn line_colorful(&mut self, xy1: (f64, f64), xy2: (f64, f64), color: Color) {
         let (x1, y1) = (normalize(xy1.0), normalize(xy1.1));
         let (x2, y2) = (normalize(xy2.0), normalize(xy2.1));
         let d = |v1, v2| {
@@ -264,12 +297,6 @@ fn get_pos(x: f64, y: f64) -> (usize, usize) {
     (y.round() as usize / 4, x.round() as usize / 2)
 }
 
-#[cfg(not(feature = "color"))]
-fn make_vec(len: usize) -> Vec<Pixel> {
-    vec![Pixel::new(); len]
-}
-
-#[cfg(feature = "color")]
 fn make_vec(len: usize) -> Vec<Colored> {
-    vec![Colored::new(Pixel::new(), TermColor::None); len]
+    vec![Colored::new(); len]
 }

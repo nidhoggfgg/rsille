@@ -1,6 +1,6 @@
 use std::env;
 
-use rsille::{lifegame::LifeGame, Animation};
+use rsille::{extra::LifeGame, Animation};
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -15,6 +15,6 @@ fn main() {
         return;
     };
     let mut anime = Animation::new();
-    anime.push(lg, |lg: &mut LifeGame| lg.update(), (0.0, 0.0));
+    anime.push(lg, |lg| lg.update(), (0.0, 0.0));
     anime.run();
 }

@@ -2,8 +2,8 @@
 //! This crate is a rust lib for making [braille] art.
 //!
 //! You can use the basic canvas to paint something,
-//! or you can use [turtle] to paint things like in python.
-//! And something like colorful output, 3D object and more!
+//! or you can use Turtle to paint things like in python.
+//! And there are more useful things like colorful output, 3D object, life game and so on!
 //!
 //! ## Examples
 //!
@@ -15,57 +15,55 @@
 //!     let x = x as f64;
 //!     c.set(x / 10.0, 15.0 + x.to_radians().sin() * 10.0);
 //! }
-//! println!("{}", c.frame());
+//! println!("{}", c.render());
 //! ```
 //!
 //! draw a star
 //! ```
-//! use rsille::{Turtle, Canvas};
+//! use rsille::{extra::Turtle, Canvas};
 //! let mut c = Canvas::new();
 //! let mut t = Turtle::new();
 //! for _ in 0..5 {
-//!     t.forward(100.0);
+//!     t.forward(30.0);
 //!     t.right(144.0);
 //! }
-//! c.paint(&t, 0.0, 30.0).unwrap();
-//! println!("{}", c.frame());
+//! c.paint(&t, 0.0, 15.0).unwrap();
+//! println!("{}", c.render());
 //! ```
 //!
+//! life game
+//! ```no_run
+//! use rsille::{extra::LifeGame, Animation};
+//! let lg =  LifeGame::from_path("path/to/rle").unwrap();
+//! let mut anime = Animation::new();
+//! anime.push(lg, |lg| lg.update(), (0.0, 0.0));
+//! anime.run();
+//! ```
+//!
+//! Want more examples? check the [examples](https://github.com/nidhoggfgg/rsille/tree/main/examples)
+//!
 //! ## Extra
-//! useful things can paint on canvas:
-//! 1. [`Object3d`](object3d/index.html) the 3d object
-//! 2. [`Turtle`](struct.Turtle.html) similar to the turtle in python
-//! 3. [`Imagille`](struct.Imgille.html) paint image to braille code
-//! 4. [`Lifegame`](lifegame/index.html) the life game in braille code
+//!
+//! Useful things can paint on canvas:
+//! 1. [`Object3d`](extra/struct.Object3D.html) the 3d object
+//! 2. [`Turtle`](extra/struct.Turtle.html) similar to the turtle in python
+//! 3. [`Imagille`](extra/struct.Imgille.html) paint image to braille code
+//! 4. [`Lifegame`](extra/struct.LifeGame.html) the life game in braille code
 //!
 //! It's inspired by [drawille], but it has more features and fast
 //!
 //! [braille]: http://www.alanwood.net/unicode/braille_patterns.html
-//! [turtle]: https://docs.python.org/3/library/turtle.html
 //! [drawille]: https://github.com/asciimoo/drawille
 
 mod anime;
 mod braille;
 mod canvas;
+pub mod color;
 mod defaults;
-pub mod lifegame;
-pub mod object3d;
-mod turtle;
+pub mod extra;
+pub mod term;
 mod utils;
 
 pub use anime::Animation;
 pub use canvas::Canvas;
 pub use canvas::Paint;
-pub use turtle::Turtle;
-
-#[cfg(feature = "color")]
-pub mod color;
-
-#[cfg(feature = "img")]
-mod image;
-
-#[cfg(feature = "ansi")]
-pub mod term;
-
-#[cfg(feature = "img")]
-pub use image::Imgille;

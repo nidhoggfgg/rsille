@@ -8,8 +8,6 @@ This library offers an API and functionality similar to the turtle module in Pyt
   <img src="https://github.com/nidhoggfgg/rsille/raw/main/imgs/anime.gif" width="320" alt="anime">
   <img src="https://github.com/nidhoggfgg/rsille/raw/main/imgs/objects.gif" width="320" alt="3d object">
   <img src="https://github.com/nidhoggfgg/rsille/raw/main/imgs/lifegame.gif" width="320" alt="life game">
-</div>
-<div align="center">
   <img src="https://github.com/nidhoggfgg/rsille/raw/main/imgs/lena.png" width="320" alt="lena">
   <img src="https://github.com/nidhoggfgg/rsille/raw/main/imgs/turtle-multi.png" width="320" alt="turtle">
 </div>
@@ -39,7 +37,7 @@ To use the rsille in your Rust project, simply add the following dependency to y
 
 ```toml
 [dependencies]
-rsille = "1.1.0"
+rsille = "2.0.0"
 ```
 
 ## Usage
@@ -58,6 +56,8 @@ fn main() {
     println!("{}", canvas.frame());
 }
 ```
+
+For more information, you can check [doc](https://docs.rs/rsille/latest/rsille/)
 
 ## Examples
 

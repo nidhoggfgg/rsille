@@ -1,6 +1,6 @@
 [package]
 name = "rsille"
-version = "1.2.0"
+version = "2.0.0"
 edition = "2021"
 authors = ["nidhoggfgg <nidhoggfgg@gmail.com>"]
 description = "A full feature braille code art lib"
@@ -12,19 +12,15 @@ repository = "https://github.com/nidhoggfgg/rsille.git"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+crossterm = "0.27.0"
 image = { version = "0.24.8", optional = true }
-[target.'cfg(not(target_os = "windows"))'.dependencies]
-libc = { version = "0.2.152", optional = true }
 
 [dev-dependencies]
 criterion = "0.4"
 
 [features]
 default = ["img"]
-img = ["termsize", "image", "color"]
-color = ["ansi"]
-termsize = ["libc"]
-ansi = []
+img = ["image"]
 
 [[bench]]
 name = "set"

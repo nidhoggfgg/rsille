@@ -1,47 +1,36 @@
-//! Object in 3D
-//!
-//! ## Example
-//!
-//! draw a line
-//! ```
-//! use rsille::{object3d::Object3D, Canvas};
-//! let mut canvas = Canvas::new();
-//! let mut object = Object3D::new();
-//! let points = [(-10.0, -10.0, -10.0), (10.0, 10.0, 10.0)];
-//! let sides = [(0, 1)]; // connect these 2 point
-//! object.add_points(&points);
-//! object.add_sides(&sides).unwrap();
-//! canvas.paint(&object, 0.0, 0.0).unwrap();
-//! println!("{}", canvas.frame());
-//! ```
-
 use crate::{
     canvas::Paint,
     utils::{check_zoom, mean, RsilleErr, MIN_DIFFERENCE},
     Canvas,
 };
 
-#[cfg(feature = "color")]
-use crate::color::TermColor;
-#[cfg(feature = "color")]
+use crate::color::Color;
 use std::collections::HashMap;
 
-/// # A paintable Object in 3D
+/// A paintable Object in 3D
 ///
-/// make object easy and easy to do something like rotate, zoom and more
+/// Make object easy and easy to do something like rotate, zoom and more
 /// also, it support colorful output
 ///
+/// ## Example
+///
+/// make a cube and rotate it endlessly
+/// ```no_run
+/// use rsille::{extra::Object3D, Animation};
+/// let cube = Object3D::cube(30.0);
+/// let mut anime = rsille::Animation::new();
+/// anime.push(cube, |cube| {
+///     cube.rotate((1.0, 2.0, 3.0));
+///     false
+/// }, (30.0, 30.0));
+/// anime.run();
+/// ```
 #[derive(Debug, Clone)]
 pub struct Object3D {
     origin_vertices: Vec<Point3D>,
     zoomed_vertices: Option<Vec<Point3D>>,
     center: Point3D,
-
-    #[cfg(not(feature = "color"))]
-    sides: Vec<(usize, usize)>,
-
-    #[cfg(feature = "color")]
-    sides: HashMap<(usize, usize), TermColor>,
+    sides: HashMap<(usize, usize), Color>,
 }
 
 impl Object3D {
@@ -51,11 +40,6 @@ impl Object3D {
             origin_vertices: Vec::new(),
             zoomed_vertices: None,
             center: Point3D::new(0.0, 0.0, 0.0),
-
-            #[cfg(not(feature = "color"))]
-            sides: Vec::new(),
-
-            #[cfg(feature = "color")]
             sides: HashMap::new(),
         }
     }
@@ -75,10 +59,6 @@ impl Object3D {
 
     /// return the sides
     pub fn sides(&self) -> Vec<(usize, usize)> {
-        #[cfg(not(feature = "color"))]
-        return self.sides.clone();
-
-        #[cfg(feature = "color")]
         return self.sides.keys().cloned().collect();
     }
 
@@ -90,20 +70,15 @@ impl Object3D {
                 return Err(RsilleErr::new("wrong add sides!".to_string()));
             }
 
-            #[cfg(not(feature = "color"))]
-            self.sides.push(*side);
-
-            #[cfg(feature = "color")]
-            self.sides.insert(*side, TermColor::None);
+            self.sides.insert(*side, Color::Reset);
         }
         Ok(())
     }
 
     /// add sides and color of those sides
-    #[cfg(feature = "color")]
     pub fn add_sides_colorful(
         &mut self,
-        sides: &[((usize, usize), TermColor)],
+        sides: &[((usize, usize), Color)],
     ) -> Result<(), RsilleErr> {
         let vn = self.origin_vertices.len();
         for (side, color) in sides {
@@ -116,8 +91,7 @@ impl Object3D {
     }
 
     /// set the color of the side
-    #[cfg(feature = "color")]
-    pub fn set_side_colorful(&mut self, side: (usize, usize), color: TermColor) {
+    pub fn set_side_colorful(&mut self, side: (usize, usize), color: Color) {
         if self.sides.contains_key(&side) {
             self.sides.insert(side, color);
         }
@@ -132,9 +106,10 @@ impl Object3D {
         }
     }
 
-    /// rotate the whole object, similar to [`rotate`]
-    /// normaly, the rotate won't grow the error of f64.
-    /// if the error is growing, use this function for return a new Object3D is useful
+    /// rotate the whole object, similar to [`rotate`] but will return a new Object3D
+    /// Normaly, the rotate won't grow the error of f64.
+    /// If the error is growing, use this function for return a new Object3D is useful.
+    /// But unfantunatly, it will clone the Object3D.
     ///
     /// [`rotate`]: struct.Object3D.html#method.rotate
     pub fn rotate_new(&self, angle: (f64, f64, f64)) -> Self {
@@ -206,15 +181,6 @@ impl Paint for Object3D {
             &self.origin_vertices
         };
 
-        #[cfg(not(feature = "color"))]
-        for side in &self.sides {
-            let (v1, v2) = (points[side.0], points[side.1]);
-            let xy1 = (x + v1.x, y + v1.z);
-            let xy2 = (x + v2.x, y + v2.z);
-            canvas.line(xy1, xy2);
-        }
-
-        #[cfg(feature = "color")]
         for (side, color) in &self.sides {
             let (v1, v2) = (points[side.0], points[side.1]);
             let xy1 = (x + v1.x, y + v1.z);
@@ -223,6 +189,50 @@ impl Paint for Object3D {
         }
 
         Ok(())
+    }
+}
+
+impl Object3D {
+    /// make a cube
+    pub fn cube(side_len: f64) -> Object3D {
+        let mut object = Object3D::new();
+        #[rustfmt::skip]
+        // the vertices of cube
+        let a = [
+            (-1, -1, -1),
+            (-1, -1,  1),
+            (-1,  1, -1),
+            ( 1, -1, -1),
+            (-1,  1,  1),
+            ( 1, -1,  1),
+            ( 1,  1, -1),
+            ( 1,  1,  1),
+        ];
+        let mut points = Vec::new();
+        for i in a {
+            let x = side_len / 2.0 * i.0 as f64;
+            let y = side_len / 2.0 * i.1 as f64;
+            let z = side_len / 2.0 * i.2 as f64;
+            points.push((x, y, z));
+        }
+        object.add_points(&points);
+        object
+            .add_sides(&[
+                (0, 1),
+                (1, 4),
+                (4, 2),
+                (2, 0),
+                (3, 5),
+                (5, 7),
+                (7, 6),
+                (6, 3),
+                (1, 5),
+                (4, 7),
+                (2, 6),
+                (0, 3),
+            ])
+            .unwrap();
+        object
     }
 }
 

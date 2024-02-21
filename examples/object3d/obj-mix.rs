@@ -1,4 +1,6 @@
-use rsille::{color::TermColor, object3d::Object3D, term, Canvas};
+use std::sync::{Arc, Mutex};
+
+use rsille::{color::Color, extra::Object3D, Animation};
 
 fn gen_cube(side_len: f64) -> (Object3D, Object3D) {
     #[rustfmt::skip]
@@ -24,18 +26,18 @@ fn gen_cube(side_len: f64) -> (Object3D, Object3D) {
     let mut nocolor = colorful.clone();
     colorful
         .add_sides_colorful(&[
-            ((0, 1), TermColor::C256(240)),
-            ((1, 4), TermColor::C256(220)),
-            ((4, 2), TermColor::C256(200)),
-            ((2, 0), TermColor::C256(180)),
-            ((3, 5), TermColor::C256(160)),
-            ((5, 7), TermColor::C256(140)),
-            ((7, 6), TermColor::C256(140)),
-            ((6, 3), TermColor::C256(160)),
-            ((1, 5), TermColor::C256(180)),
-            ((4, 7), TermColor::C256(200)),
-            ((2, 6), TermColor::C256(220)),
-            ((0, 3), TermColor::C256(240)),
+            ((0, 1), Color::AnsiValue(240)),
+            ((1, 4), Color::AnsiValue(220)),
+            ((4, 2), Color::AnsiValue(200)),
+            ((2, 0), Color::AnsiValue(180)),
+            ((3, 5), Color::AnsiValue(160)),
+            ((5, 7), Color::AnsiValue(140)),
+            ((7, 6), Color::AnsiValue(140)),
+            ((6, 3), Color::AnsiValue(160)),
+            ((1, 5), Color::AnsiValue(180)),
+            ((4, 7), Color::AnsiValue(200)),
+            ((2, 6), Color::AnsiValue(220)),
+            ((0, 3), Color::AnsiValue(240)),
         ])
         .unwrap();
     nocolor.add_sides(&colorful.sides()).unwrap();
@@ -63,68 +65,59 @@ fn gen_octahedron(side_len: f64) -> (Object3D, Object3D) {
     let mut nocolor = colorful.clone();
     colorful
         .add_sides_colorful(&[
-            ((0, 1), TermColor::C256(100)),
-            ((0, 2), TermColor::C256(120)),
-            ((0, 3), TermColor::C256(140)),
-            ((0, 4), TermColor::C256(160)),
-            ((5, 1), TermColor::C256(180)),
-            ((5, 2), TermColor::C256(200)),
-            ((5, 3), TermColor::C256(200)),
-            ((5, 4), TermColor::C256(180)),
-            ((1, 2), TermColor::C256(160)),
-            ((2, 3), TermColor::C256(140)),
-            ((3, 4), TermColor::C256(120)),
-            ((4, 1), TermColor::C256(100)),
+            ((0, 1), Color::AnsiValue(100)),
+            ((0, 2), Color::AnsiValue(120)),
+            ((0, 3), Color::AnsiValue(140)),
+            ((0, 4), Color::AnsiValue(160)),
+            ((5, 1), Color::AnsiValue(180)),
+            ((5, 2), Color::AnsiValue(200)),
+            ((5, 3), Color::AnsiValue(200)),
+            ((5, 4), Color::AnsiValue(180)),
+            ((1, 2), Color::AnsiValue(160)),
+            ((2, 3), Color::AnsiValue(140)),
+            ((3, 4), Color::AnsiValue(120)),
+            ((4, 1), Color::AnsiValue(100)),
         ])
         .unwrap();
     nocolor.add_sides(&colorful.sides()).unwrap();
     (colorful, nocolor)
 }
 
-// just make the rotate looks more "random"
 fn gen(k: i32) -> (f64, f64, f64) {
     match k {
-        k if k % 4 == 0 => (1.0, 2.0, 3.0),
-        k if k % 4 == 1 => (-2.0, -3.0, 4.0),
-        k if k % 4 == 2 => (2.0, 3.0, 4.0),
-        k if k % 4 == 3 => (-1.0, -2.0, -3.0),
+        k if k % 4 == 3 => (1.0, 2.0, 3.0),
+        k if k % 4 == 2 => (-2.0, -3.0, 4.0),
+        k if k % 4 == 1 => (2.0, 3.0, 4.0),
+        k if k % 4 == 0 => (-1.0, -2.0, -3.0),
         _ => panic!("impossible"),
     }
-    // let zoom = if k % 120 <= 60 {
-    //     1.0 + (k % 120) as f64 * 0.01
-    // } else {
-    //     1.6 - (k % 120 - 60) as f64 * 0.01
-    // };
-    // (rotate, zoom)
 }
 
 fn main() {
     let side_len = 40.0;
-    let mut canvas = Canvas::new();
+    let mut anime = Animation::new();
     let (cotc, otc) = gen_octahedron(side_len);
     let (ccube, cube) = gen_cube(side_len);
-    let mut objs = [
+    let objs = [
         (otc, (50.0, 50.0)),
         (cotc, (115.0, 50.0)),
         (ccube, (50.0, 115.0)),
         (cube, (110.0, 115.0)),
     ];
-    let mut k = 0;
-    term::clear();
-    term::disable_wrap();
-    term::hide_cursor();
-    loop {
-        canvas.clear();
-        for (obj, location) in &mut objs {
-            // let (angle, zoom) = gen(k);
-            // obj.zoom(zoom);
-            let angle = gen(k);
-            obj.rotate(angle);
-            canvas.paint(obj, location.0, location.1).unwrap();
-            k += 1;
-        }
-        term::move_to(0, 0);
-        println!("{}", canvas.frame());
-        std::thread::sleep(std::time::Duration::from_millis(64));
+    let k = Arc::new(Mutex::new(0));
+    for (obj, location) in objs {
+        let k = Arc::clone(&k);
+        anime.push(
+            obj.clone(),
+            move |obj| {
+                let mut k = k.lock().unwrap();
+                let angle = gen(*k);
+                obj.rotate(angle);
+                *k += 1;
+                *k > 1200
+            },
+            location,
+        );
     }
+    anime.run();
 }

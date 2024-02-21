@@ -1,4 +1,8 @@
-use rsille::{color::TermColor, object3d::Object3D, Animation, Turtle};
+use rsille::{
+    color::Color,
+    extra::{Object3D, Turtle},
+    Animation,
+};
 
 fn main() {
     let mut anime = Animation::new();
@@ -6,7 +10,11 @@ fn main() {
     for i in 0..12 {
         t.right(30.0);
         for j in 0..36 {
-            t.color(TermColor::Crgb(240 - i * 10, 60 + j * 5, 220));
+            t.color(Color::Rgb {
+                r: 240 - i * 10,
+                g: 60 + j * 5,
+                b: 220,
+            });
             t.right(10.0);
             t.forward(4.2);
         }
@@ -15,21 +23,18 @@ fn main() {
     let mut k = 0;
     t.anime();
     anime.set_fps(60);
-    anime.push(t, move |t: &mut Turtle| t.update(), (50.0, 50.0));
+    anime.push(t, move |t| t.update(), (50.0, 50.0));
     anime.push(
         object,
-        move |obj: &mut Object3D| {
+        move |obj| {
             obj.rotate((1.0, 2.0, 3.0));
-            if k < 12 * 36 {
-                k += 1;
-                false
-            } else {
-                true
-            }
+            k += 1;
+            k > 12 * 36
         },
         (50.0, 50.0),
     );
     anime.run();
+    println!("End!");
 }
 
 fn gen_cube() -> Object3D {

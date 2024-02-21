@@ -1,6 +1,6 @@
 use std::env;
 
-use rsille::{Canvas, Imgille};
+use rsille::{extra::Imgille, Canvas};
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -14,7 +14,7 @@ fn main() {
             return;
         };
         canvas.paint(&imgille, 0.0, 0.0).unwrap();
-        println!("{}", canvas.frame());
+        println!("{}", canvas.render());
     } else {
         println!("useage: [{}] <path>", args[0]);
     }

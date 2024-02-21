@@ -72,6 +72,7 @@ fn get_pixel(x: f64, y: f64) -> u32 {
     PIXEL_MAP[y % 4][x % 2]
 }
 
+// it's safety, dw :)
 fn make_braille_unchecked(p: u32) -> char {
     unsafe { char::from_u32_unchecked(BASE_CHAR + p) }
 }

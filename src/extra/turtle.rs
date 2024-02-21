@@ -1,4 +1,3 @@
-// TODO: remove the color feature
 // TODO: remove the extra things for animation in Turtle
 
 use std::f64::consts::PI;
@@ -9,12 +8,11 @@ use crate::{
     Canvas,
 };
 
-#[cfg(feature = "color")]
-use crate::color::TermColor;
+use crate::color::Color;
 
 /// The turtle impl of braille code in Rust
 ///
-/// all the api is similar to turtle in Python
+/// All the api is similar to turtle in Python
 ///
 /// ## Features
 ///
@@ -27,7 +25,7 @@ use crate::color::TermColor;
 ///
 /// just paint it
 /// ```
-/// use rsille::{Turtle, Canvas};
+/// use rsille::{extra::Turtle, Canvas};
 /// let mut canvas = Canvas::new();
 /// let mut t = Turtle::new();
 /// let mut length = 1.0;
@@ -37,12 +35,12 @@ use crate::color::TermColor;
 ///     length += 0.05;
 /// }
 /// canvas.paint(&t, 50.0, 50.0).unwrap();
-/// println!("{}", canvas.frame());
+/// println!("{}", canvas.render());
 /// ```
 ///
 /// or a animation
-/// ```
-/// use rsille::{Turtle, Animation};
+/// ```no_run
+/// use rsille::{extra::Turtle, Animation};
 /// let mut anime = Animation::new();
 /// let mut t = Turtle::new();
 /// let mut length = 1.0;
@@ -52,11 +50,11 @@ use crate::color::TermColor;
 ///     length += 0.05;
 /// }
 /// t.anime();
-/// anime.push(t, move |t: &mut Turtle| t.update(), (50.0, 50.0));
+/// anime.push(t, move |t| t.update(), (50.0, 50.0));
 /// anime.run();
 /// ```
 ///
-/// NOTE:
+/// ## NOTE:
 ///
 /// There isn't position or heading function,
 /// because the position and heading can't know until paint it!
@@ -190,14 +188,12 @@ impl Turtle {
     }
 
     /// Set the color of turtle
-    #[cfg(feature = "color")]
-    pub fn colorful(&mut self, color: TermColor) {
-        self.add_procedure(Procedure::Color(color));
+    pub fn colorful(&mut self, color: Color) {
+        self.add_procedure(Procedure::Colorful(color));
     }
 
     /// alias: [`colorful`](struct.Turtle.html#method.colorful)
-    #[cfg(feature = "color")]
-    pub fn color(&mut self, color: TermColor) {
+    pub fn color(&mut self, color: Color) {
         self.colorful(color);
     }
 
@@ -308,22 +304,9 @@ enum Procedure {
     Home,
     Goto(f64, f64),          // (x, y)
     Circle(f64, f64, usize), // (radius, extent, steps)
-
-    #[cfg(feature = "color")]
-    Color(TermColor),
+    Colorful(Color),
 }
 
-#[cfg(not(feature = "color"))]
-fn forward(canvas: &mut Canvas, x: f64, y: f64, heading: f64, pen: bool, step: f64) -> (f64, f64) {
-    let (sr, cr) = heading.to_radians().sin_cos();
-    let txy = (x + cr * step, y + sr * step);
-    if pen {
-        canvas.line((x, y), txy);
-    }
-    txy
-}
-
-#[cfg(feature = "color")]
 fn forward(
     canvas: &mut Canvas,
     x: f64,
@@ -331,7 +314,7 @@ fn forward(
     heading: f64,
     pen: bool,
     step: f64,
-    color: TermColor,
+    color: Color,
 ) -> (f64, f64) {
     let (sr, cr) = heading.to_radians().sin_cos();
     let txy = (x + cr * step, y + sr * step);
@@ -341,73 +324,12 @@ fn forward(
     txy
 }
 
-#[cfg(not(feature = "color"))]
 impl Paint for Turtle {
     fn paint(&self, canvas: &mut Canvas, x: f64, y: f64) -> Result<(), RsilleErr> {
         use Procedure::*;
         let (home_x, home_y) = (x, y);
         let (mut pen, mut heading, mut x, mut y) = (true, 0.0, x, y);
-        let procs = if let Some(procs) = &self.anime_proc {
-            &procs[0..self.frame_count]
-        } else {
-            &self.procedures
-        };
-
-        for p in procs {
-            match p {
-                PenDown => {
-                    pen = true;
-                }
-                PenUp => {
-                    pen = false;
-                }
-                Forward(step) => {
-                    (x, y) = forward(canvas, x, y, heading, pen, *step);
-                }
-                Right(angle) => {
-                    heading += angle;
-                }
-                Teleport(tx, ty) => {
-                    x = *tx;
-                    y = *ty;
-                }
-                Home => {
-                    (x, y) = (home_x, home_y);
-                }
-                Goto(tx, ty) => {
-                    if pen {
-                        canvas.line((x, y), (*tx, *ty));
-                    }
-                    x = *tx;
-                    y = *ty;
-                }
-                Circle(radius, extent, steps) => {
-                    let angle = extent / *steps as f64;
-                    for _ in 0..*steps {
-                        (x, y) = forward(
-                            canvas,
-                            x,
-                            y,
-                            heading,
-                            pen,
-                            2.0 * radius * (angle / 2.0).to_radians().sin(),
-                        );
-                        heading -= angle;
-                    }
-                }
-            }
-        }
-        Ok(())
-    }
-}
-
-#[cfg(feature = "color")]
-impl Paint for Turtle {
-    fn paint(&self, canvas: &mut Canvas, x: f64, y: f64) -> Result<(), RsilleErr> {
-        use Procedure::*;
-        let (home_x, home_y) = (x, y);
-        let (mut pen, mut heading, mut x, mut y) = (true, 0.0, x, y);
-        let mut color = TermColor::None;
+        let mut color = Color::Reset;
         let procs = if let Some(procs) = &self.anime_proc {
             &procs[0..self.frame_count]
         } else {
@@ -457,7 +379,7 @@ impl Paint for Turtle {
                         heading -= angle;
                     }
                 }
-                Color(c) => {
+                Colorful(c) => {
                     color = *c;
                 }
             }

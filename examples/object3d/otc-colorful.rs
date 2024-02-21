@@ -1,4 +1,4 @@
-use rsille::{color::TermColor, object3d::Object3D, term, Canvas, Paint};
+use rsille::{color::Color, extra::Object3D, Animation};
 
 fn gen_octahedron(side_len: f64) -> Object3D {
     let a = [
@@ -20,18 +20,18 @@ fn gen_octahedron(side_len: f64) -> Object3D {
     object.add_points(&points);
     object
         .add_sides_colorful(&[
-            ((0, 1), TermColor::C256(100)),
-            ((0, 2), TermColor::C256(120)),
-            ((0, 3), TermColor::C256(140)),
-            ((0, 4), TermColor::C256(160)),
-            ((5, 1), TermColor::C256(180)),
-            ((5, 2), TermColor::C256(200)),
-            ((5, 3), TermColor::C256(200)),
-            ((5, 4), TermColor::C256(180)),
-            ((1, 2), TermColor::C256(160)),
-            ((2, 3), TermColor::C256(140)),
-            ((3, 4), TermColor::C256(120)),
-            ((4, 1), TermColor::C256(100)),
+            ((0, 1), Color::AnsiValue(100)),
+            ((0, 2), Color::AnsiValue(120)),
+            ((0, 3), Color::AnsiValue(140)),
+            ((0, 4), Color::AnsiValue(160)),
+            ((5, 1), Color::AnsiValue(180)),
+            ((5, 2), Color::AnsiValue(200)),
+            ((5, 3), Color::AnsiValue(200)),
+            ((5, 4), Color::AnsiValue(180)),
+            ((1, 2), Color::AnsiValue(160)),
+            ((2, 3), Color::AnsiValue(140)),
+            ((3, 4), Color::AnsiValue(120)),
+            ((4, 1), Color::AnsiValue(100)),
         ])
         .unwrap();
     object
@@ -55,23 +55,23 @@ fn gen(k: i32) -> ((f64, f64, f64), f64) {
 
 fn main() {
     let side_len = 40.0;
-    let mut canvas = Canvas::new();
-    let mut object = gen_octahedron(side_len);
+    let mut anime = Animation::new();
+    let object = gen_octahedron(side_len);
     let mut k = 0;
-    term::clear();
-    term::disable_wrap();
-    term::hide_cursor();
-    loop {
-        let (angle, zoom) = gen(k);
-        object.rotate(angle);
-        object.zoom(zoom);
-        canvas.clear();
-        object
-            .paint(&mut canvas, 1.6 * side_len, 1.6 * side_len)
-            .unwrap();
-        term::move_to(0, 0);
-        println!("{}", canvas.frame());
-        std::thread::sleep(std::time::Duration::from_millis(32));
-        k += 1;
-    }
+    anime.push(
+        object,
+        move |obj| {
+            let (angle, zoom) = gen(k);
+            obj.rotate(angle);
+            obj.zoom(zoom);
+            k += 1;
+            if k >= 300 {
+                true
+            } else {
+                false
+            }
+        },
+        (1.6 * side_len, 1.6 * side_len),
+    );
+    anime.run();
 }

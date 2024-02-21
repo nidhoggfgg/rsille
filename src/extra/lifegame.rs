@@ -1,16 +1,3 @@
-//! the life game
-//!
-//! easy to build a life game and paint on the canvas
-//!
-//! ## Example
-//!
-//! ```no_run
-//! use rsille::{lifegame::LifeGame, Animation};
-//! let lg = LifeGame::from_path("path/to/rle").unwrap();
-//! let mut anime = Animation::new();
-//! anime.push(lg, |lg: &mut LifeGame| lg.update(), (0.0, 0.0));
-//! anime.run();
-//!```
 use std::{collections::HashMap, fs, iter::Peekable, usize};
 
 use crate::{
@@ -22,17 +9,17 @@ use crate::{
 // but when using inplace algorithms, just simply change () to bool or u8
 type LiveCells = HashMap<(isize, isize), ()>;
 
-/// the life game
+/// The life game
 ///
-/// it support `rle` file download from the internet!
+/// It support `rle` file download from the internet!
 ///
 /// ## Example
 ///
 /// ```no_run
-/// use rsille::{lifegame::LifeGame, Animation};
+/// use rsille::{extra::LifeGame, Animation};
 /// let lg = LifeGame::from_path("path/to/rle").unwrap();
 /// let mut anime = Animation::new();
-/// anime.push(lg, |lg: &mut LifeGame| lg.update(), (0.0, 0.0));
+/// anime.push(lg, |lg| lg.update(), (0.0, 0.0));
 /// anime.run();
 /// ```
 #[derive(Debug, Clone)]

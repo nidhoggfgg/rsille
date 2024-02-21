@@ -1,7 +1,8 @@
-use crate::{lifegame::LifeGame, object3d::Object3D, Animation, Canvas, Turtle};
+use crate::{
+    extra::{LifeGame, Object3D, Turtle},
+    Animation, Canvas,
+};
 
-// i don't think my Canvas, Objects3D... need a Default trait
-// but for making clippy shut up, so add those never used code
 impl Default for Canvas {
     fn default() -> Self {
         Self::new()

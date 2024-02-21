@@ -10,20 +10,20 @@ use image::{
 ///
 /// paint the image
 /// ```no_run
-/// use rsille::{Canvas, Imgille};
+/// use rsille::{extra::Imgille, Canvas};
 /// let path = "path/to/image";
 /// let mut canvas = Canvas::new();
 /// let imgille = Imgille::new(path).unwrap();
 /// canvas.paint(&imgille, 0.0, 0.0).unwrap();
-/// println!("{}", canvas.frame());
+/// println!("{}", canvas.render());
 /// ```
 ///
 /// ## NOTE
 ///
-/// you can always paint on (0.0, 0.0).
-/// but if you want, you can move it to other place on the canvas!
+/// You can always paint on (0.0, 0.0).
+/// But if you want, you can move it to other place on the canvas!
 ///
-/// when the image is big (like 3840*3840), please use release build
+/// When the image is big (like 3840*3840), please use release build
 
 #[derive(Debug, Clone)]
 pub struct Imgille {
@@ -51,7 +51,10 @@ impl Paint for Imgille {
     fn paint(&self, canvas: &mut crate::Canvas, x: f64, y: f64) -> Result<(), RsilleErr> {
         // for a fully filled image the braille code equal to a █
         let (tw, th) = get_terminal_size()?;
-        let (tw, th) = ((tw - x as usize) as u32, (th - y as usize) as u32);
+        let (tw, th) = (
+            (tw as usize - x as usize) as u32,
+            (th as usize - y as usize) as u32,
+        );
         let (iw, ih) = (self.img.width(), self.img.height());
         let img = if iw > tw || ih > th {
             let f = th as f32 / self.img.height() as f32;
@@ -69,12 +72,16 @@ impl Paint for Imgille {
         let (iw, ih) = (img.width(), img.height());
         for ny in 0..ih {
             for nx in 0..iw {
-                use crate::color::TermColor;
+                use crate::color::Color;
                 let pixel = img.get_pixel(nx, ny);
                 canvas.set_fill_colorful(
                     x + nx as f64,
                     y + ny as f64,
-                    TermColor::Crgb(pixel[0], pixel[1], pixel[2]),
+                    Color::Rgb {
+                        r: pixel[0],
+                        g: pixel[1],
+                        b: pixel[2],
+                    },
                 );
             }
         }
