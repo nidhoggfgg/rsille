@@ -8,6 +8,7 @@ This library offers an API and functionality similar to the turtle module in Pyt
   <img src="https://github.com/nidhoggfgg/rsille/raw/main/imgs/anime.gif" width="320" alt="anime">
   <img src="https://github.com/nidhoggfgg/rsille/raw/main/imgs/objects.gif" width="320" alt="3d object">
   <img src="https://github.com/nidhoggfgg/rsille/raw/main/imgs/lifegame.gif" width="320" alt="life game">
+  <img src="https://github.com/nidhoggfgg/rsille/raw/main/imgs/mandelbort.png" width="320" alt="mandelbrot set">
   <img src="https://github.com/nidhoggfgg/rsille/raw/main/imgs/lena.png" width="320" alt="lena">
   <img src="https://github.com/nidhoggfgg/rsille/raw/main/imgs/turtle-multi.png" width="320" alt="turtle">
 </div>
@@ -45,15 +46,18 @@ rsille = "2.0.0"
 Here's a simple example demonstrating how to use the rsille to draw a star:
 
 ```rust
+use rsille::{extra::Turtle, Canvas};
 fn main() {
     let mut canvas = Canvas::new();
     let mut t = Turtle::new();
-    for _ in 0..5 {
-        t.forward(100.0);
-        t.right(144.0);
+    let mut length = 1.0;
+    for _ in 0..150 {
+        t.forward(length);
+        t.right(10.0);
+        length += 0.05;
     }
-    canvas.paint(&t, 0.0, 30.0).unwrap();
-    println!("{}", canvas.frame());
+    canvas.paint(&t, 50.0, 50.0).unwrap();
+    println!("{}", canvas.render());
 }
 ```
 
