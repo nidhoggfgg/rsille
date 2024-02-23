@@ -1,12 +1,17 @@
-use std::cmp;
+// IMPORTANT: the algorithm is fixed, be very careful of changing the code
+// there isn't a good way to debug
+
 use std::io::Write;
+use std::{cmp, collections::HashMap};
 
 use crossterm::{cursor::MoveToNextLine, queue, style::Print};
 
+use crate::braille;
+use crate::utils::Toi32;
 use crate::{
     braille::PixelOp,
     term::is_raw_mode,
-    utils::{normalize, to_rsille_err, RsilleErr},
+    utils::{round, to_rsille_err, RsilleErr},
 };
 
 use crate::color::{Color, Colored};
@@ -49,9 +54,11 @@ impl<T: Paint + ?Sized> Paint for Box<T> {
 
 #[derive(Debug, Clone)]
 pub struct Canvas {
-    width: usize,
-    height: usize,
-    pixels: Vec<Vec<Colored>>,
+    minx: f64,   // <= 0
+    miny: f64,   // <= 0
+    width: i32,  // >= 0
+    height: i32, // >= 0
+    pixels: HashMap<(i32, i32), Colored>,
 }
 
 impl Canvas {
@@ -59,31 +66,16 @@ impl Canvas {
     ///
     /// the size of the canvas will auto increase
     pub fn new() -> Self {
-        let pixels = Vec::new();
+        let pixels = HashMap::new();
         let (width, height) = (0, 0);
+        let (minx, miny) = (0.0, 0.0);
         Self {
-            pixels,
+            minx,
+            miny,
             width,
             height,
-        }
-    }
-
-    /// make a new empty canvas with the size
-    ///
-    /// the size of the canvas also would auto increase
-    pub fn with_capcity(width: usize, height: usize) -> Self {
-        let vec = make_vec(width);
-        let pixels = vec![vec; height];
-        Self {
             pixels,
-            width,
-            height,
         }
-    }
-
-    /// return the (width, height) of the canvas
-    pub fn get_capcity(&self) -> (usize, usize) {
-        (self.width, self.height)
     }
 
     /// paint those Paintable object on the location (x, y)
@@ -122,12 +114,16 @@ impl Canvas {
     where
         W: Write,
     {
-        for row in &self.pixels {
-            for p in row {
-                p.queue(w)?;
+        let (start_row, start_col) = self.get_pos_impl(self.minx, self.miny);
+        for y in (start_row..self.height).rev() {
+            for x in start_col..self.width {
+                if let Some(pixel) = self.pixels.get(&(y, x)) {
+                    pixel.queue(w)?;
+                } else {
+                    queue!(w, Print(braille::SPACE))?;
+                }
             }
             if is_raw {
-                // queue!(w, Print("\r\n"))?;
                 queue!(w, MoveToNextLine(1))?;
             } else {
                 queue!(w, Print("\n"))?;
@@ -145,11 +141,17 @@ impl Canvas {
     /// return the lines of the canvas
     pub fn get_lines(&self) -> Vec<String> {
         let mut out = Vec::new();
-        for row in &self.pixels {
+        let (px, py) = (self.minx.round() as i32, self.miny.round() as i32);
+        for y in py..self.height {
             let mut buffer = Vec::new();
-            for p in row {
-                p.queue(&mut buffer)
-                    .expect("Internal error: please report this issue!");
+            for x in px..self.width {
+                if let Some(pixel) = self.pixels.get(&(y, x)) {
+                    pixel
+                        .queue(&mut buffer)
+                        .expect("Internal error: please report this issue!");
+                } else {
+                    queue!(buffer, Print(braille::SPACE)).unwrap();
+                }
             }
             buffer.flush().unwrap();
             out.push(String::from_utf8(buffer).unwrap());
@@ -159,37 +161,58 @@ impl Canvas {
 
     /// clear the canvas
     pub fn clear(&mut self) {
-        let width = self.width;
-        let height = self.height;
-        let vec = make_vec(width);
-        self.pixels = vec![vec; height];
+        self.pixels = HashMap::new();
+    }
+
+    /// reset the canvas to a new empty canvas
+    pub fn reset(&mut self) {
+        self.minx = 0.0;
+        self.miny = 0.0;
+        self.width = 0;
+        self.height = 0;
+        self.pixels = HashMap::new();
+    }
+
+    /// set the size of the canvas
+    ///
+    /// This method can't fix the size of the canvas, it's just set the canvas size,
+    /// when the size isn't enough, the canvas will auto increase.
+    /// And the (width, height) isn't the size of the terminal, it's the size of the canvas!
+    /// For example, an object `x` from -30 to 30, then it's 60 in width,
+    /// but on the terminal, it's 30 in width(because braille code), you should set the width to 60.
+    pub fn set_size<T>(&mut self, width: T, height: T)
+    where
+        T: Toi32,
+    {
+        // srow < 0, scol < 0
+        let (height, width) = self.get_pos_impl(width.to_i32() as f64, height.to_i32() as f64);
+        let (srow, scol) = self.get_pos_impl(self.minx, self.miny);
+        if width > self.width - scol {
+            self.width = width + scol;
+        }
+        if height > self.height - srow {
+            self.height = height + srow;
+        }
     }
 
     /// draw a dot on (x, y)
     ///
     /// just use the (x, y) in your object, the algorithm will find the right location
     pub fn set(&mut self, x: f64, y: f64) {
-        let (row, col) = get_pos(x, y);
-        self.pad_row_col(row, col);
-        self.pixels[row][col].set(x, y);
+        self.set_at(x, y, None);
     }
 
     /// similar to [`set`](struct.Canvas.html#method.set)
     /// but it's support color
     pub fn set_colorful(&mut self, x: f64, y: f64, color: Color) {
-        let (row, col) = get_pos(x, y);
-        self.pad_row_col(row, col);
-        self.pixels[row][col].set(x, y);
-        self.pixels[row][col].set_foregound_color(color);
+        self.set_at(x, y, Some(color));
     }
 
     /// if the (x, y) is already set, then unset it
     ///
     /// if the (x, y) is unset, then set it
     pub fn toggle(&mut self, x: f64, y: f64) {
-        let (row, col) = get_pos(x, y);
-        self.pad_row_col(row, col);
-        self.pixels[row][col].toggle(x, y);
+        self.toggle_at(x, y);
     }
 
     /// fill ⣿ at the (x, y)
@@ -198,27 +221,22 @@ impl Canvas {
     ///
     /// so don't use it unless you know what you are doing!
     pub fn set_fill(&mut self, x: f64, y: f64) {
-        let (row, col) = (y.round() as usize, x.round() as usize);
-        self.pad_row_col(row, col);
-        self.pixels[row][col].fill();
+        self.fill_at(x, y, None);
     }
 
     /// similar to [`set_fill`](struct.Canvas.html#method.set_fill), but support color
     ///
     /// don't use it unless you know what you are doing!
     pub fn set_fill_colorful(&mut self, x: f64, y: f64, color: Color) {
-        let (row, col) = (y.round() as usize, x.round() as usize);
-        self.pad_row_col(row, col);
-        self.pixels[row][col].fill();
-        self.pixels[row][col].set_foregound_color(color);
+        self.fill_at(x, y, Some(color));
     }
 
     /// draw a line on the canvas
     /// * `xy1` - the start location
     /// * `xy2` = the end location
     pub fn line(&mut self, xy1: (f64, f64), xy2: (f64, f64)) {
-        let (x1, y1) = (normalize(xy1.0), normalize(xy1.1));
-        let (x2, y2) = (normalize(xy2.0), normalize(xy2.1));
+        let (x1, y1) = (round(xy1.0), round(xy1.1));
+        let (x2, y2) = (round(xy2.0), round(xy2.1));
         let d = |v1, v2| {
             if v1 <= v2 {
                 (v2 - v1, 1.0)
@@ -245,8 +263,8 @@ impl Canvas {
     /// * `xy1` - the start location
     /// * `xy2` - the end location
     pub fn line_colorful(&mut self, xy1: (f64, f64), xy2: (f64, f64), color: Color) {
-        let (x1, y1) = (normalize(xy1.0), normalize(xy1.1));
-        let (x2, y2) = (normalize(xy2.0), normalize(xy2.1));
+        let (x1, y1) = (round(xy1.0), round(xy1.1));
+        let (x2, y2) = (round(xy2.0), round(xy2.1));
         let d = |v1, v2| {
             if v1 <= v2 {
                 (v2 - v1, 1.0)
@@ -269,34 +287,96 @@ impl Canvas {
         }
     }
 
-    // +--+    +----+    +----+
-    // |  | -> |    | -> |    |
-    // +--+    +----+    |    |
-    //                   +----+
-    fn pad_row_col(&mut self, row: usize, col: usize) {
-        if self.width <= col {
-            for r in &mut self.pixels {
-                let pad_num = col - r.len() + 1;
-                let mut vec = make_vec(pad_num);
-                r.append(&mut vec);
-            }
-            self.width = col + 1;
+    fn set_at(&mut self, x: f64, y: f64, color: Option<Color>) {
+        let (row, col) = self.get_pos(x, y);
+        if let Some(pixel) = self.pixels.get_mut(&(row, col)) {
+            pixel.set(x, y);
+        } else {
+            self.pixels.insert((row, col), Colored::new());
+            self.pixels.get_mut(&(row, col)).unwrap().set(x, y);
         }
+        if let Some(color) = color {
+            self.pixels
+                .get_mut(&(row, col))
+                .unwrap()
+                .set_foregound_color(color);
+        }
+    }
 
-        if self.height <= row {
-            let pad_num = row - self.height + 1;
-            let vec = make_vec(self.width);
-            let mut pad = vec![vec; pad_num];
-            self.pixels.append(&mut pad);
-            self.height = row + 1;
+    fn toggle_at(&mut self, x: f64, y: f64) {
+        let (row, col) = self.get_pos(x, y);
+        if let Some(pixel) = self.pixels.get_mut(&(row, col)) {
+            pixel.toggle(x, y);
+        } else {
+            self.pixels.insert((row, col), Colored::new());
+            self.pixels.get_mut(&(row, col)).unwrap().toggle(x, y);
         }
+    }
+
+    // fn set_foreground_at(&mut self, x: f64, y: f64) {
+    //     let (row, col) = get_pos(x, y);
+    //     if let Some(pixel) = self.pixels.get(&(row, col)) {
+    //         pixel.set(x, y);
+    //     } else {
+    //         self.pixels.insert((row, col), Colored::new());
+    //         self.pixels.get(&(row, col)).unwrap().set(x, y);
+    //     }
+    // }
+
+    fn fill_at(&mut self, x: f64, y: f64, color: Option<Color>) {
+        let (row, col) = (x.round() as i32, y.round() as i32); // not get_pos
+        if let Some(pixel) = self.pixels.get_mut(&(row, col)) {
+            pixel.fill();
+        } else {
+            self.pixels.insert((row, col), Colored::new());
+            self.pixels.get_mut(&(row, col)).unwrap().fill();
+        }
+        if let Some(color) = color {
+            self.pixels
+                .get_mut(&(row, col))
+                .unwrap()
+                .set_foregound_color(color);
+        }
+    }
+
+    //      ^
+    //      |
+    //      +--+
+    //      |  |
+    //      |  |
+    //      |  |
+    //      |  |
+    // -----+--+-->
+    //      0
+    fn get_pos(&mut self, x: f64, y: f64) -> (i32, i32) {
+        if x < self.minx {
+            self.minx = x;
+        }
+        if y < self.miny {
+            self.miny = y;
+        }
+        let (row, col) = self.get_pos_impl(x, y);
+        if row.abs() >= self.height {
+            self.height = row.abs() + 1;
+        }
+        if col.abs() >= self.width {
+            self.width = col.abs() + 1;
+        }
+        (row, col)
+    }
+
+    fn get_pos_impl(&self, x: f64, y: f64) -> (i32, i32) {
+        let (x, y) = (round(x), round(y));
+        let row = if y < 0 { (y + 1) / 4 - 1 } else { y / 4 };
+        let col = if x < 0 { (x - 1) / 2 } else { x / 2 };
+        (row, col)
     }
 }
 
-fn get_pos(x: f64, y: f64) -> (usize, usize) {
-    (y.round() as usize / 4, x.round() as usize / 2)
-}
+// fn get_pos(x: f64, y: f64) -> (usize, usize) {
+//     (y.round() as usize / 4, x.round() as usize / 2)
+// }
 
-fn make_vec(len: usize) -> Vec<Colored> {
-    vec![Colored::new(); len]
-}
+// fn make_vec(len: usize) -> Vec<Colored> {
+//     vec![Colored::new(); len]
+// }

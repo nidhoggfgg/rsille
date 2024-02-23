@@ -1,7 +1,8 @@
 use core::fmt;
 
-use crate::utils::normalize;
+use crate::utils::round;
 
+pub const SPACE: char = '⠀';
 // http://www.alanwood.net/unicode/braille_patterns.html
 // dots:
 //    ,___,
@@ -68,8 +69,13 @@ impl fmt::Display for Pixel {
 }
 
 fn get_pixel(x: f64, y: f64) -> u32 {
-    let (x, y) = (normalize(x), normalize(y));
-    PIXEL_MAP[y % 4][x % 2]
+    let (x, y) = (round(x), round(y));
+    let y = if y >= 0 {
+        [3, 2, 1, 0][(y % 4) as usize]
+    } else {
+        [3, 0, 1, 2][(y % 4).unsigned_abs() as usize]
+    };
+    PIXEL_MAP[y as usize][(x % 2).unsigned_abs() as usize]
 }
 
 // it's safety, dw :)

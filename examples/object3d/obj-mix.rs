@@ -99,10 +99,10 @@ fn main() {
     let (cotc, otc) = gen_octahedron(side_len);
     let (ccube, cube) = gen_cube(side_len);
     let objs = [
-        (otc, (50.0, 50.0)),
-        (cotc, (115.0, 50.0)),
-        (ccube, (50.0, 115.0)),
-        (cube, (110.0, 115.0)),
+        (otc, (0.0, 0.0)),
+        (cotc, (70.0, 0.0)),
+        (ccube, (0.0, 70.0)),
+        (cube, (70.0, 70.0)),
     ];
     let k = Arc::new(Mutex::new(0));
     for (obj, location) in objs {
@@ -119,5 +119,6 @@ fn main() {
             location,
         );
     }
+    anime.set_size(110, 110);
     anime.run();
 }

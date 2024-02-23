@@ -12,7 +12,11 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode},
 };
 
-use crate::{term, Canvas, Paint};
+use crate::{
+    term::{self, get_terminal_size, is_raw_mode},
+    utils::Toi32,
+    Canvas, Paint,
+};
 
 /// Create an animation
 ///
@@ -36,6 +40,7 @@ pub struct Animation {
     objs: Arc<Mutex<Vec<Box<dyn Update + Send>>>>,
     fps: u32,
     hide_cursor: bool,
+    size: Option<(i32, i32)>,
     end: Arc<Mutex<bool>>,
 }
 
@@ -49,6 +54,7 @@ impl Animation {
             objs: Arc::new(Mutex::new(Vec::new())),
             fps: 30,
             hide_cursor: true,
+            size: None,
             end: Arc::new(Mutex::new(false)),
         }
     }
@@ -96,6 +102,14 @@ impl Animation {
             // must wraped! for drop the objs
             {
                 let mut objs = objs.lock().unwrap();
+                let mut end = end.lock().unwrap();
+                if *end {
+                    break;
+                }
+                if objs.iter().all(|obj| obj.is_end()) {
+                    *end = true;
+                    break;
+                }
                 let mut canvas = canvas.lock().unwrap();
                 canvas.clear();
                 queue!(stdout, MoveTo(0, 0)).unwrap();
@@ -106,14 +120,6 @@ impl Animation {
                 // canvas.print_on(&mut stdout, true).unwrap();
                 canvas.print().unwrap();
                 stdout.flush().unwrap();
-                let mut end = end.lock().unwrap();
-                if *end {
-                    break;
-                }
-                if objs.iter().all(|obj| obj.is_end()) {
-                    *end = true;
-                    break;
-                }
             }
             let elapsed = start_time.elapsed();
             if elapsed < duration {
@@ -167,6 +173,38 @@ impl Animation {
     /// hide the cursor or not
     pub fn set_cursor(&mut self, hide_cursor: bool) {
         self.hide_cursor = hide_cursor;
+    }
+
+    /// set the size of the canvas
+    ///
+    /// give a look at [Canvas::set_size](crate::Canvas::set_size)
+    pub fn set_size<T>(&mut self, width: T, height: T)
+    where
+        T: Toi32,
+    {
+        let (width, height) = (width.to_i32(), height.to_i32());
+        self.canvas.lock().unwrap().set_size(width, height);
+    }
+
+    // only used in run!
+    #[allow(unused)]
+    fn check_size(&self) {
+        let size = if let Some(size) = self.size {
+            size
+        } else {
+            return;
+        };
+        if !is_raw_mode().unwrap() {
+            return;
+        }
+        if let Ok((rows, cols)) = get_terminal_size() {
+            if (rows as i32) < size.0 || (cols as i32) < size.1 {
+                println!(
+                    "this anime need at least {}x{} terminal size, but only {}x{}",
+                    size.1, size.0, cols, rows
+                );
+            }
+        }
     }
 }
 

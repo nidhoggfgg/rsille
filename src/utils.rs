@@ -4,8 +4,8 @@ use std::error::Error;
 pub const MIN_ZOOM: f64 = 0.001;
 pub const MIN_DIFFERENCE: f64 = 1E-10;
 
-pub fn normalize(v: f64) -> usize {
-    v.round() as usize
+pub fn round(v: f64) -> i32 {
+    v.round() as i32
 }
 
 pub fn mean(a: &[f64]) -> f64 {
@@ -54,3 +54,47 @@ impl fmt::Display for RsilleErr {
         write!(f, "{}", self.msg)
     }
 }
+
+pub trait Toi32 {
+    fn to_i32(&self) -> i32;
+}
+
+impl Toi32 for f64 {
+    fn to_i32(&self) -> i32 {
+        self.round() as i32
+    }
+}
+
+impl Toi32 for f32 {
+    fn to_i32(&self) -> i32 {
+        self.round() as i32
+    }
+}
+
+impl Toi32 for i32 {
+    fn to_i32(&self) -> i32 {
+        *self
+    }
+}
+
+// bad, but it's simple :)
+// only for usize, isize, i64, u64 and so on
+macro_rules! impl_round {
+    ($t:ty) => {
+        impl Toi32 for $t {
+            #[inline]
+            fn to_i32(&self) -> i32 {
+                *self as i32
+            }
+        }
+    };
+}
+
+impl_round!(usize);
+impl_round!(isize);
+impl_round!(u64);
+impl_round!(i64);
+impl_round!(u16);
+impl_round!(i16);
+impl_round!(u8);
+impl_round!(i8);
