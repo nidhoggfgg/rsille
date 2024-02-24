@@ -27,11 +27,11 @@ use crate::{
 /// ```no_run
 /// use rsille::{extra::Object3D, Animation};
 /// let cube = Object3D::cube(30.0);
-/// let mut anime = rsille::Animation::new();
+/// let mut anime = Animation::new();
 /// anime.push(cube, |cube| {
 ///     cube.rotate((1.0, 2.0, 3.0));
 ///     false
-/// }, (30.0, 30.0));
+/// }, (30, -30));
 /// anime.run();
 /// ```
 pub struct Animation {
@@ -44,7 +44,7 @@ pub struct Animation {
 }
 
 impl Animation {
-    /// create a new animation
+    /// Create a new animation
     ///
     /// The default fps is 30 and hide the cursor.
     pub fn new() -> Self {
@@ -58,7 +58,7 @@ impl Animation {
         }
     }
 
-    /// push an object to the animation
+    /// Push an object to the animation
     ///
     /// * `obj` - the object to paint
     /// * `f` - the function to update the object
@@ -78,7 +78,7 @@ impl Animation {
         }));
     }
 
-    /// run the animation
+    /// Run the animation
     ///
     /// When all the objects are end or press `ctrl+c` or `esc`, the animation will stop.
     pub fn run(&mut self) {
@@ -163,21 +163,21 @@ impl Animation {
         disable_raw_mode().expect("can't disable raw mode");
     }
 
-    /// set the fps of animation
+    /// Set the fps of animation
     ///
     /// Default is 30
     pub fn set_fps(&mut self, fps: u32) {
         self.fps = fps;
     }
 
-    /// hide the cursor or not
+    /// Hide the cursor or not
     pub fn hide_cursor(&mut self, hide_cursor: bool) {
         self.hide_cursor = hide_cursor;
     }
 
-    /// set the size of the canvas
+    /// Set the size of the canvas
     ///
-    /// give a look at [Canvas::set_size](crate::Canvas::set_size)
+    /// Give a look at [Canvas::set_size](crate::Canvas::set_size)
     pub fn set_size<T>(&mut self, width: T, height: T)
     where
         T: Into<f64>,

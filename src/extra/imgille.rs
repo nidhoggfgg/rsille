@@ -18,16 +18,17 @@ use image::{
 /// let path = "path/to/image";
 /// let mut canvas = Canvas::new();
 /// let imgille = Imgille::new(path).unwrap();
-/// canvas.paint(&imgille, 0.0, 0.0).unwrap();
-/// canvas.print();
+/// canvas.paint(&imgille, 0, 0).unwrap();
+/// canvas.print().unwrap();
 /// ```
 ///
 /// ## NOTE
 ///
-/// You can always paint on (0.0, 0.0).
-/// But if you want, you can move it to other place on the canvas!
+/// You can always paint on *(0, 0)*.
+/// But if you want, you can move it to other place on the canvas.
 ///
-/// When the image is big (like 3840*3840), please use release build
+/// If your image isn't colorful (like grayscale image), you better set the color to `false`.
+/// And give a look at [`thresholds`](#method.thresholds), [`invert`](#method.invert).
 
 #[derive(Debug, Clone)]
 pub struct Imgille {
@@ -38,7 +39,9 @@ pub struct Imgille {
 }
 
 impl Imgille {
-    /// construct a new object contains the picture
+    /// Construct a new object contains the picture
+    ///
+    /// Return `err` when can't open the image or can't decode the image
     pub fn new(path: &str) -> Result<Self, RsilleErr> {
         let err = Err(RsilleErr::new(format!("can't open image: {}", path)));
         let img = if let Ok(reader) = ImageReader::open(path) {
@@ -58,17 +61,25 @@ impl Imgille {
         })
     }
 
-    /// set if the image should be painted with color or not
+    /// Set if the image should be painted with color or not
+    ///
+    /// The default is `true`, but for grayscale image, you better set it to `false`
     pub fn color(&mut self, color: bool) {
         self.color = color;
     }
 
-    /// set the thresholds for the image
+    /// Set the thresholds for the image
+    ///
+    /// It's only for the grayscale image, and when the color is `false`.
+    /// The default is *128*, but you can set it to other value
     pub fn thresholds(&mut self, thresholds: u8) {
         self.thresholds = thresholds;
     }
 
-    /// if if invert the color of the image
+    /// If if invert the color of the image
+    ///
+    /// black to white, white to black.
+    /// It's only for the grayscale image, and when the color is `false`.
     pub fn invert(&mut self, invert: bool) {
         self.invert = invert;
     }
@@ -152,43 +163,6 @@ impl Paint for Imgille {
                 }
             }
         };
-
-        // // for a fully filled image the braille code equal to a █
-        // let (th, tw) = get_terminal_size();
-        // let (tw, th) = (
-        //     (tw as usize - x as usize) as u32,
-        //     (th as usize - y as usize) as u32,
-        // );
-        // let (iw, ih) = (self.img.width(), self.img.height());
-        // let img = if iw > tw || ih > th {
-        //     let f = th as f32 / self.img.height() as f32;
-        //     let w = (self.img.width() as f32 * f) as u32 * 2;
-        //     if tw < th || tw < w {
-        //         let f = tw as f32 / self.img.width() as f32;
-        //         let h = (self.img.height() as f32 * f / 2.0) as u32;
-        //         self.img.resize_exact(tw, h, Lanczos3)
-        //     } else {
-        //         self.img.resize_exact(w, th, Lanczos3)
-        //     }
-        // } else {
-        //     self.img.clone()
-        // };
-        // let (iw, ih) = (img.width(), img.height());
-        // for ny in 0..ih {
-        //     for nx in 0..iw {
-        //         use crate::color::Color;
-        //         let pixel = img.get_pixel(nx, ny);
-        //         canvas.fill_colorful(
-        //             x + nx as f64,
-        //             y + ny as f64,
-        //             Color::Rgb {
-        //                 r: pixel[0],
-        //                 g: pixel[1],
-        //                 b: pixel[2],
-        //             },
-        //         );
-        //     }
-        // }
         Ok(())
     }
 }

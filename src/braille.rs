@@ -30,13 +30,19 @@ impl Pixel {
     }
 }
 
-pub trait PixelOp<T> where T: Into<f64> + Copy {
+pub trait PixelOp<T>
+where
+    T: Into<f64> + Copy,
+{
     fn unset(&mut self, x: T, y: T);
     fn set(&mut self, x: T, y: T);
     fn toggle(&mut self, x: T, y: T);
 }
 
-impl<T> PixelOp<T> for Pixel where T: Into<f64> + Copy {
+impl<T> PixelOp<T> for Pixel
+where
+    T: Into<f64> + Copy,
+{
     fn unset(&mut self, x: T, y: T) {
         let p = get_pixel(x, y);
         self.code &= !p;
@@ -63,7 +69,10 @@ impl fmt::Display for Pixel {
     }
 }
 
-fn get_pixel<T>(x: T, y: T) -> u32 where T: Into<f64>{
+fn get_pixel<T>(x: T, y: T) -> u32
+where
+    T: Into<f64>,
+{
     let (x, y) = (round(x), round(y));
     let y = if y >= 0 {
         [3, 2, 1, 0][(y % 4) as usize]

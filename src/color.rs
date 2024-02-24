@@ -62,7 +62,10 @@ impl Colored {
     }
 }
 
-impl<T> PixelOp<T> for Colored where T: Into<f64> + Copy {
+impl<T> PixelOp<T> for Colored
+where
+    T: Into<f64> + Copy,
+{
     fn set(&mut self, x: T, y: T) {
         self.pixel.set(x, y);
     }

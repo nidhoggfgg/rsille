@@ -9,7 +9,7 @@ use std::collections::HashMap;
 
 /// A paintable Object in 3D
 ///
-/// Make object easy and easy to do something like rotate, zoom and more
+/// Make object and easy to do something like rotate, zoom and more
 /// also, it support colorful output
 ///
 /// ## Example
@@ -18,13 +18,14 @@ use std::collections::HashMap;
 /// ```no_run
 /// use rsille::{extra::Object3D, Animation};
 /// let cube = Object3D::cube(30.0);
-/// let mut anime = rsille::Animation::new();
+/// let mut anime = Animation::new();
 /// anime.push(cube, |cube| {
 ///     cube.rotate((1.0, 2.0, 3.0));
 ///     false
-/// }, (30.0, 30.0));
+/// }, (0, 0));
 /// anime.run();
 /// ```
+/// also try to not paint at *(0,0)*, at other location like *(30, -30)*
 #[derive(Debug, Clone)]
 pub struct Object3D {
     origin_vertices: Vec<Point3D>,
@@ -34,7 +35,7 @@ pub struct Object3D {
 }
 
 impl Object3D {
-    /// construct a new Object3D, with no vertices and sides
+    /// Construct a new Object3D, with no vertices and sides
     pub fn new() -> Self {
         Self {
             origin_vertices: Vec::new(),
@@ -44,12 +45,12 @@ impl Object3D {
         }
     }
 
-    /// return the vertices
+    /// Return the vertices
     pub fn vertices(&self) -> Vec<(f64, f64, f64)> {
         self.origin_vertices.iter().map(|p| p.get()).collect()
     }
 
-    /// add vertices to object
+    /// Add vertices to object
     pub fn add_points(&mut self, points: &[(f64, f64, f64)]) {
         for p in points {
             self.origin_vertices.push(Point3D::from(*p));
@@ -57,12 +58,17 @@ impl Object3D {
         self.calc_center();
     }
 
-    /// return the sides
+    /// Return the sides
     pub fn sides(&self) -> Vec<(usize, usize)> {
-        return self.sides.keys().cloned().collect();
+        self.sides.keys().cloned().collect()
     }
 
-    /// add sides to object
+    /// Add sides to object
+    /// 
+    /// For example, there is 3 vertices in the object,
+    /// you want to connect the first and the second, then it's `[0, 1]`.
+    ///
+    /// Return an error if the index is out of range, like only 3 vertices but you want to connect `[0, 4]`
     pub fn add_sides(&mut self, sides: &[(usize, usize)]) -> Result<(), RsilleErr> {
         let vn = self.origin_vertices.len();
         for side in sides {
@@ -75,7 +81,9 @@ impl Object3D {
         Ok(())
     }
 
-    /// add sides and color of those sides
+    /// Add sides and color of those sides
+    ///
+    /// Take a look at [`add_sides`](struct.Object3D.html#method.add_sides) for more information
     pub fn add_sides_colorful(
         &mut self,
         sides: &[((usize, usize), Color)],
@@ -90,40 +98,40 @@ impl Object3D {
         Ok(())
     }
 
-    /// set the color of the side
+    /// Set the color of the side
+    ///
+    /// If there isn't the side, it will do nothing
     pub fn set_side_colorful(&mut self, side: (usize, usize), color: Color) {
         if self.sides.contains_key(&side) {
             self.sides.insert(side, color);
         }
     }
 
-    /// rotate the whole object, about [rotate]
+    /// Rotate the whole object
     ///
-    /// [rotate]: <https://en.wikipedia.org/wiki/Rotation_matrix>
+    /// Normaly, the rotate won't grow the error of f64.
+    /// If the error is growing, use [`rotate_new`](struct.Object3D.html#method.rotate_new)
     pub fn rotate(&mut self, angle: (f64, f64, f64)) {
         for p in &mut self.origin_vertices {
             p.rotate(angle);
         }
     }
 
-    /// rotate the whole object, similar to [`rotate`] but will return a new Object3D
-    /// Normaly, the rotate won't grow the error of f64.
-    /// If the error is growing, use this function for return a new Object3D is useful.
-    /// But unfantunatly, it will clone the Object3D.
+    /// Rotate the whole object
     ///
-    /// [`rotate`]: struct.Object3D.html#method.rotate
+    /// Similar to [`rotate`](struct.Object3D.html#method.rotate) but will return a new Object3D
     pub fn rotate_new(&self, angle: (f64, f64, f64)) -> Self {
         let mut obj = self.clone();
         obj.rotate(angle);
         obj
     }
 
-    /// zoom the whole object
-    /// because of the implementation, it won't grow the error of f64 in most time
-    /// but if after many times call it, the error is grow, consider use [`zoom_new`]
-    /// * `factor` - magnification of zoom, must biger than 0.001
+    /// Zoom the whole object
     ///
-    /// [`zoom_new`]: struct.Object3D.html#method.zoom_new
+    /// * `factor` - magnification of zoom, must bigger than 0.001
+    ///
+    /// Because of the implementation, it won't grow the error of f64 in most time.
+    /// But if after many times call it, the error is grow, consider use [`zoom_new`](struct.Object3D.html#method.zoom_new)
     pub fn zoom(&mut self, factor: f64) {
         check_zoom(factor);
         let mut vertices = self.origin_vertices.clone();
@@ -133,11 +141,12 @@ impl Object3D {
         self.zoomed_vertices = Some(vertices);
     }
 
-    /// zoom the whole object
-    /// * `factor` - magnification of zoom, must biger than 0.001
+    /// Zoom the whole object
     ///
-    /// instead of change the original object, it returns a new one
-    /// it can forbide the growing of error of f64
+    /// * `factor` - magnification of zoom, must bigger than 0.001
+    ///
+    /// Instead of change the original object, it returns a new one.
+    /// It can forbide the growing of error of f64
     pub fn zoom_new(&self, factor: f64) -> Self {
         check_zoom(factor);
         let mut points: Vec<Point3D> = self.origin_vertices.clone();
@@ -197,8 +206,9 @@ impl Paint for Object3D {
 }
 
 impl Object3D {
-    /// make a cube
-    pub fn cube(side_len: f64) -> Object3D {
+    /// Make a cube
+    pub fn cube<T>(side_len: T) -> Object3D where T : Into<f64> {
+        let side_len = side_len.into();
         let mut object = Object3D::new();
         #[rustfmt::skip]
         // the vertices of cube

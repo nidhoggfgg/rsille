@@ -18,7 +18,7 @@ use crate::color::{Color, Colored};
 
 /// Implement this for painting on [`Canvas`](struct.Canvas.html)
 pub trait Paint: Send + 'static {
-    /// paint the object on the canvas
+    /// Paint the object on the canvas
     fn paint<T>(&self, canvas: &mut Canvas, x: T, y: T) -> Result<(), RsilleErr>
     where
         T: Into<f64>;
@@ -92,12 +92,6 @@ impl Canvas {
         N: Into<f64>,
     {
         let (x, y) = (x.into(), y.into());
-        if x < 0.0 || y < 0.0 {
-            return Err(RsilleErr::new(format!(
-                "can't paint on postion {:#?}!",
-                (x, y)
-            )));
-        }
         target.paint(self, x, y)?;
         Ok(())
     }
@@ -215,15 +209,19 @@ impl Canvas {
     ///
     /// Just use the (x, y) in your object, the algorithm will find the right location
     pub fn set<T>(&mut self, x: T, y: T)
-    where T: Into<f64> + Copy {
+    where
+        T: Into<f64> + Copy,
+    {
         self.set_at(x, y, None);
     }
 
     /// Similar to [`set`](struct.Canvas.html#method.set)
     ///
     /// But it's support color
-    pub fn set_colorful<T>(&mut self, x: T, y: T, color: Color) 
-    where T: Into<f64> + Copy {
+    pub fn set_colorful<T>(&mut self, x: T, y: T, color: Color)
+    where
+        T: Into<f64> + Copy,
+    {
         self.set_at(x, y, Some(color));
     }
 
@@ -231,15 +229,19 @@ impl Canvas {
     ///
     /// If the (x, y) is unset, then set it
     pub fn toggle<T>(&mut self, x: T, y: T)
-    where T: Into<f64> + Copy {
+    where
+        T: Into<f64> + Copy,
+    {
         self.toggle_at(x, y);
     }
 
     /// Draw a line on the canvas
     /// * `xy1` - the start location
     /// * `xy2` - the end location
-    pub fn line<T>(&mut self, xy1: (T, T), xy2: (T, T)) 
-    where T: Into<f64>{
+    pub fn line<T>(&mut self, xy1: (T, T), xy2: (T, T))
+    where
+        T: Into<f64>,
+    {
         let (x1, y1) = (round(xy1.0), round(xy1.1));
         let (x2, y2) = (round(xy2.0), round(xy2.1));
         let d = |v1, v2| {
@@ -267,7 +269,10 @@ impl Canvas {
     /// Draw a line on the canvas with the color
     /// * `xy1` - the start location
     /// * `xy2` - the end location
-    pub fn line_colorful<T>(&mut self, xy1: (T, T), xy2: (T, T), color: Color) where T : Into<f64> + Copy {
+    pub fn line_colorful<T>(&mut self, xy1: (T, T), xy2: (T, T), color: Color)
+    where
+        T: Into<f64> + Copy,
+    {
         let (x1, y1) = (round(xy1.0), round(xy1.1));
         let (x2, y2) = (round(xy2.0), round(xy2.1));
         let d = |v1, v2| {
@@ -292,7 +297,10 @@ impl Canvas {
         }
     }
 
-    fn set_at<T>(&mut self, x: T, y: T, color: Option<Color>) where T: Into<f64> + Copy {
+    fn set_at<T>(&mut self, x: T, y: T, color: Option<Color>)
+    where
+        T: Into<f64> + Copy,
+    {
         let (col, row) = self.get_pos(x, y);
         if let Some(pixel) = self.pixels.get_mut(&(col, row)) {
             pixel.set(x, y);
@@ -308,7 +316,10 @@ impl Canvas {
         }
     }
 
-    fn toggle_at<T>(&mut self, x: T, y: T) where T: Into<f64> + Copy {
+    fn toggle_at<T>(&mut self, x: T, y: T)
+    where
+        T: Into<f64> + Copy,
+    {
         let (col, row) = self.get_pos(x, y);
         if let Some(pixel) = self.pixels.get_mut(&(col, row)) {
             pixel.toggle(x, y);
@@ -354,7 +365,10 @@ impl Canvas {
     //     }
     // }
 
-    fn get_pos<T>(&mut self, x: T, y: T) -> (i32, i32) where T: Into<f64>{
+    fn get_pos<T>(&mut self, x: T, y: T) -> (i32, i32)
+    where
+        T: Into<f64>,
+    {
         let (x, y) = (x.into(), y.into());
         if x < self.minx {
             self.minx = x;
@@ -363,10 +377,10 @@ impl Canvas {
             self.miny = y;
         }
         let (col, row) = get_pos(x, y);
-        if row.abs() >= self.height {
+        if row >= self.height {
             self.height = row.abs() + 1;
         }
-        if col.abs() >= self.width {
+        if col >= self.width {
             self.width = col.abs() + 1;
         }
         (col, row)

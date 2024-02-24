@@ -33,8 +33,6 @@ where
     (col, row)
 }
 
-pub type Offset = (usize, usize);
-
 #[derive(Debug, Clone)]
 pub struct RsilleErr {
     msg: String,

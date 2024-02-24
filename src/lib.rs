@@ -88,6 +88,7 @@
 //!
 //! If you really don't know how to find the right position.
 //! Just try to paint your things at anyway and try to move it to another place and try again. :)
+//! And try to set x > 0 and y < 0, then the object will always in the screen and won't move.
 //!
 //! ## Other
 //!

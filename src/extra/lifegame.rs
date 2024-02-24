@@ -1,7 +1,7 @@
 use std::{collections::HashMap, fs, iter::Peekable, usize};
 
 use crate::{
-    utils::{Offset, RsilleErr},
+    utils::RsilleErr,
     Paint,
 };
 
@@ -11,7 +11,7 @@ type LiveCells = HashMap<(isize, isize), ()>;
 
 /// The life game
 ///
-/// It support `rle` file download from the internet!
+/// It support `rle` file download from the internet
 ///
 /// ## Example
 ///
@@ -19,36 +19,34 @@ type LiveCells = HashMap<(isize, isize), ()>;
 /// use rsille::{extra::LifeGame, Animation};
 /// let lg = LifeGame::from_path("path/to/rle").unwrap();
 /// let mut anime = Animation::new();
-/// anime.push(lg, |lg| lg.update(), (0.0, 0.0));
+/// anime.push(lg, |lg| lg.update(), (0, 0));
 /// anime.run();
 /// ```
 #[derive(Debug, Clone)]
 pub struct LifeGame {
-    offset: Offset,
     cells: LiveCells,
     // boundless: bool,
 }
 
 impl LifeGame {
-    /// return a new life game
+    /// Return a new life game
     pub fn new() -> Self {
         Self {
-            offset: (0, 0),
             cells: Default::default(),
             // boundless: true,
         }
     }
 
-    /// read the `rle` format string and build a life game from it
+    /// Read the `rle` format string and build a life game from it
     ///
-    /// return `err` when can't parse the rle string
+    /// Return `err` when can't parse the rle string
     pub fn from(rle: &str) -> Result<Self, RsilleErr> {
         parse(rle)
     }
 
-    /// read the `rle` file and build a life game from it
+    /// Read the `rle` file and build a life game from it
     ///
-    /// return `err` when can't parse the rle file or can't open file
+    /// Return `err` when can't parse the rle file or can't open file
     pub fn from_path(path: &str) -> Result<Self, RsilleErr> {
         let Ok(rle) = fs::read_to_string(path) else {
             return Err(RsilleErr::new(format!("can't open rle file: {}", path)));
@@ -56,10 +54,7 @@ impl LifeGame {
         Self::from(&rle)
     }
 
-    /// the next moment of the cells
-    ///
-    /// it will clone whole cells, maybe i will impl an inplace algorithm later.
-    /// and this algorithm is slow, maybe i would impl a better one
+    /// The next moment of the cells
     pub fn update(&mut self) -> bool {
         let mut next = self.cells.clone();
         for cell in self.cells.keys() {
@@ -80,14 +75,14 @@ impl LifeGame {
         self.cells = next;
 
         // deal the offset
-        let offset_x = self.cells.keys().min_by_key(|c| c.0).unwrap().0;
-        let offset_y = self.cells.keys().min_by_key(|c| c.1).unwrap().1;
-        if offset_x < 0 && self.offset.0 < offset_x.unsigned_abs() {
-            self.offset.0 = offset_x.unsigned_abs();
-        }
-        if offset_y < 0 && self.offset.1 < offset_y.unsigned_abs() {
-            self.offset.1 = offset_y.unsigned_abs();
-        }
+        // let offset_x = self.cells.keys().min_by_key(|c| c.0).unwrap().0;
+        // let offset_y = self.cells.keys().min_by_key(|c| c.1).unwrap().1;
+        // if offset_x < 0 && self.offset.0 < offset_x.unsigned_abs() {
+        //     self.offset.0 = offset_x.unsigned_abs();
+        // }
+        // if offset_y < 0 && self.offset.1 < offset_y.unsigned_abs() {
+        //     self.offset.1 = offset_y.unsigned_abs();
+        // }
         false
     }
 
@@ -116,10 +111,8 @@ impl Paint for LifeGame {
         T: Into<f64>,
     {
         let (x, y) = (x.into(), y.into());
-        let (dx, dy) = self.offset;
-        let (dx, dy) = (dx as isize, dy as isize);
         for cell in self.cells.keys() {
-            canvas.set(x + (cell.0 + dx) as f64, y + (cell.1 + dy) as f64);
+            canvas.set(x + cell.0 as f64, y + cell.1 as f64);
         }
         Ok(())
     }
@@ -178,7 +171,6 @@ fn parse(rle: &str) -> Result<LifeGame, RsilleErr> {
         }
     }
     Ok(LifeGame {
-        offset: (0, 0),
         cells,
         // boundless: false,
     })
