@@ -15,7 +15,7 @@
 //!     let x = x as f64;
 //!     c.set(x / 10.0, 15.0 + x.to_radians().sin() * 10.0);
 //! }
-//! println!("{}", c.render());
+//! c.print();
 //! ```
 //!
 //! draw a star
@@ -28,7 +28,7 @@
 //!     t.right(144.0);
 //! }
 //! c.paint(&t, 0.0, 15.0).unwrap();
-//! println!("{}", c.render());
+//! c.print();
 //! ```
 //!
 //! life game

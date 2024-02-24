@@ -57,7 +57,7 @@ fn main() {
         length += 0.05;
     }
     canvas.paint(&t, 50.0, 50.0).unwrap();
-    println!("{}", canvas.render());
+    canvas.print();
 }
 ```
 

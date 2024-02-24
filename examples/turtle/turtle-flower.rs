@@ -16,5 +16,5 @@ fn main() {
         }
     }
     canvas.paint(&t, 100.0, 100.0).unwrap();
-    println!("{}", canvas.render());
+    canvas.print().unwrap();
 }

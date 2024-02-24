@@ -7,16 +7,18 @@
 
 use crossterm::{cursor, execute, terminal};
 
-use crate::utils::{to_rsille_err, RsilleErr};
-
-/// get the (width, height) of terminal
-pub fn get_terminal_size() -> Result<(u16, u16), RsilleErr> {
-    terminal::size().map_err(|e| RsilleErr::new(format!("can't get terminal size: {}", e)))
+/// Get the (width, height) of terminal
+///
+/// If can't get the size, return (80, 24)
+pub fn get_terminal_size() -> (u16, u16) {
+    terminal::size().unwrap_or((80, 24))
 }
 
 /// check the terminal is in raw mode or not
-pub fn is_raw_mode() -> Result<bool, RsilleErr> {
-    terminal::is_raw_mode_enabled().map_err(to_rsille_err)
+///
+/// If can't get the mode, return false
+pub fn is_raw_mode() -> bool {
+    terminal::is_raw_mode_enabled().unwrap_or(false)
 }
 
 /// clear the screen

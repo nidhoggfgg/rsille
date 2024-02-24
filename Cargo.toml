@@ -15,6 +15,10 @@ repository = "https://github.com/nidhoggfgg/rsille.git"
 crossterm = "0.27.0"
 image = { version = "0.24.8", optional = true }
 
+[profile.release]
+lto = true
+# debug = true # only used for perf
+
 [dev-dependencies]
 criterion = "0.4"
 

@@ -14,7 +14,6 @@ use crossterm::{
 
 use crate::{
     term::{self, get_terminal_size, is_raw_mode},
-    utils::Toi32,
     Canvas, Paint,
 };
 
@@ -180,10 +179,25 @@ impl Animation {
     /// give a look at [Canvas::set_size](crate::Canvas::set_size)
     pub fn set_size<T>(&mut self, width: T, height: T)
     where
-        T: Toi32,
+        T: Into<f64>,
     {
-        let (width, height) = (width.to_i32(), height.to_i32());
         self.canvas.lock().unwrap().set_size(width, height);
+    }
+
+    /// Set the min `x` of the canvas
+    pub fn set_minx<T>(&mut self, minx: T)
+    where
+        T: Into<f64>,
+    {
+        self.canvas.lock().unwrap().set_minx(minx);
+    }
+
+    /// Set the max `y` of the canvas
+    pub fn set_maxy<T>(&mut self, maxy: T)
+    where
+        T: Into<f64>,
+    {
+        self.canvas.lock().unwrap().set_maxy(maxy);
     }
 
     // only used in run!
@@ -194,16 +208,15 @@ impl Animation {
         } else {
             return;
         };
-        if !is_raw_mode().unwrap() {
+        if !is_raw_mode() {
             return;
         }
-        if let Ok((rows, cols)) = get_terminal_size() {
-            if (rows as i32) < size.0 || (cols as i32) < size.1 {
-                println!(
-                    "this anime need at least {}x{} terminal size, but only {}x{}",
-                    size.1, size.0, cols, rows
-                );
-            }
+        let (rows, cols) = get_terminal_size();
+        if (rows as i32) < size.0 || (cols as i32) < size.1 {
+            println!(
+                "this anime need at least {}x{} terminal size, but only {}x{}",
+                size.1, size.0, cols, rows
+            );
         }
     }
 }

@@ -19,20 +19,15 @@ pub fn check_zoom(v: f64) {
     }
 }
 
-pub type Offset = (usize, usize);
+// the the (col, row) of (x, y)
+pub fn get_pos(x: f64, y: f64) -> (i32, i32) {
+    let (x, y) = (round(x), round(y));
+    let row = if y < 0 { (y + 1) / 4 - 1 } else { y / 4 };
+    let col = if x < 0 { (x - 1) / 2 } else { x / 2 };
+    (col, row)
+}
 
-// a multi-type mean function, but it's too complex
-// pub fn mean<'a, T>(a: &'a [T]) -> f64
-// where
-//     T: 'a
-//         + std::iter::Sum<&'a T>
-//         + std::iter::Sum<&'a T>
-//         + std::ops::Div<Output = f64>
-//         + std::convert::From<usize>,
-// {
-//     let sum = a.iter().sum::<T>();
-//     sum / a.len().try_into().expect("")
-// }
+pub type Offset = (usize, usize);
 
 #[derive(Debug, Clone)]
 pub struct RsilleErr {
@@ -55,46 +50,46 @@ impl fmt::Display for RsilleErr {
     }
 }
 
-pub trait Toi32 {
-    fn to_i32(&self) -> i32;
-}
-
-impl Toi32 for f64 {
-    fn to_i32(&self) -> i32 {
-        self.round() as i32
-    }
-}
-
-impl Toi32 for f32 {
-    fn to_i32(&self) -> i32 {
-        self.round() as i32
-    }
-}
-
-impl Toi32 for i32 {
-    fn to_i32(&self) -> i32 {
-        *self
-    }
-}
-
-// bad, but it's simple :)
-// only for usize, isize, i64, u64 and so on
-macro_rules! impl_round {
-    ($t:ty) => {
-        impl Toi32 for $t {
-            #[inline]
-            fn to_i32(&self) -> i32 {
-                *self as i32
-            }
-        }
-    };
-}
-
-impl_round!(usize);
-impl_round!(isize);
-impl_round!(u64);
-impl_round!(i64);
-impl_round!(u16);
-impl_round!(i16);
-impl_round!(u8);
-impl_round!(i8);
+// pub trait Toi32 {
+//     fn to_i32(&self) -> i32;
+// }
+//
+// impl Toi32 for f64 {
+//     fn to_i32(&self) -> i32 {
+//         self.round() as i32
+//     }
+// }
+//
+// impl Toi32 for f32 {
+//     fn to_i32(&self) -> i32 {
+//         self.round() as i32
+//     }
+// }
+//
+// impl Toi32 for i32 {
+//     fn to_i32(&self) -> i32 {
+//         *self
+//     }
+// }
+//
+// // bad, but it's simple :)
+// // only for usize, isize, i64, u64 and so on
+// macro_rules! impl_round {
+//     ($t:ty) => {
+//         impl Toi32 for $t {
+//             #[inline]
+//             fn to_i32(&self) -> i32 {
+//                 *self as i32
+//             }
+//         }
+//     };
+// }
+//
+// impl_round!(usize);
+// impl_round!(isize);
+// impl_round!(u64);
+// impl_round!(i64);
+// impl_round!(u16);
+// impl_round!(i16);
+// impl_round!(u8);
+// impl_round!(i8);

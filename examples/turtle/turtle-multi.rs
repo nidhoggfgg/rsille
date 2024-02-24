@@ -30,7 +30,7 @@ fn circle() -> (Turtle, (f64, f64)) {
     let mut t = Turtle::new();
     t.color(Color::AnsiValue(123));
     t.circle(30.0, 360.0);
-    (t, (130.0, 80.0))
+    (t, (123.0, 150.0))
 }
 
 fn star6() -> (Turtle, (f64, f64)) {
@@ -53,5 +53,5 @@ fn main() {
     for (t, (x, y)) in things {
         canvas.paint(&t, x, y).unwrap();
     }
-    println!("{}", canvas.render());
+    canvas.print().unwrap();
 }

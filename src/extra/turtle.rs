@@ -35,7 +35,7 @@ use crate::color::Color;
 ///     length += 0.05;
 /// }
 /// canvas.paint(&t, 50.0, 50.0).unwrap();
-/// println!("{}", canvas.render());
+/// canvas.print();
 /// ```
 ///
 /// or a animation
@@ -348,7 +348,7 @@ impl Paint for Turtle {
                     (x, y) = forward(canvas, x, y, heading, pen, *step, color);
                 }
                 Right(angle) => {
-                    heading += angle;
+                    heading -= angle;
                 }
                 Teleport(tx, ty) => {
                     x = *tx;
