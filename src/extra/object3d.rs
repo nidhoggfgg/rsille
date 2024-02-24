@@ -174,7 +174,11 @@ impl Object3D {
 }
 
 impl Paint for Object3D {
-    fn paint(&self, canvas: &mut Canvas, x: f64, y: f64) -> Result<(), RsilleErr> {
+    fn paint<T>(&self, canvas: &mut Canvas, x: T, y: T) -> Result<(), RsilleErr>
+    where
+        T: Into<f64>,
+    {
+        let (x, y) = (x.into(), y.into());
         let points = if let Some(p) = &self.zoomed_vertices {
             p
         } else {

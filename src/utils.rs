@@ -4,8 +4,11 @@ use std::error::Error;
 pub const MIN_ZOOM: f64 = 0.001;
 pub const MIN_DIFFERENCE: f64 = 1E-10;
 
-pub fn round(v: f64) -> i32 {
-    v.round() as i32
+pub fn round<T>(v: T) -> i32
+where
+    T: Into<f64>,
+{
+    v.into().round() as i32
 }
 
 pub fn mean(a: &[f64]) -> f64 {
@@ -20,7 +23,10 @@ pub fn check_zoom(v: f64) {
 }
 
 // the the (col, row) of (x, y)
-pub fn get_pos(x: f64, y: f64) -> (i32, i32) {
+pub fn get_pos<T>(x: T, y: T) -> (i32, i32)
+where
+    T: Into<f64>,
+{
     let (x, y) = (round(x), round(y));
     let row = if y < 0 { (y + 1) / 4 - 1 } else { y / 4 };
     let col = if x < 0 { (x - 1) / 2 } else { x / 2 };

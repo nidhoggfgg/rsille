@@ -62,20 +62,16 @@ impl Colored {
     }
 }
 
-impl PixelOp for Colored {
-    fn set(&mut self, x: f64, y: f64) {
+impl<T> PixelOp<T> for Colored where T: Into<f64> + Copy {
+    fn set(&mut self, x: T, y: T) {
         self.pixel.set(x, y);
     }
 
-    fn unset(&mut self, x: f64, y: f64) {
+    fn unset(&mut self, x: T, y: T) {
         self.pixel.unset(x, y);
     }
 
-    fn toggle(&mut self, x: f64, y: f64) {
+    fn toggle(&mut self, x: T, y: T) {
         self.pixel.toggle(x, y);
-    }
-
-    fn fill(&mut self) {
-        self.pixel.fill();
     }
 }

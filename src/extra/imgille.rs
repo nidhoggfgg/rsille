@@ -75,7 +75,10 @@ impl Imgille {
 }
 
 impl Paint for Imgille {
-    fn paint(&self, canvas: &mut crate::Canvas, x: f64, y: f64) -> Result<(), RsilleErr> {
+    fn paint<T>(&self, canvas: &mut crate::Canvas, x: T, y: T) -> Result<(), RsilleErr>
+    where
+        T: Into<f64>,
+    {
         // some example for resize the image (terminal size is 80*24):
         // 800*240 -> 160*48 (fit the width)
         // 800*120 -> 160*48 (fit the width)
@@ -89,6 +92,7 @@ impl Paint for Imgille {
         // can't stand use the fill anymore, even it would be musch faster
 
         // calculate the rest size of the terminal
+        let (x, y) = (x.into(), y.into());
         let (rest_width, rest_height) = get_rest_size(x, y);
         let (img_width, img_height) = (self.img.width(), self.img.height());
 
@@ -189,7 +193,10 @@ impl Paint for Imgille {
     }
 }
 
-fn get_rest_size(x: f64, y: f64) -> (u32, u32) {
+fn get_rest_size<T>(x: T, y: T) -> (u32, u32)
+where
+    T: Into<f64>,
+{
     // calculate the rest size of the terminal
     let (tw, th) = get_terminal_size();
     let (start_col, start_row) = get_pos(x, y);

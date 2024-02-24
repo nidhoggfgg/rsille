@@ -111,7 +111,11 @@ impl LifeGame {
 }
 
 impl Paint for LifeGame {
-    fn paint(&self, canvas: &mut crate::Canvas, x: f64, y: f64) -> Result<(), RsilleErr> {
+    fn paint<T>(&self, canvas: &mut crate::Canvas, x: T, y: T) -> Result<(), RsilleErr>
+    where
+        T: Into<f64>,
+    {
+        let (x, y) = (x.into(), y.into());
         let (dx, dy) = self.offset;
         let (dx, dy) = (dx as isize, dy as isize);
         for cell in self.cells.keys() {

@@ -63,16 +63,17 @@ impl Animation {
     /// * `obj` - the object to paint
     /// * `f` - the function to update the object
     /// * `xy` - the position to paint the object
-    pub fn push<T, F>(&mut self, obj: T, f: F, xy: (f64, f64))
+    pub fn push<T, F, N>(&mut self, obj: T, f: F, xy: (N, N))
     where
         T: Paint,
         F: FnMut(&mut T) -> bool + Send + 'static,
+        N: Into<f64> + Copy,
     {
         let mut objs = self.objs.lock().unwrap();
         objs.push(Box::new(UserObj {
             obj,
             f,
-            xy,
+            xy: (xy.0.into(), xy.1.into()),
             is_end: false,
         }));
     }
@@ -170,7 +171,7 @@ impl Animation {
     }
 
     /// hide the cursor or not
-    pub fn set_cursor(&mut self, hide_cursor: bool) {
+    pub fn hide_cursor(&mut self, hide_cursor: bool) {
         self.hide_cursor = hide_cursor;
     }
 
@@ -195,7 +196,7 @@ impl Animation {
     /// Set the max `y` of the canvas
     pub fn set_maxy<T>(&mut self, maxy: T)
     where
-        T: Into<f64>,
+        T: Into<f64> + Copy,
     {
         self.canvas.lock().unwrap().set_maxy(maxy);
     }

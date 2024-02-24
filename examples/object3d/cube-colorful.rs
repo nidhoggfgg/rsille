@@ -68,9 +68,11 @@ fn main() {
             obj.rotate(angle);
             obj.zoom(f);
             k += 1;
-            k < 180
+            k > 180
         },
-        (1.5 * side_len, 1.5 * side_len),
+        (0.0, 0.0),
     );
+    anime.set_size(1.5 * side_len, 1.5 * side_len);
+    anime.set_minx(-1.5 * side_len);
     anime.run();
 }

@@ -101,51 +101,51 @@ impl Turtle {
 
     /// Move the turtle forward by the specified distance, in the direction the turtle is headed.
     /// * `step` - the distance
-    pub fn forward(&mut self, step: f64) {
-        self.add_procedure(Procedure::Forward(step));
+    pub fn forward<T>(&mut self, step: T) where T: Into<f64> {
+        self.add_procedure(Procedure::Forward(step.into()));
     }
 
     /// alias: [`forward`](struct.Turtle.html#method.forward)
-    pub fn fd(&mut self, step: f64) {
+    pub fn fd<T>(&mut self, step: T) where T: Into<f64> {
         self.forward(step);
     }
 
     /// Move the turtle backward by distance, opposite to the direction the turtle is headed.
     /// It won't change the turtle’s heading.
     /// * `step` - the distance
-    pub fn backward(&mut self, step: f64) {
-        self.forward(-step);
+    pub fn backward<T>(&mut self, step: T) where T: Into<f64> {
+        self.forward(-step.into());
     }
 
     /// alias: [`backward`](struct.Turtle.html#method.backward)
-    pub fn back(&mut self, step: f64) {
+    pub fn back<T>(&mut self, step: T) where T: Into<f64> {
         self.backward(step);
     }
 
     /// alias: [`backward`](struct.Turtle.html#method.backward)
-    pub fn bk(&mut self, step: f64) {
+    pub fn bk<T>(&mut self, step: T) where T: Into<f64> {
         self.backward(step);
     }
 
     /// Turn turtle right by angle units.
     /// * `angle` - the degree
-    pub fn right(&mut self, angle: f64) {
-        self.add_procedure(Procedure::Right(angle));
+    pub fn right<T>(&mut self, angle: T) where T: Into<f64> {
+        self.add_procedure(Procedure::Right(angle.into()));
     }
 
     /// alias: [`right`](struct.Turtle.html#method.right)
-    pub fn rt(&mut self, angle: f64) {
+    pub fn rt<T>(&mut self, angle: T) where T: Into<f64> {
         self.right(angle);
     }
 
     /// Turn turtle left by angle units.
     /// * `angle` - the degree
-    pub fn left(&mut self, angle: f64) {
-        self.right(-angle);
+    pub fn left<T>(&mut self, angle: T) where T: Into<f64> {
+        self.right(-angle.into());
     }
 
     /// alias: [`left`](struct.Turtle.html#method.left)
-    pub fn lt(&mut self, angle: f64) {
+    pub fn lt<T>(&mut self, angle: T) where T: Into<f64> {
         self.left(angle);
     }
 
@@ -153,8 +153,8 @@ impl Turtle {
     /// The center is radius units left of the turtle;
     /// * `extent` – an angle – determines which part of the circle is drawn. If extent is not a full circle, one endpoint of the arc is the current pen position.
     /// * `radius` - Draw the arc in counterclockwise direction if radius is positive, otherwise in clockwise direction. Finally the direction of the turtle is changed by the amount of extent.
-    pub fn circle(&mut self, radius: f64, extent: f64) {
-        self.add_procedure(Procedure::Circle(radius, extent, 100));
+    pub fn circle<T>(&mut self, radius: T, extent: T) where T: Into<f64> {
+        self.add_procedure(Procedure::Circle(radius.into(), extent.into(), 100));
     }
 
     /// Draw a circle with given radius.
@@ -164,22 +164,22 @@ impl Turtle {
     /// * `steps` - Suggest 100. As the circle is approximated by an inscribed regular polygon, steps determines the number of steps to use.
     ///
     /// suggest use [`circle`](struct.Turtle.html#method.circle)
-    pub fn circle_with_steps(&mut self, radius: f64, extent: f64, steps: usize) {
-        self.add_procedure(Procedure::Circle(radius, extent, steps));
+    pub fn circle_with_steps<T>(&mut self, radius: T, extent: T, steps: usize) where T: Into<f64> {
+        self.add_procedure(Procedure::Circle(radius.into(), extent.into(), steps));
     }
 
     /// Move turtle to an absolute position. If the pen is down, draw line.
     /// * `x` - the position of x
     /// * `y` - the position of y
-    pub fn goto(&mut self, x: f64, y: f64) {
-        self.add_procedure(Procedure::Goto(x, y));
+    pub fn goto<T>(&mut self, x: T, y: T) where T : Into<f64>{
+        self.add_procedure(Procedure::Goto(x.into(), y.into()));
     }
 
     /// Move turtle to an absolute position and a line will not be drawn.
     /// * `x` - the position of x
     /// * `y` - the position of y
-    pub fn teleport(&mut self, x: f64, y: f64) {
-        self.add_procedure(Procedure::Teleport(x, y));
+    pub fn teleport<T>(&mut self, x: T, y: T) where T: Into<f64> {
+        self.add_procedure(Procedure::Teleport(x.into(), y.into()));
     }
 
     /// Move turtle to the origin – coordinates (0,0) – and set its heading to its start-orientation
@@ -283,8 +283,8 @@ impl Turtle {
     /// * but *forward(5.0) -> forward(5.0)*
     ///
     /// Beacuse like *forward(5.0), right(10.0), forward(5.0)* can't fold to *forward(10.0), right(10.0)*
-    pub fn set_anime_step(&mut self, step: f64) {
-        self.anime_step = step;
+    pub fn set_anime_step<T>(&mut self, step: T) where T: Into<f64> {
+        self.anime_step = step.into();
     }
 
     fn add_procedure(&mut self, p: Procedure) {
@@ -325,8 +325,12 @@ fn forward(
 }
 
 impl Paint for Turtle {
-    fn paint(&self, canvas: &mut Canvas, x: f64, y: f64) -> Result<(), RsilleErr> {
+    fn paint<T>(&self, canvas: &mut Canvas, x: T, y: T) -> Result<(), RsilleErr>
+    where
+        T: Into<f64>,
+    {
         use Procedure::*;
+        let (x, y) = (x.into(), y.into());
         let (home_x, home_y) = (x, y);
         let (mut pen, mut heading, mut x, mut y) = (true, 0.0, x, y);
         let mut color = Color::Reset;

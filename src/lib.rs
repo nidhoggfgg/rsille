@@ -50,6 +50,47 @@
 //! 3. [`Imagille`](extra/struct.Imgille.html) paint image to braille code
 //! 4. [`Lifegame`](extra/struct.LifeGame.html) the life game in braille code
 //!
+//! ## NOTE
+//!
+//! About (x, y), you can simply put on (0.0, 0.0) for one object, it will find the right position to paint.
+//! But if you want to build a animation or paint multiple objects,
+//! you may should find the right position by yourself.
+//!
+//! For example, this is a dot:
+//! ```text
+//! $ ./path/to/file # your terminal
+//! +--------+--------> x
+//! |         
+//! |
+//! +        ⣿
+//! |
+//! |
+//! v y
+//! ```
+//! This dot in terminal is (10, 4), because the left top corner is (1, 1).
+//! The y-axis is also facing down.
+//! It's different from the math coordinate system.
+//!
+//! But in the canvas, it's use the math coordinate system, and include the braille.
+//! Like a braille code "⣿", it has 2x4 dots, and it be thought as 8 dots not 1 dots.
+//! In the canvas, this dots B is `x` from 18.0 to 19.0, `y` from 8.0 to 11.0.
+//! And the dot A (the left top) is on (4.0, 11.0).
+//! ```text
+//! ^ y
+//! |         
+//! | A      B
+//! + ⠁      ⣿
+//! |
+//! |
+//! +--------+--------> x
+//! 0.0
+//! ```
+//!
+//! If you really don't know how to find the right position.
+//! Just try to paint your things at anyway and try to move it to another place and try again. :)
+//!
+//! ## Other
+//!
 //! It's inspired by [drawille], but it has more features and fast
 //!
 //! [braille]: http://www.alanwood.net/unicode/braille_patterns.html
