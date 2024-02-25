@@ -64,7 +64,7 @@ impl Object3D {
     }
 
     /// Add sides to object
-    /// 
+    ///
     /// For example, there is 3 vertices in the object,
     /// you want to connect the first and the second, then it's `[0, 1]`.
     ///
@@ -207,7 +207,10 @@ impl Paint for Object3D {
 
 impl Object3D {
     /// Make a cube
-    pub fn cube<T>(side_len: T) -> Object3D where T : Into<f64> {
+    pub fn cube<T>(side_len: T) -> Object3D
+    where
+        T: Into<f64>,
+    {
         let side_len = side_len.into();
         let mut object = Object3D::new();
         #[rustfmt::skip]

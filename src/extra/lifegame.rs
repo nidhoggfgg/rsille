@@ -1,9 +1,6 @@
 use std::{collections::HashMap, fs, iter::Peekable, usize};
 
-use crate::{
-    utils::RsilleErr,
-    Paint,
-};
+use crate::{utils::RsilleErr, Paint};
 
 // same as HashSet<(isize, isize)>
 // but when using inplace algorithms, just simply change () to bool or u8
