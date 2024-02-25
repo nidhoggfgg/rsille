@@ -53,5 +53,5 @@ fn main() {
     for (t, (x, y)) in things {
         canvas.paint(&t, x, y).unwrap();
     }
-    canvas.print().unwrap();
+    canvas.print();
 }

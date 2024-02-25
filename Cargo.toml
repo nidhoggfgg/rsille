@@ -1,6 +1,6 @@
 [package]
 name = "rsille"
-version = "2.1.0"
+version = "2.1.1"
 edition = "2021"
 authors = ["nidhoggfgg <nidhoggfgg@gmail.com>"]
 description = "A full feature braille code art lib"
@@ -61,3 +61,8 @@ path = "examples/turtle/turtle-flower.rs"
 [[example]]
 name = "turtle-multi"
 path = "examples/turtle/turtle-multi.rs"
+
+[[example]]
+name = "imgille"
+path = "examples/imgille.rs"
+required-features = ["img"]

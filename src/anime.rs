@@ -118,7 +118,7 @@ impl Animation {
                     obj.paint(&mut canvas);
                 }
                 // canvas.print_on(&mut stdout, true).unwrap();
-                canvas.print().unwrap();
+                canvas.print();
                 stdout.flush().unwrap();
             }
             let elapsed = start_time.elapsed();

@@ -7,7 +7,7 @@ fn main() {
         let x = x as f64;
         c.set(x / 10.0, 15.0 + x.to_radians().sin() * 10.0);
     }
-    c.print().unwrap();
+    c.print();
     c.reset();
 
     for x in (0..1800).step_by(10) {
@@ -15,14 +15,14 @@ fn main() {
         c.set(x / 10.0, 10.0 + x.to_radians().sin() * 10.0);
         c.set(x / 10.0, 10.0 + x.to_radians().cos() * 10.0);
     }
-    c.print().unwrap();
+    c.print();
     c.reset();
 
     for x in (0..3600).step_by(20) {
         let x = x as f64;
         c.set(x / 20.0, 4.0 + x.to_radians().sin() * 4.0);
     }
-    c.print().unwrap();
+    c.print();
     c.reset();
 
     for x in (0..360).step_by(4) {
@@ -38,5 +38,5 @@ fn main() {
             c.toggle(x + 60.0, y);
         }
     }
-    c.print().unwrap();
+    c.print();
 }

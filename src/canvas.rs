@@ -99,11 +99,10 @@ impl Canvas {
     /// Print the canvas to the terminal
     ///
     /// If you want to print the canvas to a buffer, use the [`print_on`](struct.Canvas.html#method.print_on)
-    pub fn print(&self) -> Result<(), RsilleErr> {
+    pub fn print(&self) {
         let is_raw = is_raw_mode();
         let mut stdout = std::io::stdout();
-        self.print_on(&mut stdout, is_raw)?;
-        Ok(())
+        self.print_on(&mut stdout, is_raw).unwrap();
     }
 
     /// Print the canvas to the buffer

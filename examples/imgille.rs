@@ -14,7 +14,7 @@ fn main() {
             return;
         };
         canvas.paint(&imgille, 0.0, 0.0).unwrap();
-        canvas.print().unwrap();
+        canvas.print();
     } else {
         println!("useage: [{}] <path>", args[0]);
     }

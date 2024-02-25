@@ -31,7 +31,7 @@ use crate::color::Color;
 ///     length += 0.05;
 /// }
 /// canvas.paint(&t, 0, 0).unwrap();
-/// canvas.print().unwrap();
+/// canvas.print();
 /// ```
 ///
 /// or a animation

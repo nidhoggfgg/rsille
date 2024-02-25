@@ -19,7 +19,7 @@ use image::{
 /// let mut canvas = Canvas::new();
 /// let imgille = Imgille::new(path).unwrap();
 /// canvas.paint(&imgille, 0, 0).unwrap();
-/// canvas.print().unwrap();
+/// canvas.print();
 /// ```
 ///
 /// ## NOTE
@@ -135,9 +135,9 @@ impl Paint for Imgille {
                 for nx in 0..iw {
                     let pixel = img.get_pixel(nx, ny);
                     let if_draw = if self.invert {
-                        (pixel.0)[0] < self.thresholds
-                    } else {
                         (pixel.0)[0] > self.thresholds
+                    } else {
+                        (pixel.0)[0] < self.thresholds
                     };
                     if if_draw {
                         canvas.set(x + nx as f64, y + (ih - ny) as f64);

@@ -71,15 +71,6 @@ impl LifeGame {
         }
         self.cells = next;
 
-        // deal the offset
-        // let offset_x = self.cells.keys().min_by_key(|c| c.0).unwrap().0;
-        // let offset_y = self.cells.keys().min_by_key(|c| c.1).unwrap().1;
-        // if offset_x < 0 && self.offset.0 < offset_x.unsigned_abs() {
-        //     self.offset.0 = offset_x.unsigned_abs();
-        // }
-        // if offset_y < 0 && self.offset.1 < offset_y.unsigned_abs() {
-        //     self.offset.1 = offset_y.unsigned_abs();
-        // }
         false
     }
 
@@ -193,6 +184,10 @@ where
                 .parse()
                 .unwrap();
             return Ok((width, height));
+        }
+        if line.is_empty() {
+            lines.next();
+            continue;
         }
     }
     Err(RsilleErr::new("can't parse width or height".to_string()))
