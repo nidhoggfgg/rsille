@@ -2,7 +2,11 @@
 
 # Rsille 🎨
 
-![GitHub Repo stars](https://img.shields.io/github/stars/nidhoggfgg/rsille) ![GitHub License](https://img.shields.io/github/license/nidhoggfgg/rsille) ![Crates.io Version](https://img.shields.io/crates/v/rsille) ![Crates.io Total Downloads](https://img.shields.io/crates/d/rsille) ![docs.rs](https://img.shields.io/docsrs/rsille)
+[![GitHub License](https://img.shields.io/github/license/nidhoggfgg/rsille?style=for-the-badge)](./LICENCE)
+[![Crates.io Version](https://img.shields.io/crates/v/rsille?style=for-the-badge)](https://crates.io/crates/rsille/versions)
+[![Crates.io Total Downloads](https://img.shields.io/crates/d/rsille?style=for-the-badge)](https://crates.io/crates/rsille)
+[![docs.rs](https://img.shields.io/docsrs/rsille?style=for-the-badge)](https://docs.rs/rsille/latest/rsille/)
+
 
 [English](./README.md) • [中文](./README_cn.md)
 
