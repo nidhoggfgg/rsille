@@ -28,6 +28,10 @@ impl Pixel {
     pub fn new() -> Self {
         Self { code: 0 }
     }
+
+    pub unsafe fn from_unchecked(code: u32) -> Self {
+        Self { code }
+    }
 }
 
 pub trait PixelOp<T>

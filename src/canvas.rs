@@ -328,42 +328,6 @@ impl Canvas {
         }
     }
 
-    // those fill methods are broke the canvas, it's useless and hard to use (even for me)
-    // and those code are wrong with the (width, height) and (minx, miny)
-    // it's very dangerous, so use them only checked them.
-    // /// Fill ⣿ at the (x, y)
-    // ///
-    // /// The (x, y) is the location on canvas.
-    // /// And it's hard to use it rightly
-    // ///
-    // /// So don't use it unless you know what you are doing!
-    // pub fn fill(&mut self, x: f64, y: f64) {
-    //     self.fill_at(x, y, None);
-    // }
-
-    // /// Similar to [`set_fill`](struct.Canvas.html#method.set_fill), but support color
-    // ///
-    // /// Don't use it unless you know what you are doing!
-    // pub fn fill_colorful(&mut self, x: f64, y: f64, color: Color) {
-    //     self.fill_at(x, y, Some(color));
-    // }
-
-    // fn fill_at(&mut self, x: f64, y: f64, color: Option<Color>) {
-    //     let (col, row) = (x.round() as i32, y.round() as i32); // not get_pos
-    //     if let Some(pixel) = self.pixels.get_mut(&(col, row)) {
-    //         pixel.fill();
-    //     } else {
-    //         self.pixels.insert((col, row), Colored::new());
-    //         self.pixels.get_mut(&(col, row)).unwrap().fill();
-    //     }
-    //     if let Some(color) = color {
-    //         self.pixels
-    //             .get_mut(&(col, row))
-    //             .unwrap()
-    //             .set_foregound_color(color);
-    //     }
-    // }
-
     fn get_pos<T>(&mut self, x: T, y: T) -> (i32, i32)
     where
         T: Into<f64>,

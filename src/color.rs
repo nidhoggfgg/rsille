@@ -44,6 +44,16 @@ impl Colored {
         }
     }
 
+    pub(crate) unsafe fn from_unchecked(pixel: u32) -> Self {
+        Self {
+            pixel: Pixel::from_unchecked(pixel),
+            color: Colors {
+                foreground: None,
+                background: None,
+            },
+        }
+    }
+
     pub(crate) fn set_foregound_color(&mut self, color: Color) {
         self.color.foreground = Some(color);
     }

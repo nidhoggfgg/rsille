@@ -50,6 +50,9 @@ This will generate a rotating cube.
 
 For more examples or to try generating those interesting patterns yourself, you can use `cargo run --example`, and you'll find all the executable examples without programming.
 
+Sure, there is more examples, like [bad-apple](./imgs/bad-apple.gif) and so on.
+You can check the usage to know how to use this lib.
+
 ## 🔧 Installation
 
 This is a Rust library, so all you need to do is add the following code to your Cargo.toml to use it:

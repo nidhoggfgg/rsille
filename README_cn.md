@@ -40,6 +40,9 @@ cargo run --example cube
 这会产生一个旋转的正方体。
 关于更多例子或者想自己尝试生成那些有趣的图案，可以尝试使用 `cargo run --example`，你会找到所有的可执行的例子而无需编程。
 
+当然，还有更多的例子，比如 [bad-apple](./imgs/bad-apple.gif) 等。
+下方的使用指南会教你如何使用这个库。
+
 ## 🔧 安装
 
 这是一个 rust 库，所以你只需要将如下代码添加到你的 Cargo.toml 中即可使用
