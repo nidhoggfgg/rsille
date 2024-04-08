@@ -144,6 +144,9 @@ impl Animation {
                     }
                     *end = true;
                 };
+                if let Event::Resize(_, _) = event {
+                    term::clear();
+                }
                 if let Event::Key(key) = event {
                     if key.code == KeyCode::Esc {
                         end_fn();

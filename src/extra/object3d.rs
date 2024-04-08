@@ -159,6 +159,19 @@ impl Object3D {
         }
     }
 
+    /// Take a closure and run it on all vertices
+    pub fn map<F>(&mut self, f: F)
+    where
+        F: Fn(f64, f64, f64) -> (f64, f64, f64),
+    {
+        for p in &mut self.origin_vertices {
+            let (x, y, z) = f(p.x, p.y, p.z);
+            p.x = x;
+            p.y = y;
+            p.z = z;
+        }
+    }
+
     fn calc_center(&mut self) {
         let (mut xs, mut ys, mut zs) = (Vec::new(), Vec::new(), Vec::new());
         for p in &self.origin_vertices {
