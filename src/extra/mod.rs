@@ -3,6 +3,7 @@
 #[cfg(feature = "img")]
 mod imgille;
 mod lifegame;
+pub mod math;
 mod object3d;
 mod turtle;
 
