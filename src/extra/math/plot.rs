@@ -1,3 +1,5 @@
+use std::iter::zip;
+
 use crate::Paint;
 
 pub struct Plot<F> {
@@ -6,6 +8,8 @@ pub struct Plot<F> {
     range: (f64, f64),
     scale: (f64, f64),
     show_axis: bool,
+    boxed: bool,
+    padding: f64,
 }
 
 impl<F> Plot<F>
@@ -25,7 +29,9 @@ where
             range: (start, end),
             step: 0.01,
             scale: (10.0, 10.0),
-            show_axis: true
+            show_axis: true,
+            boxed: true,
+            padding: 10.0
         }
     }
 }
@@ -42,35 +48,40 @@ where
     ) -> Result<(), crate::utils::RsilleErr>
     where
         T: Into<f64>,
-    {   
+    {
         let (x, y) = (x.into(), y.into());
-        let (mut px, end) = self.range;
+        let (start, end) = self.range;
+        let mut px = start;
         let (sx, sy) = self.scale;
-        let (mut minx, mut maxx) = (px, end);
-        let (mut miny, mut maxy) = ((self.fny)(px), (self.fny)(px));
+        let mut xs = Vec::new();
+        let mut ys = Vec::new();
+        // the lost of f64 isn't a big deal, loop 101 or 100 times won't be a problem
         loop {
             if px > end {
                 break;
             }
             let py = (self.fny)(px);
-            canvas.set(x + px * sx, y + py * sy);
+            xs.push(px);
+            ys.push(py);
             px += self.step;
-            if minx > px {
-                minx = px;
-            }
-            if maxx < px {
-                maxx = px;
-            }
-            if miny > py {
-                miny = py;
-            }
-            if maxy < py {
-                maxy = py;
-            }
+        }
+        for (px, py) in zip(&xs, &ys) {
+            canvas.set(x + px * sx, y + py * sy)
         }
         if self.show_axis {
-            canvas.line((x + minx * sx, 0.0), (x + maxx * sx, 0.0));
-            canvas.line((0.0, y + miny * sy), (0.0, y + maxy * sy));
+            let pad = self.padding;
+            let miny = ys.iter().fold(f64::INFINITY, |a, &b| a.min(b));
+            let maxy = ys.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b));
+            let (start_x, start_y) = (x + start * sx - pad, y + miny * sy - pad);
+            let (end_x, end_y) = (x + end * sx + pad, y + maxy * sy + pad);
+            canvas.line_any((start_x, start_y), (end_x, start_y), '─', None);
+            canvas.line_any((start_x, start_y), (start_x, end_y), '│', None);
+            canvas.line_any((end_x, end_y), (start_x, end_y), '─', None);
+            canvas.line_any((end_x, end_y), (end_x, start_y), '│', None);
+            canvas.put(start_x, start_y, '└', None);
+            canvas.put(start_x, end_y, '┌', None);
+            canvas.put(end_x, start_y, '┘', None);
+            canvas.put(end_x, end_y, '┐', None);
         }
         Ok(())
     }

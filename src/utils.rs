@@ -6,19 +6,19 @@ use crate::braille::Pixel;
 pub const MIN_ZOOM: f64 = 0.001;
 pub const MIN_DIFFERENCE: f64 = 1E-10;
 
-pub fn round<T>(v: T) -> i32
+pub(crate) fn round<T>(v: T) -> i32
 where
     T: Into<f64>,
 {
     v.into().round() as i32
 }
 
-pub fn mean(a: &[f64]) -> f64 {
+pub(crate) fn mean(a: &[f64]) -> f64 {
     let sum = a.iter().sum::<f64>();
     sum / a.len() as f64
 }
 
-pub fn check_zoom(v: f64) {
+pub(crate) fn check_zoom(v: f64) {
     if v <= MIN_ZOOM {
         panic!("zoom too small!");
     }
@@ -36,7 +36,7 @@ where
 }
 
 #[allow(unused)]
-pub fn make_braille(c: char) -> Option<Pixel> {
+pub(crate) fn make_braille(c: char) -> Option<Pixel> {
     let c = c as u32;
     if (0x2800..=0x28FF).contains(&c) {
         unsafe { Some(Pixel::from_unchecked(c - 0x2800)) }

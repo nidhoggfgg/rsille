@@ -88,3 +88,39 @@ where
         self.pixel.toggle(x, y);
     }
 }
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ColoredChar {
+    c: char,
+    color: Colors,
+}
+
+#[allow(unused)]
+impl ColoredChar {
+    pub(crate) fn new(c: char) -> Self {
+        Self {
+            c,
+            color: Colors {
+                foreground: None,
+                background: None
+            }
+        }
+    }
+
+    pub(crate) fn set_foregound_color(&mut self, color: Color) {
+        self.color.foreground = Some(color);
+    }
+
+    pub(crate) fn set_background_color(&mut self, color: Color) {
+        self.color.background = Some(color);
+    }
+
+    pub(crate) fn queue(&self, buffer: &mut impl io::Write) -> io::Result<()> {
+        queue!(
+            buffer,
+            SetColors(self.color),
+            Print(format!("{}", self.c)),
+            ResetColor
+        )
+    }
+}

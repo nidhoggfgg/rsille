@@ -6,7 +6,7 @@ use std::{cmp, collections::HashMap};
 
 use crossterm::{cursor::MoveToNextLine, queue, style::Print};
 
-use crate::braille;
+use crate::{braille, color};
 use crate::utils::get_pos;
 use crate::{
     braille::PixelOp,
@@ -14,7 +14,7 @@ use crate::{
     utils::{round, to_rsille_err, RsilleErr},
 };
 
-use crate::color::{Color, Colored};
+use crate::color::{Color, Colored, ColoredChar};
 
 /// Implement this for painting on [`Canvas`](struct.Canvas.html)
 pub trait Paint: Send + 'static {
@@ -65,7 +65,8 @@ pub struct Canvas {
     miny: f64,                            // <= 0
     width: i32,                           // >= 0
     height: i32,                          // >= 0
-    pixels: HashMap<(i32, i32), Colored>, // (x, y) -> colored
+    pixels: HashMap<(i32, i32), Colored>, // (col, row) -> colored
+    text: HashMap<(i32, i32), ColoredChar> // (col, row) -> colored char
 }
 
 impl Canvas {
@@ -74,6 +75,7 @@ impl Canvas {
     /// The size of the canvas will auto increase
     pub fn new() -> Self {
         let pixels = HashMap::new();
+        let text = HashMap::new();
         let (width, height) = (0, 0);
         let (minx, miny) = (0.0, 0.0);
         Self {
@@ -82,6 +84,7 @@ impl Canvas {
             width,
             height,
             pixels,
+            text
         }
     }
 
@@ -120,9 +123,13 @@ impl Canvas {
         W: Write,
     {
         let (start_col, start_row) = get_pos(self.minx, self.miny);
-        for y in (start_row..self.height).rev() {
-            for x in start_col..self.width {
-                if let Some(pixel) = self.pixels.get(&(x, y)) {
+        for row in (start_row..self.height).rev() {
+            for col in start_col..self.width {
+                if let Some(text) = self.text.get(&(col, row)) {
+                    text.queue(w)?;
+                    continue;
+                }
+                if let Some(pixel) = self.pixels.get(&(col, row)) {
                     pixel.queue(w)?;
                 } else {
                     queue!(w, Print(braille::SPACE))?;
@@ -265,6 +272,34 @@ impl Canvas {
         }
     }
 
+    pub fn line_any<T>(&mut self, xy1: (T, T), xy2: (T, T), c: char, color: Option<Color>)
+    where
+        T: Into<f64>,
+    {
+        let (x1, y1) = (round(xy1.0), round(xy1.1));
+        let (x2, y2) = (round(xy2.0), round(xy2.1));
+        let d = |v1, v2| {
+            if v1 <= v2 {
+                (v2 - v1, 1.0)
+            } else {
+                (v1 - v2, -1.0)
+            }
+        };
+
+        let (xdiff, xdir) = d(x1, x2);
+        let (ydiff, ydif) = d(y1, y2);
+        let r = cmp::max(xdiff, ydiff);
+
+        for i in 0..=r {
+            let r = r as f64;
+            let i = i as f64;
+            let (xd, yd) = (xdiff as f64, ydiff as f64);
+            let x = x1 as f64 + i * xd / r * xdir;
+            let y = y1 as f64 + i * yd / r * ydif;
+            self.put(x, y, c, color);
+        }
+    }
+
     /// Draw a line on the canvas with the color
     /// * `xy1` - the start location
     /// * `xy2` - the end location
@@ -294,6 +329,37 @@ impl Canvas {
             let y = y1 as f64 + i * yd / r * ydif;
             self.set_colorful(x, y, color);
         }
+    }
+
+    pub fn put_text<T>(&mut self, x: T, y: T, text: &str, color: Option<Color>)
+    where T: Into<f64>
+    {
+        let (col, row) = self.get_pos(x, y);
+        if let Some(color) = color {
+            for (i, c) in text.chars().enumerate() {
+                let mut c = ColoredChar::new(c);
+                c.set_foregound_color(color);
+                self.text.insert((col + i as i32, row), c);
+            }
+        } else {
+            for (i, c) in text.chars().enumerate() {
+                self.text.insert((col + i as i32, row), ColoredChar::new(c));
+            }
+        }
+    }
+
+    pub fn put<T>(&mut self, x: T, y: T, c: char, color: Option<Color>)
+    where T: Into<f64>
+    {
+        let (col, row) = self.get_pos(x, y);
+        let c = if let Some(color) = color {
+            let mut c = ColoredChar::new(c);
+            c.set_foregound_color(color);
+            c
+        } else {
+            ColoredChar::new(c)
+        };
+        self.text.insert((col, row), c);
     }
 
     fn set_at<T>(&mut self, x: T, y: T, color: Option<Color>)
