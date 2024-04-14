@@ -20,7 +20,7 @@ where
         let range = (range.0.into(), range.1.into());
         Self {
             fny: f,
-            step: 0.1,
+            step: 0.08,
             range,
         }
     }
@@ -36,7 +36,7 @@ impl<F> Plotable for Plot<F> where F: Fn(f64) -> f64 {
         let end = self.range.1;
         let (mut xs, mut ys) = (Vec::new(), Vec::new());
         loop {
-            if x > end {
+            if x > end && (x - end).abs() > 0.01 {
                 break;
             }
             xs.push(x);

@@ -104,6 +104,7 @@ pub mod color;
 mod defaults;
 pub mod extra;
 pub mod term;
+pub mod decor;
 mod utils;
 
 pub use anime::Animation;
