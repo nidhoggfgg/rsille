@@ -63,12 +63,16 @@ impl Colored {
     }
 
     pub(crate) fn queue(&self, buffer: &mut impl io::Write) -> io::Result<()> {
-        queue!(
-            buffer,
-            SetColors(self.color),
-            Print(format!("{}", self.pixel)),
-            ResetColor
-        )
+        if self.color.foreground.is_none() && self.color.background.is_none() {
+            queue!(buffer, Print(format!("{}", self.pixel)),)
+        } else {
+            queue!(
+                buffer,
+                SetColors(self.color),
+                Print(format!("{}", self.pixel)),
+                ResetColor
+            )
+        }
     }
 }
 
@@ -102,8 +106,8 @@ impl ColoredChar {
             c,
             color: Colors {
                 foreground: None,
-                background: None
-            }
+                background: None,
+            },
         }
     }
 
@@ -116,11 +120,15 @@ impl ColoredChar {
     }
 
     pub(crate) fn queue(&self, buffer: &mut impl io::Write) -> io::Result<()> {
-        queue!(
-            buffer,
-            SetColors(self.color),
-            Print(format!("{}", self.c)),
-            ResetColor
-        )
+        if self.color.foreground.is_none() && self.color.background.is_none() {
+            queue!(buffer, Print(format!("{}", self.c)),)
+        } else {
+            queue!(
+                buffer,
+                SetColors(self.color),
+                Print(format!("{}", self.c)),
+                ResetColor
+            )
+        }
     }
 }

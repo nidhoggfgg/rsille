@@ -6,7 +6,7 @@ use std::{cmp, collections::HashMap};
 
 use crossterm::{cursor::MoveToNextLine, queue, style::Print};
 
-use crate::{braille, color};
+use crate::braille;
 use crate::utils::get_pos;
 use crate::{
     braille::PixelOp,
@@ -61,12 +61,12 @@ impl<T: Paint + ?Sized> Paint for Box<T> {
 
 #[derive(Debug, Clone)]
 pub struct Canvas {
-    minx: f64,                            // <= 0
-    miny: f64,                            // <= 0
-    width: i32,                           // >= 0
-    height: i32,                          // >= 0
-    pixels: HashMap<(i32, i32), Colored>, // (col, row) -> colored
-    text: HashMap<(i32, i32), ColoredChar> // (col, row) -> colored char
+    minx: f64,                              // <= 0
+    miny: f64,                              // <= 0
+    width: i32,                             // >= 0
+    height: i32,                            // >= 0
+    pixels: HashMap<(i32, i32), Colored>,   // (col, row) -> colored
+    text: HashMap<(i32, i32), ColoredChar>, // (col, row) -> colored char
 }
 
 impl Canvas {
@@ -84,7 +84,7 @@ impl Canvas {
             width,
             height,
             pixels,
-            text
+            text,
         }
     }
 
@@ -272,6 +272,15 @@ impl Canvas {
         }
     }
 
+    /// Draw a line on the canvas
+    /// * `xy1` - the start location
+    /// * `xy2` - the end location
+    /// * `c` - the char used in line
+    /// * `color` - optional, the color
+    ///
+    /// It can draw any character on canvas,
+    /// and when there are both a braille code and any char on *(x, y)*,
+    /// the character will cover the braille code!
     pub fn line_any<T>(&mut self, xy1: (T, T), xy2: (T, T), c: char, color: Option<Color>)
     where
         T: Into<f64>,
@@ -331,8 +340,14 @@ impl Canvas {
         }
     }
 
+    /// Put text on canvas
+    ///
+    /// It can draw any character on canvas,
+    /// and when there are both a braille code and any char on *(x, y)*,
+    /// the character will cover the braille code!
     pub fn put_text<T>(&mut self, x: T, y: T, text: &str, color: Option<Color>)
-    where T: Into<f64>
+    where
+        T: Into<f64>,
     {
         let (col, row) = self.get_pos(x, y);
         if let Some(color) = color {
@@ -348,8 +363,14 @@ impl Canvas {
         }
     }
 
+    /// Put char on canvas
+    ///
+    /// It can draw any character on canvas,
+    /// and when there are both a braille code and any char on *(x, y)*,
+    /// the character will cover the braille code!
     pub fn put<T>(&mut self, x: T, y: T, c: char, color: Option<Color>)
-    where T: Into<f64>
+    where
+        T: Into<f64>,
     {
         let (col, row) = self.get_pos(x, y);
         let c = if let Some(color) = color {

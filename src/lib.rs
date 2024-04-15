@@ -101,12 +101,13 @@ mod anime;
 mod braille;
 mod canvas;
 pub mod color;
+mod decor;
 mod defaults;
 pub mod extra;
 pub mod term;
-pub mod decor;
 mod utils;
 
 pub use anime::Animation;
 pub use canvas::Canvas;
 pub use canvas::Paint;
+pub use decor::Decor;

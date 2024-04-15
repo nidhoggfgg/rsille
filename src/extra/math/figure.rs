@@ -1,11 +1,22 @@
 use std::iter::zip;
 
-use crate::{decor::{draw_box, Decor}, utils::{get_pos, MIN_DIFFERENCE}, Canvas, Paint};
+use crate::{
+    decor::{draw_box, Decor},
+    utils::MIN_DIFFERENCE,
+    Canvas, Paint,
+};
 
-
+/// A help macro for plot functions easy
+///
+/// example:
+/// ```
+/// use rsille::figure;
+/// figure!((|x| x.sin(), (0, 5)), (|x| x.cos(), (0, 5)));
+/// ```
 #[macro_export]
 macro_rules! figure {
     ($(($f: expr, ($start:expr, $end:expr))),*) => {
+        use rsille::{extra::math::{Figure, Plot}, Canvas};
         let mut canvas = Canvas::new();
         let mut fig = Figure::new();
         $(
@@ -18,10 +29,32 @@ macro_rules! figure {
     };
 }
 
+/// Impl this for plot on [`Figure`](struct.Figure.html)
 pub trait Plotable {
+    /// Plot on the figure
     fn plot(&self) -> (Vec<f64>, Vec<f64>);
 }
 
+/// The figure
+///
+/// It's a figure can paint many functions on it.
+/// All the math function all automatically draw on the right place.
+///
+/// ## Example
+///
+/// Draw the `y=sin(x)` and `y=cos(x)`
+/// ```
+/// use rsille::{extra::math::{Figure, Plot}, Canvas};
+///
+/// let mut canvas = Canvas::new();
+/// let mut figure = Figure::new();
+/// let p1 = Plot::new(|x| x.sin(), (0, 10));
+/// let p2 = Plot::new(|x| x.cos(), (0, 10));
+/// figure.plot(&p1);
+/// figure.plot(&p2);
+/// canvas.paint(&figure, 0, 0).unwrap();
+/// canvas.print();
+/// ```
 pub struct Figure {
     xs: Vec<f64>,
     ys: Vec<f64>,
@@ -29,10 +62,11 @@ pub struct Figure {
     show_axis: bool,
     boxed: bool,
     padding: f64,
-    decor: Decor
+    decor: Decor,
 }
 
 impl Figure {
+    /// Make a new figure
     pub fn new() -> Self {
         Self {
             xs: Vec::new(),
@@ -41,12 +75,17 @@ impl Figure {
             show_axis: true,
             boxed: true,
             padding: 10.0,
-            decor: Decor::new(),
+            decor: Decor::plot(),
         }
     }
 
+    /// Plot a thing
+    ///
+    /// It can plot something impl [`Plotable`](trait.Plotable.html)
     pub fn plot<P>(&mut self, p: &P)
-    where P: Plotable {
+    where
+        P: Plotable,
+    {
         let (xs, ys) = p.plot();
         self.xs.extend(&xs);
         self.ys.extend(&ys);

@@ -1,5 +1,5 @@
 use core::fmt;
-use std::{error::Error, fmt::Display};
+use std::error::Error;
 
 use crate::braille::Pixel;
 
