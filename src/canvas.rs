@@ -11,7 +11,7 @@ use crate::utils::get_pos;
 use crate::{
     braille::PixelOp,
     term::is_raw_mode,
-    utils::{round, to_rsille_err, RsilleErr},
+    utils::{round, RsilleErr},
 };
 
 use crate::color::{Color, Colored, ColoredChar};
@@ -115,7 +115,7 @@ impl Canvas {
     where
         W: Write,
     {
-        self.print_impl(w, is_raw).map_err(to_rsille_err)
+        self.print_impl(w, is_raw).map_err(RsilleErr::to_rsille_err)
     }
 
     fn print_impl<W>(&self, w: &mut W, is_raw: bool) -> std::io::Result<()>

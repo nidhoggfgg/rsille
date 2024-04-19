@@ -111,3 +111,4 @@ pub use anime::Animation;
 pub use canvas::Canvas;
 pub use canvas::Paint;
 pub use decor::Decor;
+pub use utils::RsilleErr;

@@ -45,18 +45,21 @@ pub(crate) fn make_braille(c: char) -> Option<Pixel> {
     }
 }
 
+/// The error type used by this crate
 #[derive(Debug, Clone)]
 pub struct RsilleErr {
     msg: String,
 }
 
-pub fn to_rsille_err<E: Error>(e: E) -> RsilleErr {
-    RsilleErr::new(e.to_string())
-}
-
 impl RsilleErr {
+    /// Return a new RsilleErr
     pub fn new(msg: String) -> Self {
         Self { msg }
+    }
+
+    /// Transform other error type to RsilleErr
+    pub fn to_rsille_err<E: Error>(e: E) -> RsilleErr {
+        RsilleErr::new(e.to_string())
     }
 }
 
