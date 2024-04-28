@@ -79,6 +79,16 @@ impl Figure {
         }
     }
 
+    pub fn with_scale(mut self, x: f64, y: f64) -> Self {
+        self.scale = (x, y);
+        self
+    }
+
+    pub fn clear(&mut self) {
+        self.xs = Vec::new();
+        self.ys = Vec::new();
+    }
+
     /// Plot a thing
     ///
     /// It can plot something impl [`Plotable`](trait.Plotable.html)
@@ -93,23 +103,23 @@ impl Figure {
 }
 
 impl Paint for Figure {
-    fn paint<T>(&self, canvas: &mut Canvas, x: T, y: T) -> Result<(), crate::utils::RsilleErr>
+    fn paint<T>(&self, canvas: &mut Canvas, x: T, y: T)
     where
         T: Into<f64>,
     {
+        let minx = self.xs.iter().fold(f64::INFINITY, |a, &b| a.min(b));
+        let miny = self.ys.iter().fold(f64::INFINITY, |a, &b| a.min(b));
         let (x, y) = (x.into(), y.into());
         let pad = self.padding;
         let (sx, sy) = self.scale;
         for (px, py) in zip(&self.xs, &self.ys) {
-            canvas.set(x + px * sx, y + py * sy);
+            canvas.set(x + (px - minx) * sx, y + (py - miny) * sy);
         }
         if self.boxed || self.show_axis {
-            let minx = self.xs.iter().fold(f64::INFINITY, |a, &b| a.min(b));
             let maxx = self.xs.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b));
-            let miny = self.ys.iter().fold(f64::INFINITY, |a, &b| a.min(b));
             let maxy = self.ys.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b));
-            let start = (x + minx * sx - pad, y + miny * sy - pad);
-            let end = (x + maxx * sx + pad, y + maxy * sy + pad);
+            let start = (x - pad, y - pad);
+            let end = (x + (maxx - minx) * sx + pad, y + (maxy - miny) * sy + pad);
             if self.boxed {
                 draw_box(canvas, start, end, &self.decor);
             }
@@ -131,7 +141,6 @@ impl Paint for Figure {
                 }
             }
         }
-        Ok(())
     }
 }
 
@@ -150,7 +159,7 @@ fn gen_label(range: (f64, f64), step: f64, v: f64) -> Vec<(f64, f64)> {
         if p == 0.0 && label > 0.0 {
             p = 1.0;
         }
-        labels.push((v, label + p));
+        labels.push((v, label - range.0 + p));
         v += 1.0;
         label += step;
     }

@@ -29,6 +29,11 @@ where
         }
     }
 
+    pub fn with_step(mut self, step: f64) -> Self {
+        self.step = step;
+        self
+    }
+
     /// Set the step
     ///
     /// The step won't change the plot, just the step of calculate the `f(x)`

@@ -370,7 +370,7 @@ fn forward(
 }
 
 impl Paint for Turtle {
-    fn paint<T>(&self, canvas: &mut Canvas, x: T, y: T) -> Result<(), RsilleErr>
+    fn paint<T>(&self, canvas: &mut Canvas, x: T, y: T)
     where
         T: Into<f64>,
     {
@@ -433,6 +433,5 @@ impl Paint for Turtle {
                 }
             }
         }
-        Ok(())
     }
 }

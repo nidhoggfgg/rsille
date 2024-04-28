@@ -94,7 +94,7 @@ impl LifeGame {
 }
 
 impl Paint for LifeGame {
-    fn paint<T>(&self, canvas: &mut crate::Canvas, x: T, y: T) -> Result<(), RsilleErr>
+    fn paint<T>(&self, canvas: &mut crate::Canvas, x: T, y: T)
     where
         T: Into<f64>,
     {
@@ -102,7 +102,6 @@ impl Paint for LifeGame {
         for cell in self.cells.keys() {
             canvas.set(x + cell.0 as f64, y + cell.1 as f64);
         }
-        Ok(())
     }
 }
 

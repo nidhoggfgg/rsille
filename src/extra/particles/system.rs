@@ -74,7 +74,7 @@ impl Paint for ParticleSystem {
         canvas: &mut crate::Canvas,
         x: T,
         y: T,
-    ) -> Result<(), crate::utils::RsilleErr>
+    )
     where
         T: Into<f64>,
     {
@@ -85,6 +85,5 @@ impl Paint for ParticleSystem {
                 canvas.set(x + t.x as f64, y + t.y as f64);
             }
         }
-        Ok(())
     }
 }

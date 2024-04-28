@@ -96,7 +96,7 @@ impl Imgille {
 }
 
 impl Paint for Imgille {
-    fn paint<T>(&self, canvas: &mut crate::Canvas, x: T, y: T) -> Result<(), RsilleErr>
+    fn paint<T>(&self, canvas: &mut crate::Canvas, x: T, y: T)
     where
         T: Into<f64>,
     {
@@ -173,7 +173,6 @@ impl Paint for Imgille {
                 }
             }
         };
-        Ok(())
     }
 }
 

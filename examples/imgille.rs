@@ -13,7 +13,7 @@ fn main() {
             println!("useage: [{}] <path>", args[0]);
             return;
         };
-        canvas.paint(&imgille, 0.0, 0.0).unwrap();
+        canvas.paint(&imgille, 0.0, 0.0);
         canvas.print();
     } else {
         println!("useage: [{}] <path>", args[0]);

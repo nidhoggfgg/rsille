@@ -196,7 +196,7 @@ impl Object3D {
 }
 
 impl Paint for Object3D {
-    fn paint<T>(&self, canvas: &mut Canvas, x: T, y: T) -> Result<(), RsilleErr>
+    fn paint<T>(&self, canvas: &mut Canvas, x: T, y: T)
     where
         T: Into<f64>,
     {
@@ -213,8 +213,6 @@ impl Paint for Object3D {
             let xy2 = (x + v2.x, y + v2.z);
             canvas.line_colorful(xy1, xy2, *color);
         }
-
-        Ok(())
     }
 }
 

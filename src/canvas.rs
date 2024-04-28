@@ -19,14 +19,12 @@ use crate::color::{Color, Colored, ColoredChar};
 /// Implement this for painting on [`Canvas`](struct.Canvas.html)
 pub trait Paint {
     /// Paint the object on the canvas
-    fn paint<T>(&self, canvas: &mut Canvas, x: T, y: T) -> Result<(), RsilleErr>
-    where
-        T: Into<f64>;
+    fn paint<T>(&self, canvas: &mut Canvas, x: T, y: T) where T: Into<f64>;
 }
 
 // this is just for err: "Box<T> not impl Paint" xd
 impl<T: Paint + ?Sized> Paint for Box<T> {
-    fn paint<N>(&self, canvas: &mut Canvas, x: N, y: N) -> Result<(), RsilleErr>
+    fn paint<N>(&self, canvas: &mut Canvas, x: N, y: N)
     where
         N: Into<f64>,
     {
@@ -116,14 +114,13 @@ impl Canvas {
     }
 
     /// Paint those [`Paint`]() object on the location (x, y)
-    pub fn paint<T, N>(&mut self, target: &T, x: N, y: N) -> Result<(), RsilleErr>
+    pub fn paint<T, N>(&mut self, target: &T, x: N, y: N)
     where
         T: Paint,
         N: Into<f64>,
     {
         let (x, y) = (x.into(), y.into());
-        target.paint(self, x, y)?;
-        Ok(())
+        target.paint(self, x, y);
     }
 
     /// Print the canvas to the terminal

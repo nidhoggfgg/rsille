@@ -96,16 +96,6 @@ impl Animation {
         self.hide_cursor = hide_cursor;
     }
 
-    // Set the size of the canvas
-    //
-    // Give a look at [Canvas::set_size](crate::Canvas::set_size)
-    // pub fn set_size<T>(&mut self, width: T, height: T)
-    // where
-    //     T: Into<f64>,
-    // {
-    //     self.canvas.lock().unwrap().set_size(width, height);
-    // }
-
     /// Set the min `x` of the canvas
     pub fn set_minx<T>(&mut self, minx: T)
     where
@@ -279,6 +269,6 @@ where
 
     fn paint(&self, canvas: &mut Canvas) {
         let (x, y) = self.xy;
-        canvas.paint(&self.obj, x, y).unwrap();
+        canvas.paint(&self.obj, x, y);
     }
 }

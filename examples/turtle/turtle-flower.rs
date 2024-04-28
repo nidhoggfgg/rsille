@@ -15,6 +15,6 @@ fn main() {
             t.forward(8.0);
         }
     }
-    canvas.paint(&t, 100.0, 100.0).unwrap();
+    canvas.paint(&t, 100.0, 100.0);
     canvas.print();
 }
