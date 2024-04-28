@@ -17,7 +17,7 @@ use crate::{
 use crate::color::{Color, Colored, ColoredChar};
 
 /// Implement this for painting on [`Canvas`](struct.Canvas.html)
-pub trait Paint: Send + 'static {
+pub trait Paint {
     /// Paint the object on the canvas
     fn paint<T>(&self, canvas: &mut Canvas, x: T, y: T) -> Result<(), RsilleErr>
     where
@@ -85,6 +85,33 @@ impl Canvas {
             height,
             pixels,
             text,
+        }
+    }
+
+    /// Set the min `x` of th canvas
+    ///
+    /// In most time, no need to call this, only when the animation is moved when running
+    pub fn set_minx<T>(&mut self, minx: T)
+    where
+        T: Into<f64>,
+    {
+        let minx = minx.into();
+        if minx < self.minx {
+            self.minx = minx;
+        }
+    }
+
+    /// Set the max `y` of the canvas
+    ///
+    /// In most time, no need to call this, only when the animation is moved when running
+    pub fn set_maxy<T>(&mut self, maxy: T)
+    where
+        T: Into<f64>,
+    {
+        let maxy = maxy.into();
+        let (_, max_row) = get_pos(0.0, maxy);
+        if max_row > self.height {
+            self.height = max_row;
         }
     }
 
@@ -162,54 +189,27 @@ impl Canvas {
         self.pixels = HashMap::new();
     }
 
-    /// Set the size of the canvas
-    ///
-    /// This method can't fix the size of the canvas, it's just set the canvas size.
-    /// When the size isn't enough, the canvas will auto increase.
-    /// And the (width, height) isn't the size of the terminal, it's the size of the canvas!
-    /// For example, an object `x` from -30 to 30, then it's 60 in width.
-    /// On the terminal, it's 30 in width(because braille code), but you should set the width to 60 not 30.
-    pub fn set_size<T>(&mut self, width: T, height: T)
-    where
-        T: Into<f64>,
-    {
-        // start_col, start_row < 0
-        let (max_col, max_row) = get_pos(width.into(), height.into());
-        let (start_col, start_row) = get_pos(self.minx, self.miny);
-        if max_col > self.width - start_col {
-            self.width = max_col + start_col;
-        }
-        if max_row > self.height - start_row {
-            self.height = max_row + start_row;
-        }
-    }
-
-    /// Set the min `x` of th canvas
-    ///
-    /// In most time, no need to call this, only when the animation is moved when running
-    pub fn set_minx<T>(&mut self, minx: T)
-    where
-        T: Into<f64>,
-    {
-        let minx = minx.into();
-        if minx < self.minx {
-            self.minx = minx;
-        }
-    }
-
-    /// Set the max `y` of the canvas
-    ///
-    /// In most time, no need to call this, only when the animation is moved when running
-    pub fn set_maxy<T>(&mut self, maxy: T)
-    where
-        T: Into<f64> + Copy,
-    {
-        let maxy = maxy.into();
-        let (_, max_row) = get_pos(0.0, maxy);
-        if max_row > self.height {
-            self.height = max_row;
-        }
-    }
+    // Set the size of the canvas
+    //
+    // This method can't fix the size of the canvas, it's just set the canvas size.
+    // When the size isn't enough, the canvas will auto increase.
+    // And the (width, height) isn't the size of the terminal, it's the size of the canvas!
+    // For example, an object `x` from -30 to 30, then it's 60 in width.
+    // On the terminal, it's 30 in width(because braille code), but you should set the width to 60 not 30.
+    // pub fn set_size<T>(&mut self, width: T, height: T)
+    // where
+    //     T: Into<f64>,
+    // {
+    //     // start_col, start_row < 0
+    //     let (max_col, max_row) = get_pos(width.into(), height.into());
+    //     let (start_col, start_row) = get_pos(self.minx, self.miny);
+    //     if max_col > self.width - start_col {
+    //         self.width = max_col + start_col;
+    //     }
+    //     if max_row > self.height - start_row {
+    //         self.height = max_row + start_row;
+    //     }
+    // }
 
     /// Draw a dot on (x, y)
     ///
@@ -370,7 +370,7 @@ impl Canvas {
     /// the character will cover the braille code!
     pub fn put<T>(&mut self, x: T, y: T, c: char, color: Option<Color>)
     where
-        T: Into<f64>,
+        T: Into<f64> + Copy,
     {
         let (col, row) = self.get_pos(x, y);
         let c = if let Some(color) = color {

@@ -36,7 +36,7 @@ impl Pixel {
 
 pub trait PixelOp<T>
 where
-    T: Into<f64> + Copy,
+    T: Into<f64>,
 {
     fn unset(&mut self, x: T, y: T);
     fn set(&mut self, x: T, y: T);

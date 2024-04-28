@@ -119,6 +119,6 @@ fn main() {
             location,
         );
     }
-    anime.set_size(110, 110);
+    anime.set_maxy(110);
     anime.run();
 }

@@ -35,8 +35,8 @@ use crate::{
 /// anime.run();
 /// ```
 pub struct Animation {
-    canvas: Arc<Mutex<Canvas>>,
-    objs: Arc<Mutex<Vec<Box<dyn Update + Send>>>>,
+    canvas: Canvas,
+    objs: Vec<Box<dyn Update + Send>>,
     fps: u32,
     hide_cursor: bool,
     size: Option<(i32, i32)>,
@@ -49,13 +49,77 @@ impl Animation {
     /// The default fps is 30 and hide the cursor.
     pub fn new() -> Self {
         Self {
-            canvas: Arc::new(Mutex::new(Canvas::new())),
-            objs: Arc::new(Mutex::new(Vec::new())),
+            canvas: Canvas::new(),
+            objs: Vec::new(),
             fps: 30,
             hide_cursor: true,
             size: None,
             end: Arc::new(Mutex::new(false)),
         }
+    }
+
+    pub fn with_fps(mut self, fps: u32) -> Self {
+        self.fps = fps;
+        self
+    }
+
+    pub fn with_hide_cursor(mut self, hide_cursor: bool) -> Self {
+        self.hide_cursor = hide_cursor;
+        self
+    }
+
+    pub fn with_minx<T>(mut self, minx: T) -> Self
+    where
+        T: Into<f64>,
+    {
+        self.canvas.set_minx(minx);
+        self
+    }
+
+    pub fn with_maxy<T>(mut self, maxy: T) -> Self
+    where
+        T: Into<f64>,
+    {
+        self.canvas.set_maxy(maxy);
+        self
+    }
+
+    /// Set the fps of animation
+    ///
+    /// Default is 30
+    pub fn set_fps(&mut self, fps: u32) {
+        self.fps = fps;
+    }
+
+    /// Hide the cursor or not
+    pub fn hide_cursor(&mut self, hide_cursor: bool) {
+        self.hide_cursor = hide_cursor;
+    }
+
+    // Set the size of the canvas
+    //
+    // Give a look at [Canvas::set_size](crate::Canvas::set_size)
+    // pub fn set_size<T>(&mut self, width: T, height: T)
+    // where
+    //     T: Into<f64>,
+    // {
+    //     self.canvas.lock().unwrap().set_size(width, height);
+    // }
+
+    /// Set the min `x` of the canvas
+    pub fn set_minx<T>(&mut self, minx: T)
+    where
+        T: Into<f64>,
+    {
+        self.canvas.set_minx(minx);
+    }
+
+    /// Set the max `y` of the canvas
+    pub fn set_maxy<T>(&mut self, maxy: T)
+    where
+        T: Into<f64> + Copy,
+    {
+        self.canvas.set_maxy(maxy);
     }
 
     /// Push an object to the animation
@@ -65,12 +129,11 @@ impl Animation {
     /// * `xy` - the position to paint the object
     pub fn push<T, F, N>(&mut self, obj: T, f: F, xy: (N, N))
     where
-        T: Paint,
+        T: Paint + Send + 'static,
         F: FnMut(&mut T) -> bool + Send + 'static,
         N: Into<f64> + Copy,
     {
-        let mut objs = self.objs.lock().unwrap();
-        objs.push(Box::new(UserObj {
+        self.objs.push(Box::new(UserObj {
             obj,
             f,
             xy: (xy.0.into(), xy.1.into()),
@@ -81,55 +144,51 @@ impl Animation {
     /// Run the animation
     ///
     /// When all the objects are end or press `ctrl+c` or `esc`, the animation will stop.
-    pub fn run(&mut self) {
+    pub fn run(self) {
         // should be very carefully to change these code
+        let mut _self = self;
 
         // init
-        let duration = Duration::from_secs(1) / self.fps;
-        let objs = Arc::clone(&self.objs);
-        let canvas = Arc::clone(&self.canvas);
+        let duration = Duration::from_secs(1) / _self.fps;
         let mut stdout = std::io::stdout();
         term::clear();
-        if self.hide_cursor {
+        if _self.hide_cursor {
             term::hide_cursor();
         }
         enable_raw_mode().expect("can't enbale raw mode");
 
         // main loop
-        let end = Arc::clone(&self.end);
+        let end = Arc::clone(&_self.end);
         let mainloop = thread::spawn(move || loop {
             let start_time = Instant::now();
             // must wraped! for drop the objs
             {
-                let mut objs = objs.lock().unwrap();
                 let mut end = end.lock().unwrap();
                 if *end {
                     break;
                 }
-                if objs.iter().all(|obj| obj.is_end()) {
+                if _self.objs.iter().all(|obj| obj.is_end()) {
                     *end = true;
                     break;
                 }
-                let mut canvas = canvas.lock().unwrap();
-                canvas.clear();
+                _self.canvas.clear();
                 queue!(stdout, MoveTo(0, 0)).unwrap();
-                for obj in &mut *objs {
+                for obj in &mut _self.objs {
                     obj.update(); // shouldn't wrap with if obj.is_end() { ... }
-                    obj.paint(&mut canvas);
+                    obj.paint(&mut _self.canvas);
                 }
                 // canvas.print_on(&mut stdout, true).unwrap();
-                canvas.print();
+                _self.canvas.print();
                 stdout.flush().unwrap();
             }
             let elapsed = start_time.elapsed();
             if elapsed < duration {
-                thread::sleep(duration - elapsed);
+                thread::sleep(duration - elapsed - Duration::from_millis(3));
             }
         });
 
         // deal with the key
-        let objs = Arc::clone(&self.objs);
-        let end = Arc::clone(&self.end);
+        let end = Arc::clone(&_self.end);
         let _keyloop = thread::spawn(move || loop {
             if *end.lock().unwrap() {
                 break;
@@ -137,11 +196,7 @@ impl Animation {
             if crossterm::event::poll(Duration::from_millis(300)).unwrap() {
                 let event = crossterm::event::read().expect("can't read key");
                 let end_fn = || {
-                    let mut objs = objs.lock().unwrap();
                     let mut end = end.lock().unwrap();
-                    for obj in &mut *objs {
-                        obj.end();
-                    }
                     *end = true;
                 };
                 if let Event::Resize(_, _) = event {
@@ -164,44 +219,6 @@ impl Animation {
         mainloop.join().unwrap();
         term::show_cursor();
         disable_raw_mode().expect("can't disable raw mode");
-    }
-
-    /// Set the fps of animation
-    ///
-    /// Default is 30
-    pub fn set_fps(&mut self, fps: u32) {
-        self.fps = fps;
-    }
-
-    /// Hide the cursor or not
-    pub fn hide_cursor(&mut self, hide_cursor: bool) {
-        self.hide_cursor = hide_cursor;
-    }
-
-    /// Set the size of the canvas
-    ///
-    /// Give a look at [Canvas::set_size](crate::Canvas::set_size)
-    pub fn set_size<T>(&mut self, width: T, height: T)
-    where
-        T: Into<f64>,
-    {
-        self.canvas.lock().unwrap().set_size(width, height);
-    }
-
-    /// Set the min `x` of the canvas
-    pub fn set_minx<T>(&mut self, minx: T)
-    where
-        T: Into<f64>,
-    {
-        self.canvas.lock().unwrap().set_minx(minx);
-    }
-
-    /// Set the max `y` of the canvas
-    pub fn set_maxy<T>(&mut self, maxy: T)
-    where
-        T: Into<f64> + Copy,
-    {
-        self.canvas.lock().unwrap().set_maxy(maxy);
     }
 
     // only used in run!

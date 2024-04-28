@@ -72,7 +72,7 @@ fn main() {
         },
         (0.0, 0.0),
     );
-    anime.set_size(1.5 * side_len, 1.5 * side_len);
+    anime.set_maxy(1.5 * side_len);
     anime.set_minx(-1.5 * side_len);
     anime.run();
 }

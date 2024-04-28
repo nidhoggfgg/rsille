@@ -1,6 +1,6 @@
 [package]
 name = "rsille"
-version = "2.2.0"
+version = "3.0.0"
 edition = "2021"
 authors = ["nidhoggfgg <nidhoggfgg@gmail.com>"]
 description = "A full feature braille code art lib"
@@ -14,6 +14,7 @@ exclude = ["examples", "imgs"]
 
 [dependencies]
 crossterm = "0.27.0"
+glam = "0.27.0"
 image = { version = "0.24.8", optional = true }
 
 [profile.release]
@@ -22,10 +23,10 @@ lto = true
 
 [dev-dependencies]
 criterion = "0.4"
+rand = "0.8.5"
 
 [features]
-default = []
-img = ["image"]
+default = ["image"]
 
 [[bench]]
 name = "set"
@@ -66,4 +67,4 @@ path = "examples/turtle/turtle-multi.rs"
 [[example]]
 name = "imgille"
 path = "examples/imgille.rs"
-required-features = ["img"]
+required-features = ["image"]

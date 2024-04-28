@@ -1,5 +1,15 @@
+use glam::Vec3A;
+
 use crate::{
-    extra::{math::Figure, LifeGame, Object3D, Turtle},
+    extra::{
+        math::Figure,
+        particles::{
+            force::Force,
+            particle::{self, Particle},
+            system::ParticleSystem,
+        },
+        LifeGame, Object3D, Turtle,
+    },
     Animation, Canvas,
 };
 
@@ -34,6 +44,24 @@ impl Default for Animation {
 }
 
 impl Default for Figure {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Default for Particle {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Default for ParticleSystem {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Default for Force {
     fn default() -> Self {
         Self::new()
     }
