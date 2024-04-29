@@ -1,8 +1,8 @@
 use std::sync::{Arc, Mutex};
 
-use rsille::{color::Color, extra::Object3D, Animation};
+use rsille::{color::Color, extra::object3d::{Object3D, Pos3, Vec3}, Animation};
 
-fn gen_cube(side_len: f64) -> (Object3D, Object3D) {
+fn gen_cube(side_len: f32) -> (Object3D, Object3D) {
     #[rustfmt::skip]
     let a = [
         (-1, -1, -1),
@@ -17,10 +17,10 @@ fn gen_cube(side_len: f64) -> (Object3D, Object3D) {
     let mut points = Vec::new();
     let mut colorful = Object3D::new();
     for i in a {
-        let x = side_len / 2.0 * i.0 as f64;
-        let y = side_len / 2.0 * i.1 as f64;
-        let z = side_len / 2.0 * i.2 as f64;
-        points.push((x, y, z));
+        let x = side_len / 2.0 * i.0 as f32;
+        let y = side_len / 2.0 * i.1 as f32;
+        let z = side_len / 2.0 * i.2 as f32;
+        points.push(Pos3::new(x, y, z));
     }
     colorful.add_points(&points);
     let mut nocolor = colorful.clone();
@@ -44,7 +44,7 @@ fn gen_cube(side_len: f64) -> (Object3D, Object3D) {
     (colorful, nocolor)
 }
 
-fn gen_octahedron(side_len: f64) -> (Object3D, Object3D) {
+fn gen_octahedron(side_len: f32) -> (Object3D, Object3D) {
     let a = [
         (0, 0, 1),
         (1, 0, 0),
@@ -56,10 +56,10 @@ fn gen_octahedron(side_len: f64) -> (Object3D, Object3D) {
     let mut points = Vec::new();
     let mut colorful = Object3D::new();
     for i in a {
-        let x = side_len * i.0 as f64;
-        let y = side_len * i.1 as f64;
-        let z = side_len * i.2 as f64;
-        points.push((x, y, z));
+        let x = side_len * i.0 as f32;
+        let y = side_len * i.1 as f32;
+        let z = side_len * i.2 as f32;
+        points.push(Pos3::new(x, y, z));
     }
     colorful.add_points(&points);
     let mut nocolor = colorful.clone();
@@ -83,13 +83,13 @@ fn gen_octahedron(side_len: f64) -> (Object3D, Object3D) {
     (colorful, nocolor)
 }
 
-fn gen(k: i32) -> (f64, f64, f64) {
+fn gen(k: i32) -> Vec3 {
     match k {
-        k if k % 4 == 3 => (1.0, 2.0, 3.0),
-        k if k % 4 == 2 => (-2.0, -3.0, 4.0),
-        k if k % 4 == 1 => (2.0, 3.0, 4.0),
-        k if k % 4 == 0 => (-1.0, -2.0, -3.0),
-        _ => panic!("impossible"),
+        k if k % 4 == 3 => Vec3::new(1.0, 2.0, 3.0),
+        k if k % 4 == 2 => Vec3::new(-2.0, -3.0, 4.0),
+        k if k % 4 == 1 => Vec3::new(2.0, 3.0, 4.0),
+        k if k % 4 == 0 => Vec3::new(-1.0, -2.0, -3.0),
+        _ => unreachable!(),
     }
 }
 

@@ -2,11 +2,7 @@
 
 use std::f64::consts::PI;
 
-use crate::{
-    canvas::Paint,
-    utils::{RsilleErr, MIN_DIFFERENCE},
-    Canvas,
-};
+use crate::{canvas::Paint, utils::MIN_DIFFERENCE, Canvas};
 
 use crate::color::Color;
 

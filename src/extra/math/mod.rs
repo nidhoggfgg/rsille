@@ -8,6 +8,7 @@
 //! ```
 
 mod figure;
+pub mod na;
 mod plot;
 
 pub use figure::Figure;

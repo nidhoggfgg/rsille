@@ -1,28 +1,28 @@
 use std::{collections::VecDeque, time::Duration};
 
-use glam::Vec3A;
+use crate::extra::math::na::Vec3;
 
 use super::force::Force;
 
 #[derive(Debug, Clone)]
 pub struct Particle {
-    pub pos: Vec3A,
-    pub vel: Vec3A,
-    pub mass: f32,
+    pub pos: Vec3,
+    pub vel: Vec3,
+    pub mass: f64,
 
     life_time: Duration,
     alive_time: Duration,
     is_dead: bool,
     early_dead: bool,
     trail_len: usize,
-    trail: VecDeque<Vec3A>,
+    trail: VecDeque<Vec3>,
 }
 
 impl Particle {
     pub fn new() -> Self {
         Self {
-            pos: Vec3A::ZERO,
-            vel: Vec3A::ZERO,
+            pos: Vec3::zeros(),
+            vel: Vec3::zeros(),
             mass: 1.0,
             life_time: Duration::ZERO,
             alive_time: Duration::ZERO,
@@ -33,12 +33,12 @@ impl Particle {
         }
     }
 
-    pub fn with_pos(mut self, pos: Vec3A) -> Self {
+    pub fn with_pos(mut self, pos: Vec3) -> Self {
         self.pos = pos;
         self
     }
 
-    pub fn with_vel(mut self, vel: Vec3A) -> Self {
+    pub fn with_vel(mut self, vel: Vec3) -> Self {
         self.vel = vel;
         self
     }
@@ -53,7 +53,7 @@ impl Particle {
         self
     }
 
-    pub fn with(pos: Vec3A, vel: Vec3A, life_time: Duration, trail_len: usize) -> Self {
+    pub fn with(pos: Vec3, vel: Vec3, life_time: Duration, trail_len: usize) -> Self {
         Self {
             pos,
             vel,
@@ -93,7 +93,7 @@ impl Particle {
         }
     }
 
-    pub fn get_trail(&self) -> &VecDeque<Vec3A> {
+    pub fn get_trail(&self) -> &VecDeque<Vec3> {
         &self.trail
     }
 }

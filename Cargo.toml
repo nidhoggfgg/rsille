@@ -14,7 +14,7 @@ exclude = ["examples", "imgs"]
 
 [dependencies]
 crossterm = "0.27.0"
-glam = "0.27.0"
+nalgebra = "0.32.5"
 image = { version = "0.24.8", optional = true }
 
 [profile.release]
@@ -28,43 +28,43 @@ rand = "0.8.5"
 [features]
 default = ["image"]
 
-[[bench]]
-name = "set"
-harness = false
+# [[bench]]
+# name = "set"
+# harness = false
 
-[[example]]
-name = "anime-mix"
-path = "examples/anime/mix.rs"
+# [[example]]
+# name = "anime-mix"
+# path = "examples/anime/mix.rs"
 
-[[example]]
-name = "obj-mix"
-path = "examples/object3d/obj-mix.rs"
+# [[example]]
+# name = "obj-mix"
+# path = "examples/object3d/obj-mix.rs"
 
-[[example]]
-name = "cube"
-path = "examples/object3d/cube.rs"
+# [[example]]
+# name = "cube"
+# path = "examples/object3d/cube.rs"
 
-[[example]]
-name = "cube-colorful"
-path = "examples/object3d/cube-colorful.rs"
+# [[example]]
+# name = "cube-colorful"
+# path = "examples/object3d/cube-colorful.rs"
 
-[[example]]
-name = "otc"
-path = "examples/object3d/otc.rs"
+# [[example]]
+# name = "otc"
+# path = "examples/object3d/otc.rs"
 
-[[example]]
-name = "otc-colorful"
-path = "examples/object3d/otc-colorful.rs"
+# [[example]]
+# name = "otc-colorful"
+# path = "examples/object3d/otc-colorful.rs"
 
-[[example]]
-name = "turtle-flower"
-path = "examples/turtle/turtle-flower.rs"
+# [[example]]
+# name = "turtle-flower"
+# path = "examples/turtle/turtle-flower.rs"
 
-[[example]]
-name = "turtle-multi"
-path = "examples/turtle/turtle-multi.rs"
+# [[example]]
+# name = "turtle-multi"
+# path = "examples/turtle/turtle-multi.rs"
 
-[[example]]
-name = "imgille"
-path = "examples/imgille.rs"
-required-features = ["image"]
+# [[example]]
+# name = "imgille"
+# path = "examples/imgille.rs"
+# required-features = ["image"]

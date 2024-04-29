@@ -111,3 +111,6 @@ pub use anime::Animation;
 pub use canvas::Canvas;
 pub use canvas::Paint;
 pub use decor::Decor;
+pub use utils::{to_rsille_err, RsilleErr};
+
+extern crate nalgebra as na;

@@ -2,12 +2,11 @@
 
 mod lifegame;
 pub mod math;
-mod object3d;
+//pub mod object3d;
 pub mod particles;
 mod turtle;
 
 pub use lifegame::LifeGame;
-pub use object3d::Object3D;
 pub use turtle::Turtle;
 
 #[cfg(feature = "image")]

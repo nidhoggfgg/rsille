@@ -1,10 +1,12 @@
 use core::fmt;
 use std::error::Error;
 
+use na::Vector3;
+
 use crate::braille::Pixel;
 
-pub const MIN_ZOOM: f64 = 0.001;
-pub const MIN_DIFFERENCE: f64 = 1E-10;
+pub(crate) const MIN_ZOOM: f64 = 0.001;
+pub(crate) const MIN_DIFFERENCE: f64 = 1E-10;
 
 pub(crate) fn round<T>(v: T) -> i32
 where
@@ -13,9 +15,9 @@ where
     v.into().round() as i32
 }
 
-pub(crate) fn mean(a: &[f64]) -> f64 {
-    let sum = a.iter().sum::<f64>();
-    sum / a.len() as f64
+pub(crate) fn mean_f32(a: &[f32]) -> f32 {
+    let sum = a.iter().sum::<f32>();
+    sum / a.len() as f32
 }
 
 pub(crate) fn check_zoom(v: f64) {

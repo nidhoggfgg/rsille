@@ -1,4 +1,4 @@
-use rsille::{extra::Object3D, Animation};
+use rsille::{extra::object3d::Object3D, Animation};
 
 fn gen_octahedron(side_len: f64) -> Object3D {
     #[rustfmt::skip]

@@ -1,8 +1,6 @@
 use std::time::{Duration, SystemTime};
 
-use glam::Vec3A;
-
-use crate::Paint;
+use crate::{extra::math::na::Vec3, Paint};
 
 use super::{force::Force, particle::Particle};
 
@@ -23,19 +21,19 @@ impl ParticleSystem {
         }
     }
 
-    pub fn with_gravity(mut self, g: f32) -> Self {
+    pub fn with_gravity(mut self, g: f64) -> Self {
         self.force.set_gravity(g);
         self
     }
 
-    pub fn with_drag(mut self, drag: f32) -> Self {
+    pub fn with_drag(mut self, drag: f64) -> Self {
         self.force.set_drag(drag);
         self
     }
 
     pub fn with_force<F>(mut self, f: F) -> Self
     where
-        F: Fn(&Particle) -> Vec3A + Send + 'static,
+        F: Fn(&Particle) -> Vec3 + Send + 'static,
     {
         self.force.add_force(f);
         self
@@ -48,7 +46,7 @@ impl ParticleSystem {
 
     pub fn add_force<F>(&mut self, f: F)
     where
-        F: Fn(&Particle) -> Vec3A + Send + 'static,
+        F: Fn(&Particle) -> Vec3 + Send + 'static,
     {
         self.force.add_force(f);
     }
@@ -69,12 +67,7 @@ impl ParticleSystem {
 }
 
 impl Paint for ParticleSystem {
-    fn paint<T>(
-        &self,
-        canvas: &mut crate::Canvas,
-        x: T,
-        y: T,
-    )
+    fn paint<T>(&self, canvas: &mut crate::Canvas, x: T, y: T)
     where
         T: Into<f64>,
     {

@@ -19,7 +19,9 @@ use crate::color::{Color, Colored, ColoredChar};
 /// Implement this for painting on [`Canvas`](struct.Canvas.html)
 pub trait Paint {
     /// Paint the object on the canvas
-    fn paint<T>(&self, canvas: &mut Canvas, x: T, y: T) where T: Into<f64>;
+    fn paint<T>(&self, canvas: &mut Canvas, x: T, y: T)
+    where
+        T: Into<f64>;
 }
 
 // this is just for err: "Box<T> not impl Paint" xd
