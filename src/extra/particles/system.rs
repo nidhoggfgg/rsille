@@ -1,6 +1,6 @@
 use std::time::{Duration, SystemTime};
 
-use crate::{extra::math::na::Vec3, Paint};
+use crate::{extra::math::glm::Vec3, Paint};
 
 use super::{force::Force, particle::Particle};
 
@@ -21,12 +21,12 @@ impl ParticleSystem {
         }
     }
 
-    pub fn with_gravity(mut self, g: f64) -> Self {
+    pub fn with_gravity(mut self, g: f32) -> Self {
         self.force.set_gravity(g);
         self
     }
 
-    pub fn with_drag(mut self, drag: f64) -> Self {
+    pub fn with_drag(mut self, drag: f32) -> Self {
         self.force.set_drag(drag);
         self
     }
@@ -57,6 +57,7 @@ impl ParticleSystem {
         for p in &mut self.paritcles {
             p.update(dt, &self.force);
         }
+        self.live_time += dt;
         self.paritcles.retain(|p| !p.is_dead());
         if self.paritcles.is_empty() {
             true

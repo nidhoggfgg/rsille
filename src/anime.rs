@@ -172,7 +172,7 @@ impl Animation {
                 stdout.flush().unwrap();
             }
             let elapsed = start_time.elapsed();
-            if elapsed < duration {
+            if elapsed < duration - Duration::from_millis(3) {
                 thread::sleep(duration - elapsed - Duration::from_millis(3));
             }
         });

@@ -1,6 +1,6 @@
 use std::{collections::VecDeque, time::Duration};
 
-use crate::extra::math::na::Vec3;
+use crate::extra::math::glm::Vec3;
 
 use super::force::Force;
 
@@ -8,7 +8,7 @@ use super::force::Force;
 pub struct Particle {
     pub pos: Vec3,
     pub vel: Vec3,
-    pub mass: f64,
+    pub mass: f32,
 
     life_time: Duration,
     alive_time: Duration,
@@ -21,8 +21,8 @@ pub struct Particle {
 impl Particle {
     pub fn new() -> Self {
         Self {
-            pos: Vec3::zeros(),
-            vel: Vec3::zeros(),
+            pos: Vec3::ZERO,
+            vel: Vec3::ZERO,
             mass: 1.0,
             life_time: Duration::ZERO,
             alive_time: Duration::ZERO,

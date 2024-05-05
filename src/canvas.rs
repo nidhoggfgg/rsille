@@ -4,6 +4,7 @@
 use std::io::Write;
 use std::{cmp, collections::HashMap};
 
+use crossterm::style::Color;
 use crossterm::{cursor::MoveToNextLine, queue, style::Print};
 
 use crate::braille;
@@ -14,7 +15,7 @@ use crate::{
     utils::{round, to_rsille_err, RsilleErr},
 };
 
-use crate::color::{Color, Colored, ColoredChar};
+use crate::color::{Colored, ColoredChar};
 
 /// Implement this for painting on [`Canvas`](struct.Canvas.html)
 pub trait Paint {

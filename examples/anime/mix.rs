@@ -1,11 +1,10 @@
 use rsille::{
     color::Color,
-    extra::{Object3D, Turtle},
+    extra::{math::glm::Vec3, Object3D, Turtle},
     Animation,
 };
 
 fn main() {
-    let mut anime = Animation::new();
     let mut t = Turtle::new();
     for i in 0..12 {
         t.right(30.0);
@@ -19,15 +18,19 @@ fn main() {
             t.forward(4.2);
         }
     }
+    t.anime();
     let object = gen_cube();
     let mut k = 0;
-    t.anime();
-    anime.set_fps(60);
+    let mut anime = Animation::new().with_fps(30).with_maxy(100);
     anime.push(t, move |t| t.update(), (50.0, 50.0));
     anime.push(
         object,
         move |obj| {
-            obj.rotate((1.0, 2.0, 3.0));
+            obj.rotate(Vec3::new(
+                1.0_f32.to_radians(),
+                2.0_f32.to_radians(),
+                3.0_f32.to_radians(),
+            ));
             k += 1;
             k > 12 * 36
         },
@@ -53,10 +56,10 @@ fn gen_cube() -> Object3D {
     let mut points = Vec::new();
     let mut object = Object3D::new();
     for i in a {
-        let x = side_len / 2.0 * i.0 as f64;
-        let y = side_len / 2.0 * i.1 as f64;
-        let z = side_len / 2.0 * i.2 as f64;
-        points.push((x, y, z));
+        let x = side_len / 2.0 * i.0 as f32;
+        let y = side_len / 2.0 * i.1 as f32;
+        let z = side_len / 2.0 * i.2 as f32;
+        points.push(Vec3::new(x, y, z));
     }
     object.add_points(&points);
     object

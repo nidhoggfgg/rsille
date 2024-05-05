@@ -1,8 +1,6 @@
 use core::fmt;
 use std::error::Error;
 
-use na::Vector3;
-
 use crate::braille::Pixel;
 
 pub(crate) const MIN_ZOOM: f64 = 0.001;

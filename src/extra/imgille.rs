@@ -4,6 +4,7 @@ use crate::{
     Paint,
 };
 
+use crossterm::style::Color;
 use image::{
     imageops::FilterType::Lanczos3, io::Reader as ImageReader, DynamicImage, GenericImageView,
 };
@@ -110,7 +111,7 @@ impl Paint for Imgille {
         //  img_width       width
         //
         // important: never optimize with the fill, it's really hard to use and the algo is really complex
-        // can't stand use the fill anymore, even it would be musch faster
+        // can't stand use the fill anymore, even it would be much faster
 
         // calculate the rest size of the terminal
         let (x, y) = (x.into(), y.into());
@@ -159,7 +160,6 @@ impl Paint for Imgille {
             let (iw, ih) = (img.width(), img.height());
             for ny in 0..ih {
                 for nx in 0..iw {
-                    use crate::color::Color;
                     let pixel = img.get_pixel(nx, ny);
                     canvas.set_colorful(
                         x + nx as f64,

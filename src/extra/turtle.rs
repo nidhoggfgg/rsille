@@ -2,9 +2,10 @@
 
 use std::f64::consts::PI;
 
+use crossterm::style::Color;
+
 use crate::{canvas::Paint, utils::MIN_DIFFERENCE, Canvas};
 
-use crate::color::Color;
 
 /// The turtle impl of braille code in Rust
 ///

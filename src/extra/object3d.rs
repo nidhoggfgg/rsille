@@ -1,10 +1,11 @@
+use crossterm::style::Color;
+use glam::Affine3A;
+
 use crate::{
     canvas::Paint, utils::{mean_f32, RsilleErr, MIN_DIFFERENCE}, Canvas
 };
 
-
-use crate::color::Color;
-use std::collections::HashMap;
+use super::math::glm::{Pos3, Vec3};
 
 /// A paintable Object in 3D
 ///
@@ -28,8 +29,15 @@ use std::collections::HashMap;
 #[derive(Debug, Clone)]
 pub struct Object3D {
     pub vertices: Vec<Pos3>,
-    pub sides: HashMap<(usize, usize), Option<Color>>,
+    pub sides: Vec<Side>,
     center: Pos3,
+    radians: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Side {
+    pub side: (usize, usize),
+    pub color: Option<Color>
 }
 
 impl Object3D {
@@ -37,8 +45,9 @@ impl Object3D {
     pub fn new() -> Self {
         Self {
             vertices: Vec::new(),
-            sides: HashMap::new(),
+            sides: Vec::new(),
             center: Pos3::ZERO,
+            radians: false
         }
     }
 
@@ -63,7 +72,7 @@ impl Object3D {
                 return Err(RsilleErr::new("Wrong sides!".to_string()));
             }
 
-            self.sides.insert(*side, None);
+            self.sides.push(Side { side: *side, color: None });
         }
         Ok(())
     }
@@ -80,7 +89,7 @@ impl Object3D {
             if vn <= side.0 || vn <= side.1 {
                 return Err(RsilleErr::new("Wrong sides!".to_string()));
             }
-            self.sides.insert(*side, Some(*color));
+            self.sides.push(Side { side: *side, color: None });
         }
         Ok(())
     }
@@ -88,11 +97,11 @@ impl Object3D {
     /// Set the color of the side
     ///
     /// If there isn't the side, it will do nothing
-    pub fn set_side_colorful(&mut self, side: (usize, usize), color: Color) {
-        if self.sides.contains_key(&side) {
-            self.sides.insert(side, Some(color));
-        }
-    }
+    // pub fn set_side_colorful(&mut self, side: (usize, usize), color: Color) {
+    //     if self.sides.contains_key(&side) {
+    //         self.sides.insert(side, Some(color));
+    //     }
+    // }
 
     /// Return the vertices
     pub fn vertices(&self) -> &[Pos3] {
@@ -100,26 +109,31 @@ impl Object3D {
     }
 
     /// Return the sides
-    pub fn sides(&self) -> Vec<(usize, usize)> {
-        self.sides.keys().cloned().collect()
-    }
+    // pub fn sides(&self) -> Vec<(usize, usize)> {
+    //     self.sides.keys().cloned().collect()
+    // }
 
     /// Rotate the whole object
     ///
     /// Normaly, the rotate won't grow the error of f64.
     /// If the error is growing, use [`rotate_new`](struct.Object3D.html#method.rotate_new)
     pub fn rotate(&mut self, angle: Vec3) {
-        self.vertices.into_iter().map(|p| p.rotate(angle));
+        let angle =  if self.radians {
+            angle
+        } else {
+            Vec3::new(angle.x.to_radians(), angle.y.to_radians(), angle.z.to_radians())
+        };
+        self.vertices.iter_mut().for_each(|p| p.rotate(angle));
     }
 
     /// Rotate the whole object
     ///
     /// Similar to [`rotate`](struct.Object3D.html#method.rotate) but will return a new Object3D
-    pub fn rotate_new(&self, angle: Vec3) -> Self {
-        let mut obj = self.clone();
-        obj.rotate(angle);
-        obj
-    }
+    // pub fn rotate_new(&self, angle: Vec3) -> Self {
+    //     let mut obj = self.clone();
+    //     obj.rotate(angle);
+    //     obj
+    // }
 
     /// Zoom the whole object
     ///
@@ -154,16 +168,6 @@ impl Object3D {
     //     }
     // }
 
-    /// Take a closure and run it on all vertices
-    pub fn map<F>(&mut self, f: F)
-    where
-        F: Fn(&Vec3A) -> Vec3A,
-    {
-        for p in &mut self.vertices {
-            *p = f(p);
-        }
-    }
-
     fn calc_center(&mut self) {
         let (mut xs, mut ys, mut zs) = (Vec::new(), Vec::new(), Vec::new());
         for p in &self.vertices {
@@ -171,7 +175,7 @@ impl Object3D {
             ys.push(p.y);
             zs.push(p.z);
         }
-        let mean = Vec3A::new(mean_f32(&xs), mean_f32(&ys), mean_f32(&zs));
+        let mean = Pos3::new(mean_f32(&xs), mean_f32(&ys), mean_f32(&zs));
 
         // forbide the lost of f64
         if mean.distance(self.center) < MIN_DIFFERENCE as f32 {
@@ -190,12 +194,12 @@ impl Paint for Object3D {
         let (x, y) = (x.into(), y.into());
         let points = &self.vertices;
 
-        for (side, color) in &self.sides {
-            let (v1, v2) = (points[side.0], points[side.1]);
+        for side in &self.sides {
+            let (v1, v2) = (points[side.side.0], points[side.side.1]);
             let xy1 = (x + v1.x as f64, y + v1.z as f64);
             let xy2 = (x + v2.x as f64, y + v2.z as f64);
-            if let Some(color) = color {
-                canvas.line_colorful(xy1, xy2, *color);
+            if let Some(color) = side.color {
+                canvas.line_colorful(xy1, xy2, color);
             } else {
                 canvas.line(xy1, xy2);
             }
@@ -204,6 +208,35 @@ impl Paint for Object3D {
 }
 
 impl Object3D {
+    #[cfg(feature = "obj-rs")]
+    pub fn from_obj(path: &str, f: f32) -> Result<Self, RsilleErr> {
+        use std::fs::File;
+        use std::io::BufReader;
+        use obj::{load_obj, Obj};
+
+        use crate::to_rsille_err;
+
+        let input = BufReader::new(File::open(path).map_err(to_rsille_err)?);
+        let dome: Obj = load_obj(input).map_err(to_rsille_err)?;
+        let mut sides = Vec::new();
+        for is in dome.indices.windows(2) {
+            sides.push(Side {
+                side: (is[0].into(), is[1].into()),
+                color: None
+            })
+        }
+        let vs = dome.vertices.iter().map(|v| {
+            let p = v.position;
+            Pos3::new(p[0] * f, p[1] * f, p[2] * f)
+        }).collect();
+        Ok(Self {
+            vertices: vs,
+            sides,
+            center: Pos3::ZERO,
+            radians: false
+        })
+    }
+
     /// Make a cube
     pub fn cube<T>(side_len: T) -> Object3D
     where
@@ -228,7 +261,7 @@ impl Object3D {
             let x = side_len as f32 / 2.0 * i.0 as f32;
             let y = side_len as f32 / 2.0 * i.1 as f32;
             let z = side_len as f32 / 2.0 * i.2 as f32;
-            points.push(Vec3A::new(x, y, z));
+            points.push(Pos3::new(x, y, z));
         }
         object.add_points(&points);
         object
@@ -250,36 +283,35 @@ impl Object3D {
         object
     }
 }
-
 trait Affine {
-    fn rotate(self, angle: Vec3) -> Self;
-    fn scale(self, factor: Vec3) -> Self;
-    fn rotate_x(self, angle: f32) -> Self;
-    fn rotate_y(self, angle: f32) -> Self;
-    fn rotate_z(self, angle: f32) -> Self;
+    fn rotate(&mut self, angle: Vec3);
+    fn scale(&mut self, factor: Vec3);
+    fn rotate_x(&mut self, angle: f32);
+    fn rotate_y(&mut self, angle: f32);
+    fn rotate_z(&mut self, angle: f32);
 }
 
 impl Affine for Pos3 {
-    fn rotate(self, angle: Vec3) -> Self {
-        self.rotate_x(angle.x)
-        .rotate_y(angle.y)
-        .rotate_z(angle.z)
+    fn rotate(&mut self, angle: Vec3) {
+        self.rotate_x(angle.x);
+        self.rotate_y(angle.y);
+        self.rotate_z(angle.z);
     }
 
-    fn scale(self, scale: Vec3) -> Self {
-        Affine3A::from_scale(scale).transform_point3a(self)
+    fn scale(&mut self, scale: Vec3) {
+        *self = Affine3A::from_scale(scale.into()).transform_point3a(*self);
     }
 
-    fn rotate_x(self, angle: f32) -> Self {
-        Affine3A::from_rotation_x(angle).transform_point3a(self)
+    fn rotate_x(&mut self, angle: f32) {
+        *self = Affine3A::from_rotation_x(angle).transform_point3a(*self);
     }
 
-    fn rotate_y(self, angle: f32) -> Self {
-        Affine3A::from_rotation_y(angle).transform_point3a(self)
+    fn rotate_y(&mut self, angle: f32) {
+        *self = Affine3A::from_rotation_y(angle).transform_point3a(*self);
     }
 
-    fn rotate_z(self, angle: f32) -> Self {
-        Affine3A::from_rotation_z(angle).transform_point3a(self)
+    fn rotate_z(&mut self, angle: f32) {
+        *self = Affine3A::from_rotation_z(angle).transform_point3a(*self);
     }
 }
 

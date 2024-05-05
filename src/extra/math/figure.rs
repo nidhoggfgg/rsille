@@ -24,7 +24,7 @@ macro_rules! figure {
             let plot = Plot::new($f, ($start, $end));
             fig.plot(&plot);
         )*
-        canvas.paint(&fig, 0, 0).unwrap();
+        canvas.paint(&fig, 0, 0);
         canvas.print();
     };
 }

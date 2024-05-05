@@ -1,14 +1,14 @@
 use std::time::Duration;
 
-use crate::extra::math::na::Vec3;
+use crate::extra::math::glm::Vec3;
 
 use super::particle::Particle;
 
 pub struct Force {
-    gravity: f64,
-    drag: f64,
+    gravity: f32,
+    drag: f32,
     extra: Vec<Box<dyn Fn(&Particle) -> Vec3 + Send + 'static>>,
-    dt: f64,
+    dt: f32,
 }
 
 impl Force {
@@ -21,7 +21,7 @@ impl Force {
         }
     }
 
-    pub fn with(gravity: f64, drag: f64, dt: f64) -> Self {
+    pub fn with(gravity: f32, drag: f32, dt: f32) -> Self {
         Self {
             gravity,
             drag,
@@ -30,12 +30,12 @@ impl Force {
         }
     }
 
-    pub fn with_gravity(mut self, g: f64) -> Self {
+    pub fn with_gravity(mut self, g: f32) -> Self {
         self.gravity = g;
         self
     }
 
-    pub fn with_air(mut self, drag: f64) -> Self {
+    pub fn with_air(mut self, drag: f32) -> Self {
         self.drag = drag;
         self
     }
@@ -55,27 +55,33 @@ impl Force {
         self.extra.push(Box::new(f));
     }
 
-    pub fn set_gravity(&mut self, g: f64) {
+    pub fn set_gravity(&mut self, g: f32) {
         self.gravity = g;
     }
 
-    pub fn set_drag(&mut self, drag: f64) {
+    pub fn set_drag(&mut self, drag: f32) {
         self.drag = drag;
     }
 
     pub fn apply(&self, p: &mut Particle, time: Duration) {
         let (mut vel, mut pos) = (p.vel, p.pos);
-        let mut t = 0.0;
-        let time = time.as_secs_f32();
-        while t < time {
-            // vel += self.dt
-            //     * (Vec3::NEG_Y * 9.8 * self.gravity
-            //         - vel.normalize() * vel.length().powi(2) * self.drag);
-            // for f in &self.extra {
-            //     vel += self.dt * (f)(p);
-            // }
-            // pos += self.dt * vel;
-            // t += self.dt;
+        let mut time = time.as_secs_f32();
+
+        while time > 0.0 {
+            let dt = if time < self.dt {
+                time
+            } else {
+                self.dt
+            };
+            vel += dt * (
+                Vec3::NEG_Y * 9.8 * self.gravity
+                - vel.normalize() * vel.length().powi(2) * self.drag
+            );
+            for f in &self.extra {
+                vel += dt * (f)(p);
+            }
+            pos += dt * vel;
+            time -= dt;
         }
         p.vel = vel;
         p.pos = pos;

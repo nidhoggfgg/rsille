@@ -21,6 +21,7 @@ use std::io;
 use crate::braille::{Pixel, PixelOp};
 
 pub use crossterm::style::Color;
+
 use crossterm::{
     queue,
     style::{Colors, Print, ResetColor, SetColors},
