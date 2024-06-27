@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fs, iter::Peekable, usize};
+use std::{collections::HashMap, fs, iter::Peekable};
 
 use crate::{utils::RsilleErr, Paint};
 

@@ -1,6 +1,6 @@
 use crate::{
     term::get_terminal_size,
-    utils::{get_pos, to_rsille_err, RsilleErr},
+    utils::{get_pos, RsilleErr},
     Paint,
 };
 
@@ -64,9 +64,9 @@ impl Imgille {
     /// Open a image file
     pub fn open(&mut self, path: &str) -> Result<(), RsilleErr> {
         let img = ImageReader::open(path)
-            .map_err(to_rsille_err)?
+            .map_err(RsilleErr::to_rsille_err)?
             .decode()
-            .map_err(to_rsille_err)?;
+            .map_err(RsilleErr::to_rsille_err)?;
         self.img = img;
         Ok(())
     }
