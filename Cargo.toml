@@ -13,7 +13,7 @@ exclude = ["examples", "imgs"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-crossterm = "0.27.0"
+crossterm = "0.28.1"
 image = { version = "0.24.8", optional = true }
 
 [profile.release]
@@ -26,6 +26,10 @@ criterion = "0.4"
 [features]
 default = []
 img = ["image"]
+
+
+[workspace]
+members = ["canvas"]
 
 [[bench]]
 name = "set"
