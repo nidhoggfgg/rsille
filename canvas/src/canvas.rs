@@ -59,10 +59,10 @@ impl<T: Paint + ?Sized> Paint for Box<T> {
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Canvas {
-    minx: f64,                            // <= 0
-    miny: f64,                            // <= 0
-    width: i32,                           // >= 0
-    height: i32,                          // >= 0
+    minx: i32,                            // <= 0
+    miny: i32,                            // <= 0
+    maxx: i32,                            // >= 0
+    maxy: i32,                            // >= 0
     pixels: HashMap<(i32, i32), Colored>, // (col, row) -> colored
 }
 
@@ -73,12 +73,12 @@ impl Canvas {
     pub fn new() -> Self {
         let pixels = HashMap::new();
         let (width, height) = (0, 0);
-        let (minx, miny) = (0.0, 0.0);
+        let (minx, miny) = (0, 0);
         Self {
             minx,
             miny,
-            width,
-            height,
+            maxx: width,
+            maxy: height,
             pixels,
         }
     }
@@ -98,7 +98,7 @@ impl Canvas {
     ///
     /// If you want to print the canvas to a buffer, use the [`print_on`](struct.Canvas.html#method.print_on)
     pub fn print(&self) {
-        let is_raw = false;
+        let is_raw = crossterm::terminal::is_raw_mode_enabled().unwrap_or(false);
         let mut stdout = std::io::stdout();
         self.print_on(&mut stdout, is_raw).unwrap();
     }
@@ -110,9 +110,8 @@ impl Canvas {
     where
         W: Write,
     {
-        let (start_col, start_row) = get_pos(self.minx, self.miny);
-        for row in (start_row..self.height).rev() {
-            for col in start_col..self.width {
+        for row in (self.miny..self.maxy).rev() {
+            for col in self.minx..self.maxx {
                 if let Some(pixel) = self.pixels.get(&(col, row)) {
                     pixel.queue(w)?;
                 } else {
@@ -139,60 +138,11 @@ impl Canvas {
 
     /// Reset the canvas to a new empty canvas
     pub fn reset(&mut self) {
-        self.minx = 0.0;
-        self.miny = 0.0;
-        self.width = 0;
-        self.height = 0;
+        self.minx = 0;
+        self.miny = 0;
+        self.maxx = 0;
+        self.maxy = 0;
         self.pixels = HashMap::new();
-    }
-
-    /// Set the size of the canvas
-    ///
-    /// This method can't fix the size of the canvas, it's just set the canvas size.
-    /// When the size isn't enough, the canvas will auto increase.
-    /// And the (width, height) isn't the size of the terminal, it's the size of the canvas!
-    /// For example, an object `x` from -30 to 30, then it's 60 in width.
-    /// On the terminal, it's 30 in width(because braille code), but you should set the width to 60 not 30.
-    pub fn set_size<T>(&mut self, width: T, height: T)
-    where
-        T: Into<f64>,
-    {
-        // start_col, start_row < 0
-        let (max_col, max_row) = get_pos(width.into(), height.into());
-        let (start_col, start_row) = get_pos(self.minx, self.miny);
-        if max_col > self.width - start_col {
-            self.width = max_col + start_col;
-        }
-        if max_row > self.height - start_row {
-            self.height = max_row + start_row;
-        }
-    }
-
-    /// Set the min `x` of th canvas
-    ///
-    /// In most time, no need to call this, only when the animation is moved when running
-    pub fn set_minx<T>(&mut self, minx: T)
-    where
-        T: Into<f64>,
-    {
-        let minx = minx.into();
-        if minx < self.minx {
-            self.minx = minx;
-        }
-    }
-
-    /// Set the max `y` of the canvas
-    ///
-    /// In most time, no need to call this, only when the animation is moved when running
-    pub fn set_maxy<T>(&mut self, maxy: T)
-    where
-        T: Into<f64> + Copy,
-    {
-        let maxy = maxy.into();
-        let (_, max_row) = get_pos(0.0, maxy);
-        if max_row > self.height {
-            self.height = max_row;
-        }
     }
 
     /// Draw a dot on (x, y)
@@ -208,11 +158,11 @@ impl Canvas {
     /// Similar to [`set`](struct.Canvas.html#method.set)
     ///
     /// But it's support color
-    pub fn set_colorful<T>(&mut self, x: T, y: T, color: Colors)
+    pub fn set_colorful<T>(&mut self, x: T, y: T, colors: Colors)
     where
         T: Into<f64> + Copy,
     {
-        self.set_at(x, y, Some(color));
+        self.set_at(x, y, Some(colors));
     }
 
     /// If the (x, y) is already set, then unset it
@@ -325,18 +275,18 @@ impl Canvas {
         T: Into<f64>,
     {
         let (x, y) = (x.into(), y.into());
-        if x < self.minx {
-            self.minx = x;
-        }
-        if y < self.miny {
-            self.miny = y;
-        }
         let (col, row) = get_pos(x, y);
-        if row >= self.height {
-            self.height = row.abs() + 1;
+        if row < self.minx {
+            self.minx = row;
         }
-        if col >= self.width {
-            self.width = col.abs() + 1;
+        if row >= self.maxy {
+            self.maxy = row.abs() + 1;
+        }
+        if col < self.minx {
+            self.minx = col
+        }
+        if col >= self.maxx {
+            self.maxx = col.abs() + 1;
         }
         (col, row)
     }
