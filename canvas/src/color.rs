@@ -50,8 +50,9 @@ impl Colored {
         self
     }
 
-    pub fn set_background_color(&mut self, color: Color) {
+    pub fn set_background_color(&mut self, color: Color) -> &mut Self {
         self.color.background = Some(color);
+        self
     }
 
     pub fn queue(&self, buffer: &mut impl io::Write) -> io::Result<()> {
