@@ -5,3 +5,15 @@ edition = "2021"
 
 [dependencies]
 crossterm = "0.28.1"
+
+[dev-dependencies]
+criterion = "0.5.1"
+rand = "0.8.5"
+
+[[bench]]
+name = "vec_vs_map"
+harness = false
+
+[[bench]]
+name = "u8_vs_u32"
+harness = false
