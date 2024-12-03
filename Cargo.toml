@@ -8,7 +8,7 @@ keywords = ["braille", "terminal", "tui", "cli", "animation"]
 readme = "README.md"
 license = "MIT"
 repository = "https://github.com/nidhoggfgg/rsille.git"
-exclude = ["examples", "imgs"]
+exclude = ["examples", "imgs", "pyrsille"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -29,7 +29,7 @@ img = ["image"]
 
 
 [workspace]
-members = ["canvas"]
+members = ["canvas", "pyrsille"]
 
 [[bench]]
 name = "set"
