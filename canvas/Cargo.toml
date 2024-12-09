@@ -10,6 +10,10 @@ crossterm = "0.28.1"
 criterion = "0.5.1"
 rand = "0.8.5"
 
+[features]
+default = []
+no_color = []
+
 [[bench]]
 name = "vec_vs_map"
 harness = false

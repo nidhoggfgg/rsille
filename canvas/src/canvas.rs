@@ -1,12 +1,20 @@
 use std::io::Write;
 use std::{cmp, collections::HashMap};
 
-use crossterm::style::Colors;
 use crossterm::{cursor::MoveToNextLine, queue, style::Print};
 
+use crate::bound::Bound;
 use crate::braille::{self, PixelOp};
-use crate::color::Colored;
+
 use crate::utils::{get_pos, round};
+
+#[cfg(feature = "no_color")]
+use crate::braille::Pixel;
+
+#[cfg(not(feature = "no_color"))]
+use crate::color::Colored;
+#[cfg(not(feature = "no_color"))]
+use crossterm::style::Colors;
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -34,26 +42,24 @@ impl<T: Paint + ?Sized> Paint for Box<T> {
     }
 }
 
+#[repr(C)]
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Canvas {
-    minx: i32,                            // <= 0
-    miny: i32,                            // <= 0
-    maxx: i32,                            // >= 0
-    maxy: i32,                            // >= 0
-    pixels: HashMap<(i32, i32), Colored>, // (col, row) -> colored
+    bound: Bound,
+    #[cfg(not(feature = "no_color"))]
+    pixels: HashMap<(i32, i32), Colored>,
+    #[cfg(feature = "no_color")]
+    pixels: HashMap<(i32, i32), Pixel>,
     unbound: bool,
 }
 
 impl Canvas {
+    #[inline]
+    #[must_use]
     pub fn new() -> Self {
         let pixels = HashMap::new();
-        let (maxx, maxy) = (0, 0);
-        let (minx, miny) = (0, 0);
         Self {
-            minx,
-            miny,
-            maxx,
-            maxy,
+            bound: Bound::new(),
             pixels,
             unbound: true,
         }
@@ -79,12 +85,13 @@ impl Canvas {
     where
         W: Write,
     {
-        for row in (self.miny..=self.maxy).rev() {
-            for col in self.minx..=self.maxx {
+        let ((minx, maxx), (miny, maxy)) = self.bound.get_bound();
+        for row in (miny..=maxy).rev() {
+            for col in minx..=maxx {
                 if let Some(pixel) = self.pixels.get(&(col, row)) {
                     pixel.queue(w)?;
                 } else {
-                    queue!(w, Print(braille::SPACE))?;
+                    queue!(w, Print(braille::BRAILLE_SPACE))?;
                 }
             }
             if is_raw {
@@ -102,10 +109,7 @@ impl Canvas {
     }
 
     pub fn reset(&mut self) {
-        self.minx = 0;
-        self.miny = 0;
-        self.maxx = 0;
-        self.maxy = 0;
+        self.bound = Bound::new();
         self.clear();
     }
 
@@ -117,22 +121,31 @@ impl Canvas {
         if let Some(pixel) = self.pixels.get_mut(&(col, row)) {
             pixel.set(x, y);
         } else {
+            #[cfg(not(feature = "no_color"))]
             self.pixels.insert((col, row), Colored::new());
+            #[cfg(feature = "no_color")]
+            self.pixels.insert((col, row), Pixel::new());
             self.pixels.get_mut(&(col, row)).unwrap().set(x, y);
         }
     }
 
+    #[cfg(not(feature = "no_color"))]
     pub fn set_colorful<T>(&mut self, x: T, y: T, colors: Colors)
     where
         T: Into<f64> + Copy,
     {
         self.set(x, y);
         let (col, row) = self.get_pos(x, y);
-        self.pixels
-            .get_mut(&(col, row))
-            .unwrap()
-            .set_foregound_color(colors.foreground.unwrap())
-            .set_background_color(colors.background.unwrap());
+        if let Some(pixel) = self.pixels.get_mut(&(col, row)) {
+            if let Some(foreground) = colors.foreground {
+                pixel.set_foregound_color(foreground);
+            }
+            if let Some(background) = colors.background {
+                pixel.set_background_color(background);
+            }
+        } else {
+            unreachable!("pixel not found")
+        }
     }
 
     pub fn toggle<T>(&mut self, x: T, y: T)
@@ -143,7 +156,10 @@ impl Canvas {
         if let Some(pixel) = self.pixels.get_mut(&(col, row)) {
             pixel.toggle(x, y);
         } else {
+            #[cfg(not(feature = "no_color"))]
             self.pixels.insert((col, row), Colored::new());
+            #[cfg(feature = "no_color")]
+            self.pixels.insert((col, row), Pixel::new());
             self.pixels.get_mut(&(col, row)).unwrap().toggle(x, y);
         }
     }
@@ -176,6 +192,7 @@ impl Canvas {
         }
     }
 
+    #[cfg(not(feature = "no_color"))]
     pub fn line_colorful<T>(&mut self, xy1: (T, T), xy2: (T, T), color: Colors)
     where
         T: Into<f64> + Copy,
@@ -204,24 +221,18 @@ impl Canvas {
         }
     }
 
+    pub fn size(&self) -> (i32, i32) {
+        let ((minx, maxx), (miny, maxy)) = self.bound.get_bound();
+        return (maxx - minx + 1, maxy - miny + 1);
+    }
+
     fn get_pos<T>(&mut self, x: T, y: T) -> (i32, i32)
     where
         T: Into<f64>,
     {
         // let (x, y) = (x.into(), y.into());
         let (col, row) = get_pos(x, y);
-        if row < self.minx {
-            self.minx = row;
-        }
-        if row >= self.maxy {
-            self.maxy = row.abs();
-        }
-        if col < self.minx {
-            self.minx = col
-        }
-        if col >= self.maxx {
-            self.maxx = col.abs();
-        }
+        self.bound.update(col, row);
         (col, row)
     }
 }
