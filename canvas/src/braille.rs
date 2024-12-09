@@ -1,8 +1,11 @@
 use core::fmt;
+use std::io;
+
+use crossterm::{queue, style::Print};
 
 use crate::utils::round;
 
-pub const SPACE: char = '⠀';
+pub const BRAILLE_SPACE: char = '⠀';
 // http://www.alanwood.net/unicode/braille_patterns.html
 // dots:
 //    ,___,
@@ -26,12 +29,21 @@ pub struct Pixel {
 }
 
 impl Pixel {
+    #[inline]
+    #[must_use]
     pub fn new() -> Self {
         Self { code: 0 }
     }
 
+    #[inline]
+    #[must_use]
     pub fn from(code: u8) -> Self {
         Self { code }
+    }
+
+    #[inline]
+    pub fn queue(&self, buffer: &mut impl io::Write) -> io::Result<()> {
+        queue!(buffer, Print(self))
     }
 }
 
@@ -39,32 +51,35 @@ pub trait PixelOp<T>
 where
     T: Into<f64> + Copy,
 {
-    fn unset(&mut self, x: T, y: T);
-    fn set(&mut self, x: T, y: T);
-    fn toggle(&mut self, x: T, y: T);
+    fn unset(&mut self, x: T, y: T) -> &mut Self;
+    fn set(&mut self, x: T, y: T) -> &mut Self;
+    fn toggle(&mut self, x: T, y: T) -> &mut Self;
 }
 
 impl<T> PixelOp<T> for Pixel
 where
     T: Into<f64> + Copy,
 {
-    fn unset(&mut self, x: T, y: T) {
+    fn unset(&mut self, x: T, y: T) -> &mut Self {
         let p = get_pixel(x, y);
         self.code &= !p;
+        self
     }
 
-    fn set(&mut self, x: T, y: T) {
+    fn set(&mut self, x: T, y: T) -> &mut Self {
         let p = get_pixel(x, y);
         self.code |= p;
+        self
     }
 
-    fn toggle(&mut self, x: T, y: T) {
+    fn toggle(&mut self, x: T, y: T) -> &mut Self {
         let p = get_pixel(x, y);
         if self.code & p != 0 {
             self.unset(x, y);
         } else {
             self.set(x, y);
         }
+        self
     }
 }
 
