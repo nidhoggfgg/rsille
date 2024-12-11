@@ -2,6 +2,7 @@
 name = "canvas"
 version = "0.1.0"
 edition = "2021"
+exclude = ["examples"]
 
 [dependencies]
 crossterm = "0.28.1"
@@ -11,8 +12,8 @@ criterion = "0.5.1"
 rand = "0.8.5"
 
 [features]
-default = []
-no_color = []
+default = ["color"]
+color = []
 
 [[bench]]
 name = "vec_vs_map"
@@ -20,4 +21,8 @@ harness = false
 
 [[bench]]
 name = "u8_vs_u32"
+harness = false
+
+[[bench]]
+name = "line"
 harness = false

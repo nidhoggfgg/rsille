@@ -1,4 +1,4 @@
-use canvas::canvas;
+use canvas;
 use pyo3::prelude::*;
 
 #[pyclass]

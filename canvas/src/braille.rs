@@ -3,9 +3,6 @@ use std::io;
 
 use crossterm::{queue, style::Print};
 
-use crate::utils::round;
-
-pub const BRAILLE_SPACE: char = '⠀';
 // http://www.alanwood.net/unicode/braille_patterns.html
 // dots:
 //    ,___,
@@ -16,9 +13,9 @@ pub const BRAILLE_SPACE: char = '⠀';
 //    `````
 #[rustfmt::skip]
 const PIXEL_MAP: [[u8; 2]; 4] = [[0x01, 0x08],
-                                  [0x02, 0x10],
-                                  [0x04, 0x20],
-                                  [0x40, 0x80]];
+                                 [0x02, 0x10],
+                                 [0x04, 0x20],
+                                 [0x40, 0x80]];
 // braille unicode characters starts at 0x2800
 const BASE_CHAR: u32 = 0x2800;
 
@@ -42,43 +39,39 @@ impl Pixel {
     }
 
     #[inline]
+    #[must_use]
+    pub fn space() -> Self {
+        Self { code: 0 }
+    }
+
+    #[inline]
     pub fn queue(&self, buffer: &mut impl io::Write) -> io::Result<()> {
         queue!(buffer, Print(self))
     }
 }
 
-pub trait PixelOp<T>
-where
-    T: Into<f64> + Copy,
-{
-    fn unset(&mut self, x: T, y: T) -> &mut Self;
-    fn set(&mut self, x: T, y: T) -> &mut Self;
-    fn toggle(&mut self, x: T, y: T) -> &mut Self;
+pub trait PixelOp {
+    fn unset(&mut self, x: i32, y: i32) -> &mut Self;
+    fn set(&mut self, x: i32, y: i32) -> &mut Self;
+    fn toggle(&mut self, x: i32, y: i32) -> &mut Self;
 }
 
-impl<T> PixelOp<T> for Pixel
-where
-    T: Into<f64> + Copy,
-{
-    fn unset(&mut self, x: T, y: T) -> &mut Self {
+impl PixelOp for Pixel {
+    fn unset(&mut self, x: i32, y: i32) -> &mut Self {
         let p = get_pixel(x, y);
         self.code &= !p;
         self
     }
 
-    fn set(&mut self, x: T, y: T) -> &mut Self {
+    fn set(&mut self, x: i32, y: i32) -> &mut Self {
         let p = get_pixel(x, y);
         self.code |= p;
         self
     }
 
-    fn toggle(&mut self, x: T, y: T) -> &mut Self {
+    fn toggle(&mut self, x: i32, y: i32) -> &mut Self {
         let p = get_pixel(x, y);
-        if self.code & p != 0 {
-            self.unset(x, y);
-        } else {
-            self.set(x, y);
-        }
+        self.code ^= p;
         self
     }
 }
@@ -89,17 +82,15 @@ impl fmt::Display for Pixel {
     }
 }
 
-fn get_pixel<T>(x: T, y: T) -> u8
-where
-    T: Into<f64>,
-{
-    let (x, y) = (round(x), round(y));
-    let y = if y >= 0 {
-        [3, 2, 1, 0][(y % 4) as usize]
-    } else {
-        [3, 0, 1, 2][(y % 4).unsigned_abs() as usize]
-    };
-    PIXEL_MAP[y as usize][(x % 2).unsigned_abs() as usize]
+#[rustfmt::skip]                                      //              axis to index in PIXEL_MAP
+fn get_pixel(x: i32, y: i32) -> u8 {                  //       ^ y                |  y ^    
+    let y = if y >= 0 {                        //  -2 -1|   x  x: -1 -> 1  |  3 | * *     x: 0 -> 
+        [3, 2, 1, 0][(y % 4) as usize]                // ------+--->     -2 -> 0  |  2 | * *        1 -> 1      
+    } else {                                          //   * * | -1   y: -1 -> 0  |  1 | * *     y: 0 -> 3      
+        [3, 0, 1, 2][(y % 4).unsigned_abs() as usize] //   * * | -2      -2 -> 1  |  0 | * *        1 -> 2
+    };                                                //   * * | -3      -3 -> 2  |  --+------>     2 -> 1
+    let x = (x % 2).unsigned_abs() as usize;   //   * * | -4      -4 -> 3  |    | 0 1  x     3 -> 0
+    PIXEL_MAP[y][x]                                   // those dots in braille is defined as PIXEL_MAP on the top of this file
 }
 
 // it's safety, dw :)

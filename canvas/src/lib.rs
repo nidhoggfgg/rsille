@@ -1,8 +1,15 @@
 pub mod braille;
-pub mod canvas;
 pub mod utils;
 
-mod bound;
+pub use canvas::Canvas;
+pub use canvas::Paint;
+pub use canvas::PaintErr;
 
-#[cfg(not(feature = "no_color"))]
+pub extern crate crossterm;
+
+#[cfg(feature = "color")]
 pub mod color;
+
+mod bound;
+mod canvas;
+mod tile;

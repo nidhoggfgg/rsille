@@ -9,16 +9,13 @@ pub fn get_pos<T>(x: T, y: T) -> (i32, i32)
 where
     T: Into<f64>,
 {
+    let (x, y) = (round(x), round(y));
     let row = get_row(y);
     let col = get_col(x);
     (col, row)
 }
 
-pub fn get_row<T>(y: T) -> i32
-where
-    T: Into<f64>,
-{
-    let y = round(y);
+pub fn get_row(y: i32) -> i32 {
     if y < 0 {
         (y + 1) / 4 - 1
     } else {
@@ -26,11 +23,7 @@ where
     }
 }
 
-pub fn get_col<T>(x: T) -> i32
-where
-    T: Into<f64>,
-{
-    let x = round(x);
+pub fn get_col(x: i32) -> i32 {
     if x < 0 {
         (x - 1) / 2
     } else {

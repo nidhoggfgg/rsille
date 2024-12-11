@@ -27,7 +27,6 @@ criterion = "0.4"
 default = []
 img = ["image"]
 
-
 [workspace]
 members = ["canvas", "pyrsille"]
 
