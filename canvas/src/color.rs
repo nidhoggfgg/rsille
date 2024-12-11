@@ -49,22 +49,25 @@ impl Colored {
     }
 }
 
-impl<T> PixelOp<T> for Colored
-where
-    T: Into<f64> + Copy,
-{
-    fn set(&mut self, x: T, y: T) -> &mut Self {
+impl PixelOp for Colored {
+    fn set(&mut self, x: i32, y: i32) -> &mut Self {
         self.pixel.set(x, y);
         self
     }
 
-    fn unset(&mut self, x: T, y: T) -> &mut Self {
+    fn unset(&mut self, x: i32, y: i32) -> &mut Self {
         self.pixel.unset(x, y);
         self
     }
 
-    fn toggle(&mut self, x: T, y: T) -> &mut Self {
+    fn toggle(&mut self, x: i32, y: i32) -> &mut Self {
         self.pixel.toggle(x, y);
         self
+    }
+}
+
+impl Default for Colored {
+    fn default() -> Self {
+        Self::new()
     }
 }
