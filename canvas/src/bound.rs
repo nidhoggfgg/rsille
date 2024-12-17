@@ -27,7 +27,7 @@ impl Bound {
         if self.fixed {
             return;
         }
-        let (x, y) = (tile.col, tile.row);
+        let (x, y) = tile.get();
         if !self.is_inside(x, y) {
             self.minx = self.minx.min(x);
             self.maxx = self.maxx.max(x);

@@ -1,0 +1,8 @@
+[package]
+name = "anime"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+canvas = { path = "../canvas" }
+crossbeam = "0.8.4"

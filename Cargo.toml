@@ -15,6 +15,8 @@ exclude = ["examples", "imgs", "pyrsille"]
 [dependencies]
 crossterm = "0.28.1"
 image = { version = "0.24.8", optional = true }
+canvas = { path = "./canvas" }
+terminal = { path = "./terminal" }
 
 [profile.release]
 lto = true
@@ -28,7 +30,7 @@ default = []
 img = ["image"]
 
 [workspace]
-members = ["canvas", "pyrsille"]
+members = ["anime", "canvas", "pyrsille", "terminal"]
 
 [[bench]]
 name = "set"

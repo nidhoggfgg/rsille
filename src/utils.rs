@@ -1,8 +1,6 @@
 use core::fmt;
 use std::error::Error;
 
-use crate::braille::Pixel;
-
 pub const MIN_ZOOM: f64 = 0.001;
 pub const MIN_DIFFERENCE: f64 = 1E-10;
 
@@ -33,16 +31,6 @@ where
     let row = if y < 0 { (y + 1) / 4 - 1 } else { y / 4 };
     let col = if x < 0 { (x - 1) / 2 } else { x / 2 };
     (col, row)
-}
-
-#[allow(unused)]
-pub(crate) fn make_braille(c: char) -> Option<Pixel> {
-    let c = c as u32;
-    if (0x2800..=0x28FF).contains(&c) {
-        unsafe { Some(Pixel::from_unchecked(c - 0x2800)) }
-    } else {
-        None
-    }
 }
 
 /// The error type used by this crate

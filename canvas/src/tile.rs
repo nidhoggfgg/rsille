@@ -2,9 +2,9 @@ use crate::utils::get_pos;
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Hash)]
-pub struct Tile {
-    pub col: i32,
-    pub row: i32,
+pub(crate) struct Tile {
+    col: i32,
+    row: i32,
 }
 
 impl Tile {
@@ -22,5 +22,11 @@ impl Tile {
     {
         let (col, row) = get_pos(x, y);
         Self { col, row }
+    }
+
+    #[inline]
+    #[must_use]
+    pub fn get(self) -> (i32, i32) {
+        (self.col, self.row)
     }
 }

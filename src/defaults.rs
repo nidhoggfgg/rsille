@@ -1,13 +1,7 @@
 use crate::{
     extra::{math::Figure, LifeGame, Object3D, Turtle},
-    Animation, Canvas,
+    Animation,
 };
-
-impl Default for Canvas {
-    fn default() -> Self {
-        Self::new()
-    }
-}
 
 impl Default for Object3D {
     fn default() -> Self {

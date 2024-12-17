@@ -98,9 +98,6 @@
 //! [drawille]: https://github.com/asciimoo/drawille
 
 mod anime;
-mod braille;
-mod canvas;
-pub mod color;
 mod decor;
 mod defaults;
 pub mod extra;
