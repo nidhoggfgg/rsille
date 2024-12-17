@@ -44,7 +44,6 @@ impl<T: Paint + ?Sized> Paint for Box<T> {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Canvas {
     bound: Bound,
-    unbound: bool,
     #[cfg(feature = "color")]
     pixels: HashMap<Tile, Colored>,
     #[cfg(not(feature = "color"))]
@@ -59,7 +58,6 @@ impl Canvas {
         Self {
             bound: Bound::new(),
             pixels,
-            unbound: true,
         }
     }
 
