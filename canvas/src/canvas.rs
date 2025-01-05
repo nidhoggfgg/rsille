@@ -2,17 +2,21 @@ use std::cmp;
 use std::collections::HashMap;
 use std::io::Write;
 
-use crossterm::{cursor::MoveToNextLine, queue, style::Print};
-
 use crate::bound::Bound;
 use crate::braille::{Pixel, PixelOp};
 use crate::tile::Tile;
 use crate::utils::round;
 
+use terminal::async_trait::async_trait;
+use terminal::crossterm::cursor::MoveToNextLine;
+use terminal::crossterm::queue;
+use terminal::crossterm::style::Print;
+use terminal::{Draw, DrawErr, DrawUpdate, Update};
+
 #[cfg(feature = "color")]
 use crate::color::Colored;
 #[cfg(feature = "color")]
-use crossterm::style::Colors;
+use terminal::crossterm::style::Colors;
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -72,7 +76,7 @@ impl Canvas {
     }
 
     pub fn print(&self) {
-        let is_raw = crossterm::terminal::is_raw_mode_enabled().unwrap_or(false);
+        let is_raw = terminal::crossterm::terminal::is_raw_mode_enabled().unwrap_or(false);
         let mut stdout = std::io::stdout();
         self.print_on(&mut stdout, is_raw).unwrap();
     }
@@ -202,9 +206,9 @@ impl Canvas {
         self
     }
 
-    pub fn size(&self) -> (i32, i32) {
+    pub fn get_size(&self) -> (u32, u32) {
         let ((minx, maxx), (miny, maxy)) = self.bound.get_bound();
-        (maxx - minx + 1, maxy - miny + 1)
+        ((maxx - minx + 1) as u32, (maxy - miny + 1) as u32)
     }
 
     pub fn set_range(&mut self, range_x: (i32, i32), range_y: (i32, i32)) {
@@ -224,3 +228,34 @@ impl Canvas {
         tile
     }
 }
+
+impl Draw for Canvas {
+    fn draw(&self) -> Vec<terminal::style::Stylized> {
+        let size = self.get_size();
+        let mut result = Vec::with_capacity((size.0 * size.1) as usize);
+        let ((minx, maxx), (miny, maxy)) = self.bound.get_bound();
+        for row in (miny..=maxy).rev() {
+            for col in minx..=maxx {
+                if let Some(pixel) = self.pixels.get(&Tile::from(col, row)) {
+                    result.push((*pixel).into());
+                } else {
+                    result.push(Pixel::space().into());
+                }
+            }
+        }
+        result
+    }
+
+    fn size(&self) -> (u32, u32) {
+        self.get_size()
+    }
+}
+
+#[async_trait]
+impl Update for Canvas {
+    async fn update(&mut self) -> Result<bool, DrawErr> {
+        Ok(false)
+    }
+}
+
+impl DrawUpdate for Canvas {}

@@ -1,7 +1,10 @@
 use core::fmt;
 use std::io;
 
-use crossterm::{queue, style::Print};
+use terminal::{
+    crossterm::{queue, style::Print},
+    style::Stylized,
+};
 
 // http://www.alanwood.net/unicode/braille_patterns.html
 // dots:
@@ -48,6 +51,12 @@ impl Pixel {
     pub fn queue(&self, buffer: &mut impl io::Write) -> io::Result<()> {
         queue!(buffer, Print(self))
     }
+
+    #[inline]
+    #[must_use]
+    pub fn to_char(&self) -> char {
+        make_braille_unchecked(self.code)
+    }
 }
 
 pub trait PixelOp {
@@ -82,9 +91,15 @@ impl fmt::Display for Pixel {
     }
 }
 
+impl From<Pixel> for Stylized {
+    fn from(value: Pixel) -> Self {
+        Stylized::new(value.to_char(), None, None)
+    }
+}
+
 #[rustfmt::skip]                                      //              axis to index in PIXEL_MAP
 fn get_pixel(x: i32, y: i32) -> u8 {                  //       ^ y                |  y ^    
-    let y = if y >= 0 {                        //  -2 -1|   x  x: -1 -> 1  |  3 | * *     x: 0 -> 
+    let y = if y >= 0 {                        //  -2 -1|   x  x: -1 -> 1  |  3 | * *     x: 0 -> 0
         [3, 2, 1, 0][(y % 4) as usize]                // ------+--->     -2 -> 0  |  2 | * *        1 -> 1      
     } else {                                          //   * * | -1   y: -1 -> 0  |  1 | * *     y: 0 -> 3      
         [3, 0, 1, 2][(y % 4).unsigned_abs() as usize] //   * * | -2      -2 -> 1  |  0 | * *        1 -> 2
@@ -94,6 +109,7 @@ fn get_pixel(x: i32, y: i32) -> u8 {                  //       ^ y              
 }
 
 // it's safety, dw :)
+#[inline]
 fn make_braille_unchecked(p: u8) -> char {
     unsafe { char::from_u32_unchecked(BASE_CHAR + p as u32) }
 }
