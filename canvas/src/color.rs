@@ -1,12 +1,14 @@
 use std::io;
 
-use crate::braille::{Pixel, PixelOp};
-
-pub use crossterm::style::Color;
-use crossterm::{
-    queue,
-    style::{Colors, Print, ResetColor, SetColors},
+use terminal::{
+    crossterm::{
+        queue,
+        style::{Color, Colors, Print, ResetColor, SetColors},
+    },
+    style::Stylized,
 };
+
+use crate::braille::{Pixel, PixelOp};
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -69,5 +71,11 @@ impl PixelOp for Colored {
 impl Default for Colored {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl From<Colored> for Stylized {
+    fn from(value: Colored) -> Self {
+        Stylized::new(value.pixel.to_char(), Some(value.color), None)
     }
 }

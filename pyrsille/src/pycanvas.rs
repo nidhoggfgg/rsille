@@ -27,7 +27,7 @@ impl Canvas {
         self.canvas.print();
     }
 
-    fn size(&self) -> (i32, i32) {
-        self.canvas.size()
+    fn size(&self) -> (u32, u32) {
+        self.canvas.get_size()
     }
 }
