@@ -33,7 +33,7 @@ impl Panel {
 }
 
 impl Draw for Panel {
-    fn draw(&self) -> Vec<Stylized> {
+    fn draw(&self) -> Result<Vec<Stylized>, DrawErr> {
         let mut result = vec![Stylized::space(); (self.size.0 * self.size.1) as usize];
 
         let (mut offset_col, mut offset_row) = (0_usize, 0_usize);
@@ -43,8 +43,8 @@ impl Draw for Panel {
             if b.attr.float {
                 todo!()
             }
-            let data = b.draw();
-            let (width, height) = b.size();
+            let data = b.draw()?;
+            let (width, height) = b.size().ok_or(DrawErr)?;
 
             // 获取可渲染区域
             let real_width = if pos_col as u32 + width > self.size.0 {
@@ -78,11 +78,13 @@ impl Draw for Panel {
                 AttrDisplay::Inline => todo!(),
             }
         }
-        result
+        Ok(result)
     }
 
-    fn size(&self) -> (u32, u32) {
-        self.size
+    #[must_use]
+    #[inline]
+    fn size(&self) -> Option<(u32, u32)> {
+        Some(self.size)
     }
 }
 

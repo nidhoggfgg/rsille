@@ -8,11 +8,11 @@ pub struct Slot {
 }
 
 impl Draw for Slot {
-    fn draw(&self) -> Vec<Stylized> {
+    fn draw(&self) -> Result<Vec<Stylized>, DrawErr> {
         self.thing.draw()
     }
 
-    fn size(&self) -> (u32, u32) {
+    fn size(&self) -> Option<(u32, u32)> {
         self.thing.size()
     }
 }

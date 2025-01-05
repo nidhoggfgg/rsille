@@ -1,0 +1,9 @@
+[package]
+name = "ui_core"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+async-trait = "0.1.84"
+tokio = { version = "1", features = ["full"] }
+terminal = { path = "../terminal" }
