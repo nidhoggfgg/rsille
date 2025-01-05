@@ -1,15 +1,15 @@
 use canvas::Canvas;
-use terminal::{
+use tokio::sync::watch;
+use ui_core::{
     attr::{Attr, AttrDisplay},
     panel::Panel,
     reactive::Reactive,
-    terminal::Terminal,
+    view::View,
 };
-use tokio::sync::watch;
 
 #[tokio::main]
 pub async fn main() {
-    let mut panel = Panel::new(200, 30);
+    let mut panel = Panel::new(80, 30);
 
     let canvas = Canvas::new();
 
@@ -19,8 +19,16 @@ pub async fn main() {
         canvas.clear();
 
         for x in 0..1800 {
-            let x = x as f64 + *v as f64;
-            canvas.set(x / 10.0, 15.0 + x.to_radians().sin() * 10.0);
+            let x = x as f64;
+            canvas.set(x / 10.0, 15.0 + (x + *v as f64).to_radians().sin() * 10.0);
+        }
+
+        for x in 0..1800 {
+            let x = x as f64;
+            canvas.set(
+                x / 10.0,
+                15.0 + ((9.0 + x + (*v as f64) * 2.0) / 2.0).to_radians().sin() * 10.0,
+            );
         }
     });
 
@@ -28,14 +36,14 @@ pub async fn main() {
         reactive_canvas,
         Attr {
             id: "canvas".into(),
-            width: 200,
+            width: 80,
             height: 30,
             display: AttrDisplay::Block,
             float: false,
         },
     );
 
-    let mut terminal = Terminal::new(panel);
+    let mut terminal = View::new(panel);
 
     let sender_task = tokio::spawn(async move {
         for i in 0..1800 {

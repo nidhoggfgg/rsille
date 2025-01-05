@@ -5,6 +5,7 @@ edition = "2021"
 exclude = ["examples"]
 
 [dependencies]
+ui_core = { path = "../ui_core" }
 terminal = { path = "../terminal" }
 
 [dev-dependencies]

@@ -7,11 +7,12 @@ use crate::braille::{Pixel, PixelOp};
 use crate::tile::Tile;
 use crate::utils::round;
 
-use terminal::async_trait::async_trait;
 use terminal::crossterm::cursor::MoveToNextLine;
 use terminal::crossterm::queue;
 use terminal::crossterm::style::Print;
-use terminal::{Draw, DrawErr, DrawUpdate, Update};
+use ui_core::async_trait::async_trait;
+use ui_core::style::Stylized;
+use ui_core::{Draw, DrawErr, DrawUpdate, Update};
 
 #[cfg(feature = "color")]
 use crate::color::Colored;
@@ -230,7 +231,7 @@ impl Canvas {
 }
 
 impl Draw for Canvas {
-    fn draw(&self) -> Vec<terminal::style::Stylized> {
+    fn draw(&self) -> Result<Vec<Stylized>, DrawErr> {
         let size = self.get_size();
         let mut result = Vec::with_capacity((size.0 * size.1) as usize);
         let ((minx, maxx), (miny, maxy)) = self.bound.get_bound();
@@ -243,11 +244,11 @@ impl Draw for Canvas {
                 }
             }
         }
-        result
+        Ok(result)
     }
 
-    fn size(&self) -> (u32, u32) {
-        self.get_size()
+    fn size(&self) -> Option<(u32, u32)> {
+        Some(self.get_size())
     }
 }
 

@@ -16,7 +16,7 @@ exclude = ["examples", "imgs", "pyrsille"]
 crossterm = "0.28.1"
 image = { version = "0.24.8", optional = true }
 canvas = { path = "./canvas" }
-terminal = { path = "./terminal" }
+ui_core = { path = "./ui_core" }
 tokio = { version = "1", features = ["full"] }
 
 [profile.release]
@@ -31,4 +31,4 @@ default = []
 img = ["image"]
 
 [workspace]
-members = ["anime", "canvas", "pyrsille", "terminal"]
+members = ["anime", "canvas", "pyrsille", "terminal", "ui_core"]
