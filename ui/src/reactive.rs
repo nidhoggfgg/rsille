@@ -1,7 +1,7 @@
-use async_trait::async_trait;
+use term::crossterm::event::Event;
 use tokio::sync::watch;
 
-use crate::{style::Stylized, traits::Draw, DrawErr, DrawUpdate, Update};
+use crate::{style::Stylized, traits::Draw, DrawErr, Update};
 
 pub struct Reactive<T, S, F> {
     component: T,
@@ -25,9 +25,14 @@ where
 
     #[must_use]
     #[inline]
-    pub fn watch(mut self, watcher: watch::Receiver<S>, func: F) -> Self {
-        self.watchers.push(Watcher { watcher, func });
-        self
+    pub fn watch(&mut self, value: S, func: F) -> watch::Sender<S> {
+        let (sender, receiver) = watch::channel(value);
+        self.watchers.push(Watcher {
+            _sender: sender.clone(),
+            receiver,
+            func,
+        });
+        sender
     }
 }
 
@@ -46,22 +51,22 @@ where
     }
 }
 
-#[async_trait]
 impl<T, S, F> Update for Reactive<T, S, F>
 where
     T: Update,
     S: Clone + Send + Sync,
     F: FnMut(&mut T, &S) + Send + 'static,
 {
-    async fn update(&mut self) -> Result<bool, DrawErr> {
-        self.component.update().await?;
+    fn update(&mut self, events: &[Event]) -> Result<bool, DrawErr> {
+        self.component.update(events)?;
         let mut changed = false;
         for watcher in self.watchers.iter_mut() {
-            match watcher.watcher.changed().await {
-                Ok(()) => {
-                    (watcher.func)(&mut self.component, &watcher.watcher.borrow());
+            match watcher.receiver.has_changed() {
+                Ok(true) => {
+                    (watcher.func)(&mut self.component, &watcher.receiver.borrow());
                     changed = true;
                 }
+                Ok(false) => {}
                 Err(_) => return Err(DrawErr),
             }
         }
@@ -69,15 +74,9 @@ where
     }
 }
 
-impl<T, S, F> DrawUpdate for Reactive<T, S, F>
-where
-    T: DrawUpdate,
-    S: Clone + Send + Sync,
-    F: FnMut(&mut T, &S) + Send + 'static,
-{
-}
-
+// for hold on to the sender and receiver
 struct Watcher<S, F> {
-    watcher: watch::Receiver<S>,
+    _sender: watch::Sender<S>,
+    receiver: watch::Receiver<S>,
     func: F,
 }
