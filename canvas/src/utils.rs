@@ -1,8 +1,14 @@
+#[inline]
 pub fn round<T>(v: T) -> i32
 where
     T: Into<f64>,
 {
     v.into().round() as i32
+}
+
+#[inline]
+pub fn round_f64(v: f64) -> i32 {
+    v.round() as i32
 }
 
 pub fn get_pos<T>(x: T, y: T) -> (i32, i32)

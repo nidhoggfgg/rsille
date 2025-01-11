@@ -5,19 +5,19 @@ use std::io::Write;
 use crate::bound::Bound;
 use crate::braille::{Pixel, PixelOp};
 use crate::tile::Tile;
-use crate::utils::round;
+use crate::utils::{round, round_f64};
 
-use terminal::crossterm::cursor::MoveToNextLine;
-use terminal::crossterm::queue;
-use terminal::crossterm::style::Print;
-use ui_core::async_trait::async_trait;
-use ui_core::style::Stylized;
-use ui_core::{Draw, DrawErr, DrawUpdate, Update};
+use term::crossterm::cursor::MoveToNextLine;
+use term::crossterm::event::Event;
+use term::crossterm::queue;
+use term::crossterm::style::Print;
+use ui::style::Stylized;
+use ui::{Draw, DrawErr, Update};
 
 #[cfg(feature = "color")]
 use crate::color::Colored;
 #[cfg(feature = "color")]
-use terminal::crossterm::style::Colors;
+use term::crossterm::style::Colors;
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -77,7 +77,7 @@ impl Canvas {
     }
 
     pub fn print(&self) {
-        let is_raw = terminal::crossterm::terminal::is_raw_mode_enabled().unwrap_or(false);
+        let is_raw = term::crossterm::terminal::is_raw_mode_enabled().unwrap_or(false);
         let mut stdout = std::io::stdout();
         self.print_on(&mut stdout, is_raw).unwrap();
     }
@@ -132,6 +132,23 @@ impl Canvas {
             self.pixels.insert(tile, pixel);
         }
 
+        self
+    }
+
+    pub fn set_f64(&mut self, x: f64, y: f64) -> &mut Self {
+        let tile = self.get_tile_f64(x, y);
+        let (x, y) = (round_f64(x), round_f64(y));
+        if let Some(pixel) = self.pixels.get_mut(&tile) {
+            pixel.set(x, y);
+        } else {
+            #[cfg(feature = "color")]
+            let mut pixel = Colored::new();
+            #[cfg(not(feature = "color"))]
+            let mut pixel = Pixel::new();
+
+            pixel.set(x, y);
+            self.pixels.insert(tile, pixel);
+        }
         self
     }
 
@@ -228,6 +245,12 @@ impl Canvas {
         self.bound.update(tile);
         tile
     }
+
+    fn get_tile_f64(&mut self, x: f64, y: f64) -> Tile {
+        let tile = Tile::from_xy(x, y);
+        self.bound.update(tile);
+        tile
+    }
 }
 
 impl Draw for Canvas {
@@ -244,6 +267,7 @@ impl Draw for Canvas {
                 }
             }
         }
+        println!("{:#?}", size);
         Ok(result)
     }
 
@@ -252,11 +276,8 @@ impl Draw for Canvas {
     }
 }
 
-#[async_trait]
 impl Update for Canvas {
-    async fn update(&mut self) -> Result<bool, DrawErr> {
+    fn update(&mut self, _events: &[Event]) -> Result<bool, DrawErr> {
         Ok(false)
     }
 }
-
-impl DrawUpdate for Canvas {}

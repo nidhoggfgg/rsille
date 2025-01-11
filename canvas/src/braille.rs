@@ -1,8 +1,8 @@
 use core::fmt;
 use std::io;
 
-use terminal::crossterm::{queue, style::Print};
-use ui_core::style::Stylized;
+use term::crossterm::{queue, style::Print};
+use ui::style::Stylized;
 
 // http://www.alanwood.net/unicode/braille_patterns.html
 // dots:

@@ -1,10 +1,10 @@
 use std::io;
 
-use terminal::crossterm::{
+use term::crossterm::{
     queue,
     style::{Color, Colors, Print, ResetColor, SetColors},
 };
-use ui_core::style::Stylized;
+use ui::style::Stylized;
 
 use crate::braille::{Pixel, PixelOp};
 

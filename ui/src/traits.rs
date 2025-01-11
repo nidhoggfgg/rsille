@@ -1,4 +1,4 @@
-use async_trait::async_trait;
+use term::crossterm::event::Event;
 
 use crate::{style::Stylized, DrawErr};
 
@@ -7,11 +7,11 @@ pub trait Draw {
     fn size(&self) -> Option<(u32, u32)>;
 }
 
-#[async_trait]
 pub trait Update: Send {
-    async fn update(&mut self) -> Result<bool, DrawErr>;
+    fn update(&mut self, events: &[Event]) -> Result<bool, DrawErr>;
 }
 
 // this trait is for making trait object
-#[async_trait]
 pub trait DrawUpdate: Draw + Update {}
+
+impl<T: Draw + Update> DrawUpdate for T {}

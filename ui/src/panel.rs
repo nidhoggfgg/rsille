@@ -1,4 +1,4 @@
-use async_trait::async_trait;
+use term::crossterm::event::Event;
 
 use crate::{
     attr::{Attr, AttrDisplay},
@@ -88,17 +88,28 @@ impl Draw for Panel {
     }
 }
 
-#[async_trait]
 impl Update for Panel {
-    async fn update(&mut self) -> Result<bool, DrawErr> {
+    fn update(&mut self, events: &[Event]) -> Result<bool, DrawErr> {
         let mut changed = false;
-        for b in self.boxes.iter_mut() {
-            match b.update().await {
-                Ok(true) => changed = true,
-                Ok(false) => (),
-                Err(_) => return Err(DrawErr),
+        for b in &mut self.boxes {
+            if b.update(events)? {
+                changed = true;
             }
         }
+        // let changes = self
+        //     .boxes
+        //     .par_iter_mut()
+        //     .map(|b| b.update())
+        //     .collect::<Vec<_>>();
+        // for c in changes {
+        //     if c.is_ok() && c.unwrap() {
+        //         changed = true;
+        //         break;
+        //     }
+        //     if c.is_err() {
+        //         return Err(DrawErr);
+        //     }
+        // }
         Ok(changed)
     }
 }

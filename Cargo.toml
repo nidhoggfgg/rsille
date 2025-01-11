@@ -13,11 +13,11 @@ exclude = ["examples", "imgs", "pyrsille"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-crossterm = "0.28.1"
 image = { version = "0.24.8", optional = true }
 canvas = { path = "./canvas" }
-ui_core = { path = "./ui_core" }
+ui = { path = "./ui" }
 tokio = { version = "1", features = ["full"] }
+rayon = "1.10.0"
 
 [profile.release]
 lto = true
@@ -31,4 +31,4 @@ default = []
 img = ["image"]
 
 [workspace]
-members = ["anime", "canvas", "pyrsille", "terminal", "ui_core"]
+members = ["anime", "canvas", "pyrsille", "term", "ui"]

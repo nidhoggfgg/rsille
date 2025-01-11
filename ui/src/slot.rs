@@ -1,4 +1,4 @@
-use async_trait::async_trait;
+use term::crossterm::event::Event;
 
 use crate::{attr::Attr, style::Stylized, traits::Draw, DrawErr, DrawUpdate, Update};
 
@@ -17,9 +17,8 @@ impl Draw for Slot {
     }
 }
 
-#[async_trait]
 impl Update for Slot {
-    async fn update(&mut self) -> Result<bool, DrawErr> {
-        self.thing.update().await
+    fn update(&mut self, events: &[Event]) -> Result<bool, DrawErr> {
+        self.thing.update(events)
     }
 }

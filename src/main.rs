@@ -1,61 +1,40 @@
 use canvas::Canvas;
-use tokio::sync::watch;
-use ui_core::{
+use ui::{
     attr::{Attr, AttrDisplay},
+    interactive::Interactive,
     panel::Panel,
-    reactive::Reactive,
-    view::View,
+    runtime::Runtime,
 };
 
-#[tokio::main]
-pub async fn main() {
-    let mut panel = Panel::new(80, 30);
+fn main() {
+    let mut panel = Panel::new(100, 50);
 
     let canvas = Canvas::new();
 
-    let (tx, rx) = watch::channel(0);
-
-    let reactive_canvas = Reactive::new(canvas).watch(rx, |canvas, v| {
+    let mut interactive_canvas = Interactive::new(canvas);
+    interactive_canvas.register_mouse_event(|canvas, mouse| {
         canvas.clear();
-
-        for x in 0..1800 {
-            let x = x as f64;
-            canvas.set(x / 10.0, 15.0 + (x + *v as f64).to_radians().sin() * 10.0);
-        }
-
-        for x in 0..1800 {
-            let x = x as f64;
-            canvas.set(
-                x / 10.0,
-                15.0 + ((9.0 + x + (*v as f64) * 2.0) / 2.0).to_radians().sin() * 10.0,
-            );
+        let (row, column) = (mouse.row, mouse.column);
+        let v = (row * column) as f64;
+        for i in 0..7200 {
+            let x = i as f64;
+            let y = 15.0 + (x + v).to_radians().sin() * 50.0;
+            canvas.set_f64(x / 10.0, y);
         }
     });
 
     panel.push(
-        reactive_canvas,
+        interactive_canvas,
         Attr {
-            id: "canvas".into(),
-            width: 80,
-            height: 30,
+            id: "canvas".to_string(),
+            width: 100,
+            height: 50,
             display: AttrDisplay::Block,
             float: false,
         },
     );
 
-    let mut terminal = View::new(panel);
+    let runtime = Runtime::new(panel);
 
-    let sender_task = tokio::spawn(async move {
-        for i in 0..1800 {
-            tx.send(i).unwrap();
-            tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
-        }
-    });
-
-    let terminal_task = tokio::spawn(async move {
-        terminal.run().await.unwrap();
-    });
-
-    let v = tokio::join!(sender_task, terminal_task);
-    println!("{:?}", v);
+    runtime.run();
 }
