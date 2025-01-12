@@ -24,6 +24,7 @@ pub struct Runtime {
     panel: Panel,
     raw_mode: bool,
     exit_code: KeyEvent,
+    max_event_per_frame: usize,
 }
 
 impl Runtime {
@@ -32,7 +33,12 @@ impl Runtime {
             panel,
             raw_mode: false,
             exit_code: KeyCode::Esc.into(),
+            max_event_per_frame: 10,
         }
+    }
+
+    pub fn set_max_event_per_frame(&mut self, max_event_per_frame: usize) {
+        self.max_event_per_frame = max_event_per_frame;
     }
 
     pub fn draw(&mut self) -> Result<(Duration, Vec<Stylized>), DrawErr> {
@@ -67,7 +73,8 @@ impl Runtime {
 
     pub fn run(mut self) {
         enable_raw_mode().unwrap();
-        enable_mouse_capture(&mut io::stdout()).unwrap();
+        enable_mouse_capture().unwrap();
+
         self.raw_mode = true;
         let (render_tx, mut render_rx) = mpsc::channel(1);
         let (event_tx, mut event_rx) = mpsc::channel(1);
@@ -75,6 +82,7 @@ impl Runtime {
 
         let exit_code = self.exit_code;
 
+        let max_event_per_frame = self.max_event_per_frame;
         let event_thread = thread::spawn(move || {
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
@@ -98,7 +106,7 @@ impl Runtime {
                                         stop_tx.send(()).unwrap();
                                         break;
                                     }
-                                    if events.len() < 10 {
+                                    if events.len() < max_event_per_frame {
                                         events.push(event);
                                     }
                                 }
@@ -112,7 +120,7 @@ impl Runtime {
         });
 
         let render_thread = thread::spawn(move || {
-            let mut _self = self;
+            let mut rt = self;
             let mut queue = VecDeque::with_capacity(10);
             for _ in 0..10 {
                 queue.push_back(0);
@@ -125,10 +133,11 @@ impl Runtime {
 
                 let events = event_rx.blocking_recv().unwrap();
                 let now = std::time::Instant::now();
-                _self.panel.update(&events).unwrap_or(false);
+                rt.panel.update(&events).unwrap_or(false);
                 let update_elapsed = now.elapsed();
-                let (draw_elapsed, data) = _self.draw().unwrap();
-                let print_elapsed = _self.print(data).unwrap();
+                rt.panel.refresh_cache().unwrap();
+                let (draw_elapsed, data) = rt.draw().unwrap();
+                let print_elapsed = rt.print(data).unwrap();
                 let elapsed = now.elapsed();
                 queue.pop_front();
                 queue.push_back(elapsed.as_micros());

@@ -15,10 +15,10 @@ pub fn disable_raw_mode() -> io::Result<()> {
     crossterm::terminal::disable_raw_mode()
 }
 
-pub fn enable_mouse_capture<T: io::Write>(buffer: &mut T) -> io::Result<()> {
-    execute!(buffer, EnableMouseCapture)
+pub fn enable_mouse_capture() -> io::Result<()> {
+    execute!(io::stdout(), EnableMouseCapture)
 }
 
-pub fn enable_focus_change<T: io::Write>(buffer: &mut T) -> io::Result<()> {
-    execute!(buffer, EnableFocusChange)
+pub fn enable_focus_change() -> io::Result<()> {
+    execute!(io::stdout(), EnableFocusChange)
 }

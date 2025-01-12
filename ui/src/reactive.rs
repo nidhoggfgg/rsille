@@ -3,6 +3,7 @@ use tokio::sync::watch;
 
 use crate::{style::Stylized, traits::Draw, DrawErr, Update};
 
+#[derive(Clone)]
 pub struct Reactive<T, S, F> {
     component: T,
     watchers: Vec<Watcher<S, F>>,
@@ -75,6 +76,7 @@ where
 }
 
 // for hold on to the sender and receiver
+#[derive(Clone)]
 struct Watcher<S, F> {
     _sender: watch::Sender<S>,
     receiver: watch::Receiver<S>,
