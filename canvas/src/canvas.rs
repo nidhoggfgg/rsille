@@ -267,7 +267,6 @@ impl Draw for Canvas {
                 }
             }
         }
-        println!("{:#?}", size);
         Ok(result)
     }
 

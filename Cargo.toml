@@ -13,11 +13,12 @@ exclude = ["examples", "imgs", "pyrsille"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-image = { version = "0.24.8", optional = true }
 canvas = { path = "./canvas" }
 ui = { path = "./ui" }
 tokio = { version = "1", features = ["full"] }
 rayon = "1.10.0"
+log = { version = "0.4", features = ["std"], optional = true }
+env_logger = { version = "0.11.6", optional = true }
 
 [profile.release]
 lto = true
@@ -27,8 +28,8 @@ lto = true
 criterion = "0.4"
 
 [features]
-default = []
-img = ["image"]
+log = ["dep:log", "dep:env_logger", "ui/log"]
+default = ["log"]
 
 [workspace]
 members = ["anime", "canvas", "pyrsille", "term", "ui"]

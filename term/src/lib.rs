@@ -1,8 +1,10 @@
 use std::io;
 
 use crossterm::{
+    cursor::{Hide, Show},
     event::{EnableFocusChange, EnableMouseCapture},
     execute,
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen},
 };
 
 pub extern crate crossterm;
@@ -21,4 +23,20 @@ pub fn enable_mouse_capture() -> io::Result<()> {
 
 pub fn enable_focus_change() -> io::Result<()> {
     execute!(io::stdout(), EnableFocusChange)
+}
+
+pub fn hide_cursor() -> io::Result<()> {
+    execute!(io::stdout(), Hide)
+}
+
+pub fn show_cursor() -> io::Result<()> {
+    execute!(io::stdout(), Show)
+}
+
+pub fn enter_alt_screen() -> io::Result<()> {
+    execute!(io::stdout(), EnterAlternateScreen)
+}
+
+pub fn leave_alt_screen() -> io::Result<()> {
+    execute!(io::stdout(), LeaveAlternateScreen)
 }
