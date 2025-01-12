@@ -2,29 +2,27 @@ use std::{
     collections::VecDeque,
     io::{self, Write},
     thread,
-    time::Duration,
 };
 
 use futures::{FutureExt, StreamExt};
-use term::{
-    crossterm::{
-        cursor::{MoveTo, MoveToNextLine},
-        event::{Event, EventStream, KeyCode, KeyEvent},
-        queue,
-        style::Print,
-        terminal::{disable_raw_mode, enable_raw_mode},
-    },
-    enable_mouse_capture,
+use term::crossterm::{
+    cursor::{MoveTo, MoveToNextLine},
+    event::{Event, EventStream, KeyCode, KeyEvent},
+    queue,
+    style::Print,
 };
 use tokio::{select, sync::mpsc};
 
-use crate::{panel::Panel, style::Stylized, traits::Draw, DrawErr, Update};
+use crate::{panel::Panel, style::Stylized, traits::Draw, Update};
 
 pub struct Runtime {
     panel: Panel,
     raw_mode: bool,
     exit_code: KeyEvent,
     max_event_per_frame: usize,
+    alt_screen: bool,
+    mouse_capture: bool,
+    hide_cursor: bool,
 }
 
 impl Runtime {
@@ -34,6 +32,9 @@ impl Runtime {
             raw_mode: false,
             exit_code: KeyCode::Esc.into(),
             max_event_per_frame: 10,
+            alt_screen: true,
+            mouse_capture: true,
+            hide_cursor: true,
         }
     }
 
@@ -41,15 +42,7 @@ impl Runtime {
         self.max_event_per_frame = max_event_per_frame;
     }
 
-    pub fn draw(&mut self) -> Result<(Duration, Vec<Stylized>), DrawErr> {
-        let now = std::time::Instant::now();
-        let data = self.panel.draw()?;
-        Ok((now.elapsed(), data))
-    }
-
-    pub fn print(&mut self, data: Vec<Stylized>) -> io::Result<Duration> {
-        // queue!(self.buffer, Clear(ClearType::All))?;
-        let now = std::time::Instant::now();
+    pub fn print(&mut self, data: Vec<Stylized>) -> io::Result<()> {
         queue!(io::stdout(), MoveTo(0, 0))?;
         let (width, _) = self
             .panel
@@ -68,22 +61,59 @@ impl Runtime {
         }
 
         io::stdout().flush()?;
-        Ok(now.elapsed())
+        Ok(())
     }
 
     pub fn run(mut self) {
-        enable_raw_mode().unwrap();
-        enable_mouse_capture().unwrap();
-
         self.raw_mode = true;
-        let (render_tx, mut render_rx) = mpsc::channel(1);
-        let (event_tx, mut event_rx) = mpsc::channel(1);
+        let alt_screen = self.alt_screen;
+        let raw_mode = self.raw_mode;
+        let mouse_capture = self.mouse_capture;
+        let hide_cursor = self.hide_cursor;
+
+        if alt_screen {
+            term::enter_alt_screen().unwrap();
+        }
+        if raw_mode {
+            term::enable_raw_mode().unwrap();
+        }
+        if mouse_capture {
+            term::enable_mouse_capture().unwrap();
+        }
+        if hide_cursor {
+            term::hide_cursor().unwrap();
+        }
+
+        let (render_tx, render_rx) = mpsc::channel(1);
+        let (event_tx, event_rx) = mpsc::channel(1);
         let (stop_tx, stop_rx) = std::sync::mpsc::channel();
 
-        let exit_code = self.exit_code;
+        let event_thread = self.make_event_thread(render_rx, event_tx, stop_tx);
+        let render_thread = self.make_render_thread(render_tx, event_rx, stop_rx);
+        event_thread.join().unwrap();
+        render_thread.join().unwrap();
 
+        // some cleanup
+        if hide_cursor {
+            term::show_cursor().unwrap();
+        }
+        if raw_mode {
+            term::disable_raw_mode().unwrap();
+        }
+        if alt_screen {
+            term::leave_alt_screen().unwrap();
+        }
+    }
+
+    fn make_event_thread(
+        &self,
+        mut render_rx: mpsc::Receiver<()>,
+        event_tx: mpsc::Sender<Vec<Event>>,
+        stop_tx: std::sync::mpsc::Sender<()>,
+    ) -> thread::JoinHandle<()> {
+        let exit_code = self.exit_code;
         let max_event_per_frame = self.max_event_per_frame;
-        let event_thread = thread::spawn(move || {
+        thread::spawn(move || {
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
@@ -110,6 +140,11 @@ impl Runtime {
                                         events.push(event);
                                     }
                                 }
+                                #[cfg(feature = "log")]
+                                Some(Err(e)) => {
+                                    log::error!("read event error: {:#?}", e);
+                                }
+                                #[cfg(not(feature = "log"))]
                                 Some(Err(_)) => {}
                                 None => {}
                             }
@@ -117,47 +152,79 @@ impl Runtime {
                     }
                 }
             });
-        });
+        })
+    }
 
-        let render_thread = thread::spawn(move || {
-            let mut rt = self;
+    fn make_render_thread(
+        mut self,
+        render_tx: mpsc::Sender<()>,
+        mut event_rx: mpsc::Receiver<Vec<Event>>,
+        stop_rx: std::sync::mpsc::Receiver<()>,
+    ) -> thread::JoinHandle<()> {
+        thread::spawn(move || {
+            #[cfg(feature = "log")]
             let mut queue = VecDeque::with_capacity(10);
+            #[cfg(feature = "log")]
             for _ in 0..10 {
                 queue.push_back(0);
             }
             loop {
+                #[cfg(feature = "log")]
+                log::info!("|----------start render a frame----------|");
+
+                // check stop signal
                 if let Ok(_) = stop_rx.try_recv() {
-                    disable_raw_mode().unwrap();
+                    #[cfg(feature = "log")]
+                    log::info!("break in render thread");
                     break;
                 }
 
+                // collect events
                 let events = event_rx.blocking_recv().unwrap();
-                let now = std::time::Instant::now();
-                rt.panel.update(&events).unwrap_or(false);
-                let update_elapsed = now.elapsed();
-                rt.panel.refresh_cache().unwrap();
-                let (draw_elapsed, data) = rt.draw().unwrap();
-                let print_elapsed = rt.print(data).unwrap();
-                let elapsed = now.elapsed();
-                queue.pop_front();
-                queue.push_back(elapsed.as_micros());
-                let mut sum = 0;
-                for v in &queue {
-                    sum += *v;
-                }
-                let fps = 1000.0 / (sum as f64 / 1000.0);
-                println!("update_elapsed: {:?}", update_elapsed.as_micros());
-                println!("draw_elapsed: {:?}", draw_elapsed.as_micros());
-                println!("print_elapsed: {:?}", print_elapsed.as_micros());
-                println!("elapsed: {:?}", elapsed.as_micros());
-                println!("fps: {:?}", fps);
 
-                if let Err(e) = render_tx.blocking_send(()) {
-                    println!("render_tx error: {:#?}", e);
+                #[cfg(feature = "log")]
+                let now = std::time::Instant::now();
+
+                // update
+                self.panel.update(&events).unwrap_or(false);
+
+                // refresh cache
+                self.panel.refresh_cache().unwrap();
+
+                // draw
+                let data = self.panel.draw().unwrap();
+
+                // print
+                self.print(data).unwrap();
+
+                // collect fps
+                #[cfg(feature = "log")]
+                {
+                    let elapsed = now.elapsed();
+                    log::info!("total use time: {:?}", elapsed);
+                    queue.pop_front();
+                    queue.push_back(elapsed.as_micros());
+                    let mut sum = 0;
+                    for v in &queue {
+                        sum += *v;
+                    }
+                    let len = queue.len();
+                    let fps = 1000.0 / (sum as f64 / 1000.0) * len as f64;
+                    log::info!("fps: {:.2}", fps);
                 }
+
+                // send signal to event thread
+                #[cfg(feature = "log")]
+                if let Err(e) = render_tx.blocking_send(()) {
+                    log::error!("render_tx error: {:#?}", e);
+                }
+                #[cfg(not(feature = "log"))]
+                if let Err(_) = render_tx.blocking_send(()) {}
+
+                // end of a frame
+                #[cfg(feature = "log")]
+                log::info!("|---------- end render a frame ----------|");
             }
-        });
-        event_thread.join().unwrap();
-        render_thread.join().unwrap();
+        })
     }
 }
