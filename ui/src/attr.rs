@@ -1,4 +1,4 @@
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, PartialOrd, Ord, Eq, Hash)]
 pub struct Attr {
     pub id: String,
     pub width: u32,
@@ -7,7 +7,7 @@ pub struct Attr {
     pub float: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, Ord, Eq, Hash, Copy)]
 pub enum AttrDisplay {
     Block,
     Inline,

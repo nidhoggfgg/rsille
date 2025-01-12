@@ -68,18 +68,33 @@ where
         }
 
         for event in events {
-            match event {
-                Event::Key(key) => {
-                    if let Some(handler) = &mut self.key_handler {
-                        (handler)(&mut self.component, *key);
-                    }
-                }
-                Event::Mouse(mouse) => {
-                    if let Some(handler) = &mut self.mouse_handler {
-                        (handler)(&mut self.component, *mouse);
-                    }
-                }
-                _ => {}
+            changed |= match event {
+                Event::Key(key) => self
+                    .key_handler
+                    .as_mut()
+                    .map(|h| h(&mut self.component, *key))
+                    .is_some(),
+                Event::Mouse(mouse) => self
+                    .mouse_handler
+                    .as_mut()
+                    .map(|h| h(&mut self.component, *mouse))
+                    .is_some(),
+                Event::Resize(width, height) => self
+                    .resize_handler
+                    .as_mut()
+                    .map(|h| h(&mut self.component, (*width, *height)))
+                    .is_some(),
+                Event::FocusGained => self
+                    .focus_handler
+                    .as_mut()
+                    .map(|h| h(&mut self.component, true))
+                    .is_some(),
+                Event::FocusLost => self
+                    .focus_handler
+                    .as_mut()
+                    .map(|h| h(&mut self.component, false))
+                    .is_some(),
+                _ => false,
             }
         }
 

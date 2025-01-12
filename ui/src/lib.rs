@@ -7,7 +7,6 @@ pub mod runtime;
 pub mod slot;
 pub mod style;
 pub mod traits;
-pub mod variable;
 
 pub use traits::*;
 

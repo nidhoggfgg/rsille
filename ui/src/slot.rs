@@ -4,7 +4,9 @@ use crate::{attr::Attr, style::Stylized, traits::Draw, DrawErr, DrawUpdate, Upda
 
 pub struct Slot {
     pub attr: Attr,
-    pub thing: Box<dyn DrawUpdate>,
+    pub thing: Box<dyn DrawUpdate + Send + Sync>,
+    pub updated: bool,
+    pub enable_cache: bool,
 }
 
 impl Draw for Slot {
@@ -19,6 +21,7 @@ impl Draw for Slot {
 
 impl Update for Slot {
     fn update(&mut self, events: &[Event]) -> Result<bool, DrawErr> {
-        self.thing.update(events)
+        self.updated = self.thing.update(events)?;
+        Ok(self.updated)
     }
 }
