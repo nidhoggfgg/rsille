@@ -13,7 +13,7 @@ use term::crossterm::{
 };
 use tokio::{select, sync::mpsc};
 
-use crate::{panel::Panel, style::Stylized, traits::Draw, Update};
+use crate::{composite::Panel, style::Stylized, traits::Draw, Update};
 
 use super::{builder::Size, Builder};
 
