@@ -1,3 +1,4 @@
+pub mod animative;
 pub mod attr;
 pub mod engine;
 pub mod interactive;
