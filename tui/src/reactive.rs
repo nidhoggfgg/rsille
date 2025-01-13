@@ -47,7 +47,7 @@ where
         self.component.draw()
     }
 
-    fn size(&self) -> Option<(u32, u32)> {
+    fn size(&self) -> Option<(u16, u16)> {
         self.component.size()
     }
 }

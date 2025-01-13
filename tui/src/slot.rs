@@ -14,7 +14,7 @@ impl Draw for Slot {
         self.thing.draw()
     }
 
-    fn size(&self) -> Option<(u32, u32)> {
+    fn size(&self) -> Option<(u16, u16)> {
         self.thing.size()
     }
 }

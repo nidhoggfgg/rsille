@@ -11,8 +11,8 @@ use term::crossterm::cursor::MoveToNextLine;
 use term::crossterm::event::Event;
 use term::crossterm::queue;
 use term::crossterm::style::Print;
-use ui::style::Stylized;
-use ui::{Draw, DrawErr, Update};
+use tui::style::Stylized;
+use tui::{Draw, DrawErr, Update};
 
 #[cfg(feature = "color")]
 use crate::color::Colored;
@@ -270,8 +270,9 @@ impl Draw for Canvas {
         Ok(result)
     }
 
-    fn size(&self) -> Option<(u32, u32)> {
-        Some(self.get_size())
+    fn size(&self) -> Option<(u16, u16)> {
+        let (w, h) = self.get_size();
+        Some((w as u16, h as u16))
     }
 }
 

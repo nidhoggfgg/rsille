@@ -14,7 +14,7 @@ exclude = ["examples", "imgs", "pyrsille"]
 
 [dependencies]
 canvas = { path = "./canvas" }
-ui = { path = "./ui" }
+tui = { path = "./tui" }
 tokio = { version = "1", features = ["full"] }
 rayon = "1.10.0"
 log = { version = "0.4", features = ["std"], optional = true }
@@ -28,8 +28,8 @@ lto = true
 criterion = "0.4"
 
 [features]
-log = ["dep:log", "dep:env_logger", "ui/log"]
+log = ["dep:log", "dep:env_logger", "tui/log"]
 default = ["log"]
 
 [workspace]
-members = ["anime", "canvas", "pyrsille", "term", "ui"]
+members = ["anime", "canvas", "pyrsille", "term", "tui"]

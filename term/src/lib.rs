@@ -2,7 +2,7 @@ use std::io;
 
 use crossterm::{
     cursor::{Hide, Show},
-    event::{EnableFocusChange, EnableMouseCapture},
+    event::{DisableMouseCapture, EnableFocusChange, EnableMouseCapture},
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -19,6 +19,10 @@ pub fn disable_raw_mode() -> io::Result<()> {
 
 pub fn enable_mouse_capture() -> io::Result<()> {
     execute!(io::stdout(), EnableMouseCapture)
+}
+
+pub fn disable_mouse_capture() -> io::Result<()> {
+    execute!(io::stdout(), DisableMouseCapture)
 }
 
 pub fn enable_focus_change() -> io::Result<()> {
@@ -39,4 +43,9 @@ pub fn enter_alt_screen() -> io::Result<()> {
 
 pub fn leave_alt_screen() -> io::Result<()> {
     execute!(io::stdout(), LeaveAlternateScreen)
+}
+
+pub fn terminal_size() -> io::Result<(u16, u16)> {
+    let (w, h) = crossterm::terminal::size()?;
+    Ok((w, h))
 }

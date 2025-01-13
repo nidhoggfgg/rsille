@@ -2,12 +2,11 @@ use std::fs::File;
 use std::io::Write;
 
 use canvas::Canvas;
-use ui::{
+use tui::{
     attr::{Attr, AttrDisplay},
     interactive::Interactive,
     panel::Panel,
     reactive::Reactive,
-    runtime::Runtime,
 };
 
 #[tokio::main]
@@ -114,8 +113,12 @@ async fn main() {
         }
     });
 
-    let mut runtime = Runtime::new(panel);
-    runtime.set_max_event_per_frame(3);
+    let runtime = tui::engine::Builder::new()
+        .set_size((200, 50))
+        .set_max_event_per_frame(3)
+        .enable_all()
+        .build()
+        .unwrap();
 
     runtime.run();
 }

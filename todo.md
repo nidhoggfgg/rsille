@@ -1,9 +1,0 @@
-1. Canvas不再作为一切的底层。
-2. Terminal作为最底层，封装crossterm，提供终端的操作，作为终端最原始的抽象，实现Print来输出到Terminal。
-3. Panel作为Terminal的上一层，提供层叠、大小、位置等，实现Print，要求实现Draw来在Panel删绘制。不要求使用braille，支持任意字符。
-4. Canvas只作为专用braille绘图等的画布。
-5. 动画引擎重做，Terminal作为动画引擎的输出对象，要支持事件循环。
-6. pyrsille作为支持rsille全部功能的python库。
-7. wasm支持（暂定）。
-8. 3D渲染引擎支持，重写3D渲染引擎。
-9. 所有extra内的模块都不再以Canvas为核心，支持多种输出方式。
