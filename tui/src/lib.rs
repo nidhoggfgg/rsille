@@ -1,13 +1,10 @@
-pub mod animative;
 pub mod attr;
+pub mod composite;
 pub mod engine;
-pub mod interactive;
-pub mod panel;
-pub mod reactive;
-pub mod slot;
-pub mod style;
-pub mod traits;
 
+mod style;
+mod traits;
+pub use style::Stylized;
 pub use traits::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]

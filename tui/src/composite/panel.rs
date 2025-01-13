@@ -5,11 +5,12 @@ use term::crossterm::event::Event;
 
 use crate::{
     attr::{Attr, AttrDisplay},
-    slot::Slot,
     style::Stylized,
     traits::Draw,
     DrawErr, DrawUpdate, Update,
 };
+
+use super::slot::Slot;
 
 pub struct Panel {
     size: (u16, u16),

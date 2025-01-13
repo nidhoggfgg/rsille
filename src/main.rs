@@ -4,9 +4,7 @@ use std::io::Write;
 use canvas::Canvas;
 use tui::{
     attr::{Attr, AttrDisplay},
-    interactive::Interactive,
-    panel::Panel,
-    reactive::Reactive,
+    composite::{Interactive, Panel, Reactive},
 };
 
 #[tokio::main]

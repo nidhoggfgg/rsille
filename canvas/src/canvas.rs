@@ -11,7 +11,7 @@ use term::crossterm::cursor::MoveToNextLine;
 use term::crossterm::event::Event;
 use term::crossterm::queue;
 use term::crossterm::style::Print;
-use tui::style::Stylized;
+use tui::Stylized;
 use tui::{Draw, DrawErr, Update};
 
 #[cfg(feature = "color")]

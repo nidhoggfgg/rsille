@@ -2,13 +2,6 @@ use term::crossterm::event::{Event, KeyEvent, MouseEvent};
 
 use crate::{Draw, Update};
 
-pub enum EventKind {
-    Key,
-    Mouse,
-    Resize,
-    Focus,
-}
-
 pub type KeyHandler<T> = Box<dyn FnMut(&mut T, KeyEvent) + Send + Sync>;
 pub type MouseHandler<T> = Box<dyn FnMut(&mut T, MouseEvent) + Send + Sync>;
 pub type ResizeHandler<T> = Box<dyn FnMut(&mut T, (u16, u16)) + Send + Sync>;
