@@ -5,7 +5,7 @@ edition = "2021"
 exclude = ["examples"]
 
 [dependencies]
-ui = { path = "../ui" }
+tui = { path = "../tui" }
 term = { path = "../term" }
 
 [dev-dependencies]

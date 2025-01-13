@@ -12,13 +12,13 @@ use crate::{
 };
 
 pub struct Panel {
-    size: (u32, u32),
+    size: (u16, u16),
     boxes: Vec<Slot>,
     cache: Vec<Option<Vec<Stylized>>>,
 }
 
 impl Panel {
-    pub fn new(width: u32, height: u32) -> Self {
+    pub fn new(width: u16, height: u16) -> Self {
         Self {
             size: (width, height),
             boxes: Vec::new(),
@@ -146,7 +146,7 @@ impl Draw for Panel {
             } else if let Some(Ok(d)) = not_cached[i].as_ref() {
                 boxes.push(d);
             } else if let Some(Err(e)) = not_cached[i].as_ref() {
-                return Err(e.clone());
+                return Err(*e);
             } else {
                 // unreachable
                 continue;
@@ -162,7 +162,7 @@ impl Draw for Panel {
 
     #[must_use]
     #[inline]
-    fn size(&self) -> Option<(u32, u32)> {
+    fn size(&self) -> Option<(u16, u16)> {
         Some(self.size)
     }
 }
@@ -182,11 +182,11 @@ impl Update for Panel {
 }
 
 fn calc_render_area(
-    offset: (u32, u32),
-    panel_size: (u32, u32),
-    box_size: (u32, u32),
-    render_size: (u32, u32),
-) -> ((u32, u32), (u32, u32)) {
+    offset: (u16, u16),
+    panel_size: (u16, u16),
+    box_size: (u16, u16),
+    render_size: (u16, u16),
+) -> ((u16, u16), (u16, u16)) {
     // already out of panel
     if offset.0 >= panel_size.0 || offset.1 >= panel_size.1 {
         return ((0, 0), (0, 0));

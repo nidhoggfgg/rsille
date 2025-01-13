@@ -9,12 +9,17 @@ pub enum EventKind {
     Focus,
 }
 
+pub type KeyHandler<T> = Box<dyn FnMut(&mut T, KeyEvent) + Send + Sync>;
+pub type MouseHandler<T> = Box<dyn FnMut(&mut T, MouseEvent) + Send + Sync>;
+pub type ResizeHandler<T> = Box<dyn FnMut(&mut T, (u16, u16)) + Send + Sync>;
+pub type FocusHandler<T> = Box<dyn FnMut(&mut T, bool) + Send + Sync>;
+
 pub struct Interactive<T> {
     component: T,
-    key_handler: Option<Box<dyn FnMut(&mut T, KeyEvent) + Send + Sync>>,
-    mouse_handler: Option<Box<dyn FnMut(&mut T, MouseEvent) + Send + Sync>>,
-    resize_handler: Option<Box<dyn FnMut(&mut T, (u16, u16)) + Send + Sync>>,
-    focus_handler: Option<Box<dyn FnMut(&mut T, bool) + Send + Sync>>,
+    key_handler: Option<KeyHandler<T>>,
+    mouse_handler: Option<MouseHandler<T>>,
+    resize_handler: Option<ResizeHandler<T>>,
+    focus_handler: Option<FocusHandler<T>>,
 }
 
 impl<T> Interactive<T> {
@@ -110,7 +115,7 @@ where
         self.component.draw()
     }
 
-    fn size(&self) -> Option<(u32, u32)> {
+    fn size(&self) -> Option<(u16, u16)> {
         self.component.size()
     }
 }

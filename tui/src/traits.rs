@@ -4,7 +4,7 @@ use crate::{style::Stylized, DrawErr};
 
 pub trait Draw {
     fn draw(&self) -> Result<Vec<Stylized>, DrawErr>;
-    fn size(&self) -> Option<(u32, u32)>;
+    fn size(&self) -> Option<(u16, u16)>;
 }
 
 pub trait Update: Send {

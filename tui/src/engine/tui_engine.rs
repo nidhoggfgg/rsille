@@ -7,7 +7,7 @@ use std::{
 use futures::{FutureExt, StreamExt};
 use term::crossterm::{
     cursor::{MoveTo, MoveToNextLine},
-    event::{Event, EventStream, KeyCode, KeyEvent},
+    event::{Event, EventStream, KeyEvent},
     queue,
     style::Print,
 };
@@ -15,31 +15,87 @@ use tokio::{select, sync::mpsc};
 
 use crate::{panel::Panel, style::Stylized, traits::Draw, Update};
 
-pub struct Runtime {
+use super::{builder::Size, Builder};
+
+pub struct TuiEngine {
     panel: Panel,
     raw_mode: bool,
     exit_code: KeyEvent,
     max_event_per_frame: usize,
+    frame_limit: Option<u16>,
     alt_screen: bool,
     mouse_capture: bool,
     hide_cursor: bool,
 }
 
-impl Runtime {
-    pub fn new(panel: Panel) -> Runtime {
-        Runtime {
-            panel,
-            raw_mode: false,
-            exit_code: KeyCode::Esc.into(),
-            max_event_per_frame: 10,
-            alt_screen: true,
-            mouse_capture: true,
-            hide_cursor: true,
-        }
+impl TuiEngine {
+    pub(super) fn from_builder(builder: &Builder) -> io::Result<Self> {
+        let (width, height) = match builder.size {
+            Size::Fixed(w, h) => (w, h),
+            Size::FullScreen => {
+                let (w, h) = term::terminal_size()?;
+                (w, h)
+            }
+            Size::Auto => {
+                let (w, h) = term::terminal_size()?;
+                (w, h)
+            }
+        };
+        Ok(Self {
+            panel: Panel::new(width, height),
+            raw_mode: builder.enable_raw_mode,
+            exit_code: builder.exit_code,
+            max_event_per_frame: builder.max_event_per_frame,
+            frame_limit: builder.frame_limit,
+            alt_screen: builder.enable_alt_screen,
+            mouse_capture: builder.enable_mouse_capture,
+            hide_cursor: builder.enable_hide_cursor,
+        })
     }
 
-    pub fn set_max_event_per_frame(&mut self, max_event_per_frame: usize) {
+    pub fn set_max_event_per_frame(&mut self, max_event_per_frame: usize) -> &mut Self {
         self.max_event_per_frame = max_event_per_frame;
+        self
+    }
+
+    pub fn set_frame_limit(&mut self, frame_limit: Option<u16>) -> &mut Self {
+        self.frame_limit = frame_limit;
+        self
+    }
+
+    pub fn set_exit_code(&mut self, exit_code: KeyEvent) -> &mut Self {
+        self.exit_code = exit_code;
+        self
+    }
+
+    pub fn enable_alt_screen(&mut self) -> &mut Self {
+        self.alt_screen = true;
+        self
+    }
+
+    pub fn disable_alt_screen(&mut self) -> &mut Self {
+        self.alt_screen = false;
+        self
+    }
+
+    pub fn enable_mouse_capture(&mut self) -> &mut Self {
+        self.mouse_capture = true;
+        self
+    }
+
+    pub fn disable_mouse_capture(&mut self) -> &mut Self {
+        self.mouse_capture = false;
+        self
+    }
+
+    pub fn hide_cursor_when_render(&mut self) -> &mut Self {
+        self.hide_cursor = true;
+        self
+    }
+
+    pub fn show_cursor_when_render(&mut self) -> &mut Self {
+        self.hide_cursor = false;
+        self
     }
 
     pub fn print(&mut self, data: Vec<Stylized>) -> io::Result<()> {
@@ -71,6 +127,7 @@ impl Runtime {
         let mouse_capture = self.mouse_capture;
         let hide_cursor = self.hide_cursor;
 
+        // first enter alt screen then enable raw mode
         if alt_screen {
             term::enter_alt_screen().unwrap();
         }
@@ -93,9 +150,12 @@ impl Runtime {
         event_thread.join().unwrap();
         render_thread.join().unwrap();
 
-        // some cleanup
+        // some cleanup, reverse the order of enable and disable
         if hide_cursor {
             term::show_cursor().unwrap();
+        }
+        if mouse_capture {
+            term::disable_mouse_capture().unwrap();
         }
         if raw_mode {
             term::disable_raw_mode().unwrap();
@@ -173,7 +233,7 @@ impl Runtime {
                 log::info!("|----------start render a frame----------|");
 
                 // check stop signal
-                if let Ok(_) = stop_rx.try_recv() {
+                if stop_rx.try_recv().is_ok() {
                     #[cfg(feature = "log")]
                     log::info!("break in render thread");
                     break;
