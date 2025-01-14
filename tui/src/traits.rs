@@ -7,7 +7,7 @@ pub trait Draw {
     fn size(&self) -> Option<(u16, u16)>;
 }
 
-pub trait Update: Send {
+pub trait Update {
     fn update(&mut self, events: &[Event]) -> Result<bool, DrawErr>;
 }
 
