@@ -44,7 +44,18 @@ impl Panel {
         let result = self
             .boxes
             .par_iter_mut()
-            .map(|b| if b.enable_cache { Some(b.draw()) } else { None })
+            .enumerate()
+            .map(|(i, b)| {
+                if b.enable_cache {
+                    if b.updated || self.cache[i].is_none() {
+                        Some(b.draw())
+                    } else {
+                        None
+                    }
+                } else {
+                    Some(b.draw())
+                }
+            })
             .collect::<Vec<_>>();
         for (i, r) in result.into_iter().enumerate() {
             if let Some(Ok(d)) = r {
