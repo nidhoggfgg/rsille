@@ -25,7 +25,7 @@ impl Panel {
         }
     }
 
-    pub fn push<T>(&mut self, thing: T, attr: Attr, enable_cache: bool)
+    pub fn push<T>(&mut self, thing: T, attr: Attr)
     where
         T: DrawUpdate + Send + Sync + 'static,
     {
@@ -33,7 +33,6 @@ impl Panel {
             attr,
             thing: Box::new(thing),
             updated: false,
-            enable_cache,
         });
         self.cache.push(None);
     }
@@ -44,14 +43,10 @@ impl Panel {
             .par_iter_mut()
             .enumerate()
             .map(|(i, b)| {
-                if b.enable_cache {
-                    if b.updated || self.cache[i].is_none() {
-                        Some(b.draw())
-                    } else {
-                        None
-                    }
-                } else {
+                if b.updated || self.cache[i].is_none() {
                     Some(b.draw())
+                } else {
+                    None
                 }
             })
             .collect::<Vec<_>>();
@@ -136,6 +131,8 @@ impl Panel {
 
 impl Draw for Panel {
     fn draw(&mut self) -> Result<Vec<Stylized>, DrawErr> {
+        self.refresh_cache()?;
+
         let not_cached = (&mut self.boxes)
             .par_iter_mut()
             .enumerate()

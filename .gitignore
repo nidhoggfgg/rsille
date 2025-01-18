@@ -3,3 +3,4 @@ Cargo.lock
 test-files
 examples/test.rs
 .vscode
+*.log
