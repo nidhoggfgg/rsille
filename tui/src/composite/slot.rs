@@ -10,7 +10,7 @@ pub struct Slot {
 }
 
 impl Draw for Slot {
-    fn draw(&self) -> Result<Vec<Stylized>, DrawErr> {
+    fn draw(&mut self) -> Result<Vec<Stylized>, DrawErr> {
         self.thing.draw()
     }
 

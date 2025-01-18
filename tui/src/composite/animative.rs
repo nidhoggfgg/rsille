@@ -22,7 +22,7 @@ where
     T: Draw,
     F: Fn(&mut T) + 'static,
 {
-    fn draw(&self) -> Result<Vec<Stylized>, DrawErr> {
+    fn draw(&mut self) -> Result<Vec<Stylized>, DrawErr> {
         self.component.draw()
     }
 

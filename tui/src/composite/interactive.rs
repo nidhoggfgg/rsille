@@ -104,7 +104,7 @@ impl<T> Draw for Interactive<T>
 where
     T: Draw,
 {
-    fn draw(&self) -> Result<Vec<crate::style::Stylized>, crate::DrawErr> {
+    fn draw(&mut self) -> Result<Vec<crate::style::Stylized>, crate::DrawErr> {
         self.component.draw()
     }
 

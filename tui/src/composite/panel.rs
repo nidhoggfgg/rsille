@@ -1,6 +1,4 @@
-use rayon::iter::{
-    IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator,
-};
+use rayon::iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
 use term::crossterm::event::Event;
 
 use crate::{
@@ -137,10 +135,9 @@ impl Panel {
 }
 
 impl Draw for Panel {
-    fn draw(&self) -> Result<Vec<Stylized>, DrawErr> {
-        let not_cached = self
-            .boxes
-            .par_iter()
+    fn draw(&mut self) -> Result<Vec<Stylized>, DrawErr> {
+        let not_cached = (&mut self.boxes)
+            .par_iter_mut()
             .enumerate()
             .map(|(i, b)| {
                 if self.cache[i].is_none() {
