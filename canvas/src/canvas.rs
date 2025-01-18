@@ -254,7 +254,7 @@ impl Canvas {
 }
 
 impl Draw for Canvas {
-    fn draw(&self) -> Result<Vec<Stylized>, DrawErr> {
+    fn draw(&mut self) -> Result<Vec<Stylized>, DrawErr> {
         let size = self.get_size();
         let mut result = Vec::with_capacity((size.0 * size.1) as usize);
         let ((minx, maxx), (miny, maxy)) = self.bound.get_bound();

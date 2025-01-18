@@ -3,7 +3,7 @@ use term::crossterm::event::Event;
 use crate::{style::Stylized, DrawErr};
 
 pub trait Draw {
-    fn draw(&self) -> Result<Vec<Stylized>, DrawErr>;
+    fn draw(&mut self) -> Result<Vec<Stylized>, DrawErr>;
     fn size(&self) -> Option<(u16, u16)>;
 }
 

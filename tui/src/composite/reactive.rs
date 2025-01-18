@@ -43,7 +43,7 @@ where
     S: Clone + Send + Sync,
     F: FnMut(&mut T, &S) + 'static,
 {
-    fn draw(&self) -> Result<Vec<Stylized>, DrawErr> {
+    fn draw(&mut self) -> Result<Vec<Stylized>, DrawErr> {
         self.component.draw()
     }
 
