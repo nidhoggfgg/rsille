@@ -6,7 +6,6 @@ pub struct Slot {
     pub attr: Attr,
     pub thing: Box<dyn DrawUpdate + Send + Sync>,
     pub updated: bool,
-    pub enable_cache: bool,
 }
 
 impl Draw for Slot {

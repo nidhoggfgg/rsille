@@ -13,7 +13,7 @@ use term::crossterm::{
 };
 use tokio::{select, sync::mpsc};
 
-use crate::{composite::Panel, style::Stylized, traits::Draw, Update};
+use crate::{attr::Attr, composite::Panel, style::Stylized, traits::Draw, DrawUpdate, Update};
 
 use super::{builder::Size, Builder};
 
@@ -98,6 +98,14 @@ impl TuiEngine {
         self
     }
 
+    pub fn push<T>(&mut self, thing: T, attr: Attr) -> &mut Self
+    where
+        T: DrawUpdate + Send + Sync + 'static,
+    {
+        self.panel.push(thing, attr);
+        self
+    }
+
     pub fn print(&mut self, data: Vec<Stylized>) -> io::Result<()> {
         queue!(io::stdout(), MoveTo(0, 0))?;
         let (width, _) = self
@@ -120,8 +128,7 @@ impl TuiEngine {
         Ok(())
     }
 
-    pub fn run(mut self) {
-        self.raw_mode = true;
+    pub fn run(self) {
         let alt_screen = self.alt_screen;
         let raw_mode = self.raw_mode;
         let mouse_capture = self.mouse_capture;
@@ -247,9 +254,6 @@ impl TuiEngine {
 
                 // update
                 self.panel.update(&events).unwrap_or(false);
-
-                // refresh cache
-                self.panel.refresh_cache().unwrap();
 
                 // draw
                 let data = self.panel.draw().unwrap();

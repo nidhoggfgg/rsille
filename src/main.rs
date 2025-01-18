@@ -4,7 +4,7 @@ use std::io::Write;
 use canvas::Canvas;
 use tui::{
     attr::{Attr, AttrDisplay},
-    composite::{Interactive, Panel, Reactive},
+    composite::{Interactive, Reactive},
 };
 
 #[tokio::main]
@@ -25,8 +25,6 @@ async fn main() {
         .filter(None, log::LevelFilter::Info)
         .target(env_logger::Target::Pipe(target))
         .init();
-
-    let mut panel = Panel::new(200, 50);
 
     let canvas = Canvas::new();
 
@@ -59,50 +57,55 @@ async fn main() {
 
     let rc2 = reactive_canvas.clone();
     let rc3 = reactive_canvas.clone();
-    panel.push(
-        interactive_canvas,
-        Attr {
-            id: "canvas".to_string(),
-            width: 50,
-            height: 50,
-            display: AttrDisplay::Inline,
-            float: false,
-        },
-        false,
-    );
-    panel.push(
-        reactive_canvas,
-        Attr {
-            id: "reactive_canvas".to_string(),
-            width: 50,
-            height: 50,
-            display: AttrDisplay::Inline,
-            float: false,
-        },
-        false,
-    );
-    panel.push(
-        rc2,
-        Attr {
-            id: "rc2".to_string(),
-            width: 50,
-            height: 50,
-            display: AttrDisplay::Inline,
-            float: false,
-        },
-        false,
-    );
-    panel.push(
-        rc3,
-        Attr {
-            id: "rc3".to_string(),
-            width: 50,
-            height: 50,
-            display: AttrDisplay::Inline,
-            float: false,
-        },
-        false,
-    );
+
+    let mut engine = tui::engine::Builder::new()
+        .set_size((200, 50))
+        .set_max_event_per_frame(3)
+        .enable_all()
+        .build()
+        .unwrap();
+
+    engine
+        .push(
+            interactive_canvas,
+            Attr {
+                id: "canvas".to_string(),
+                width: 50,
+                height: 50,
+                display: AttrDisplay::Inline,
+                float: false,
+            },
+        )
+        .push(
+            reactive_canvas,
+            Attr {
+                id: "reactive_canvas".to_string(),
+                width: 50,
+                height: 50,
+                display: AttrDisplay::Inline,
+                float: false,
+            },
+        )
+        .push(
+            rc2,
+            Attr {
+                id: "rc2".to_string(),
+                width: 50,
+                height: 50,
+                display: AttrDisplay::Inline,
+                float: false,
+            },
+        )
+        .push(
+            rc3,
+            Attr {
+                id: "rc3".to_string(),
+                width: 50,
+                height: 50,
+                display: AttrDisplay::Inline,
+                float: false,
+            },
+        );
 
     tokio::spawn(async move {
         for i in 0..7200 {
@@ -111,12 +114,5 @@ async fn main() {
         }
     });
 
-    let runtime = tui::engine::Builder::new()
-        .set_size((200, 50))
-        .set_max_event_per_frame(3)
-        .enable_all()
-        .build()
-        .unwrap();
-
-    runtime.run();
+    engine.run();
 }
