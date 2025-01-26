@@ -1,4 +1,4 @@
-use term::crossterm::event::Event;
+use term::event::Event;
 use tokio::sync::watch;
 
 use crate::{style::Stylized, traits::Draw, DrawErr, Update};
@@ -58,8 +58,12 @@ where
     S: Clone + Send + Sync,
     F: FnMut(&mut T, &S) + Send + 'static,
 {
-    fn update(&mut self, events: &[Event]) -> Result<bool, DrawErr> {
-        self.component.update(events)?;
+    fn on_events(&mut self, events: &[Event]) -> Result<(), DrawErr> {
+        self.component.on_events(events)
+    }
+
+    fn update(&mut self) -> Result<bool, DrawErr> {
+        self.component.update()?;
         let mut changed = false;
         for watcher in self.watchers.iter_mut() {
             match watcher.receiver.has_changed() {
@@ -77,7 +81,7 @@ where
 
 // for hold on to the sender and receiver
 #[derive(Clone)]
-struct Watcher<S, F> {
+pub struct Watcher<S, F> {
     _sender: watch::Sender<S>,
     receiver: watch::Receiver<S>,
     func: F,

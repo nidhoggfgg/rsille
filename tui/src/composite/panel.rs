@@ -1,5 +1,5 @@
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
-use term::crossterm::event::Event;
+use term::event::Event;
 
 use crate::{
     attr::{Attr, AttrDisplay},
@@ -11,8 +11,9 @@ use crate::{
 use super::slot::Slot;
 
 pub struct Panel {
-    size: (u16, u16),
-    boxes: Vec<Slot>,
+    pub boxes: Vec<Slot>,
+    pub size: (u16, u16),
+    // internal cache
     cache: Vec<Option<Vec<Stylized>>>,
 }
 
@@ -57,113 +58,24 @@ impl Panel {
         }
         Ok(())
     }
-
-    fn draw_impl(&self, boxes: &[&Vec<Stylized>]) -> Result<Vec<Stylized>, DrawErr> {
-        let mut result = vec![Stylized::space(); (self.size.0 * self.size.1) as usize];
-        let (panel_width, panel_height) = self.size;
-        let (mut offset_col, mut offset_row) = (0, 0);
-        let (mut end_offset_col, mut end_offset_row) = (0, 0);
-
-        let mut state = RenderState::Block;
-
-        for (i, b) in self.boxes.iter().enumerate() {
-            if b.attr.float {
-                todo!()
-            }
-            let data = boxes[i];
-            // the size of the data, width * height = data.len()
-            let (render_width, render_height) = b.size().ok_or(DrawErr)?;
-
-            match state {
-                RenderState::Block => {
-                    offset_row = end_offset_row;
-                    match b.attr.display {
-                        AttrDisplay::Block => {
-                            state = RenderState::Block;
-                        }
-                        AttrDisplay::Inline => {
-                            state = RenderState::Inline;
-                        }
-                    }
-                }
-                RenderState::Inline => match b.attr.display {
-                    AttrDisplay::Block => {
-                        offset_col = 0;
-                        offset_row = end_offset_row;
-                        state = RenderState::Block;
-                    }
-                    AttrDisplay::Inline => {
-                        offset_col = end_offset_col;
-                        state = RenderState::Inline;
-                    }
-                },
-            }
-
-            let ((real_render_width, real_render_height), (real_box_width, real_box_height)) =
-                calc_render_area(
-                    (offset_col, offset_row),
-                    (panel_width, panel_height),
-                    (b.attr.width, b.attr.height),
-                    (render_width, render_height),
-                );
-
-            // only render the real renderable area, not the whole box
-            // other area in the box is already filled with space
-            let mut tmp_offset_row = offset_row;
-            for i in 0..real_render_height {
-                let start = (i * render_width) as usize;
-                let end = start + real_render_width as usize;
-                let line = &data[start..end];
-
-                let r_start = (tmp_offset_row * panel_width + offset_col) as usize;
-                let r_end = r_start + real_render_width as usize;
-                result[r_start..r_end].clone_from_slice(line);
-                tmp_offset_row += 1;
-            }
-
-            end_offset_col = offset_col + real_box_width;
-            end_offset_row = offset_row + real_box_height;
-        }
-
-        Ok(result)
-    }
 }
 
 impl Draw for Panel {
     fn draw(&mut self) -> Result<Vec<Stylized>, DrawErr> {
         self.refresh_cache()?;
 
-        let not_cached = (&mut self.boxes)
-            .par_iter_mut()
-            .enumerate()
-            .map(|(i, b)| {
-                if self.cache[i].is_none() {
-                    Some(b.draw())
-                } else {
-                    None
-                }
-            })
-            .collect::<Vec<_>>();
-
-        let mut boxes = Vec::with_capacity(self.boxes.len());
-        for i in 0..self.boxes.len() {
+        // after refresh cache, there shouldn't be any None in the cache
+        let mut draw_data = Vec::new();
+        for (i, s) in self.boxes.iter().enumerate() {
             if let Some(d) = self.cache[i].as_ref() {
-                boxes.push(d);
-            } else if let Some(Ok(d)) = not_cached[i].as_ref() {
-                boxes.push(d);
-            } else if let Some(Err(e)) = not_cached[i].as_ref() {
-                return Err(*e);
+                let size = s.size().ok_or(DrawErr)?;
+                draw_data.push((d, size, &s.attr));
             } else {
-                // unreachable
-                continue;
+                return Err(DrawErr);
             }
         }
 
-        if boxes.len() != self.boxes.len() {
-            return Err(DrawErr);
-        }
-
-        self.draw_impl(&boxes)
+        draw_boxes(&draw_data, self.size)
     }
 
     #[must_use]
@@ -174,11 +86,16 @@ impl Draw for Panel {
 }
 
 impl Update for Panel {
-    fn update(&mut self, events: &[Event]) -> Result<bool, DrawErr> {
+    fn on_events(&mut self, events: &[Event]) -> Result<(), DrawErr> {
+        // dispatch event
+        todo!()
+    }
+
+    fn update(&mut self) -> Result<bool, DrawErr> {
         let changes = self
             .boxes
             .par_iter_mut()
-            .map(|b| b.update(events))
+            .map(|b| b.update())
             .collect::<Result<Vec<_>, DrawErr>>()?;
 
         let changed = changes.iter().any(|x| *x);
@@ -187,7 +104,79 @@ impl Update for Panel {
     }
 }
 
-fn calc_render_area(
+pub fn draw_boxes(
+    boxes: &[(&Vec<Stylized>, (u16, u16), &Attr)],
+    size: (u16, u16),
+) -> Result<Vec<Stylized>, DrawErr> {
+    let (panel_width, panel_height) = size;
+    let mut result = vec![Stylized::space(); (panel_width * panel_height) as usize];
+    let (mut offset_col, mut offset_row) = (0, 0);
+    let (mut end_offset_col, mut end_offset_row) = (0, 0);
+
+    let mut state = RenderState::Block;
+
+    for (data, render_size, attr) in boxes.iter() {
+        if attr.float {
+            todo!()
+        }
+        // the size of the data, width * height = data.len()
+        let (render_width, render_height) = render_size.to_owned();
+
+        match state {
+            RenderState::Block => {
+                offset_row = end_offset_row;
+                match attr.display {
+                    AttrDisplay::Block => {
+                        state = RenderState::Block;
+                    }
+                    AttrDisplay::Inline => {
+                        state = RenderState::Inline;
+                    }
+                }
+            }
+            RenderState::Inline => match attr.display {
+                AttrDisplay::Block => {
+                    offset_col = 0;
+                    offset_row = end_offset_row;
+                    state = RenderState::Block;
+                }
+                AttrDisplay::Inline => {
+                    offset_col = end_offset_col;
+                    state = RenderState::Inline;
+                }
+            },
+        }
+
+        let ((real_render_width, real_render_height), (real_box_width, real_box_height)) =
+            calc_render_area(
+                (offset_col, offset_row),
+                (panel_width, panel_height),
+                (attr.width, attr.height),
+                (render_width, render_height),
+            );
+
+        // only render the real renderable area, not the whole box
+        // other area in the box is already filled with space
+        let mut tmp_offset_row = offset_row;
+        for i in 0..real_render_height {
+            let start = (i * render_width) as usize;
+            let end = start + real_render_width as usize;
+            let line = &data[start..end];
+
+            let r_start = (tmp_offset_row * panel_width + offset_col) as usize;
+            let r_end = r_start + real_render_width as usize;
+            result[r_start..r_end].clone_from_slice(line);
+            tmp_offset_row += 1;
+        }
+
+        end_offset_col = offset_col + real_box_width;
+        end_offset_row = offset_row + real_box_height;
+    }
+
+    Ok(result)
+}
+
+pub fn calc_render_area(
     offset: (u16, u16),
     panel_size: (u16, u16),
     box_size: (u16, u16),

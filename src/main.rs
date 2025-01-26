@@ -66,16 +66,16 @@ async fn main() {
         .unwrap();
 
     engine
-        .push(
-            interactive_canvas,
-            Attr {
-                id: "canvas".to_string(),
-                width: 50,
-                height: 50,
-                display: AttrDisplay::Inline,
-                float: false,
-            },
-        )
+        // .push(
+        //     interactive_canvas,
+        //     Attr {
+        //         id: "canvas".to_string(),
+        //         width: 50,
+        //         height: 50,
+        //         display: AttrDisplay::Inline,
+        //         float: false,
+        //     },
+        // )
         .push(
             reactive_canvas,
             Attr {

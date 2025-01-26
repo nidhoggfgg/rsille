@@ -1,4 +1,4 @@
-use term::crossterm::event::Event;
+use term::event::Event;
 
 use crate::{style::Stylized, DrawErr};
 
@@ -8,7 +8,8 @@ pub trait Draw {
 }
 
 pub trait Update {
-    fn update(&mut self, events: &[Event]) -> Result<bool, DrawErr>;
+    fn on_events(&mut self, events: &[Event]) -> Result<(), DrawErr>;
+    fn update(&mut self) -> Result<bool, DrawErr>;
 }
 
 // this trait is for making trait object
