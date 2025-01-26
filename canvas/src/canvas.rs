@@ -8,9 +8,9 @@ use crate::tile::Tile;
 use crate::utils::{round, round_f64};
 
 use term::crossterm::cursor::MoveToNextLine;
-use term::crossterm::event::Event;
 use term::crossterm::queue;
 use term::crossterm::style::Print;
+use term::event::Event;
 use tui::Stylized;
 use tui::{Draw, DrawErr, Update};
 
@@ -277,7 +277,11 @@ impl Draw for Canvas {
 }
 
 impl Update for Canvas {
-    fn update(&mut self, _events: &[Event]) -> Result<bool, DrawErr> {
+    fn on_events(&mut self, _events: &[Event]) -> Result<(), DrawErr> {
+        Ok(())
+    }
+
+    fn update(&mut self) -> Result<bool, DrawErr> {
         Ok(false)
     }
 }

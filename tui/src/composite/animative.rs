@@ -1,4 +1,4 @@
-use term::crossterm::event::Event;
+use term::event::Event;
 
 use crate::{style::Stylized, Draw, DrawErr, Update};
 
@@ -36,8 +36,12 @@ where
     T: Update,
     F: Fn(&mut T) + Send + Sync + 'static,
 {
-    fn update(&mut self, events: &[Event]) -> Result<bool, DrawErr> {
+    fn update(&mut self) -> Result<bool, DrawErr> {
         (self.anime_fn)(&mut self.component);
-        self.component.update(events)
+        self.component.update()
+    }
+
+    fn on_events(&mut self, events: &[Event]) -> Result<(), DrawErr> {
+        self.component.on_events(events)
     }
 }

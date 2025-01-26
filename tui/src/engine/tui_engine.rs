@@ -5,11 +5,14 @@ use std::{
 };
 
 use futures::{FutureExt, StreamExt};
-use term::crossterm::{
-    cursor::{MoveTo, MoveToNextLine},
-    event::{Event, EventStream, KeyEvent},
-    queue,
-    style::Print,
+use term::{
+    crossterm::{
+        cursor::{MoveTo, MoveToNextLine},
+        event::EventStream,
+        queue,
+        style::Print,
+    },
+    event::{Event, KeyEvent},
 };
 use tokio::{select, sync::mpsc};
 
@@ -199,6 +202,7 @@ impl TuiEngine {
                         maybe_event = event => {
                             match maybe_event {
                                 Some(Ok(event)) => {
+                                    let event = Event::from(event);
                                     if event == Event::Key(exit_code) {
                                         stop_tx.send(()).unwrap();
                                         break;
@@ -253,7 +257,8 @@ impl TuiEngine {
                 let now = std::time::Instant::now();
 
                 // update
-                self.panel.update(&events).unwrap_or(false);
+                self.panel.on_events(&events).unwrap_or(());
+                self.panel.update().unwrap_or(false);
 
                 // draw
                 let data = self.panel.draw().unwrap();

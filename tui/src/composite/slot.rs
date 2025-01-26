@@ -1,4 +1,4 @@
-use term::crossterm::event::Event;
+use term::event::Event;
 
 use crate::{attr::Attr, style::Stylized, traits::Draw, DrawErr, DrawUpdate, Update};
 
@@ -19,8 +19,12 @@ impl Draw for Slot {
 }
 
 impl Update for Slot {
-    fn update(&mut self, events: &[Event]) -> Result<bool, DrawErr> {
-        self.updated = self.thing.update(events)?;
+    fn on_events(&mut self, events: &[Event]) -> Result<(), DrawErr> {
+        self.thing.on_events(events)
+    }
+
+    fn update(&mut self) -> Result<bool, DrawErr> {
+        self.updated = self.thing.update()?;
         Ok(self.updated)
     }
 }
