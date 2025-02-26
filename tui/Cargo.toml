@@ -10,6 +10,7 @@ term = { path = "../term" }
 log = { version = "0.4", features = ["std"], optional = true }
 rayon = "1.10.0"
 futures = "0.3.31"
+unicode-width = "0.2.0"
 
 [features]
 log = ["dep:log"]

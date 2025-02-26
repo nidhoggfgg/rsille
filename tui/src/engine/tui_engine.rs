@@ -16,7 +16,7 @@ use term::{
 };
 use tokio::{select, sync::mpsc};
 
-use crate::{attr::Attr, composite::Panel, style::Stylized, traits::Draw, DrawUpdate, Update};
+use crate::{attr::Attr, composite::Panel, style::Stylized, traits::Draw, widgets::Widget, Update};
 
 use super::{builder::Size, Builder};
 
@@ -103,7 +103,7 @@ impl TuiEngine {
 
     pub fn push<T>(&mut self, thing: T, attr: Attr) -> &mut Self
     where
-        T: DrawUpdate + Send + Sync + 'static,
+        T: Widget + Send + Sync + 'static,
     {
         self.panel.push(thing, attr);
         self
