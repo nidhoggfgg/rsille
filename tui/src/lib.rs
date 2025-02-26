@@ -1,6 +1,7 @@
 pub mod attr;
 pub mod composite;
 pub mod engine;
+pub mod widgets;
 
 mod style;
 mod traits;

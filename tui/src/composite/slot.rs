@@ -1,10 +1,9 @@
 use term::event::Event;
 
-use crate::{attr::Attr, style::Stylized, traits::Draw, DrawErr, DrawUpdate, Update};
+use crate::{attr::Attr, style::Stylized, traits::Draw, widgets::Widget, DrawErr, Update};
 
 pub struct Slot {
-    pub attr: Attr,
-    pub thing: Box<dyn DrawUpdate + Send + Sync>,
+    pub thing: Box<dyn Widget + Send + Sync>,
     pub updated: bool,
 }
 
@@ -26,5 +25,19 @@ impl Update for Slot {
     fn update(&mut self) -> Result<bool, DrawErr> {
         self.updated = self.thing.update()?;
         Ok(self.updated)
+    }
+}
+
+impl Widget for Slot {
+    fn show(&mut self) -> Result<Vec<Stylized>, DrawErr> {
+        self.thing.show()
+    }
+
+    fn get_attr(&self) -> &Attr {
+        self.thing.get_attr()
+    }
+
+    fn set_attr(&mut self, attr: Attr) {
+        self.thing.set_attr(attr);
     }
 }

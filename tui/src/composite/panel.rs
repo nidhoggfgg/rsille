@@ -5,7 +5,8 @@ use crate::{
     attr::{Attr, AttrDisplay},
     style::Stylized,
     traits::Draw,
-    DrawErr, DrawUpdate, Update,
+    widgets::Widget,
+    DrawErr, Update,
 };
 
 use super::slot::Slot;
@@ -28,13 +29,14 @@ impl Panel {
 
     pub fn push<T>(&mut self, thing: T, attr: Attr)
     where
-        T: DrawUpdate + Send + Sync + 'static,
+        T: Widget + Send + Sync + 'static,
     {
-        self.boxes.push(Slot {
-            attr,
+        let mut slot = Slot {
             thing: Box::new(thing),
             updated: false,
-        });
+        };
+        slot.set_attr(attr);
+        self.boxes.push(slot);
         self.cache.push(None);
     }
 
@@ -69,7 +71,7 @@ impl Draw for Panel {
         for (i, s) in self.boxes.iter().enumerate() {
             if let Some(d) = self.cache[i].as_ref() {
                 let size = s.size().ok_or(DrawErr)?;
-                draw_data.push((d, size, &s.attr));
+                draw_data.push((d, size, s.get_attr()));
             } else {
                 return Err(DrawErr);
             }
@@ -86,7 +88,7 @@ impl Draw for Panel {
 }
 
 impl Update for Panel {
-    fn on_events(&mut self, events: &[Event]) -> Result<(), DrawErr> {
+    fn on_events(&mut self, _events: &[Event]) -> Result<(), DrawErr> {
         // dispatch event
         todo!()
     }
@@ -132,6 +134,7 @@ pub fn draw_boxes(
                     AttrDisplay::Inline => {
                         state = RenderState::Inline;
                     }
+                    AttrDisplay::Hidden => {}
                 }
             }
             RenderState::Inline => match attr.display {
@@ -144,6 +147,7 @@ pub fn draw_boxes(
                     offset_col = end_offset_col;
                     state = RenderState::Inline;
                 }
+                AttrDisplay::Hidden => {}
             },
         }
 
