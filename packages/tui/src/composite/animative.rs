@@ -1,6 +1,7 @@
-use term::event::Event;
+use render::{Draw, DrawErr, Update};
+use term::{event::Event, style::Stylized};
 
-use crate::{style::Stylized, Draw, DrawErr, Update};
+use crate::widgets::Widget;
 
 #[derive(Clone)]
 pub struct Animative<T, F> {
@@ -8,7 +9,10 @@ pub struct Animative<T, F> {
     anime_fn: F,
 }
 
-impl<T, F> Animative<T, F> {
+impl<T, F> Animative<T, F>
+where
+    F: Fn(&mut T) + 'static,
+{
     pub fn new(component: T, anime_fn: F) -> Self {
         Self {
             component,
@@ -43,5 +47,23 @@ where
 
     fn on_events(&mut self, events: &[Event]) -> Result<(), DrawErr> {
         self.component.on_events(events)
+    }
+}
+
+impl<T, F> Widget for Animative<T, F>
+where
+    T: Widget,
+    F: Fn(&mut T) + Send + Sync + 'static,
+{
+    fn get_attr(&self) -> &crate::attr::Attr {
+        self.component.get_attr()
+    }
+
+    fn set_attr(&mut self, attr: crate::attr::Attr) {
+        self.component.set_attr(attr);
+    }
+
+    fn show(&mut self) -> Result<Vec<Stylized>, DrawErr> {
+        self.component.show()
     }
 }

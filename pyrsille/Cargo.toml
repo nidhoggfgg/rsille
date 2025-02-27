@@ -10,4 +10,4 @@ crate-type = ["cdylib"]
 
 [dependencies]
 pyo3 = "0.23.1"
-canvas = { path = "../canvas" }
+canvas = { path = "../packages/canvas" }

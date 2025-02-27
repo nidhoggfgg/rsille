@@ -1,16 +1,15 @@
 [package]
-name = "tui"
+name = "render"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 [dependencies]
-async-trait = "0.1.84"
 tokio = { version = "1", features = ["full"] }
 term = { path = "../term" }
-log = { version = "0.4", features = ["std"], optional = true }
-rayon = "1.10.0"
+async-trait = "0.1.84"
 futures = "0.3.31"
-unicode-width = "0.2.0"
+rayon = "1.10.0"
+log = { version = "0.4", features = ["std"], optional = true }
 
 [features]
 log = ["dep:log"]

@@ -13,15 +13,16 @@ use term::{
         style::Print,
     },
     event::{Event, KeyEvent},
+    style::Stylized,
 };
 use tokio::{select, sync::mpsc};
 
-use crate::{attr::Attr, composite::Panel, style::Stylized, traits::Draw, widgets::Widget, Update};
+use crate::DrawUpdate;
 
-use super::{builder::Size, Builder};
+use super::{Builder, builder::Size};
 
-pub struct TuiEngine {
-    panel: Panel,
+pub struct Engine {
+    thing: Box<dyn DrawUpdate + Send + Sync>,
     raw_mode: bool,
     exit_code: KeyEvent,
     max_event_per_frame: usize,
@@ -31,7 +32,7 @@ pub struct TuiEngine {
     hide_cursor: bool,
 }
 
-impl TuiEngine {
+impl Engine {
     pub(super) fn from_builder(builder: &Builder) -> io::Result<Self> {
         let (width, height) = match builder.size {
             Size::Fixed(w, h) => (w, h),
@@ -45,7 +46,7 @@ impl TuiEngine {
             }
         };
         Ok(Self {
-            panel: Panel::new(width, height),
+            thing: todo!(),
             raw_mode: builder.enable_raw_mode,
             exit_code: builder.exit_code,
             max_event_per_frame: builder.max_event_per_frame,
@@ -101,18 +102,10 @@ impl TuiEngine {
         self
     }
 
-    pub fn push<T>(&mut self, thing: T, attr: Attr) -> &mut Self
-    where
-        T: Widget + Send + Sync + 'static,
-    {
-        self.panel.push(thing, attr);
-        self
-    }
-
     pub fn print(&mut self, data: Vec<Stylized>) -> io::Result<()> {
         queue!(io::stdout(), MoveTo(0, 0))?;
         let (width, _) = self
-            .panel
+            .thing
             .size()
             .ok_or(io::Error::new(io::ErrorKind::Other, "draw error"))?;
 
@@ -257,11 +250,11 @@ impl TuiEngine {
                 let now = std::time::Instant::now();
 
                 // update
-                self.panel.on_events(&events).unwrap_or(());
-                self.panel.update().unwrap_or(false);
+                self.thing.on_events(&events).unwrap_or(());
+                self.thing.update().unwrap_or(false);
 
                 // draw
-                let data = self.panel.draw().unwrap();
+                let data = self.thing.draw().unwrap();
 
                 // print
                 self.print(data).unwrap();

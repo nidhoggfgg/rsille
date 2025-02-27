@@ -1,7 +1,8 @@
-use term::event::Event;
+use render::{Draw, DrawErr, Update};
+use term::{event::Event, style::Stylized};
 use tokio::sync::watch;
 
-use crate::{style::Stylized, traits::Draw, DrawErr, Update};
+use crate::widgets::Widget;
 
 #[derive(Clone)]
 pub struct Reactive<T, S, F> {
@@ -76,6 +77,25 @@ where
             }
         }
         Ok(changed)
+    }
+}
+
+impl<T, S, F> Widget for Reactive<T, S, F>
+where
+    T: Widget,
+    S: Clone + Send + Sync,
+    F: FnMut(&mut T, &S) + Send + 'static,
+{
+    fn get_attr(&self) -> &crate::attr::Attr {
+        self.component.get_attr()
+    }
+
+    fn set_attr(&mut self, attr: crate::attr::Attr) {
+        self.component.set_attr(attr);
+    }
+
+    fn show(&mut self) -> Result<Vec<Stylized>, DrawErr> {
+        self.component.show()
     }
 }
 

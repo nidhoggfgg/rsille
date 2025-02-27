@@ -1,6 +1,7 @@
-use term::event::Event;
+use render::{Draw, DrawErr, Update};
+use term::{event::Event, style::Stylized};
 
-use crate::{attr::Attr, style::Stylized, traits::Draw, widgets::Widget, DrawErr, Update};
+use crate::{attr::Attr, widgets::Widget};
 
 pub struct Slot {
     pub thing: Box<dyn Widget + Send + Sync>,
