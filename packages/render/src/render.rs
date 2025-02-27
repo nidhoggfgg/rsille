@@ -21,7 +21,7 @@ use crate::DrawUpdate;
 
 use super::{Builder, builder::Size};
 
-pub struct Engine {
+pub struct Render {
     thing: Box<dyn DrawUpdate + Send + Sync>,
     raw_mode: bool,
     exit_code: KeyEvent,
@@ -32,7 +32,7 @@ pub struct Engine {
     hide_cursor: bool,
 }
 
-impl Engine {
+impl Render {
     pub(super) fn from_builder(builder: &Builder) -> io::Result<Self> {
         let (width, height) = match builder.size {
             Size::Fixed(w, h) => (w, h),
