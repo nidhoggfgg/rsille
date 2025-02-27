@@ -1,6 +1,5 @@
 pub trait Draw {
-    fn draw(&mut self) -> Result<Vec<term::style::Stylized>, crate::DrawErr>;
-    fn size(&self) -> Option<(u16, u16)>;
+    fn draw(&mut self) -> Result<DrawChunk, crate::DrawErr>;
 }
 
 pub trait Update {
@@ -12,3 +11,6 @@ pub trait Update {
 pub trait DrawUpdate: Draw + Update {}
 
 impl<T: Draw + Update> DrawUpdate for T {}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DrawChunk(pub Vec<term::style::Stylized>, pub (u16, u16));

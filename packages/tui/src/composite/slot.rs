@@ -1,4 +1,4 @@
-use render::{Draw, DrawErr, Update};
+use render::{Draw, DrawChunk, DrawErr, Update};
 use term::{event::Event, style::Stylized};
 
 use crate::{attr::Attr, widgets::Widget};
@@ -9,12 +9,8 @@ pub struct Slot {
 }
 
 impl Draw for Slot {
-    fn draw(&mut self) -> Result<Vec<Stylized>, DrawErr> {
+    fn draw(&mut self) -> Result<DrawChunk, DrawErr> {
         self.thing.draw()
-    }
-
-    fn size(&self) -> Option<(u16, u16)> {
-        self.thing.size()
     }
 }
 

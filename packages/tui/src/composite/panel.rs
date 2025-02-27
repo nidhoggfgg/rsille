@@ -50,9 +50,10 @@ impl Panel {
                 }
             })
             .collect::<Vec<_>>();
-        for (i, r) in result.into_iter().enumerate() {
-            if let Some(Ok(d)) = r {
-                self.cache[i] = Some(d);
+        for (_i, r) in result.into_iter().enumerate() {
+            if let Some(Ok(_d)) = r {
+                // self.cache[i] = Some(d);
+                todo!()
             }
         }
         Ok(())
@@ -60,27 +61,8 @@ impl Panel {
 }
 
 impl Draw for Panel {
-    fn draw(&mut self) -> Result<Vec<Stylized>, DrawErr> {
-        self.refresh_cache()?;
-
-        // after refresh cache, there shouldn't be any None in the cache
-        let mut draw_data = Vec::new();
-        for (i, s) in self.boxes.iter().enumerate() {
-            if let Some(d) = self.cache[i].as_ref() {
-                let size = s.size().ok_or(DrawErr)?;
-                draw_data.push((d, size, s.get_attr()));
-            } else {
-                return Err(DrawErr);
-            }
-        }
-
-        draw_boxes(&draw_data, self.size)
-    }
-
-    #[must_use]
-    #[inline]
-    fn size(&self) -> Option<(u16, u16)> {
-        Some(self.size)
+    fn draw(&mut self) -> Result<render::DrawChunk, render::DrawErr> {
+        todo!()
     }
 }
 
@@ -104,6 +86,7 @@ impl Update for Panel {
     }
 }
 
+#[allow(unused)]
 pub fn draw_boxes(
     boxes: &[(&Vec<Stylized>, (u16, u16), &Attr)],
     size: (u16, u16),

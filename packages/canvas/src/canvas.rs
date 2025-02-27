@@ -7,12 +7,11 @@ use crate::braille::{Pixel, PixelOp};
 use crate::tile::Tile;
 use crate::utils::{round, round_f64};
 
-use render::{Draw, DrawErr, Update};
+use render::{Draw, DrawChunk, DrawErr, Update};
 use term::crossterm::cursor::MoveToNextLine;
 use term::crossterm::queue;
 use term::crossterm::style::Print;
 use term::event::Event;
-use term::style::Stylized;
 
 #[cfg(feature = "color")]
 use crate::color::Colored;
@@ -254,7 +253,7 @@ impl Canvas {
 }
 
 impl Draw for Canvas {
-    fn draw(&mut self) -> Result<Vec<Stylized>, DrawErr> {
+    fn draw(&mut self) -> Result<DrawChunk, DrawErr> {
         let size = self.get_size();
         let mut result = Vec::with_capacity((size.0 * size.1) as usize);
         let ((minx, maxx), (miny, maxy)) = self.bound.get_bound();
@@ -267,12 +266,7 @@ impl Draw for Canvas {
                 }
             }
         }
-        Ok(result)
-    }
-
-    fn size(&self) -> Option<(u16, u16)> {
-        let (w, h) = self.get_size();
-        Some((w as u16, h as u16))
+        Ok(DrawChunk(result, (size.0 as u16, size.1 as u16)))
     }
 }
 

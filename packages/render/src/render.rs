@@ -13,16 +13,17 @@ use term::{
         style::Print,
     },
     event::{Event, KeyEvent},
-    style::Stylized,
 };
 use tokio::{select, sync::mpsc};
 
-use crate::DrawUpdate;
+use crate::{DrawChunk, DrawUpdate};
 
-use super::{Builder, builder::Size};
+use super::Builder;
 
+#[allow(unused)]
 pub struct Render {
     thing: Box<dyn DrawUpdate + Send + Sync>,
+    size: Size,
     raw_mode: bool,
     exit_code: KeyEvent,
     max_event_per_frame: usize,
@@ -33,20 +34,13 @@ pub struct Render {
 }
 
 impl Render {
-    pub(super) fn from_builder(builder: &Builder) -> io::Result<Self> {
-        let (width, height) = match builder.size {
-            Size::Fixed(w, h) => (w, h),
-            Size::FullScreen => {
-                let (w, h) = term::terminal_size()?;
-                (w, h)
-            }
-            Size::Auto => {
-                let (w, h) = term::terminal_size()?;
-                (w, h)
-            }
-        };
+    pub(super) fn from_builder<T>(builder: &Builder, thing: T) -> io::Result<Self>
+    where
+        T: DrawUpdate + Send + Sync + 'static,
+    {
         Ok(Self {
-            thing: todo!(),
+            thing: Box::new(thing),
+            size: builder.size,
             raw_mode: builder.enable_raw_mode,
             exit_code: builder.exit_code,
             max_event_per_frame: builder.max_event_per_frame,
@@ -57,17 +51,17 @@ impl Render {
         })
     }
 
-    pub fn set_max_event_per_frame(&mut self, max_event_per_frame: usize) -> &mut Self {
+    pub fn max_event_per_frame(&mut self, max_event_per_frame: usize) -> &mut Self {
         self.max_event_per_frame = max_event_per_frame;
         self
     }
 
-    pub fn set_frame_limit(&mut self, frame_limit: Option<u16>) -> &mut Self {
+    pub fn frame_limit(&mut self, frame_limit: Option<u16>) -> &mut Self {
         self.frame_limit = frame_limit;
         self
     }
 
-    pub fn set_exit_code(&mut self, exit_code: KeyEvent) -> &mut Self {
+    pub fn exit_code(&mut self, exit_code: KeyEvent) -> &mut Self {
         self.exit_code = exit_code;
         self
     }
@@ -102,12 +96,9 @@ impl Render {
         self
     }
 
-    pub fn print(&mut self, data: Vec<Stylized>) -> io::Result<()> {
+    pub fn print(&mut self, DrawChunk(data, size): DrawChunk) -> io::Result<()> {
         queue!(io::stdout(), MoveTo(0, 0))?;
-        let (width, _) = self
-            .thing
-            .size()
-            .ok_or(io::Error::new(io::ErrorKind::Other, "draw error"))?;
+        let (width, _) = size;
 
         for chunk in data.chunks(width as usize) {
             for v in chunk {
@@ -289,4 +280,14 @@ impl Render {
             }
         })
     }
+}
+
+#[allow(unused)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Hash)]
+pub(super) enum Size {
+    Fixed(u16, u16),
+    FullScreen,
+
+    // unimplemented, bc panel have fixed size
+    Auto,
 }

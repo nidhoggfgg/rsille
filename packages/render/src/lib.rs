@@ -1,10 +1,10 @@
 mod builder;
+mod draw_update;
 mod render;
-mod traits;
 
 pub use builder::Builder;
+pub use draw_update::*;
 pub use render::*;
-pub use traits::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct DrawErr;

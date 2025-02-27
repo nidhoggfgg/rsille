@@ -1,4 +1,4 @@
-use render::{Draw, DrawErr, Update};
+use render::{Draw, DrawChunk, DrawErr, Update};
 use term::{event::Event, style::Stylized};
 use unicode_width::UnicodeWidthChar;
 
@@ -45,18 +45,14 @@ impl Text {
 }
 
 impl Draw for Text {
-    fn draw(&mut self) -> Result<Vec<Stylized>, DrawErr> {
+    fn draw(&mut self) -> Result<DrawChunk, DrawErr> {
         let mut result = Vec::with_capacity(self.height * self.width);
         for l in &self.text {
             for c in l.chars() {
                 result.push(Stylized::new(c, None, None));
             }
         }
-        Ok(result)
-    }
-
-    fn size(&self) -> Option<(u16, u16)> {
-        Some((self.width as u16, self.height as u16))
+        Ok(DrawChunk(result, (self.width as u16, self.height as u16)))
     }
 }
 

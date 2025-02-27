@@ -21,12 +21,8 @@ impl Div {
 }
 
 impl Draw for Div {
-    fn draw(&mut self) -> Result<Vec<Stylized>, DrawErr> {
+    fn draw(&mut self) -> Result<render::DrawChunk, render::DrawErr> {
         self.thing.draw()
-    }
-
-    fn size(&self) -> Option<(u16, u16)> {
-        self.thing.size()
     }
 }
 
@@ -42,7 +38,7 @@ impl Update for Div {
 
 impl Widget for Div {
     fn show(&mut self) -> Result<Vec<Stylized>, DrawErr> {
-        self.draw()
+        todo!()
     }
 
     fn get_attr(&self) -> &Attr {
