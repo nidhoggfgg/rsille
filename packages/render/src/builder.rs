@@ -1,7 +1,7 @@
 use futures::io;
 use term::crossterm::event::{KeyCode, KeyEvent};
 
-use super::Engine;
+use super::Render;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Hash)]
 pub struct Builder {
@@ -98,8 +98,8 @@ impl Builder {
         self
     }
 
-    pub fn build(&self) -> io::Result<Engine> {
-        Engine::from_builder(self)
+    pub fn build(&self) -> io::Result<Render> {
+        Render::from_builder(self)
     }
 }
 
