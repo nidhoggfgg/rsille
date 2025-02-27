@@ -1,8 +1,7 @@
-use term::event::Event;
+use render::{Draw, DrawErr, DrawUpdate, Update};
+use term::{event::Event, style::Stylized};
 
-use crate::{
-    attr::Attr, style::Stylized, traits::Draw, widgets::Widget, DrawErr, DrawUpdate, Update,
-};
+use crate::{attr::Attr, widgets::Widget};
 
 pub struct Div {
     pub attr: Attr,

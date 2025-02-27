@@ -7,12 +7,12 @@ use crate::braille::{Pixel, PixelOp};
 use crate::tile::Tile;
 use crate::utils::{round, round_f64};
 
+use render::{Draw, DrawErr, Update};
 use term::crossterm::cursor::MoveToNextLine;
 use term::crossterm::queue;
 use term::crossterm::style::Print;
 use term::event::Event;
-use tui::Stylized;
-use tui::{Draw, DrawErr, Update};
+use term::style::Stylized;
 
 #[cfg(feature = "color")]
 use crate::color::Colored;

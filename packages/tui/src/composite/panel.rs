@@ -1,12 +1,10 @@
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
-use term::event::Event;
+use render::{Draw, DrawErr, Update};
+use term::{event::Event, style::Stylized};
 
 use crate::{
     attr::{Attr, AttrDisplay},
-    style::Stylized,
-    traits::Draw,
     widgets::Widget,
-    DrawErr, Update,
 };
 
 use super::slot::Slot;
@@ -27,15 +25,14 @@ impl Panel {
         }
     }
 
-    pub fn push<T>(&mut self, thing: T, attr: Attr)
+    pub fn push<T>(&mut self, thing: T)
     where
         T: Widget + Send + Sync + 'static,
     {
-        let mut slot = Slot {
+        let slot = Slot {
             thing: Box::new(thing),
             updated: false,
         };
-        slot.set_attr(attr);
         self.boxes.push(slot);
         self.cache.push(None);
     }
@@ -90,7 +87,8 @@ impl Draw for Panel {
 impl Update for Panel {
     fn on_events(&mut self, _events: &[Event]) -> Result<(), DrawErr> {
         // dispatch event
-        todo!()
+        // todo!()
+        Ok(())
     }
 
     fn update(&mut self) -> Result<bool, DrawErr> {

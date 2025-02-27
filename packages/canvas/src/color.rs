@@ -4,7 +4,7 @@ use term::crossterm::{
     queue,
     style::{Color, Colors, Print, ResetColor, SetColors},
 };
-use tui::Stylized;
+use term::style::Stylized;
 
 use crate::braille::{Pixel, PixelOp};
 

@@ -1,6 +1,10 @@
-use term::event::{Event, KeyEvent, MouseEvent};
+use render::{Draw, DrawErr, Update};
+use term::{
+    event::{Event, KeyEvent, MouseEvent},
+    style::Stylized,
+};
 
-use crate::{Draw, Update};
+use crate::widgets::Widget;
 
 pub type KeyHandler<T> = Box<dyn FnMut(&mut T, KeyEvent) + Send + Sync>;
 pub type MouseHandler<T> = Box<dyn FnMut(&mut T, MouseEvent) + Send + Sync>;
@@ -39,11 +43,11 @@ impl<T> Update for Interactive<T>
 where
     T: Update,
 {
-    fn on_events(&mut self, events: &[Event]) -> Result<(), crate::DrawErr> {
+    fn on_events(&mut self, events: &[Event]) -> Result<(), DrawErr> {
         self.component.on_events(events)
     }
 
-    fn update(&mut self) -> Result<bool, crate::DrawErr> {
+    fn update(&mut self) -> Result<bool, DrawErr> {
         self.component.update()
     }
 }
@@ -52,11 +56,28 @@ impl<T> Draw for Interactive<T>
 where
     T: Draw,
 {
-    fn draw(&mut self) -> Result<Vec<crate::style::Stylized>, crate::DrawErr> {
+    fn draw(&mut self) -> Result<Vec<Stylized>, DrawErr> {
         self.component.draw()
     }
 
     fn size(&self) -> Option<(u16, u16)> {
         self.component.size()
+    }
+}
+
+impl<T> Widget for Interactive<T>
+where
+    T: Widget,
+{
+    fn get_attr(&self) -> &crate::attr::Attr {
+        self.component.get_attr()
+    }
+
+    fn set_attr(&mut self, attr: crate::attr::Attr) {
+        self.component.set_attr(attr);
+    }
+
+    fn show(&mut self) -> Result<Vec<Stylized>, DrawErr> {
+        self.component.show()
     }
 }

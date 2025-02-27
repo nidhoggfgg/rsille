@@ -1,13 +1,13 @@
+use render::{Draw, DrawErr, Update};
+use term::{event::Event, style::Stylized};
 use unicode_width::UnicodeWidthChar;
 
-use crate::{
-    attr::{Attr, AttrDisplay},
-    Draw, Stylized, Update,
-};
+use crate::attr::{Attr, AttrDisplay};
 
 use super::Widget;
 
 pub struct Text {
+    origin: String,
     text: Vec<String>,
     attr: Attr,
     width: usize,
@@ -17,8 +17,10 @@ pub struct Text {
 
 impl Text {
     pub fn new(text: String) -> Self {
+        let origin = text.clone();
         let (text, (width, height)) = split(text);
         Self {
+            origin,
             text,
             width,
             height,
@@ -28,16 +30,22 @@ impl Text {
     }
 
     pub fn replace(&mut self, text: String) {
+        let origin = text.clone();
         let (text, (width, height)) = split(text);
+        self.origin = origin;
         self.text = text;
         self.width = width;
         self.height = height;
         self.updated = true;
     }
+
+    pub fn get_text(&mut self) -> &str {
+        &self.origin
+    }
 }
 
 impl Draw for Text {
-    fn draw(&mut self) -> Result<Vec<crate::Stylized>, crate::DrawErr> {
+    fn draw(&mut self) -> Result<Vec<Stylized>, DrawErr> {
         let mut result = Vec::with_capacity(self.height * self.width);
         for l in &self.text {
             for c in l.chars() {
@@ -53,11 +61,11 @@ impl Draw for Text {
 }
 
 impl Update for Text {
-    fn on_events(&mut self, _events: &[term::event::Event]) -> Result<(), crate::DrawErr> {
+    fn on_events(&mut self, _events: &[Event]) -> Result<(), DrawErr> {
         Ok(())
     }
 
-    fn update(&mut self) -> Result<bool, crate::DrawErr> {
+    fn update(&mut self) -> Result<bool, DrawErr> {
         if self.updated {
             // next time call update will return false if the text doesn't changeed
             self.updated = false;
@@ -77,7 +85,7 @@ impl Widget for Text {
         self.attr = attr;
     }
 
-    fn show(&mut self) -> Result<Vec<Stylized>, crate::DrawErr> {
+    fn show(&mut self) -> Result<Vec<Stylized>, DrawErr> {
         if self.attr.display == AttrDisplay::Hidden {
             return Ok(Vec::new());
         }
