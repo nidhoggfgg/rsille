@@ -1,6 +1,8 @@
 use futures::io;
 use term::crossterm::event::{KeyCode, KeyEvent};
 
+use crate::{DrawUpdate, Size};
+
 use super::Render;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Hash)]
@@ -98,8 +100,11 @@ impl Builder {
         self
     }
 
-    pub fn build(&self) -> io::Result<Render> {
-        Render::from_builder(self)
+    pub fn build<T>(&self, thing: T) -> io::Result<Render>
+    where
+        T: DrawUpdate + Send + Sync + 'static,
+    {
+        Render::from_builder(self, thing)
     }
 }
 
@@ -109,18 +114,8 @@ impl Default for Builder {
     }
 }
 
-#[allow(unused)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Hash)]
-pub(super) enum Size {
-    Fixed(u16, u16),
-    FullScreen,
-
-    // unimplemented, bc panel have fixed size
-    Auto,
-}
-
 // unimplemented
-// this is useful, when want to use TuiEngine with other things
+// this is useful, when want to use Render with other things
 // like put a clock on the right top corner in shell
 #[allow(unused)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Hash)]

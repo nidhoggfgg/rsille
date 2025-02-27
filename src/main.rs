@@ -1,7 +1,7 @@
 use std::fs::File;
 use std::io::Write;
 
-use tui::composite::Animative;
+use tui::composite::{Animative, Panel};
 use tui::widgets::Text;
 
 #[tokio::main]
@@ -23,13 +23,7 @@ async fn main() {
         .target(env_logger::Target::Pipe(target))
         .init();
 
-    let mut render = render::Builder::new()
-        .set_size((30, 30))
-        .enable_all()
-        .full_screen()
-        .build()
-        .unwrap();
-
+    let mut panel = Panel::new(100, 100);
     let text_widget = Text::new("1".into());
     let animed = Animative::new(text_widget, |x| {
         let s = x.get_text();
@@ -37,5 +31,15 @@ async fn main() {
         x.replace(number.to_string());
     });
 
-    todo!()
+    panel.push(animed);
+
+    let render = render::Builder::new()
+        .set_size((30, 30))
+        .enable_all()
+        .full_screen()
+        .set_frame_limit(10)
+        .build(panel)
+        .unwrap();
+
+    render.run();
 }

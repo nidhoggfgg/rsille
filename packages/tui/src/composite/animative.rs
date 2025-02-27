@@ -1,7 +1,7 @@
-use render::{Draw, DrawErr, Update};
+use render::{Draw, DrawChunk, DrawErr, Update};
 use term::{event::Event, style::Stylized};
 
-use crate::widgets::Widget;
+use crate::{attr::Attr, widgets::Widget};
 
 #[derive(Clone)]
 pub struct Animative<T, F> {
@@ -26,12 +26,8 @@ where
     T: Draw,
     F: Fn(&mut T) + 'static,
 {
-    fn draw(&mut self) -> Result<Vec<Stylized>, DrawErr> {
+    fn draw(&mut self) -> Result<DrawChunk, DrawErr> {
         self.component.draw()
-    }
-
-    fn size(&self) -> Option<(u16, u16)> {
-        self.component.size()
     }
 }
 
@@ -55,11 +51,11 @@ where
     T: Widget,
     F: Fn(&mut T) + Send + Sync + 'static,
 {
-    fn get_attr(&self) -> &crate::attr::Attr {
+    fn get_attr(&self) -> &Attr {
         self.component.get_attr()
     }
 
-    fn set_attr(&mut self, attr: crate::attr::Attr) {
+    fn set_attr(&mut self, attr: Attr) {
         self.component.set_attr(attr);
     }
 

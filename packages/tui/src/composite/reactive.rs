@@ -1,4 +1,4 @@
-use render::{Draw, DrawErr, Update};
+use render::{Draw, DrawChunk, DrawErr, Update};
 use term::{event::Event, style::Stylized};
 use tokio::sync::watch;
 
@@ -44,12 +44,8 @@ where
     S: Clone + Send + Sync,
     F: FnMut(&mut T, &S) + 'static,
 {
-    fn draw(&mut self) -> Result<Vec<Stylized>, DrawErr> {
+    fn draw(&mut self) -> Result<DrawChunk, DrawErr> {
         self.component.draw()
-    }
-
-    fn size(&self) -> Option<(u16, u16)> {
-        self.component.size()
     }
 }
 

@@ -1,4 +1,4 @@
-use render::{Draw, DrawErr, Update};
+use render::{Draw, DrawChunk, DrawErr, Update};
 use term::{
     event::{Event, KeyEvent, MouseEvent},
     style::Stylized,
@@ -56,12 +56,8 @@ impl<T> Draw for Interactive<T>
 where
     T: Draw,
 {
-    fn draw(&mut self) -> Result<Vec<Stylized>, DrawErr> {
+    fn draw(&mut self) -> Result<DrawChunk, DrawErr> {
         self.component.draw()
-    }
-
-    fn size(&self) -> Option<(u16, u16)> {
-        self.component.size()
     }
 }
 
