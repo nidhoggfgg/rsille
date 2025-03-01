@@ -32,7 +32,7 @@ impl Builder {
     }
 
     // (col, row) aka (x, y)
-    pub fn set_size(&mut self, (col, row): (u16, u16)) -> &mut Self {
+    pub fn size(&mut self, (col, row): (u16, u16)) -> &mut Self {
         self.size = Size::Fixed(col, row);
         self
     }
@@ -90,12 +90,12 @@ impl Builder {
         self
     }
 
-    pub fn set_max_event_per_frame(&mut self, max_event_per_frame: usize) -> &mut Self {
+    pub fn max_event_per_frame(&mut self, max_event_per_frame: usize) -> &mut Self {
         self.max_event_per_frame = max_event_per_frame;
         self
     }
 
-    pub fn set_frame_limit(&mut self, frame_limit: u16) -> &mut Self {
+    pub fn frame_limit(&mut self, frame_limit: u16) -> &mut Self {
         self.frame_limit = Some(frame_limit);
         self
     }
