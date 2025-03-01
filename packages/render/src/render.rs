@@ -2,6 +2,7 @@ use std::{
     collections::VecDeque,
     io::{self, Write},
     thread,
+    time::Duration,
 };
 
 use futures::{FutureExt, StreamExt};
@@ -216,28 +217,23 @@ impl Render {
         mut event_rx: mpsc::Receiver<Vec<Event>>,
         stop_rx: std::sync::mpsc::Receiver<()>,
     ) -> thread::JoinHandle<()> {
-        thread::spawn(move || {
-            #[cfg(feature = "log")]
-            let mut queue = VecDeque::with_capacity(10);
-            #[cfg(feature = "log")]
-            for _ in 0..10 {
-                queue.push_back(0);
-            }
-            loop {
-                #[cfg(feature = "log")]
-                log::info!("|----------start render a frame----------|");
+        let frame_limit = self.frame_limit.unwrap_or(0);
+        let time_per_frame = if frame_limit > 0 {
+            Duration::from_secs_f64(1.0 / frame_limit as f64)
+        } else {
+            Duration::from_secs(0)
+        };
 
+        thread::spawn(move || {
+            loop {
                 // check stop signal
                 if stop_rx.try_recv().is_ok() {
-                    #[cfg(feature = "log")]
-                    log::info!("break in render thread");
                     break;
                 }
 
                 // collect events
                 let events = event_rx.blocking_recv().unwrap();
 
-                #[cfg(feature = "log")]
                 let now = std::time::Instant::now();
 
                 // update
@@ -250,33 +246,13 @@ impl Render {
                 // print
                 self.print(data).unwrap();
 
-                // collect fps
-                #[cfg(feature = "log")]
-                {
-                    let elapsed = now.elapsed();
-                    log::info!("total use time: {:?}", elapsed);
-                    queue.pop_front();
-                    queue.push_back(elapsed.as_micros());
-                    let mut sum = 0;
-                    for v in &queue {
-                        sum += *v;
-                    }
-                    let len = queue.len();
-                    let fps = 1000.0 / (sum as f64 / 1000.0) * len as f64;
-                    log::info!("fps: {:.2}", fps);
+                // frame limit
+                let used_time = now.elapsed();
+                if used_time < time_per_frame {
+                    thread::sleep(time_per_frame - used_time);
                 }
 
-                // send signal to event thread
-                #[cfg(feature = "log")]
-                if let Err(e) = render_tx.blocking_send(()) {
-                    log::error!("render_tx error: {:#?}", e);
-                }
-                #[cfg(not(feature = "log"))]
                 if let Err(_) = render_tx.blocking_send(()) {}
-
-                // end of a frame
-                #[cfg(feature = "log")]
-                log::info!("|---------- end render a frame ----------|");
             }
         })
     }

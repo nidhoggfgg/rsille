@@ -1,8 +1,33 @@
 use std::fs::File;
 use std::io::Write;
 
-use tui::composite::{Animative, Panel};
-use tui::widgets::Text;
+use canvas::Canvas;
+use render::style::Stylized;
+use render::{Draw, DrawChunk, Update};
+
+struct A {
+    count: u128,
+}
+
+impl Draw for A {
+    fn draw(&mut self) -> Result<render::DrawChunk, render::DrawErr> {
+        let s = self.count.to_string();
+        let result: Vec<Stylized> = s.chars().map(|c| Stylized::new(c, None, None)).collect();
+        let width = result.len() as u16;
+        Ok(DrawChunk(result, (width, 1)))
+    }
+}
+
+impl Update for A {
+    fn on_events(&mut self, _events: &[term::event::Event]) -> Result<(), render::DrawErr> {
+        Ok(())
+    }
+
+    fn update(&mut self) -> Result<bool, render::DrawErr> {
+        self.count += 1;
+        Ok(true)
+    }
+}
 
 #[tokio::main]
 async fn main() {
@@ -23,22 +48,20 @@ async fn main() {
         .target(env_logger::Target::Pipe(target))
         .init();
 
-    let mut panel = Panel::new(100, 100);
-    let text_widget = Text::new("1".into());
-    let animed = Animative::new(text_widget, |x| {
-        let s = x.get_text();
-        let number = s.parse::<i32>().unwrap() + 1;
-        x.replace(number.to_string());
-    });
+    let mut _canvas = Canvas::new();
 
-    panel.push(animed);
+    for x in 0..1800 {
+        let x = x as f64;
+        _canvas.set(x / 10.0, 15.0 + x.to_radians().sin() * 10.0);
+    }
+
+    let a = A { count: 0 };
 
     let render = render::Builder::new()
-        .set_size((30, 30))
         .enable_all()
         .full_screen()
-        .set_frame_limit(10)
-        .build(panel)
+        .frame_limit(100)
+        .build(a)
         .unwrap();
 
     render.run();
