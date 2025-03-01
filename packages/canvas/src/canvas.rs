@@ -266,7 +266,7 @@ impl Draw for Canvas {
                 }
             }
         }
-        Ok(DrawChunk(result, (size.0 as u16, size.1 as u16)))
+        Ok(DrawChunk(result, size.0 as usize))
     }
 }
 

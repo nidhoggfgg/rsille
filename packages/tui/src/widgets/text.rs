@@ -52,7 +52,7 @@ impl Draw for Text {
                 result.push(Stylized::new(c, None, None));
             }
         }
-        Ok(DrawChunk(result, (self.width as u16, self.height as u16)))
+        Ok(DrawChunk(result, self.width))
     }
 }
 
