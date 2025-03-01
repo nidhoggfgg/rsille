@@ -1,5 +1,5 @@
-use render::{Draw, DrawChunk, DrawErr, Update};
-use term::{event::Event, style::Stylized};
+use render::{style::Stylized, Draw, DrawChunk, DrawErr, Update};
+use term::event::Event;
 use unicode_width::UnicodeWidthChar;
 
 use crate::attr::{Attr, AttrDisplay};

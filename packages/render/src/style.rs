@@ -1,6 +1,6 @@
 use std::io;
 
-use crossterm::{
+use term::crossterm::{
     queue,
     style::{Attributes, Colors, Print, SetAttributes, SetColors},
 };

@@ -1,8 +1,5 @@
-use render::{Draw, DrawChunk, DrawErr, Update};
-use term::{
-    event::{Event, KeyEvent, MouseEvent},
-    style::Stylized,
-};
+use render::{style::Stylized, Draw, DrawChunk, DrawErr, Update};
+use term::event::{Event, KeyEvent, MouseEvent};
 
 use crate::widgets::Widget;
 
