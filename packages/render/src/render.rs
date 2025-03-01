@@ -1,5 +1,4 @@
 use std::{
-    collections::VecDeque,
     io::{self, Write},
     thread,
     time::Duration,
@@ -17,7 +16,7 @@ use term::{
 };
 use tokio::{select, sync::mpsc};
 
-use crate::{DrawChunk, DrawUpdate};
+use crate::{DrawChunk, DrawErr, DrawUpdate, style::Stylized};
 
 use super::Builder;
 
@@ -97,13 +96,36 @@ impl Render {
         self
     }
 
-    pub fn print(&mut self, DrawChunk(data, size): DrawChunk) -> io::Result<()> {
+    pub fn print(&mut self, DrawChunk(data, width): DrawChunk) -> io::Result<()> {
         queue!(io::stdout(), MoveTo(0, 0))?;
-        let (width, _) = size;
+        if width == 0 {
+            if data.len() == 0 {
+                return Ok(());
+            } else {
+                return Err(DrawErr.into());
+            }
+        }
 
-        for chunk in data.chunks(width as usize) {
+        let (max_width, max_height) = match self.size {
+            Size::Fixed(w, h) => (w, h),
+            Size::Auto => todo!(),
+            Size::FullScreen => term::terminal_size().unwrap_or((80, 24)),
+        };
+        let (max_width, max_height) = (max_width as usize, max_height as usize);
+
+        for (height, chunk) in data.chunks(width).enumerate() {
+            if height >= max_height {
+                break;
+            }
+
+            let mut now_width = 0;
             for v in chunk {
+                let cw = v.width();
+                if now_width + cw > max_width {
+                    break;
+                }
                 v.queue(&mut io::stdout())?;
+                now_width += cw;
             }
             if self.raw_mode {
                 queue!(io::stdout(), MoveToNextLine(1))?;
