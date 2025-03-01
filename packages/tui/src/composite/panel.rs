@@ -1,6 +1,6 @@
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
-use render::{Draw, DrawErr, Update};
-use term::{event::Event, style::Stylized};
+use render::{style::Stylized, Draw, DrawErr, Update};
+use term::event::Event;
 
 use crate::{
     attr::{Attr, AttrDisplay},

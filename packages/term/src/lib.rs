@@ -1,5 +1,4 @@
 pub mod event;
-pub mod style;
 
 pub extern crate crossterm;
 pub use fns::*;

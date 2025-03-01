@@ -13,4 +13,4 @@ pub trait DrawUpdate: Draw + Update {}
 impl<T: Draw + Update> DrawUpdate for T {}
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct DrawChunk(pub Vec<term::style::Stylized>, pub (u16, u16));
+pub struct DrawChunk(pub Vec<crate::style::Stylized>, pub (u16, u16));

@@ -1,6 +1,7 @@
 mod builder;
 mod draw_update;
 mod render;
+pub mod style;
 
 pub use builder::Builder;
 pub use draw_update::*;

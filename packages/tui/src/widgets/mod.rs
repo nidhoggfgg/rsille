@@ -2,8 +2,8 @@ mod div;
 mod text;
 
 pub use div::Div;
+use render::style::Stylized;
 use render::{Draw, DrawErr, DrawUpdate};
-use term::style::Stylized;
 pub use text::Text;
 
 use crate::attr::Attr;

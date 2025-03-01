@@ -1,5 +1,5 @@
-use render::{Draw, DrawErr, DrawUpdate, Update};
-use term::{event::Event, style::Stylized};
+use render::{style::Stylized, Draw, DrawErr, DrawUpdate, Update};
+use term::event::Event;
 
 use crate::{attr::Attr, widgets::Widget};
 
