@@ -16,7 +16,7 @@ use term::{
 };
 use tokio::{select, sync::mpsc};
 
-use crate::{DrawChunk, DrawErr, DrawUpdate, style::Stylized};
+use crate::{DrawChunk, DrawErr, DrawUpdate};
 
 use super::Builder;
 
@@ -99,7 +99,7 @@ impl Render {
     pub fn print(&mut self, DrawChunk(data, width): DrawChunk) -> io::Result<()> {
         queue!(io::stdout(), MoveTo(0, 0))?;
         if width == 0 {
-            if data.len() == 0 {
+            if data.is_empty() {
                 return Ok(());
             } else {
                 return Err(DrawErr.into());
@@ -274,7 +274,7 @@ impl Render {
                     thread::sleep(time_per_frame - used_time);
                 }
 
-                if let Err(_) = render_tx.blocking_send(()) {}
+                if render_tx.blocking_send(()).is_err() {}
             }
         })
     }

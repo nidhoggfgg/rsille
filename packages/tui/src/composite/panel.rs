@@ -1,4 +1,4 @@
-use rayon::iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
+use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
 use render::{style::Stylized, Draw, DrawErr, Update};
 use term::event::Event;
 
@@ -38,24 +38,21 @@ impl Panel {
     }
 
     pub fn refresh_cache(&mut self) -> Result<(), DrawErr> {
-        let result = self
-            .boxes
-            .par_iter_mut()
-            .enumerate()
-            .map(|(i, b)| {
-                if b.updated || self.cache[i].is_none() {
-                    Some(b.draw())
-                } else {
-                    None
-                }
-            })
-            .collect::<Vec<_>>();
-        for (_i, r) in result.into_iter().enumerate() {
-            if let Some(Ok(_d)) = r {
-                // self.cache[i] = Some(d);
-                todo!()
-            }
-        }
+        // let result = self
+        //     .boxes
+        //     .par_iter_mut()
+        //     .enumerate()
+        //     .map(|(i, b)| {
+        //         if b.updated || self.cache[i].is_none() {
+        //             Some(b.draw())
+        //         } else {
+        //             None
+        //         }
+        //     })
+        //     .collect::<Vec<_>>();
+        // for r in result.into_iter().flatten() {
+        //     todo!()
+        // }
         Ok(())
     }
 }
