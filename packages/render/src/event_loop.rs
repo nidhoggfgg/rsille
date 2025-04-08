@@ -20,8 +20,7 @@ use crate::{DrawChunk, DrawErr, DrawUpdate};
 
 use super::Builder;
 
-#[allow(unused)]
-pub struct Render {
+pub struct EventLoop {
     thing: Box<dyn DrawUpdate + Send + Sync>,
     size: Size,
     raw_mode: bool,
@@ -31,9 +30,10 @@ pub struct Render {
     alt_screen: bool,
     mouse_capture: bool,
     hide_cursor: bool,
+    home: (u16, u16),
 }
 
-impl Render {
+impl EventLoop {
     pub(super) fn from_builder<T>(builder: &Builder, thing: T) -> io::Result<Self>
     where
         T: DrawUpdate + Send + Sync + 'static,
@@ -48,6 +48,7 @@ impl Render {
             alt_screen: builder.enable_alt_screen,
             mouse_capture: builder.enable_mouse_capture,
             hide_cursor: builder.enable_hide_cursor,
+            home: builder.home,
         })
     }
 
@@ -96,48 +97,6 @@ impl Render {
         self
     }
 
-    pub fn print(&mut self, DrawChunk(data, width): DrawChunk) -> io::Result<()> {
-        queue!(io::stdout(), MoveTo(0, 0))?;
-        if width == 0 {
-            if data.is_empty() {
-                return Ok(());
-            } else {
-                return Err(DrawErr.into());
-            }
-        }
-
-        let (max_width, max_height) = match self.size {
-            Size::Fixed(w, h) => (w, h),
-            Size::Auto => todo!(),
-            Size::FullScreen => term::terminal_size().unwrap_or((80, 24)),
-        };
-        let (max_width, max_height) = (max_width as usize, max_height as usize);
-
-        for (height, chunk) in data.chunks(width).enumerate() {
-            if height >= max_height {
-                break;
-            }
-
-            let mut now_width = 0;
-            for v in chunk {
-                let cw = v.width();
-                if now_width + cw > max_width {
-                    break;
-                }
-                v.queue(&mut io::stdout())?;
-                now_width += cw;
-            }
-            if self.raw_mode {
-                queue!(io::stdout(), MoveToNextLine(1))?;
-            } else {
-                queue!(io::stdout(), Print("\n"))?;
-            }
-        }
-
-        io::stdout().flush()?;
-        Ok(())
-    }
-
     pub fn run(self) {
         let alt_screen = self.alt_screen;
         let raw_mode = self.raw_mode;
@@ -180,6 +139,55 @@ impl Render {
         if alt_screen {
             term::leave_alt_screen().unwrap();
         }
+    }
+
+    fn print(&mut self, DrawChunk(data, width): DrawChunk) -> io::Result<()> {
+        queue!(io::stdout(), MoveTo(self.home.0, self.home.1))?;
+        if width == 0 {
+            if data.is_empty() {
+                return Ok(());
+            } else {
+                return Err(DrawErr.into());
+            }
+        }
+
+        if data.len() % width != 0 {
+            return Err(DrawErr.into());
+        }
+
+        let (max_width, max_height) = match self.size {
+            Size::Fixed(w, h) => (w, h),
+            Size::Auto => todo!(),
+            Size::FullScreen => {
+                queue!(io::stdout(), MoveTo(0, 0))?;
+                term::terminal_size()?
+            }
+        };
+        let (max_width, max_height) = (max_width as usize, max_height as usize);
+
+        for (height, chunk) in data.chunks(width).enumerate() {
+            if height >= max_height {
+                break;
+            }
+
+            let mut now_width = 0;
+            for v in chunk {
+                let cw = v.width();
+                if now_width + cw > max_width {
+                    break;
+                }
+                v.queue(&mut io::stdout())?;
+                now_width += cw;
+            }
+            if self.raw_mode {
+                queue!(io::stdout(), MoveToNextLine(1))?;
+            } else {
+                queue!(io::stdout(), Print("\n"))?;
+            }
+        }
+
+        io::stdout().flush()?;
+        Ok(())
     }
 
     fn make_event_thread(

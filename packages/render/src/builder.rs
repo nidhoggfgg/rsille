@@ -3,7 +3,7 @@ use term::crossterm::event::{KeyCode, KeyEvent};
 
 use crate::{DrawUpdate, Size};
 
-use super::Render;
+use super::EventLoop;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Hash)]
 pub struct Builder {
@@ -15,6 +15,7 @@ pub struct Builder {
     pub(super) frame_limit: Option<u16>,
     pub(super) max_event_per_frame: usize,
     pub(super) size: Size,
+    pub(super) home: (u16, u16),
 }
 
 impl Builder {
@@ -28,6 +29,7 @@ impl Builder {
             frame_limit: None,
             max_event_per_frame: 10,
             size: Size::FullScreen,
+            home: (0, 0),
         }
     }
 
@@ -100,11 +102,16 @@ impl Builder {
         self
     }
 
-    pub fn build<T>(&self, thing: T) -> io::Result<Render>
+    pub fn home(&mut self, home: (u16, u16)) -> &mut Self {
+        self.home = home;
+        self
+    }
+
+    pub fn build<T>(&self, thing: T) -> io::Result<EventLoop>
     where
         T: DrawUpdate + Send + Sync + 'static,
     {
-        Render::from_builder(self, thing)
+        EventLoop::from_builder(self, thing)
     }
 }
 

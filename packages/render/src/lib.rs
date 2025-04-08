@@ -1,13 +1,13 @@
 mod builder;
 mod draw_update;
-mod render;
+mod event_loop;
 pub mod style;
 
 use std::{error, fmt, io};
 
 pub use builder::Builder;
 pub use draw_update::*;
-pub use render::*;
+pub use event_loop::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct DrawErr;
