@@ -3,6 +3,7 @@ name = "canvas"
 version = "0.1.0"
 edition = "2021"
 exclude = ["examples"]
+license = "MIT"
 
 [dependencies]
 tui = { path = "../tui" }
