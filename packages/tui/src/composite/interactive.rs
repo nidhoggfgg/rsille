@@ -1,7 +1,7 @@
-use render::{style::Stylized, Draw, DrawChunk, DrawErr, Update};
+use render::{Draw, DrawChunk, DrawErr, Update};
 use term::event::{Event, KeyEvent, MouseEvent};
 
-use crate::widgets::Widget;
+use crate::Widget;
 
 pub type KeyHandler<T> = Box<dyn FnMut(&mut T, KeyEvent) + Send + Sync>;
 pub type MouseHandler<T> = Box<dyn FnMut(&mut T, MouseEvent) + Send + Sync>;
@@ -68,9 +68,5 @@ where
 
     fn set_attr(&mut self, attr: crate::attr::Attr) {
         self.component.set_attr(attr);
-    }
-
-    fn show(&mut self) -> Result<Vec<Stylized>, DrawErr> {
-        self.component.show()
     }
 }

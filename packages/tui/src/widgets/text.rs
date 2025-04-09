@@ -1,10 +1,7 @@
 use render::{style::Stylized, Draw, DrawChunk, DrawErr, Update};
 use term::event::Event;
-use unicode_width::UnicodeWidthChar;
 
-use crate::attr::{Attr, AttrDisplay};
-
-use super::Widget;
+use crate::{attr::Attr, Widget};
 
 pub struct Text {
     origin: String,
@@ -79,32 +76,6 @@ impl Widget for Text {
 
     fn set_attr(&mut self, attr: crate::attr::Attr) {
         self.attr = attr;
-    }
-
-    fn show(&mut self) -> Result<Vec<Stylized>, DrawErr> {
-        if self.attr.display == AttrDisplay::Hidden {
-            return Ok(Vec::new());
-        }
-
-        let mut result = Vec::new();
-        let max_witdh = self.attr.width as usize;
-        let max_height = self.attr.height as usize;
-        for (height, line) in self.text.iter().enumerate() {
-            if height >= max_height {
-                break;
-            }
-            let mut width = 0;
-            for c in line.chars() {
-                let cw = c.width().unwrap_or(0);
-                if width + cw > max_witdh {
-                    break;
-                }
-                result.push(Stylized::new(c, None, None));
-                width += cw;
-            }
-        }
-
-        Ok(result)
     }
 }
 

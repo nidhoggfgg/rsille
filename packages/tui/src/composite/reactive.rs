@@ -1,8 +1,8 @@
-use render::{style::Stylized, Draw, DrawChunk, DrawErr, Update};
+use render::{Draw, DrawChunk, DrawErr, Update};
 use term::event::Event;
 use tokio::sync::watch;
 
-use crate::widgets::Widget;
+use crate::Widget;
 
 #[derive(Clone)]
 pub struct Reactive<T, S, F> {
@@ -88,10 +88,6 @@ where
 
     fn set_attr(&mut self, attr: crate::attr::Attr) {
         self.component.set_attr(attr);
-    }
-
-    fn show(&mut self) -> Result<Vec<Stylized>, DrawErr> {
-        self.component.show()
     }
 }
 
