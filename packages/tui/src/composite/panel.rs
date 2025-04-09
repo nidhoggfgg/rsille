@@ -4,7 +4,7 @@ use term::event::Event;
 
 use crate::{
     attr::{Attr, AttrDisplay},
-    widgets::Widget,
+    Widget,
 };
 
 use super::slot::Slot;

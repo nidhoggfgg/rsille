@@ -1,7 +1,7 @@
-use render::{style::Stylized, Draw, DrawChunk, DrawErr, Update};
+use render::{Draw, DrawChunk, DrawErr, Update};
 use term::event::Event;
 
-use crate::{attr::Attr, widgets::Widget};
+use crate::{attr::Attr, Widget};
 
 #[derive(Clone)]
 pub struct Animative<T, F> {
@@ -57,9 +57,5 @@ where
 
     fn set_attr(&mut self, attr: Attr) {
         self.component.set_attr(attr);
-    }
-
-    fn show(&mut self) -> Result<Vec<Stylized>, DrawErr> {
-        self.component.show()
     }
 }

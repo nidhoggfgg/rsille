@@ -1,7 +1,7 @@
-use render::{style::Stylized, Draw, DrawChunk, DrawErr, Update};
+use render::{Draw, DrawChunk, DrawErr, Update};
 use term::event::Event;
 
-use crate::{attr::Attr, widgets::Widget};
+use crate::{attr::Attr, Widget};
 
 pub struct Slot {
     pub thing: Box<dyn Widget + Send + Sync>,
@@ -26,10 +26,6 @@ impl Update for Slot {
 }
 
 impl Widget for Slot {
-    fn show(&mut self) -> Result<Vec<Stylized>, DrawErr> {
-        self.thing.show()
-    }
-
     fn get_attr(&self) -> &Attr {
         self.thing.get_attr()
     }

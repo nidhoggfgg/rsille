@@ -1,7 +1,7 @@
-use render::{style::Stylized, Draw, DrawErr, DrawUpdate, Update};
+use render::{Draw, DrawErr, DrawUpdate, Update};
 use term::event::Event;
 
-use crate::{attr::Attr, widgets::Widget};
+use crate::{attr::Attr, Widget};
 
 pub struct Div {
     pub attr: Attr,
@@ -37,10 +37,6 @@ impl Update for Div {
 }
 
 impl Widget for Div {
-    fn show(&mut self) -> Result<Vec<Stylized>, DrawErr> {
-        todo!()
-    }
-
     fn get_attr(&self) -> &Attr {
         &self.attr
     }
