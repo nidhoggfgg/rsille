@@ -18,7 +18,7 @@ use tokio::{select, sync::mpsc};
 
 use crate::{DrawChunk, DrawErr, DrawUpdate};
 
-use super::Builder;
+use super::{Builder, Size};
 
 pub struct EventLoop {
     thing: Box<dyn DrawUpdate + Send + Sync>,
@@ -226,12 +226,10 @@ impl EventLoop {
                                         events.push(event);
                                     }
                                 }
-                                #[cfg(feature = "log")]
-                                Some(Err(e)) => {
-                                    log::error!("read event error: {:#?}", e);
+                                Some(Err(_e)) => {
+                                    #[cfg(feature = "log")]
+                                    log::error!("read event error: {:#?}", _e);
                                 }
-                                #[cfg(not(feature = "log"))]
-                                Some(Err(_)) => {}
                                 None => {}
                             }
                         }
@@ -286,14 +284,4 @@ impl EventLoop {
             }
         })
     }
-}
-
-#[allow(unused)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Hash)]
-pub(super) enum Size {
-    Fixed(u16, u16),
-    FullScreen,
-
-    // unimplemented, bc panel have fixed size
-    Auto,
 }

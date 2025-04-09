@@ -1,10 +1,16 @@
 [workspace]
 members = [
+    # pub
+    "pyrsille",
+    "rsille",
+
+    # internal
     "packages/anime",
     "packages/canvas",
     "packages/render",
     "packages/tui",
     "packages/term",
-    "pyrsille",
-    "rsille",
+
+    # examples
+    "examples",
 ]

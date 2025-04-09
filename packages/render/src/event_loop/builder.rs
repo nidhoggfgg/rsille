@@ -1,9 +1,9 @@
 use futures::io;
 use term::crossterm::event::{KeyCode, KeyEvent};
 
-use crate::{DrawUpdate, Size};
+use crate::DrawUpdate;
 
-use super::EventLoop;
+use super::{EventLoop, Size};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Hash)]
 pub struct Builder {
@@ -119,17 +119,4 @@ impl Default for Builder {
     fn default() -> Self {
         Self::new()
     }
-}
-
-// unimplemented
-// this is useful, when want to use Render with other things
-// like put a clock on the right top corner in shell
-#[allow(unused)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Hash)]
-pub(super) enum Position {
-    LeftTop,
-    RightTop,
-    LeftBottom,
-    RightBottom,
-    Center,
 }

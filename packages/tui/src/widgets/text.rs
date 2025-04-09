@@ -13,9 +13,9 @@ pub struct Text {
 }
 
 impl Text {
-    pub fn new(text: String) -> Self {
-        let origin = text.clone();
-        let (text, (width, height)) = split(text);
+    pub fn new(text: &str) -> Self {
+        let origin = text.to_string();
+        let (text, (width, height)) = split(text.to_string());
         Self {
             origin,
             text,

@@ -1,0 +1,13 @@
+[package]
+name = "examples"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+publish = false
+
+[dependencies]
+rsille = { path = "../rsille" }
+
+[[example]]
+name = "basic_text"
+path = "basic_text.rs"
