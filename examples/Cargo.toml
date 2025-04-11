@@ -15,3 +15,7 @@ path = "basic_text.rs"
 [[example]]
 name = "basic_panel"
 path = "basic_panel.rs"
+
+[[example]]
+name = "basic_event_loop"
+path = "basic_event_loop.rs"
