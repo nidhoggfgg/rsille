@@ -1,8 +1,8 @@
 mod builder;
-mod event_loop;
+mod el;
 
 pub use builder::Builder;
-pub use event_loop::EventLoop;
+pub use el::EventLoop;
 
 #[allow(unused)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Hash)]

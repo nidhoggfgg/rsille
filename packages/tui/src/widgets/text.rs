@@ -15,24 +15,30 @@ pub struct Text {
 impl Text {
     pub fn new(text: &str) -> Self {
         let origin = text.to_string();
-        let (text, (width, height)) = split(text.to_string());
+        let (text, (width, height)) = split(text);
         Self {
             origin,
             text,
             width,
             height,
             updated: true,
-            attr: Default::default(),
+            attr: Attr {
+                width: width as u16,
+                height: height as u16,
+                ..Default::default()
+            },
         }
     }
 
     pub fn replace(&mut self, text: String) {
         let origin = text.clone();
-        let (text, (width, height)) = split(text);
+        let (text, (width, height)) = split(&text);
         self.origin = origin;
         self.text = text;
         self.width = width;
         self.height = height;
+        self.attr.width = width as u16;
+        self.attr.height = height as u16;
         self.updated = true;
     }
 
@@ -79,7 +85,7 @@ impl Widget for Text {
     }
 }
 
-fn split(text: String) -> (Vec<String>, (usize, usize)) {
+fn split(text: &str) -> (Vec<String>, (usize, usize)) {
     let mut heigth = 0;
     let mut width = 0;
     let result = text

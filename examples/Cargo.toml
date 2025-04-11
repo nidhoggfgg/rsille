@@ -11,3 +11,7 @@ rsille = { path = "../rsille" }
 [[example]]
 name = "basic_text"
 path = "basic_text.rs"
+
+[[example]]
+name = "basic_panel"
+path = "basic_panel.rs"
