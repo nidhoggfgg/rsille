@@ -9,7 +9,7 @@ use term::crossterm::{
     style::Print,
 };
 
-use crate::{DrawChunk, DrawErr, DrawUpdate};
+use crate::{Draw, DrawChunk, DrawErr, DrawUpdate, Update};
 
 pub struct Render<W> {
     size: Size,
@@ -119,6 +119,22 @@ where
     pub fn fullscreen(&mut self) -> &mut Self {
         self.size = Size::FullScreen;
         self
+    }
+}
+
+impl<W> Draw for Render<W> {
+    fn draw(&mut self) -> Result<DrawChunk, crate::DrawErr> {
+        self.thing.borrow_mut().draw()
+    }
+}
+
+impl<W> Update for Render<W> {
+    fn on_events(&mut self, events: &[term::event::Event]) -> Result<(), crate::DrawErr> {
+        self.thing.borrow_mut().on_events(events)
+    }
+
+    fn update(&mut self) -> Result<bool, crate::DrawErr> {
+        self.thing.borrow_mut().update()
     }
 }
 

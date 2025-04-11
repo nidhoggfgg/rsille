@@ -1,28 +1,22 @@
 use std::{
-    io::{self, Write},
+    io::{self, Stdout},
     thread,
     time::Duration,
 };
 
 use futures::{FutureExt, StreamExt};
 use term::{
-    crossterm::{
-        cursor::{MoveTo, MoveToNextLine},
-        event::EventStream,
-        queue,
-        style::Print,
-    },
+    crossterm::event::EventStream,
     event::{Event, KeyEvent},
 };
 use tokio::{select, sync::mpsc};
 
-use crate::{DrawChunk, DrawErr, DrawUpdate};
+use crate::{DrawUpdate, Render, Update};
 
-use super::{Builder, Size};
+use super::Builder;
 
 pub struct EventLoop {
-    thing: Box<dyn DrawUpdate + Send + Sync>,
-    size: Size,
+    render: Render<Stdout>,
     raw_mode: bool,
     exit_code: KeyEvent,
     max_event_per_frame: usize,
@@ -30,7 +24,6 @@ pub struct EventLoop {
     alt_screen: bool,
     mouse_capture: bool,
     hide_cursor: bool,
-    home: (u16, u16),
 }
 
 impl EventLoop {
@@ -39,8 +32,7 @@ impl EventLoop {
         T: DrawUpdate + Send + Sync + 'static,
     {
         Ok(Self {
-            thing: Box::new(thing),
-            size: builder.size,
+            render: Render::new(thing),
             raw_mode: builder.enable_raw_mode,
             exit_code: builder.exit_code,
             max_event_per_frame: builder.max_event_per_frame,
@@ -48,7 +40,6 @@ impl EventLoop {
             alt_screen: builder.enable_alt_screen,
             mouse_capture: builder.enable_mouse_capture,
             hide_cursor: builder.enable_hide_cursor,
-            home: builder.home,
         })
     }
 
@@ -141,55 +132,6 @@ impl EventLoop {
         }
     }
 
-    fn print(&mut self, DrawChunk(data, width): DrawChunk) -> io::Result<()> {
-        queue!(io::stdout(), MoveTo(self.home.0, self.home.1))?;
-        if width == 0 {
-            if data.is_empty() {
-                return Ok(());
-            } else {
-                return Err(DrawErr.into());
-            }
-        }
-
-        if data.len() % width != 0 {
-            return Err(DrawErr.into());
-        }
-
-        let (max_width, max_height) = match self.size {
-            Size::Fixed(w, h) => (w, h),
-            Size::Auto => todo!(),
-            Size::FullScreen => {
-                queue!(io::stdout(), MoveTo(0, 0))?;
-                term::terminal_size()?
-            }
-        };
-        let (max_width, max_height) = (max_width as usize, max_height as usize);
-
-        for (height, chunk) in data.chunks(width).enumerate() {
-            if height >= max_height {
-                break;
-            }
-
-            let mut now_width = 0;
-            for v in chunk {
-                let cw = v.width();
-                if now_width + cw > max_width {
-                    break;
-                }
-                v.queue(&mut io::stdout())?;
-                now_width += cw;
-            }
-            if self.raw_mode {
-                queue!(io::stdout(), MoveToNextLine(1))?;
-            } else {
-                queue!(io::stdout(), Print("\n"))?;
-            }
-        }
-
-        io::stdout().flush()?;
-        Ok(())
-    }
-
     fn make_event_thread(
         &self,
         mut render_rx: mpsc::Receiver<()>,
@@ -265,14 +207,11 @@ impl EventLoop {
                 let now = std::time::Instant::now();
 
                 // update
-                self.thing.on_events(&events).unwrap_or(());
-                self.thing.update().unwrap_or(false);
+                self.render.on_events(&events).unwrap_or(());
+                self.render.update().unwrap_or(false);
 
                 // draw
-                let data = self.thing.draw().unwrap();
-
-                // print
-                self.print(data).unwrap();
+                self.render.render().unwrap_or(());
 
                 // frame limit
                 let used_time = now.elapsed();
