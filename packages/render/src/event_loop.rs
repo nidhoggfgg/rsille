@@ -1,5 +1,5 @@
 use std::{
-    io::{self, Stdout},
+    io::{Stdout, stdout},
     thread,
     time::Duration,
 };
@@ -11,9 +11,7 @@ use term::{
 };
 use tokio::{select, sync::mpsc};
 
-use crate::{DrawUpdate, Render, Update};
-
-use super::Builder;
+use crate::{Builder, DrawUpdate, Render, Update};
 
 pub struct EventLoop {
     render: Render<Stdout>,
@@ -27,12 +25,12 @@ pub struct EventLoop {
 }
 
 impl EventLoop {
-    pub(super) fn from_builder<T>(builder: &Builder, thing: T) -> io::Result<Self>
+    pub(super) fn from_builder<T>(builder: &Builder, thing: T) -> Self
     where
         T: DrawUpdate + Send + Sync + 'static,
     {
-        Ok(Self {
-            render: Render::new(thing),
+        Self {
+            render: Render::from_builder(builder, thing, stdout()),
             raw_mode: builder.enable_raw_mode,
             exit_code: builder.exit_code,
             max_event_per_frame: builder.max_event_per_frame,
@@ -40,7 +38,7 @@ impl EventLoop {
             alt_screen: builder.enable_alt_screen,
             mouse_capture: builder.enable_mouse_capture,
             hide_cursor: builder.enable_hide_cursor,
-        })
+        }
     }
 
     pub fn max_event_per_frame(&mut self, max_event_per_frame: usize) -> &mut Self {

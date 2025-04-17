@@ -9,7 +9,7 @@ use term::crossterm::{
     style::Print,
 };
 
-use crate::{Draw, DrawChunk, DrawErr, DrawUpdate, Update};
+use crate::{Builder, Draw, DrawChunk, DrawErr, DrawUpdate, Update};
 
 pub struct Render<W> {
     size: Size,
@@ -135,6 +135,24 @@ impl<W> Update for Render<W> {
 
     fn update(&mut self) -> Result<bool, crate::DrawErr> {
         self.thing.borrow_mut().update()
+    }
+}
+
+impl<W> Render<W>
+where
+    W: std::io::Write,
+{
+    pub(crate) fn from_builder<T>(builder: &Builder, thing: T, writer: W) -> Self
+    where
+        T: DrawUpdate + Send + Sync + 'static,
+    {
+        Self {
+            home: builder.home,
+            size: builder.size,
+            raw_mode: builder.enable_raw_mode,
+            thing: RefCell::new(Box::new(thing)),
+            out: RefCell::new(writer),
+        }
     }
 }
 

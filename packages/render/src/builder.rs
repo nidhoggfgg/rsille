@@ -1,9 +1,6 @@
-use futures::io;
 use term::crossterm::event::{KeyCode, KeyEvent};
 
-use crate::DrawUpdate;
-
-use super::{EventLoop, Size};
+use crate::{DrawUpdate, Render, event_loop::EventLoop, render::Size};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Hash)]
 pub struct Builder {
@@ -40,7 +37,7 @@ impl Builder {
     }
 
     pub fn full_screen(&mut self) -> &mut Self {
-        self.size = Size::Auto;
+        self.size = Size::FullScreen;
         self
     }
 
@@ -107,11 +104,19 @@ impl Builder {
         self
     }
 
-    pub fn build<T>(&self, thing: T) -> io::Result<EventLoop>
+    pub fn build_eventloop<T>(&self, thing: T) -> EventLoop
     where
         T: DrawUpdate + Send + Sync + 'static,
     {
         EventLoop::from_builder(self, thing)
+    }
+
+    pub fn build_render<T, W>(&self, thing: T, writer: W) -> Render<W>
+    where
+        T: DrawUpdate + Send + Sync + 'static,
+        W: std::io::Write,
+    {
+        Render::from_builder(self, thing, writer)
     }
 }
 
