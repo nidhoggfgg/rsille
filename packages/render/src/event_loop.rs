@@ -132,50 +132,14 @@ impl EventLoop {
 
     fn make_event_thread(
         &self,
-        mut render_rx: mpsc::Receiver<()>,
+        render_rx: mpsc::Receiver<()>,
         event_tx: mpsc::Sender<Vec<Event>>,
         stop_tx: std::sync::mpsc::Sender<()>,
     ) -> thread::JoinHandle<()> {
         let exit_code = self.exit_code;
         let max_event_per_frame = self.max_event_per_frame;
         thread::spawn(move || {
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .unwrap();
-            rt.block_on(async move {
-                let mut reader = EventStream::new();
-                let mut events = Vec::new();
-                event_tx.send(Vec::new()).await.unwrap();
-                loop {
-                    let event = reader.next().fuse();
-                    select! {
-                        Some(_) = render_rx.recv() => {
-                            event_tx.send(events).await.unwrap();
-                            events = Vec::new();
-                        }
-                        maybe_event = event => {
-                            match maybe_event {
-                                Some(Ok(event)) => {
-                                    let event = Event::from(event);
-                                    if event == Event::Key(exit_code) {
-                                        stop_tx.send(()).unwrap();
-                                        break;
-                                    }
-                                    if events.len() < max_event_per_frame {
-                                        events.push(event);
-                                    }
-                                }
-                                Some(Err(_e)) => {
-                                    #[cfg(feature = "log")]
-                                    log::error!("read event error: {:#?}", _e);
-                                }
-                                None => {}
-                            }
-                        }
-                    }
-                }
-            });
+            event_thread(render_rx, event_tx, stop_tx, exit_code, max_event_per_frame)
         })
     }
 
@@ -221,4 +185,50 @@ impl EventLoop {
             }
         })
     }
+}
+
+fn event_thread(
+    mut render_rx: mpsc::Receiver<()>,
+    event_tx: mpsc::Sender<Vec<Event>>,
+    stop_tx: std::sync::mpsc::Sender<()>,
+    exit_code: KeyEvent,
+    max_event_per_frame: usize,
+) {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async move {
+        let mut reader = EventStream::new();
+        let mut events = Vec::new();
+        event_tx.send(Vec::new()).await.unwrap();
+        loop {
+            let event = reader.next().fuse();
+            select! {
+                Some(_) = render_rx.recv() => {
+                    event_tx.send(events).await.unwrap();
+                    events = Vec::new();
+                }
+                maybe_event = event => {
+                    match maybe_event {
+                        Some(Ok(event)) => {
+                            let event = Event::from(event);
+                            if event == Event::Key(exit_code) {
+                                stop_tx.send(()).unwrap();
+                                break;
+                            }
+                            if events.len() < max_event_per_frame {
+                                events.push(event);
+                            }
+                        }
+                        Some(Err(_e)) => {
+                            #[cfg(feature = "log")]
+                            log::error!("read event error: {:#?}", _e);
+                        }
+                        None => {}
+                    }
+                }
+            }
+        }
+    });
 }
