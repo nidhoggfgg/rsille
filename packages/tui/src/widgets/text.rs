@@ -51,8 +51,13 @@ impl Draw for Text {
     fn draw(&mut self) -> Result<DrawChunk, DrawErr> {
         let mut result = Vec::with_capacity(self.height * self.width);
         for l in &self.text {
+            let mut w = 0;
             for c in l.chars() {
                 result.push(Stylized::new(c, None, None));
+                w += 1;
+            }
+            if self.width - w != 0 {
+                result.extend(vec![Stylized::nop(); self.width - w]);
             }
         }
         Ok(DrawChunk(result, self.width))

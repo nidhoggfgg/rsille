@@ -8,7 +8,7 @@ mod fns {
         cursor::{Hide, Show},
         event::{DisableMouseCapture, EnableFocusChange, EnableMouseCapture},
         execute,
-        terminal::{EnterAlternateScreen, LeaveAlternateScreen},
+        terminal::{Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen},
     };
     use std::io;
     pub fn enable_raw_mode() -> io::Result<()> {
@@ -50,5 +50,9 @@ mod fns {
     pub fn terminal_size() -> io::Result<(u16, u16)> {
         let (w, h) = crossterm::terminal::size()?;
         Ok((w, h))
+    }
+
+    pub fn clear() -> io::Result<()> {
+        execute!(io::stdout(), Clear(ClearType::All))
     }
 }

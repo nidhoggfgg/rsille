@@ -1,5 +1,7 @@
+use std::io::stdout;
+
 use rsille::{
-    render::Render,
+    render,
     tui::{composite::Panel, widgets::Text},
 };
 
@@ -10,6 +12,6 @@ fn main() {
     let mut panel = Panel::new(10, 10);
     panel.push(text);
 
-    let render = Render::new(panel);
+    let render = render::Builder::new().build_render(panel, stdout());
     render.render().unwrap();
 }
