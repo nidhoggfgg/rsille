@@ -13,6 +13,7 @@ pub struct Builder {
     pub(super) max_event_per_frame: usize,
     pub(super) size: Size,
     pub(super) home: (u16, u16),
+    pub(super) clear: bool,
 }
 
 impl Builder {
@@ -27,6 +28,7 @@ impl Builder {
             max_event_per_frame: 10,
             size: Size::FullScreen,
             home: (0, 0),
+            clear: true,
         }
     }
 
@@ -101,6 +103,11 @@ impl Builder {
 
     pub fn home(&mut self, home: (u16, u16)) -> &mut Self {
         self.home = home;
+        self
+    }
+
+    pub fn clear(&mut self, clear: bool) -> &mut Self {
+        self.clear = clear;
         self
     }
 
