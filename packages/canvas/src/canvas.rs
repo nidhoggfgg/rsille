@@ -18,7 +18,6 @@ use crate::color::Colored;
 #[cfg(feature = "color")]
 use term::crossterm::style::Colors;
 
-#[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PaintErr;
 
@@ -44,7 +43,6 @@ impl<T: Paint + ?Sized> Paint for Box<T> {
     }
 }
 
-#[repr(C)]
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Canvas {
     bound: Bound,

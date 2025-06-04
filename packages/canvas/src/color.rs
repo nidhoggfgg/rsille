@@ -8,7 +8,6 @@ use term::crossterm::{
 
 use crate::braille::{Pixel, PixelOp};
 
-#[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Colored {
     pixel: Pixel,
