@@ -13,37 +13,10 @@ pub struct Render<W> {
     clear: bool,
 }
 
-// impl Render<Stdout> {
-//     pub fn new<T>(thing: T) -> Self
-//     where
-//         T: DrawUpdate + Send + Sync + 'static,
-//     {
-//         Self {
-//             size: Size::FullScreen,
-//             home: (0, 0),
-//             thing: RefCell::new(Box::new(thing)),
-//             out: RefCell::new(std::io::stdout()),
-//             clear: true,
-//         }
-//     }
-// }
-
 impl<W> Render<W>
 where
     W: std::io::Write,
 {
-    // pub fn with<T>(w: W, thing: T) -> Self
-    // where
-    //     T: DrawUpdate + Send + Sync + 'static,
-    // {
-    //     Self {
-    //         size: Size::FullScreen,
-    //         home: (0, 0),
-    //         thing: RefCell::new(Box::new(thing)),
-    //         out: RefCell::new(w),
-    //     }
-    // }
-
     pub fn render(&self) -> io::Result<()> {
         let DrawChunk(data, width) = self.thing.borrow_mut().draw()?;
         let (cur_col, mut cur_row) = self.home;

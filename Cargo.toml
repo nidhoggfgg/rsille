@@ -5,7 +5,6 @@ members = [
     "rsille",
 
     # internal
-    "packages/anime",
     "packages/canvas",
     "packages/render",
     "packages/tui",
@@ -14,3 +13,8 @@ members = [
     # examples
     "examples",
 ]
+resolver = "3"
+
+[profile.release]
+lto = true
+# debug = true # only used for perf
