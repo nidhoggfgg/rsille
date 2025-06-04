@@ -6,7 +6,6 @@ use term::crossterm::{
 };
 use unicode_width::UnicodeWidthChar;
 
-#[repr(C)]
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Stylized {
     c: Option<char>,

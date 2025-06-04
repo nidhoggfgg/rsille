@@ -1,6 +1,5 @@
 use crate::utils::get_pos;
 
-#[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Hash)]
 pub(crate) struct Tile {
     col: i32,

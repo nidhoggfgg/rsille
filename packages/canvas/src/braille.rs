@@ -20,7 +20,6 @@ const PIXEL_MAP: [[u8; 2]; 4] = [[0x01, 0x08],
 // braille unicode characters starts at 0x2800
 const BASE_CHAR: u32 = 0x2800;
 
-#[repr(C)]
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Pixel {
     code: u8,

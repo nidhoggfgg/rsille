@@ -6,8 +6,7 @@ use crate::{Builder, Draw, DrawChunk, DrawErr, DrawUpdate, Update};
 
 pub struct Render<W> {
     size: Size,
-    #[allow(unused)]
-    home: (u16, u16), // TODO: support
+    home: (u16, u16),
     thing: RefCell<Box<dyn DrawUpdate + Send + Sync>>,
     out: RefCell<W>,
     clear: bool,
@@ -39,7 +38,6 @@ where
 
         let (max_width, max_height) = match self.size {
             Size::Fixed(w, h) => (w, h),
-            Size::Auto => todo!(),
             Size::FullScreen => {
                 queue!(self.out.borrow_mut(), MoveTo(0, 0))?;
                 term::terminal_size()?
@@ -107,12 +105,8 @@ where
     }
 }
 
-#[allow(unused)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Hash)]
 pub(crate) enum Size {
     Fixed(u16, u16),
     FullScreen,
-
-    // unimplemented, bc panel have fixed size
-    Auto,
 }
