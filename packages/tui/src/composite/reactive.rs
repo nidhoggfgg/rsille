@@ -60,8 +60,7 @@ where
     }
 
     fn update(&mut self) -> Result<bool, DrawErr> {
-        self.component.update()?;
-        let mut changed = false;
+        let mut changed = self.component.update()?;
         for watcher in self.watchers.iter_mut() {
             match watcher.receiver.has_changed() {
                 Ok(true) => {
