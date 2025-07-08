@@ -1,7 +1,10 @@
 use render::{Draw, DrawErr, DrawUpdate, Update};
 use term::event::Event;
 
-use crate::{attr::Attr, Widget};
+use crate::{
+    attr::{Attr, SetAttr},
+    Widget,
+};
 
 pub struct Div {
     pub attr: Attr,
@@ -41,7 +44,7 @@ impl Widget for Div {
         &self.attr
     }
 
-    fn set_attr(&mut self, attr: Attr) {
-        self.attr = attr
+    fn set_attr(&mut self, attr: SetAttr) {
+        self.attr.set(attr);
     }
 }

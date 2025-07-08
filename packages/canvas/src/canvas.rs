@@ -252,19 +252,20 @@ impl Canvas {
 
 impl Draw for Canvas {
     fn draw(&mut self) -> Result<DrawChunk, DrawErr> {
-        let size = self.get_size();
-        let mut result = Vec::with_capacity((size.0 * size.1) as usize);
         let ((minx, maxx), (miny, maxy)) = self.bound.get_bound();
+        let mut result = Vec::new();
         for row in (miny..=maxy).rev() {
+            let mut line = Vec::new();
             for col in minx..=maxx {
                 if let Some(pixel) = self.pixels.get(&Tile::from(col, row)) {
-                    result.push((*pixel).into());
+                    line.push((*pixel).into());
                 } else {
-                    result.push(Pixel::space().into());
+                    line.push(Pixel::space().into());
                 }
             }
+            result.push(line);
         }
-        Ok(DrawChunk(result, size.0 as usize))
+        Ok(DrawChunk::Chunk(result))
     }
 }
 

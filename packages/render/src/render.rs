@@ -2,7 +2,7 @@ use std::{cell::RefCell, io};
 
 use term::crossterm::{cursor::MoveTo, queue, style::Print};
 
-use crate::{Builder, Draw, DrawChunk, DrawErr, DrawUpdate, Update};
+use crate::{Builder, Draw, DrawChunk, DrawUpdate, Update};
 
 pub struct Render<W> {
     size: Size,
@@ -17,24 +17,12 @@ where
     W: std::io::Write,
 {
     pub fn render(&self) -> io::Result<()> {
-        let DrawChunk(data, width) = self.thing.borrow_mut().draw()?;
+        let data = self.thing.borrow_mut().draw()?;
         let (cur_col, mut cur_row) = self.home;
         if self.clear {
             term::clear()?
         }
         queue!(self.out.borrow_mut(), MoveTo(cur_col, cur_row))?;
-
-        if width == 0 {
-            if data.is_empty() {
-                return Ok(());
-            } else {
-                return Err(DrawErr.into());
-            }
-        }
-
-        if data.len() % width != 0 {
-            return Err(DrawErr.into());
-        }
 
         let (max_width, max_height) = match self.size {
             Size::Fixed(w, h) => (w, h),
@@ -45,26 +33,30 @@ where
         };
         let (max_width, max_height) = (max_width as usize, max_height as usize);
 
-        for (height, chunk) in data.chunks(width).enumerate() {
-            if height >= max_height {
-                break;
-            }
+        match data {
+            DrawChunk::Chunk(data) => {
+                for (height, line) in data.iter().enumerate() {
+                    if height >= max_height {
+                        break;
+                    }
 
-            let mut now_width = 0;
-            for v in chunk {
-                let cw = v.width();
-                if now_width + cw > max_width {
-                    break;
+                    let mut now_width = 0;
+                    for c in line {
+                        let cw = c.width();
+                        if now_width + cw > max_width {
+                            break;
+                        }
+                        c.queue(self.out.borrow_mut().by_ref())?;
+                        now_width += cw;
+                    }
+                    if now_width < max_width {
+                        let n = max_width - now_width;
+                        queue!(self.out.borrow_mut().by_ref(), Print(" ".repeat(n)))?
+                    }
+                    cur_row += 1;
+                    queue!(self.out.borrow_mut(), MoveTo(cur_col, cur_row))?;
                 }
-                v.queue(self.out.borrow_mut().by_ref())?;
-                now_width += cw;
             }
-            if now_width < max_width {
-                let n = max_width - now_width;
-                queue!(self.out.borrow_mut().by_ref(), Print(" ".repeat(n)))?
-            }
-            cur_row += 1;
-            queue!(self.out.borrow_mut(), MoveTo(cur_col, cur_row))?;
         }
 
         self.out.borrow_mut().flush()

@@ -15,7 +15,7 @@ Emoji 序列：🚀🎉💻❤️😂🐱‍👤
     let chars = s.chars();
     let mut text = Reactive::new(Text::new(""));
     let bind_str = text.watch(String::new(), |t, ss| {
-        t.replace(ss.to_string());
+        t.replace(ss);
     });
 
     let handler = thread::spawn(move || {

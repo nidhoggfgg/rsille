@@ -1,7 +1,10 @@
 use render::{Draw, DrawChunk, DrawErr, Update};
 use term::event::Event;
 
-use crate::{attr::Attr, Widget};
+use crate::{
+    attr::{Attr, SetAttr},
+    Widget,
+};
 
 pub struct Slot {
     pub thing: Box<dyn Widget + Send + Sync>,
@@ -30,7 +33,7 @@ impl Widget for Slot {
         self.thing.get_attr()
     }
 
-    fn set_attr(&mut self, attr: Attr) {
+    fn set_attr(&mut self, attr: SetAttr) {
         self.thing.set_attr(attr);
     }
 }
