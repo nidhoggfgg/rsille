@@ -66,7 +66,7 @@ where
         self.component.get_attr()
     }
 
-    fn set_attr(&mut self, attr: crate::attr::Attr) {
+    fn set_attr(&mut self, attr: crate::attr::SetAttr) {
         self.component.set_attr(attr);
     }
 }

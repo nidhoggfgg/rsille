@@ -14,15 +14,8 @@ pub trait DrawUpdate: Draw + Update {}
 
 impl<T: Draw + Update> DrawUpdate for T {}
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct DrawChunk(pub Vec<Stylized>, pub usize);
-
-impl DrawChunk {
-    pub fn padding(&mut self) {
-        let tmp = self.0.len() % self.1;
-        if tmp != 0 {
-            let pad_num = self.1 - tmp;
-            self.0.extend(vec![Stylized::nop(); pad_num]);
-        }
-    }
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DrawChunk {
+    Chunk(Vec<Vec<Stylized>>),
+    // Sixel
 }

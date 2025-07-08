@@ -1,44 +1,35 @@
 use render::{style::Stylized, Draw, DrawChunk, DrawErr, Update};
 use term::event::Event;
+use unicode_width::UnicodeWidthChar;
 
-use crate::{attr::Attr, Widget};
+use crate::{
+    attr::{Attr, ElementSize},
+    Widget,
+};
 
 pub struct Text {
     origin: String,
     text: Vec<String>,
     attr: Attr,
-    width: usize,
-    height: usize,
     updated: bool,
 }
 
 impl Text {
     pub fn new(text: &str) -> Self {
         let origin = text.to_string();
-        let (text, (width, height)) = split(text);
+        let text = text.split("\n").map(|x| x.into()).collect();
         Self {
             origin,
             text,
-            width,
-            height,
             updated: true,
-            attr: Attr {
-                width: width as u16,
-                height: height as u16,
-                ..Default::default()
-            },
+            attr: Default::default(),
         }
     }
 
-    pub fn replace(&mut self, text: String) {
-        let origin = text.clone();
-        let (text, (width, height)) = split(&text);
-        self.origin = origin;
+    pub fn replace(&mut self, text: &str) {
+        self.origin = text.to_string();
+        let text = text.split("\n").map(|x| x.into()).collect();
         self.text = text;
-        self.width = width;
-        self.height = height;
-        self.attr.width = width as u16;
-        self.attr.height = height as u16;
         self.updated = true;
     }
 
@@ -49,18 +40,32 @@ impl Text {
 
 impl Draw for Text {
     fn draw(&mut self) -> Result<DrawChunk, DrawErr> {
-        let mut result = Vec::with_capacity(self.height * self.width);
-        for l in &self.text {
+        let max_height = match self.attr.height {
+            ElementSize::Auto => usize::MAX,
+            ElementSize::Fixed(height) => height.into(),
+        };
+        let max_width = match self.attr.width {
+            ElementSize::Auto => usize::MAX,
+            ElementSize::Fixed(width) => width.into(),
+        };
+
+        let mut result = Vec::new();
+        for (h, line) in self.text.iter().enumerate() {
+            if h >= max_height {
+                break;
+            }
+            let mut line_chars = Vec::new();
             let mut w = 0;
-            for c in l.chars() {
-                result.push(Stylized::new(c, None, None));
-                w += 1;
+            for c in line.chars() {
+                if w >= max_width {
+                    break;
+                }
+                line_chars.push(Stylized::new(c, None, None));
+                w += c.width_cjk().unwrap_or(0);
             }
-            if self.width - w != 0 {
-                result.extend(vec![Stylized::nop(); self.width - w]);
-            }
+            result.push(line_chars);
         }
-        Ok(DrawChunk(result, self.width))
+        Ok(DrawChunk::Chunk(result))
     }
 }
 
@@ -85,24 +90,7 @@ impl Widget for Text {
         &self.attr
     }
 
-    fn set_attr(&mut self, attr: crate::attr::Attr) {
-        self.attr = attr;
+    fn set_attr(&mut self, attr: crate::attr::SetAttr) {
+        self.attr.set(attr);
     }
-}
-
-fn split(text: &str) -> (Vec<String>, (usize, usize)) {
-    let mut heigth = 0;
-    let mut width = 0;
-    let result = text
-        .split("\n")
-        .map(|x| {
-            let w = x.chars().count();
-            if w > width {
-                width = w;
-            }
-            heigth += 1;
-            x.into()
-        })
-        .collect();
-    (result, (width, heigth))
 }

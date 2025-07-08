@@ -1,7 +1,10 @@
 use render::{Draw, DrawChunk, DrawErr, Update};
 use term::event::Event;
 
-use crate::{attr::Attr, Widget};
+use crate::{
+    attr::{Attr, SetAttr},
+    Widget,
+};
 
 #[derive(Clone)]
 pub struct Animative<T, F> {
@@ -55,7 +58,7 @@ where
         self.component.get_attr()
     }
 
-    fn set_attr(&mut self, attr: Attr) {
+    fn set_attr(&mut self, attr: SetAttr) {
         self.component.set_attr(attr);
     }
 }
