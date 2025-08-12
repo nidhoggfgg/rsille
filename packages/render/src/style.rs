@@ -22,6 +22,10 @@ impl Stylized {
         }
     }
 
+    pub fn set_char(&mut self, c: char) {
+        self.c = Some(c);
+    }
+
     pub fn queue(&self, buffer: &mut impl io::Write) -> io::Result<()> {
         if let Some(c) = self.c {
             if let Some(c) = self.colors {

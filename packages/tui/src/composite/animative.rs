@@ -1,4 +1,4 @@
-use render::{Draw, DrawChunk, DrawErr, Update};
+use render::{chunk::Chunk, Draw, DrawErr, Update};
 use term::event::Event;
 
 use crate::{
@@ -29,8 +29,8 @@ where
     T: Draw,
     F: Fn(&mut T) + 'static,
 {
-    fn draw(&mut self) -> Result<DrawChunk, DrawErr> {
-        self.component.draw()
+    fn draw(&mut self, chunk: &mut Chunk) -> Result<(), DrawErr> {
+        self.component.draw(chunk)
     }
 }
 

@@ -1,9 +1,8 @@
-use render::{style::Stylized, Draw, DrawChunk, DrawErr, Update};
+use render::{chunk::Chunk, Draw, DrawErr, Update};
 use term::event::Event;
-use unicode_width::UnicodeWidthChar;
 
 use crate::{
-    attr::{Attr, ElementSize},
+    attr::Attr,
     Widget,
 };
 
@@ -39,33 +38,19 @@ impl Text {
 }
 
 impl Draw for Text {
-    fn draw(&mut self) -> Result<DrawChunk, DrawErr> {
-        let max_height = match self.attr.height {
-            ElementSize::Auto => usize::MAX,
-            ElementSize::Fixed(height) => height.into(),
-        };
-        let max_width = match self.attr.width {
-            ElementSize::Auto => usize::MAX,
-            ElementSize::Fixed(width) => width.into(),
-        };
-
-        let mut result = Vec::new();
-        for (h, line) in self.text.iter().enumerate() {
-            if h >= max_height {
-                break;
-            }
-            let mut line_chars = Vec::new();
-            let mut w = 0;
+    fn draw(&mut self, chunk: &mut Chunk) -> Result<(), DrawErr> {
+        let mut y = 0;
+        for line in &self.text {
+            let mut x = 0;
             for c in line.chars() {
-                if w >= max_width {
-                    break;
+                if let Some(t) = chunk.get_mut(x, y) {
+                    t.set_char(c);
                 }
-                line_chars.push(Stylized::new(c, None, None));
-                w += c.width_cjk().unwrap_or(0);
+                x += 1;
             }
-            result.push(line_chars);
+            y += 1;
         }
-        Ok(DrawChunk::Chunk(result))
+        Ok(())
     }
 }
 

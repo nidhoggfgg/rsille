@@ -11,7 +11,7 @@ Emoji 序列：🚀🎉💻❤️😂🐱‍👤
 会被截断的内容：12345678901234567890098765432112345678900987654321"#;
     let text = Text::new(&s.to_string());
 
-    let render = render::Builder::new()
+    let mut render = render::Builder::new()
         .size((60, 10))
         .build_render(text, stdout());
     render.render().unwrap();

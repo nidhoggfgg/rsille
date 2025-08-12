@@ -1,6 +1,6 @@
 use term::crossterm::event::{KeyCode, KeyEvent};
 
-use crate::{DrawUpdate, Render, event_loop::EventLoop, render::Size};
+use crate::{chunk::{Position, Size}, DrawUpdate, Render};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Hash)]
 pub struct Builder {
@@ -12,13 +12,15 @@ pub struct Builder {
     pub(super) frame_limit: Option<u16>,
     pub(super) max_event_per_frame: usize,
     pub(super) size: Size,
-    pub(super) home: (u16, u16),
+    pub(super) pos: Position,
     pub(super) clear: bool,
 }
 
 impl Builder {
     pub fn new() -> Self {
         Self {
+            size: Size { width: 0, height: 0 },
+            pos: Position { x: 0, y: 0 },
             enable_raw_mode: false,
             enable_alt_screen: false,
             enable_mouse_capture: false,
@@ -26,21 +28,8 @@ impl Builder {
             exit_code: KeyCode::Esc.into(),
             frame_limit: None,
             max_event_per_frame: 10,
-            size: Size::FullScreen,
-            home: (0, 0),
             clear: true,
         }
-    }
-
-    // (col, row) aka (x, y)
-    pub fn size(&mut self, (col, row): (u16, u16)) -> &mut Self {
-        self.size = Size::Fixed(col, row);
-        self
-    }
-
-    pub fn full_screen(&mut self) -> &mut Self {
-        self.size = Size::FullScreen;
-        self
     }
 
     pub fn enable_all(&mut self) -> &mut Self {
@@ -101,21 +90,19 @@ impl Builder {
         self
     }
 
-    pub fn home(&mut self, home: (u16, u16)) -> &mut Self {
-        self.home = home;
+    pub fn size(&mut self, size: (u16, u16)) -> &mut Self {
+        self.size = Size { width: size.0, height: size.1 };
+        self
+    }
+
+    pub fn pos(&mut self, pos: (u16, u16)) -> &mut Self {
+        self.pos = Position { x: pos.0, y: pos.1 };
         self
     }
 
     pub fn clear(&mut self, clear: bool) -> &mut Self {
         self.clear = clear;
         self
-    }
-
-    pub fn build_eventloop<T>(&self, thing: T) -> EventLoop
-    where
-        T: DrawUpdate + Send + Sync + 'static,
-    {
-        EventLoop::from_builder(self, thing)
     }
 
     pub fn build_render<T, W>(&self, thing: T, writer: W) -> Render<W>

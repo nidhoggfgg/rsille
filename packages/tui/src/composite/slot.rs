@@ -1,4 +1,4 @@
-use render::{Draw, DrawChunk, DrawErr, Update};
+use render::{chunk::Chunk, Draw, DrawErr, Update};
 use term::event::Event;
 
 use crate::{
@@ -12,8 +12,8 @@ pub struct Slot {
 }
 
 impl Draw for Slot {
-    fn draw(&mut self) -> Result<DrawChunk, DrawErr> {
-        self.thing.draw()
+    fn draw(&mut self, chunk: &mut Chunk) -> Result<(), DrawErr> {
+        self.thing.draw(chunk)
     }
 }
 
