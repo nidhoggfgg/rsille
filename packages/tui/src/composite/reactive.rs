@@ -1,4 +1,4 @@
-use render::{Draw, DrawChunk, DrawErr, Update};
+use render::{chunk::Chunk, Draw, DrawErr, Update};
 use term::event::Event;
 use tokio::sync::watch;
 
@@ -44,8 +44,8 @@ where
     S: Clone + Send + Sync,
     F: FnMut(&mut T, &S) + 'static,
 {
-    fn draw(&mut self) -> Result<DrawChunk, DrawErr> {
-        self.component.draw()
+    fn draw(&mut self, chunk: &mut Chunk) -> Result<(), DrawErr> {
+        self.component.draw(chunk)
     }
 }
 

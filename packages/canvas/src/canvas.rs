@@ -7,7 +7,8 @@ use crate::braille::{Pixel, PixelOp};
 use crate::tile::Tile;
 use crate::utils::{round, round_f64};
 
-use render::{Draw, DrawChunk, DrawErr, Update};
+use render::chunk::Chunk;
+use render::{Draw, DrawErr, Update};
 use term::crossterm::cursor::MoveToNextLine;
 use term::crossterm::queue;
 use term::crossterm::style::Print;
@@ -251,21 +252,8 @@ impl Canvas {
 }
 
 impl Draw for Canvas {
-    fn draw(&mut self) -> Result<DrawChunk, DrawErr> {
-        let ((minx, maxx), (miny, maxy)) = self.bound.get_bound();
-        let mut result = Vec::new();
-        for row in (miny..=maxy).rev() {
-            let mut line = Vec::new();
-            for col in minx..=maxx {
-                if let Some(pixel) = self.pixels.get(&Tile::from(col, row)) {
-                    line.push((*pixel).into());
-                } else {
-                    line.push(Pixel::space().into());
-                }
-            }
-            result.push(line);
-        }
-        Ok(DrawChunk::Chunk(result))
+    fn draw(&mut self, chunk: &mut Chunk) -> Result<(), DrawErr> {
+        todo!()
     }
 }
 

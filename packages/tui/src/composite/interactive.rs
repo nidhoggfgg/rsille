@@ -1,4 +1,4 @@
-use render::{Draw, DrawChunk, DrawErr, Update};
+use render::{chunk::Chunk, Draw, DrawErr, Update};
 use term::event::{Event, KeyEvent, MouseEvent};
 
 use crate::Widget;
@@ -53,8 +53,8 @@ impl<T> Draw for Interactive<T>
 where
     T: Draw,
 {
-    fn draw(&mut self) -> Result<DrawChunk, DrawErr> {
-        self.component.draw()
+    fn draw(&mut self, chunk: &mut Chunk) -> Result<(), DrawErr> {
+        self.component.draw(chunk)
     }
 }
 

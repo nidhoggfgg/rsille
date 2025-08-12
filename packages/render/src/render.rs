@@ -1,14 +1,13 @@
-use std::{cell::RefCell, io};
+use std::io;
 
-use term::crossterm::{cursor::MoveTo, queue, style::Print};
+use term::crossterm::{queue, style::Print};
 
-use crate::{Builder, Draw, DrawChunk, DrawUpdate, Update};
+use crate::{chunk::Chunk, Builder, DrawUpdate};
 
 pub struct Render<W> {
-    size: Size,
-    home: (u16, u16),
-    thing: RefCell<Box<dyn DrawUpdate + Send + Sync>>,
-    out: RefCell<W>,
+    chunk: Chunk,
+    thing: Box<dyn DrawUpdate + Send + Sync>,
+    out: W,
     clear: bool,
 }
 
@@ -16,89 +15,54 @@ impl<W> Render<W>
 where
     W: std::io::Write,
 {
-    pub fn render(&self) -> io::Result<()> {
-        let data = self.thing.borrow_mut().draw()?;
-        let (cur_col, mut cur_row) = self.home;
+    pub fn render(&mut self) -> io::Result<()> {
+        self.thing.draw(&mut self.chunk)?;
+
         if self.clear {
-            term::clear()?
+            queue!(self.out, term::crossterm::terminal::Clear(term::crossterm::terminal::ClearType::All))?;
         }
-        queue!(self.out.borrow_mut(), MoveTo(cur_col, cur_row))?;
 
-        let (max_width, max_height) = match self.size {
-            Size::Fixed(w, h) => (w, h),
-            Size::FullScreen => {
-                queue!(self.out.borrow_mut(), MoveTo(0, 0))?;
-                term::terminal_size()?
-            }
-        };
-        let (max_width, max_height) = (max_width as usize, max_height as usize);
-
-        match data {
-            DrawChunk::Chunk(data) => {
-                for (height, line) in data.iter().enumerate() {
-                    if height >= max_height {
-                        break;
-                    }
-
-                    let mut now_width = 0;
-                    for c in line {
-                        let cw = c.width();
-                        if now_width + cw > max_width {
-                            break;
-                        }
-                        c.queue(self.out.borrow_mut().by_ref())?;
-                        now_width += cw;
-                    }
-                    if now_width < max_width {
-                        let n = max_width - now_width;
-                        queue!(self.out.borrow_mut().by_ref(), Print(" ".repeat(n)))?
-                    }
-                    cur_row += 1;
-                    queue!(self.out.borrow_mut(), MoveTo(cur_col, cur_row))?;
+        for line in self.chunk.lines() {
+            let mut w = 0;
+            for c in line {
+                w += c.width() as u16;
+                if w > self.chunk.size.width {
+                    break;
                 }
+
+                c.queue(&mut self.out)?
             }
+            queue!(self.out, Print("\n"))?
         }
 
-        self.out.borrow_mut().flush()
-    }
-}
-
-impl<W> Draw for Render<W> {
-    fn draw(&mut self) -> Result<DrawChunk, crate::DrawErr> {
-        self.thing.borrow_mut().draw()
-    }
-}
-
-impl<W> Update for Render<W> {
-    fn on_events(&mut self, events: &[term::event::Event]) -> Result<(), crate::DrawErr> {
-        self.thing.borrow_mut().on_events(events)
+        Ok(())
     }
 
-    fn update(&mut self) -> Result<bool, crate::DrawErr> {
-        self.thing.borrow_mut().update()
-    }
-}
-
-impl<W> Render<W>
-where
-    W: std::io::Write,
-{
     pub(crate) fn from_builder<T>(builder: &Builder, thing: T, writer: W) -> Self
     where
         T: DrawUpdate + Send + Sync + 'static,
     {
         Self {
-            home: builder.home,
-            size: builder.size,
-            thing: RefCell::new(Box::new(thing)),
-            out: RefCell::new(writer),
+            chunk: Chunk::empty((builder.size.width, builder.size.height)),
+            thing: Box::new(thing),
+            out: writer,
             clear: builder.clear,
         }
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Hash)]
-pub(crate) enum Size {
-    Fixed(u16, u16),
-    FullScreen,
-}
+// impl<W> Draw for Render<W> {
+//     fn draw(&mut self, chunk: &mut Chunk) -> Result<(), crate::DrawErr> {
+//         self.thing.draw(chunk)
+//     }
+// }
+
+// impl<W> Update for Render<W> {
+//     fn on_events(&mut self, events: &[term::event::Event]) -> Result<(), crate::DrawErr> {
+//         self.thing.on_events(events)
+//     }
+
+//     fn update(&mut self) -> Result<bool, crate::DrawErr> {
+//         self.thing.update()
+//     }
+// }

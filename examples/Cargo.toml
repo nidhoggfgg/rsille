@@ -11,11 +11,3 @@ rsille = { path = "../rsille" }
 [[example]]
 name = "basic_text"
 path = "basic_text.rs"
-
-[[example]]
-name = "basic_event_loop"
-path = "basic_event_loop.rs"
-
-[[example]]
-name = "vivid_text"
-path = "vivid_text.rs"
