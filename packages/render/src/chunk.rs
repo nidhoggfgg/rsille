@@ -39,10 +39,10 @@ impl Chunk {
     }
 
     pub fn index(&self, x: u16, y: u16) -> Option<usize> {
-        if self.size.width < x || self.size.height < y {
-            None
-        } else {
+        if self.size.width > x && self.size.height > y {
             Some((y * self.size.width + x) as usize)
+        } else {
+            None
         }
     }
 

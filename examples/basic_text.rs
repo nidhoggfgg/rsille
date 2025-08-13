@@ -1,6 +1,6 @@
 use std::io::stdout;
 
-use rsille::{render, tui::widgets::Text};
+use rsille::{render, term, tui::widgets::Text};
 
 fn main() {
     let s = r#"Hello! 你好！こんにちは！안녕하세요! Bonjour! 😊
@@ -11,8 +11,19 @@ Emoji 序列：🚀🎉💻❤️😂🐱‍👤
 会被截断的内容：12345678901234567890098765432112345678900987654321"#;
     let text = Text::new(&s.to_string());
 
+    let size = term::terminal_size().unwrap();
+    let center = if size.0 > 60 && size.1 > 10 {
+        (size.0 / 2 - 30, size.1 / 2 - 5)
+    } else {
+        (0, 0)
+    };
+
+    term::clear().unwrap();
+
     let mut render = render::Builder::new()
+        .pos(center)
         .size((60, 10))
+        .clear(false)
         .build_render(text, stdout());
     render.render().unwrap();
 }
