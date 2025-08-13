@@ -1,7 +1,7 @@
 mod builder;
 mod draw_err;
 mod draw_update;
-//pub mod event_loop;
+pub mod event_loop;
 mod render;
 pub mod style;
 pub mod chunk;

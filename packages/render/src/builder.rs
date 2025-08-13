@@ -1,6 +1,6 @@
 use term::crossterm::event::{KeyCode, KeyEvent};
 
-use crate::{chunk::{Position, Size}, DrawUpdate, Render};
+use crate::{chunk::{Position, Size}, event_loop::EventLoop, Draw, DrawUpdate, Render};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Hash)]
 pub struct Builder {
@@ -105,12 +105,19 @@ impl Builder {
         self
     }
 
-    pub fn build_render<T, W>(&self, thing: T, writer: W) -> Render<W>
+    pub fn build_render<T, W>(&self, thing: T, writer: W) -> Render<W, T>
     where
-        T: DrawUpdate + Send + Sync + 'static,
+        T: Draw + Send + Sync + 'static,
         W: std::io::Write,
     {
         Render::from_builder(self, thing, writer)
+    }
+
+    pub fn build_event_loop<T>(&self, thing: T) -> EventLoop<T>
+    where
+        T: DrawUpdate + Send + Sync + 'static,
+    {
+        EventLoop::from_builder(self, thing)
     }
 }
 

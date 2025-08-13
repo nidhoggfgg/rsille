@@ -6,15 +6,15 @@ use std::{
 
 use futures::{FutureExt, StreamExt};
 use term::{
-    crossterm::event::EventStream,
+    crossterm::{cursor::MoveTo, event::EventStream, queue},
     event::{Event, KeyEvent},
 };
 use tokio::{select, sync::mpsc};
 
-use crate::{Builder, DrawUpdate, Render, Update};
+use crate::{Builder, DrawUpdate, Render};
 
-pub struct EventLoop {
-    render: Render<Stdout>,
+pub struct EventLoop<T> {
+    render: Render<Stdout, T>,
     raw_mode: bool,
     exit_code: KeyEvent,
     max_event_per_frame: usize,
@@ -24,8 +24,11 @@ pub struct EventLoop {
     hide_cursor: bool,
 }
 
-impl EventLoop {
-    pub(super) fn from_builder<T>(builder: &Builder, thing: T) -> Self
+impl<T> EventLoop<T>
+where
+    T: DrawUpdate + Send + Sync + 'static,
+{
+    pub(super) fn from_builder(builder: &Builder, thing: T) -> Self
     where
         T: DrawUpdate + Send + Sync + 'static,
     {
@@ -171,6 +174,9 @@ impl EventLoop {
                 // update
                 self.render.on_events(&events).unwrap_or(());
                 self.render.update().unwrap_or(false);
+
+                // clear
+                queue!(stdout(), MoveTo(0, 0)).unwrap();
 
                 // draw
                 self.render.render().unwrap_or(());
