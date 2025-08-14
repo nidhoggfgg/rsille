@@ -1,8 +1,7 @@
 use std::{thread, time::Duration};
 
 use rsille::{
-    render,
-    tui::{composite::Reactive, widgets::Text},
+    render, term, tui::{composite::Reactive, widgets::Text}
 };
 
 fn main() {
@@ -20,6 +19,13 @@ Emoji 序列：🚀🎉💻❤️😂🐱‍👤
         text.replace(s);
     });
 
+    let size = term::terminal_size().unwrap();
+    let center = if size.0 > 60 && size.1 > 10 {
+        (size.0 / 2 - 30, size.1 / 2 - 5)
+    } else {
+        (0, 0)
+    };
+
     let handle = thread::spawn(move || {
         for c in s.chars() {
             ss.push(c);
@@ -31,6 +37,7 @@ Emoji 序列：🚀🎉💻❤️😂🐱‍👤
         let el = render::Builder::new()
             .enable_all()
             .size((60, 10))
+            .pos(center)
             .clear(false)
             .frame_limit(30)
             .build_event_loop(reactive);

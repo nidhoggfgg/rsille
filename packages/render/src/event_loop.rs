@@ -11,9 +11,10 @@ use term::{
 };
 use tokio::{select, sync::mpsc};
 
-use crate::{Builder, DrawUpdate, Render};
+use crate::{chunk::Position, Builder, DrawUpdate, Render};
 
 pub struct EventLoop<T> {
+    pos: Position,
     render: Render<Stdout, T>,
     raw_mode: bool,
     exit_code: KeyEvent,
@@ -33,6 +34,7 @@ where
         T: DrawUpdate + Send + Sync + 'static,
     {
         Self {
+            pos: builder.pos,
             render: Render::from_builder(builder, thing, stdout()),
             raw_mode: builder.enable_raw_mode,
             exit_code: builder.exit_code,
@@ -175,8 +177,8 @@ where
                 self.render.on_events(&events).unwrap_or(());
                 self.render.update().unwrap_or(false);
 
-                // clear
-                queue!(stdout(), MoveTo(0, 0)).unwrap();
+                // move to position
+                queue!(stdout(), MoveTo(self.pos.x, self.pos.y)).unwrap();
 
                 // draw
                 self.render.render().unwrap_or(());
