@@ -39,16 +39,12 @@ impl Text {
 
 impl Draw for Text {
     fn draw(&mut self, chunk: &mut Chunk) -> Result<(), DrawErr> {
-        let mut y = 0;
-        for line in &self.text {
-            let mut x = 0;
-            for c in line.chars() {
-                if let Some(t) = chunk.get_mut(x, y) {
+        for (y, line) in self.text.iter().enumerate() {
+            for (x, c) in line.chars().enumerate() {
+                if let Some(t) = chunk.get_mut(x as u16, y as u16) {
                     t.set_char(c);
                 }
-                x += 1;
             }
-            y += 1;
         }
         Ok(())
     }

@@ -8,6 +8,7 @@ use crate::tile::Tile;
 use crate::utils::{round, round_f64};
 
 use render::chunk::Chunk;
+use render::style::Stylized;
 use render::{Draw, DrawErr, Update};
 use term::crossterm::cursor::MoveToNextLine;
 use term::crossterm::queue;
@@ -253,7 +254,19 @@ impl Canvas {
 
 impl Draw for Canvas {
     fn draw(&mut self, chunk: &mut Chunk) -> Result<(), DrawErr> {
-        todo!()
+        let ((minx, _), (_, maxy)) = self.bound.get_bound();
+        for (t, p) in &self.pixels {
+            let (x, y) = t.get();
+            let x = x - minx;
+            let y = maxy - y;
+            let x = x as u16;
+            let y = y as u16;
+            if let Some(c) = chunk.get_mut(x, y) {
+                let p: Stylized = (*p).into();
+                *c = p;
+            }
+        }
+        Ok(())
     }
 }
 
