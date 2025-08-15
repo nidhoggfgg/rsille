@@ -9,7 +9,7 @@ fn main() {
 数字：1234567890 🔢
 Emoji 序列：🚀🎉💻❤️😂🐱‍👤
 会被截断的内容：12345678901234567890098765432112345678900987654321"#;
-    let text = Text::new(&s.to_string());
+    let text = Text::new(s);
 
     let size = term::terminal_size().unwrap();
     let center = if size.0 > 60 && size.1 > 10 {
@@ -24,6 +24,7 @@ Emoji 序列：🚀🎉💻❤️😂🐱‍👤
         .pos(center)
         .size((60, 10))
         .clear(false)
+        .append_newline(true)
         .build_render(text, stdout());
     render.render().unwrap();
 }

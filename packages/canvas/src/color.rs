@@ -73,6 +73,6 @@ impl Default for Colored {
 
 impl From<Colored> for Stylized {
     fn from(value: Colored) -> Self {
-        Stylized::new(value.pixel.to_char(), Some(value.color), None)
+        Stylized::new(value.pixel.to_char(), Default::default())
     }
 }

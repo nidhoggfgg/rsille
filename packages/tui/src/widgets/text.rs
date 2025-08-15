@@ -1,4 +1,6 @@
-use render::{chunk::Chunk, Draw, DrawErr, Update};
+use std::borrow::Cow;
+
+use render::{chunk::Chunk, style::StylizedLine, Draw, DrawErr, Update};
 use term::event::Event;
 
 use crate::{
@@ -6,43 +8,48 @@ use crate::{
     Widget,
 };
 
-pub struct Text {
-    origin: String,
-    text: Vec<String>,
+pub struct Text<'a> {
+    text: Vec<StylizedLine<'a>>,
     attr: Attr,
     updated: bool,
 }
 
-impl Text {
-    pub fn new(text: &str) -> Self {
-        let origin = text.to_string();
-        let text = text.split("\n").map(|x| x.into()).collect();
+impl<'a> Text<'a> {
+    pub fn new<T>(text: T) -> Self
+    where
+        T: Into<Cow<'a, str>>,
+    {
+        let lines = match text.into() {
+            Cow::Borrowed(s) => s.lines().map(|x| StylizedLine::from(x)).collect(),
+            Cow::Owned(s) => s.lines().map(|x| StylizedLine::from(x.to_owned())).collect(),
+        };
         Self {
-            origin,
-            text,
+            text: lines,
             updated: true,
             attr: Default::default(),
         }
     }
 
-    pub fn replace(&mut self, text: &str) {
-        self.origin = text.to_string();
-        let text = text.split("\n").map(|x| x.into()).collect();
-        self.text = text;
-        self.updated = true;
-    }
+    pub fn replace<T>(&mut self, text: T)
+    where
+        T: Into<Cow<'a, str>>,
+    {
+        let lines = match text.into() {
+            Cow::Borrowed(s) => s.lines().map(|x| StylizedLine::from(x)).collect(),
+            Cow::Owned(s) => s.lines().map(|x| StylizedLine::from(x.to_owned())).collect(),
+        };
 
-    pub fn get_text(&mut self) -> &str {
-        &self.origin
+        self.text = lines;
+        self.updated = true;
     }
 }
 
-impl Draw for Text {
+impl<'a> Draw for Text<'a> {
     fn draw(&mut self, chunk: &mut Chunk) -> Result<(), DrawErr> {
         for (y, line) in self.text.iter().enumerate() {
-            for (x, c) in line.chars().enumerate() {
+            for (x, c) in line.content.iter().flat_map(|x| x.into_iter()).enumerate() {
                 if let Some(t) = chunk.get_mut(x as u16, y as u16) {
-                    t.set_char(c);
+                    t.set_char(c.c.unwrap());
                 }
             }
         }
@@ -50,7 +57,7 @@ impl Draw for Text {
     }
 }
 
-impl Update for Text {
+impl<'a> Update for Text<'a> {
     fn on_events(&mut self, _events: &[Event]) -> Result<(), DrawErr> {
         Ok(())
     }
@@ -66,7 +73,7 @@ impl Update for Text {
     }
 }
 
-impl Widget for Text {
+impl<'a> Widget for Text<'a> {
     fn get_attr(&self) -> &crate::attr::Attr {
         &self.attr
     }
