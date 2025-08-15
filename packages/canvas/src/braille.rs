@@ -90,7 +90,7 @@ impl fmt::Display for Pixel {
 
 impl From<Pixel> for Stylized {
     fn from(value: Pixel) -> Self {
-        Stylized::new(value.to_char(), None, None)
+        Stylized::new(value.to_char(), Default::default())
     }
 }
 

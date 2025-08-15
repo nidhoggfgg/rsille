@@ -13,6 +13,7 @@ pub fn main() {
     let mut render = render::Builder::new()
         .pos((0, 0))
         .size((40, 20))
+        .append_newline(true)
         .build_render(c, stdout());
     render.render().unwrap();
 }

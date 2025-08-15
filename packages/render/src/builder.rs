@@ -14,6 +14,7 @@ pub struct Builder {
     pub(super) size: Size,
     pub(super) pos: Position,
     pub(super) clear: bool,
+    pub(super) append_newline: bool,
 }
 
 impl Builder {
@@ -29,6 +30,7 @@ impl Builder {
             frame_limit: None,
             max_event_per_frame: 10,
             clear: true,
+            append_newline: false,
         }
     }
 
@@ -102,6 +104,11 @@ impl Builder {
 
     pub fn clear(&mut self, clear: bool) -> &mut Self {
         self.clear = clear;
+        self
+    }
+
+    pub fn append_newline(&mut self, append_newline: bool) -> &mut Self {
+        self.append_newline = append_newline;
         self
     }
 

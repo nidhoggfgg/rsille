@@ -10,6 +10,7 @@ pub struct Render<W, T> {
     pub(crate) thing: T,
     out: W,
     clear: bool,
+    append_newline: bool,
 }
 
 impl<W, T> Render<W, T>
@@ -51,6 +52,10 @@ where
             }
         }
 
+        if self.append_newline {
+            queue!(self.out, Print("\n"))?;
+        }
+
         Ok(())
     }
 
@@ -65,6 +70,7 @@ where
             thing,
             out: writer,
             clear: builder.clear,
+            append_newline: builder.append_newline,
         }
     }
 }
