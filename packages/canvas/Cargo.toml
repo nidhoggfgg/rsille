@@ -14,10 +14,6 @@ render = { path = "../render" }
 criterion = "0.5.1"
 rand = "0.8.5"
 
-[features]
-default = ["color"]
-color = []
-
 [[bench]]
 name = "vec_vs_map"
 harness = false

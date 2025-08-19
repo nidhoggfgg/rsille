@@ -15,9 +15,7 @@ use term::crossterm::queue;
 use term::crossterm::style::Print;
 use term::event::Event;
 
-#[cfg(feature = "color")]
 use crate::color::Colored;
-#[cfg(feature = "color")]
 use term::crossterm::style::Colors;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -48,10 +46,7 @@ impl<T: Paint + ?Sized> Paint for Box<T> {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Canvas {
     bound: Bound,
-    #[cfg(feature = "color")]
     pixels: HashMap<Tile, Colored>,
-    #[cfg(not(feature = "color"))]
-    pixels: HashMap<Tile, Pixel>,
 }
 
 impl Canvas {
@@ -122,11 +117,7 @@ impl Canvas {
         if let Some(pixel) = self.pixels.get_mut(&tile) {
             pixel.set(x, y);
         } else {
-            #[cfg(feature = "color")]
             let mut pixel = Colored::new();
-            #[cfg(not(feature = "color"))]
-            let mut pixel = Pixel::new();
-
             pixel.set(x, y);
             self.pixels.insert(tile, pixel);
         }
@@ -140,10 +131,7 @@ impl Canvas {
         if let Some(pixel) = self.pixels.get_mut(&tile) {
             pixel.set(x, y);
         } else {
-            #[cfg(feature = "color")]
             let mut pixel = Colored::new();
-            #[cfg(not(feature = "color"))]
-            let mut pixel = Pixel::new();
 
             pixel.set(x, y);
             self.pixels.insert(tile, pixel);
@@ -151,7 +139,6 @@ impl Canvas {
         self
     }
 
-    #[cfg(feature = "color")]
     pub fn set_colorful<T>(&mut self, x: T, y: T, colors: Colors) -> &mut Self
     where
         T: Into<f64> + Copy,
@@ -181,11 +168,7 @@ impl Canvas {
         if let Some(pixel) = self.pixels.get_mut(&tile) {
             pixel.toggle(x, y);
         } else {
-            #[cfg(feature = "color")]
             let mut pixel = Colored::new();
-            #[cfg(not(feature = "color"))]
-            let mut pixel = Pixel::new();
-
             pixel.toggle(x, y);
             self.pixels.insert(tile, pixel);
         }
