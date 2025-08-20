@@ -3,10 +3,7 @@ use std::borrow::Cow;
 use render::{chunk::Chunk, style::StylizedLine, Draw, DrawErr, Update};
 use term::event::Event;
 
-use crate::{
-    attr::Attr,
-    Widget,
-};
+use crate::{attr::Attr, Widget};
 
 pub struct Text<'a> {
     text: Vec<StylizedLine<'a>>,
@@ -20,8 +17,11 @@ impl<'a> Text<'a> {
         T: Into<Cow<'a, str>>,
     {
         let lines = match text.into() {
-            Cow::Borrowed(s) => s.lines().map(|x| StylizedLine::from(x)).collect(),
-            Cow::Owned(s) => s.lines().map(|x| StylizedLine::from(x.to_owned())).collect(),
+            Cow::Borrowed(s) => s.lines().map(StylizedLine::from).collect(),
+            Cow::Owned(s) => s
+                .lines()
+                .map(|x| StylizedLine::from(x.to_owned()))
+                .collect(),
         };
         Self {
             text: lines,
@@ -35,8 +35,11 @@ impl<'a> Text<'a> {
         T: Into<Cow<'a, str>>,
     {
         let lines = match text.into() {
-            Cow::Borrowed(s) => s.lines().map(|x| StylizedLine::from(x)).collect(),
-            Cow::Owned(s) => s.lines().map(|x| StylizedLine::from(x.to_owned())).collect(),
+            Cow::Borrowed(s) => s.lines().map(StylizedLine::from).collect(),
+            Cow::Owned(s) => s
+                .lines()
+                .map(|x| StylizedLine::from(x.to_owned()))
+                .collect(),
         };
 
         self.text = lines;
@@ -44,7 +47,7 @@ impl<'a> Text<'a> {
     }
 }
 
-impl<'a> Draw for Text<'a> {
+impl Draw for Text<'_> {
     fn draw(&mut self, chunk: &mut Chunk) -> Result<(), DrawErr> {
         for (y, line) in self.text.iter().enumerate() {
             for (x, c) in line.content.iter().flat_map(|x| x.into_iter()).enumerate() {
@@ -57,7 +60,7 @@ impl<'a> Draw for Text<'a> {
     }
 }
 
-impl<'a> Update for Text<'a> {
+impl Update for Text<'_> {
     fn on_events(&mut self, _events: &[Event]) -> Result<(), DrawErr> {
         Ok(())
     }
@@ -73,7 +76,7 @@ impl<'a> Update for Text<'a> {
     }
 }
 
-impl<'a> Widget for Text<'a> {
+impl Widget for Text<'_> {
     fn get_attr(&self) -> &crate::attr::Attr {
         &self.attr
     }

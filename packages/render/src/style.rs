@@ -34,14 +34,14 @@ pub struct Stylized {
 
 impl Stylized {
     pub fn new(c: char, style: Style) -> Self {
-        Self {
-            c: Some(c),
-            style,
-        }
+        Self { c: Some(c), style }
     }
 
     pub fn raw(c: char) -> Self {
-        Self { c: Some(c), style: Default::default() }
+        Self {
+            c: Some(c),
+            style: Default::default(),
+        }
     }
 
     pub fn set_char(&mut self, c: char) {
@@ -104,7 +104,7 @@ impl<'a> From<&'a str> for StylizedLine<'a> {
     }
 }
 
-impl<'a> From<String> for StylizedLine<'a> {
+impl From<String> for StylizedLine<'_> {
     fn from(s: String) -> Self {
         Self {
             content: vec![StylizedText::from(s)],
@@ -154,7 +154,6 @@ impl<'a> StylizedText<'a> {
     }
 }
 
-// 为 StylizedText 创建一个专门的迭代器
 pub struct StylizedTextIter<'a> {
     chars: std::str::Chars<'a>,
     style: Style,
@@ -169,20 +168,19 @@ impl<'a> StylizedTextIter<'a> {
     }
 }
 
-impl<'a> Iterator for StylizedTextIter<'a> {
+impl Iterator for StylizedTextIter<'_> {
     type Item = Stylized;
-    
+
     fn next(&mut self) -> Option<Self::Item> {
         let c = self.chars.next()?;
         Some(Stylized::new(c, self.style))
     }
 }
 
-// 为 StylizedText 实现 IntoIterator trait
 impl<'a> IntoIterator for &'a StylizedText<'a> {
     type Item = Stylized;
     type IntoIter = StylizedTextIter<'a>;
-    
+
     fn into_iter(self) -> Self::IntoIter {
         StylizedTextIter::new(self)
     }
@@ -194,7 +192,7 @@ impl<'a> From<&'a str> for StylizedText<'a> {
     }
 }
 
-impl<'a> From<String> for StylizedText<'a> {
+impl From<String> for StylizedText<'_> {
     fn from(s: String) -> Self {
         Self::new(Cow::Owned(s), Default::default())
     }

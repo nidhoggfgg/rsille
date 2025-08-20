@@ -2,8 +2,12 @@ use std::io;
 
 use term::crossterm::{cursor::MoveTo, queue, style::Print};
 
-use crate::{chunk::{Chunk, Position}, Builder, Draw, DrawErr, DrawUpdate};
+use crate::{
+    Builder, Draw, DrawErr, DrawUpdate,
+    chunk::{Chunk, Position},
+};
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct Render<W, T> {
     pub(crate) pos: Position,
     pub(crate) chunk: Chunk,
@@ -22,7 +26,10 @@ where
         self.thing.draw(&mut self.chunk)?;
 
         if self.clear {
-            queue!(self.out, term::crossterm::terminal::Clear(term::crossterm::terminal::ClearType::All))?;
+            queue!(
+                self.out,
+                term::crossterm::terminal::Clear(term::crossterm::terminal::ClearType::All)
+            )?;
         }
 
         queue!(self.out, MoveTo(self.pos.x, self.pos.y))?;
@@ -44,7 +51,10 @@ where
             }
 
             if w < self.chunk.size.width {
-                queue!(self.out, Print(" ".repeat(self.chunk.size.width as usize - w as usize)))?;
+                queue!(
+                    self.out,
+                    Print(" ".repeat(self.chunk.size.width as usize - w as usize))
+                )?;
             }
 
             if y < self.chunk.size.height as usize - 1 {
@@ -91,8 +101,8 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::{Draw, DrawErr};
     use super::*;
+    use crate::{Draw, DrawErr};
 
     struct Text {
         lines: Vec<String>,
@@ -100,7 +110,9 @@ mod tests {
 
     impl Text {
         fn new(text: &str) -> Self {
-            Self { lines: text.split("\n").map(|x| x.to_string()).collect() }
+            Self {
+                lines: text.split("\n").map(|x| x.to_string()).collect(),
+            }
         }
     }
 

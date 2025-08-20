@@ -6,15 +6,14 @@ use std::{
 
 use futures::{FutureExt, StreamExt};
 use term::{
-    crossterm::{cursor::MoveTo, event::EventStream, queue},
+    crossterm::event::EventStream,
     event::{Event, KeyEvent},
 };
 use tokio::{select, sync::mpsc};
 
-use crate::{chunk::Position, Builder, DrawUpdate, Render};
+use crate::{Builder, DrawUpdate, Render};
 
 pub struct EventLoop<T> {
-    pos: Position,
     render: Render<Stdout, T>,
     raw_mode: bool,
     exit_code: KeyEvent,
@@ -34,7 +33,6 @@ where
         T: DrawUpdate + Send + Sync + 'static,
     {
         Self {
-            pos: builder.pos,
             render: Render::from_builder(builder, thing, stdout()),
             raw_mode: builder.enable_raw_mode,
             exit_code: builder.exit_code,
@@ -177,9 +175,6 @@ where
                 self.render.on_events(&events).unwrap_or(());
                 self.render.update().unwrap_or(false);
 
-                // move to position
-                queue!(stdout(), MoveTo(self.pos.x, self.pos.y)).unwrap();
-
                 // draw
                 self.render.render().unwrap_or(());
 
@@ -229,10 +224,7 @@ fn event_thread(
                                 events.push(event);
                             }
                         }
-                        Some(Err(_e)) => {
-                            #[cfg(feature = "log")]
-                            log::error!("read event error: {:#?}", _e);
-                        }
+                        Some(Err(_e)) => {}
                         None => {}
                     }
                 }

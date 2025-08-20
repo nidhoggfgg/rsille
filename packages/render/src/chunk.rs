@@ -2,25 +2,25 @@ use std::slice::Chunks;
 
 use crate::style::Stylized;
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Copy, Default)]
 pub struct Size {
     pub width: u16,
     pub height: u16,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Copy, Default)]
 pub struct Position {
     pub x: u16,
     pub y: u16,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Copy, Default)]
 pub struct Area {
     pub pos: Position,
     pub size: Size,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Chunk {
     pub size: Size,
     pub content: Vec<Stylized>,
@@ -29,7 +29,10 @@ pub struct Chunk {
 impl Chunk {
     pub fn empty(size: (u16, u16)) -> Self {
         Self {
-            size: Size { width: size.0, height: size.1 },
+            size: Size {
+                width: size.0,
+                height: size.1,
+            },
             content: vec![Stylized::space(); (size.0 * size.1) as usize],
         }
     }

@@ -1,8 +1,30 @@
+[package]
+name = "rsille"
+version = "3.0.0"
+edition = "2021"
+authors = ["nidhoggfgg <nidhoggfgg@gmail.com>"]
+description = "A full feature braille code art lib"
+keywords = ["braille", "terminal", "tui", "cli", "animation"]
+readme = "README.md"
+license = "MIT"
+repository = "https://github.com/nidhoggfgg/rsille.git"
+
+[dependencies]
+canvas = { path = "packages/canvas" }
+tui = { path = "packages/tui" }
+render = { path = "packages/render" }
+term = { path = "packages/term" }
+
+[dev-dependencies]
+criterion = "0.4"
+
+[features]
+default = []
+
 [workspace]
 members = [
     # pub
     "pyrsille",
-    "rsille",
 
     # internal
     "packages/canvas",
@@ -14,6 +36,14 @@ members = [
     "examples",
 ]
 resolver = "3"
+
+[workspace.dependencies]
+tokio = { version = "1", features = ["full"] }
+rayon = "1.10.0"
+unicode-width = "0.2.0"
+crossterm = { version = "0.28.1", features = ["event-stream"] }
+async-trait = "0.1.84"
+futures = "0.3.31"
 
 [profile.release]
 lto = true

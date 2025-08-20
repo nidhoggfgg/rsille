@@ -23,6 +23,25 @@ impl Bound {
     }
 
     #[inline]
+    #[must_use]
+    pub(crate) fn tile_inside(&self, tile: Tile) -> bool {
+        let (x, y) = tile.get();
+        self.is_inside(x, y)
+    }
+
+    #[inline]
+    #[must_use]
+    pub(crate) fn get_terminal_xy(&self, tile: Tile) -> Option<(i32, i32)> {
+        if !self.tile_inside(tile) {
+            return None;
+        }
+
+        let (x, y) = tile.get();
+        // reverse the y-axis, because the y-axis is reversed in the terminal
+        Some((x - self.minx, self.maxy - y))
+    }
+
+    #[inline]
     pub(crate) fn update(&mut self, tile: Tile) {
         if self.fixed {
             return;
