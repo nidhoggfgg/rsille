@@ -1,7 +1,8 @@
 use std::{thread, time::Duration};
 
 use rsille::{
-    render, term, tui::{composite::Reactive, widgets::Text}
+    render, term,
+    tui::{composite::Reactive, widgets::Text},
 };
 
 fn main() {

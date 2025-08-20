@@ -5,15 +5,14 @@ use std::io::Write;
 use crate::bound::Bound;
 use crate::braille::{Pixel, PixelOp};
 use crate::tile::Tile;
-use crate::utils::{round, round_f64};
+use crate::utils::round;
 
 use render::chunk::Chunk;
 use render::style::Stylized;
-use render::{Draw, DrawErr, Update};
+use render::{Draw, DrawErr};
 use term::crossterm::cursor::MoveToNextLine;
 use term::crossterm::queue;
 use term::crossterm::style::Print;
-use term::event::Event;
 
 use crate::color::Colored;
 use term::crossterm::style::Colors;
@@ -50,6 +49,9 @@ pub struct Canvas {
 }
 
 impl Canvas {
+    /// Creates a new empty canvas with default settings.
+    ///
+    /// The canvas starts with no pixels and an unbounded drawing area.
     #[inline]
     #[must_use]
     pub fn new() -> Self {
@@ -60,6 +62,9 @@ impl Canvas {
         }
     }
 
+    /// Paints a target object on the canvas at the specified coordinates.
+    ///
+    /// This method delegates the actual painting to the target object's `paint` method.
     pub fn paint<T, N>(&mut self, target: &T, x: N, y: N) -> Result<(), PaintErr>
     where
         T: Paint,
@@ -70,12 +75,17 @@ impl Canvas {
         Ok(())
     }
 
+    /// Prints the canvas content to stdout.
     pub fn print(&self) {
         let is_raw = term::crossterm::terminal::is_raw_mode_enabled().unwrap_or(false);
         let mut stdout = std::io::stdout();
         self.print_on(&mut stdout, is_raw).unwrap();
     }
 
+    /// Prints the canvas content to a specified writer.
+    ///
+    /// This method allows you to control where the canvas output goes and whether
+    /// to use raw terminal mode formatting.
     pub fn print_on<W>(&self, w: &mut W, is_raw: bool) -> std::io::Result<()>
     where
         W: Write,
@@ -99,15 +109,24 @@ impl Canvas {
         Ok(())
     }
 
+    /// Clears all pixels from the canvas.
+    ///
+    /// This removes all drawn content but preserves the canvas boundary settings.
+    /// The canvas remains the same size but becomes empty.
     pub fn clear(&mut self) {
         self.pixels = HashMap::new();
     }
 
+    /// Resets the canvas to its initial state.
+    ///
+    /// This clears all pixels and resets the boundary to default (unbounded).
+    /// The canvas will be completely empty and ready for new drawing.
     pub fn reset(&mut self) {
         self.bound = Bound::new();
         self.clear();
     }
 
+    /// Sets a pixel at the specified coordinates.
     pub fn set<T>(&mut self, x: T, y: T) -> &mut Self
     where
         T: Into<f64> + Copy,
@@ -125,20 +144,7 @@ impl Canvas {
         self
     }
 
-    pub fn set_f64(&mut self, x: f64, y: f64) -> &mut Self {
-        let tile = self.get_tile_f64(x, y);
-        let (x, y) = (round_f64(x), round_f64(y));
-        if let Some(pixel) = self.pixels.get_mut(&tile) {
-            pixel.set(x, y);
-        } else {
-            let mut pixel = Colored::new();
-
-            pixel.set(x, y);
-            self.pixels.insert(tile, pixel);
-        }
-        self
-    }
-
+    /// Sets a colored pixel at the specified coordinates.
     pub fn set_colorful<T>(&mut self, x: T, y: T, colors: Colors) -> &mut Self
     where
         T: Into<f64> + Copy,
@@ -159,6 +165,11 @@ impl Canvas {
         self
     }
 
+    /// Toggles a pixel at the specified coordinates.
+    ///
+    /// This method toggles the state of a pixel at the given coordinates.
+    /// If a pixel exists, it will be toggled. If no pixel exists, a new one
+    /// will be created in the toggled state.
     pub fn toggle<T>(&mut self, x: T, y: T) -> &mut Self
     where
         T: Into<f64> + Copy,
@@ -176,6 +187,7 @@ impl Canvas {
         self
     }
 
+    /// Draws a line between two points.
     pub fn line<T>(&mut self, xy1: (T, T), xy2: (T, T)) -> &mut Self
     where
         T: Into<f64>,
@@ -206,15 +218,30 @@ impl Canvas {
         self
     }
 
+    /// Gets the current size of the canvas.
     pub fn get_size(&self) -> (u32, u32) {
         let ((minx, maxx), (miny, maxy)) = self.bound.get_bound();
         ((maxx - minx + 1) as u32, (maxy - miny + 1) as u32)
     }
 
-    pub fn set_range(&mut self, range_x: (i32, i32), range_y: (i32, i32)) {
-        self.bound.set_bound(range_x, range_y);
+    /// Sets the boundary of the canvas.
+    ///
+    /// By default, the canvas is unbounded and will automatically expand as new pixels are drawn.
+    /// However, during animations, this automatic expansion can cause the drawing to shift
+    /// as the canvas size changes, which is undesirable.
+    ///
+    /// Setting a fixed boundary prevents the canvas from growing beyond specified limits.
+    /// Note: Drawing outside the boundary will still cause the canvas to expand if needed.
+    ///
+    /// To make the boundary truly fixed (preventing any expansion), call [`fixed_bound`](Self::fixed_bound).
+    pub fn set_bound(&mut self, bound_x: (i32, i32), bound_y: (i32, i32)) {
+        self.bound.set_bound(bound_x, bound_y);
     }
 
+    /// Sets whether the canvas boundary is fixed.
+    ///
+    /// When `is_fixed` is true, the canvas boundary cannot be expanded beyond the current limits.
+    /// This is useful for creating fixed-size canvases that won't grow during drawing operations.
     pub fn fixed_bound(&mut self, is_fixed: bool) {
         self.bound.fixed_bound(is_fixed);
     }
@@ -227,38 +254,20 @@ impl Canvas {
         self.bound.update(tile);
         tile
     }
-
-    fn get_tile_f64(&mut self, x: f64, y: f64) -> Tile {
-        let tile = Tile::from_xy(x, y);
-        self.bound.update(tile);
-        tile
-    }
 }
 
 impl Draw for Canvas {
     fn draw(&mut self, chunk: &mut Chunk) -> Result<(), DrawErr> {
-        let ((minx, _), (_, maxy)) = self.bound.get_bound();
         for (t, p) in &self.pixels {
-            let (x, y) = t.get();
-            let x = x - minx;
-            let y = maxy - y;
-            let x = x as u16;
-            let y = y as u16;
-            if let Some(c) = chunk.get_mut(x, y) {
-                let p: Stylized = (*p).into();
-                *c = p;
+            if let Some((x, y)) = self.bound.get_terminal_xy(*t) {
+                let x = x as u16;
+                let y = y as u16;
+                if let Some(c) = chunk.get_mut(x, y) {
+                    let p: Stylized = (*p).into();
+                    *c = p;
+                }
             }
         }
         Ok(())
-    }
-}
-
-impl Update for Canvas {
-    fn on_events(&mut self, _events: &[Event]) -> Result<(), DrawErr> {
-        Ok(())
-    }
-
-    fn update(&mut self) -> Result<bool, DrawErr> {
-        Ok(false)
     }
 }

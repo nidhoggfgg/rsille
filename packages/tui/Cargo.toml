@@ -7,6 +7,6 @@ license = "MIT"
 [dependencies]
 term = { path = "../term" }
 render = { path = "../render" }
-unicode-width = "0.2.0"
-tokio = { version = "1", features = ["full"] }
-rayon = "1.10.0"
+unicode-width = {workspace = true}
+tokio = { workspace = true }
+rayon = { workspace = true }

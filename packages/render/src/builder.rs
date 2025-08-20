@@ -1,6 +1,10 @@
 use term::crossterm::event::{KeyCode, KeyEvent};
 
-use crate::{chunk::{Position, Size}, event_loop::EventLoop, Draw, DrawUpdate, Render};
+use crate::{
+    Draw, DrawUpdate, Render,
+    chunk::{Position, Size},
+    event_loop::EventLoop,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Hash)]
 pub struct Builder {
@@ -20,7 +24,10 @@ pub struct Builder {
 impl Builder {
     pub fn new() -> Self {
         Self {
-            size: Size { width: 0, height: 0 },
+            size: Size {
+                width: 0,
+                height: 0,
+            },
             pos: Position { x: 0, y: 0 },
             enable_raw_mode: false,
             enable_alt_screen: false,
@@ -93,7 +100,10 @@ impl Builder {
     }
 
     pub fn size(&mut self, size: (u16, u16)) -> &mut Self {
-        self.size = Size { width: size.0, height: size.1 };
+        self.size = Size {
+            width: size.0,
+            height: size.1,
+        };
         self
     }
 

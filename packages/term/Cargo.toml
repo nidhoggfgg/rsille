@@ -5,4 +5,4 @@ edition = "2021"
 license = "MIT"
 
 [dependencies]
-crossterm = { version = "0.28.1", features = ["event-stream"] }
+crossterm = { workspace = true }

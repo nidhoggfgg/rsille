@@ -1,4 +1,4 @@
-use crate::{chunk::Chunk, DrawErr};
+use crate::{DrawErr, chunk::Chunk};
 
 pub trait Draw {
     fn draw(&mut self, chunk: &mut Chunk) -> Result<(), DrawErr>;

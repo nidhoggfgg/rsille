@@ -11,6 +11,7 @@ pub fn round_f64(v: f64) -> i32 {
     v.round() as i32
 }
 
+/// return (col, row)
 pub fn get_pos<T>(x: T, y: T) -> (i32, i32)
 where
     T: Into<f64>,
