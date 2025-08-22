@@ -48,7 +48,7 @@ impl<'a> Text<'a> {
 }
 
 impl Draw for Text<'_> {
-    fn draw(&mut self, chunk: &mut Chunk) -> Result<(), DrawErr> {
+    fn draw(&mut self, mut chunk: Chunk) -> Result<(), DrawErr> {
         for (y, line) in self.text.iter().enumerate() {
             for (x, c) in line.content.iter().flat_map(|x| x.into_iter()).enumerate() {
                 if let Some(t) = chunk.get_mut(x as u16, y as u16) {

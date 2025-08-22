@@ -1,3 +1,4 @@
+pub mod area;
 mod builder;
 pub mod chunk;
 mod draw_err;

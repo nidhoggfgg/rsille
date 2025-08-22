@@ -1,6 +1,7 @@
 use render::DrawUpdate;
 
 pub mod attr;
+pub mod border;
 pub mod composite;
 pub mod widgets;
 

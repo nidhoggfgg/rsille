@@ -29,7 +29,7 @@ where
     T: Draw,
     F: Fn(&mut T) + 'static,
 {
-    fn draw(&mut self, chunk: &mut Chunk) -> Result<(), DrawErr> {
+    fn draw(&mut self, chunk: Chunk) -> Result<(), DrawErr> {
         self.component.draw(chunk)
     }
 }

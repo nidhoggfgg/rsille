@@ -12,7 +12,7 @@ pub struct Slot {
 }
 
 impl Draw for Slot {
-    fn draw(&mut self, chunk: &mut Chunk) -> Result<(), DrawErr> {
+    fn draw(&mut self, chunk: Chunk) -> Result<(), DrawErr> {
         self.thing.draw(chunk)
     }
 }
