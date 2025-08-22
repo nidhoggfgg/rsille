@@ -2,7 +2,7 @@ use term::crossterm::event::{KeyCode, KeyEvent};
 
 use crate::{
     Draw, DrawUpdate, Render,
-    chunk::{Position, Size},
+    area::{Position, Size},
     event_loop::EventLoop,
 };
 

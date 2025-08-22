@@ -53,7 +53,7 @@ impl<T> Draw for Interactive<T>
 where
     T: Draw,
 {
-    fn draw(&mut self, chunk: &mut Chunk) -> Result<(), DrawErr> {
+    fn draw(&mut self, chunk: Chunk) -> Result<(), DrawErr> {
         self.component.draw(chunk)
     }
 }

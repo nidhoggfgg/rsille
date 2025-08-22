@@ -257,7 +257,7 @@ impl Canvas {
 }
 
 impl Draw for Canvas {
-    fn draw(&mut self, chunk: &mut Chunk) -> Result<(), DrawErr> {
+    fn draw(&mut self, mut chunk: Chunk) -> Result<(), DrawErr> {
         for (t, p) in &self.pixels {
             if let Some((x, y)) = self.bound.get_terminal_xy(*t) {
                 let x = x as u16;

@@ -1,16 +1,20 @@
-use std::io;
-
-use term::crossterm::{cursor::MoveTo, queue, style::Print};
+use term::crossterm::{
+    cursor::MoveTo,
+    queue,
+    style::Print,
+    terminal::{Clear, ClearType},
+};
 
 use crate::{
     Builder, Draw, DrawErr, DrawUpdate,
-    chunk::{Chunk, Position},
+    area::{Area, Position, Size},
+    chunk::{Buffer, Chunk},
 };
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Render<W, T> {
     pub(crate) pos: Position,
-    pub(crate) chunk: Chunk,
+    pub(crate) buffer: Buffer,
     pub(crate) thing: T,
     out: W,
     clear: bool,
@@ -22,27 +26,32 @@ where
     W: std::io::Write,
     T: Draw + Sync + Send,
 {
-    pub fn render(&mut self) -> io::Result<()> {
-        self.thing.draw(&mut self.chunk)?;
+    pub fn render(&mut self) -> std::io::Result<()> {
+        // the position in chunk should be (0, 0), the render already move to the target position
+        let area: Area = self.buffer.size.into();
+        let chunk = Chunk::new(&mut self.buffer, area);
+        self.thing.draw(chunk)?;
 
         if self.clear {
-            queue!(
-                self.out,
-                term::crossterm::terminal::Clear(term::crossterm::terminal::ClearType::All)
-            )?;
+            queue!(self.out, Clear(ClearType::All))?;
         }
 
         queue!(self.out, MoveTo(self.pos.x, self.pos.y))?;
 
-        for (y, line) in self.chunk.lines().enumerate() {
-            if y >= self.chunk.size.height as usize {
+        for (y, line) in self
+            .buffer
+            .content
+            .chunks(self.buffer.size.width as usize)
+            .enumerate()
+        {
+            if y >= self.buffer.size.height as usize {
                 break;
             }
 
             let mut w = 0;
             for c in line {
                 w += c.width() as u16;
-                if w > self.chunk.size.width {
+                if w > self.buffer.size.width {
                     w -= c.width() as u16;
                     break;
                 }
@@ -50,14 +59,14 @@ where
                 c.queue(&mut self.out)?
             }
 
-            if w < self.chunk.size.width {
+            if w < self.buffer.size.width {
                 queue!(
                     self.out,
-                    Print(" ".repeat(self.chunk.size.width as usize - w as usize))
+                    Print(" ".repeat(self.buffer.size.width as usize - w as usize))
                 )?;
             }
 
-            if y < self.chunk.size.height as usize - 1 {
+            if y < self.buffer.size.height as usize - 1 {
                 queue!(self.out, MoveTo(self.pos.x, self.pos.y + y as u16 + 1))?;
             }
         }
@@ -76,7 +85,10 @@ where
     {
         Self {
             pos: builder.pos,
-            chunk: Chunk::empty((builder.size.width, builder.size.height)),
+            buffer: Buffer::new(Size {
+                width: builder.size.width,
+                height: builder.size.height,
+            }),
             thing,
             out: writer,
             clear: builder.clear,
@@ -85,6 +97,7 @@ where
     }
 }
 
+// do not impl DrawUpdate for Render, it's not a drawable thing
 impl<W, T> Render<W, T>
 where
     W: std::io::Write,
@@ -117,7 +130,7 @@ mod tests {
     }
 
     impl Draw for Text {
-        fn draw(&mut self, chunk: &mut Chunk) -> Result<(), DrawErr> {
+        fn draw(&mut self, mut chunk: Chunk) -> Result<(), DrawErr> {
             for (y, line) in self.lines.iter().enumerate() {
                 for (x, c) in line.chars().enumerate() {
                     if let Some(t) = chunk.get_mut(x as u16, y as u16) {
@@ -141,7 +154,7 @@ mod tests {
 
         let result = String::from_utf8(buffer).unwrap();
 
-        assert_eq!(result, "Hello, wor\nHello, wor");
+        assert_eq!(result, "\u{1b}[1;1HHello, wor\u{1b}[2;1HHello, wor");
     }
 
     #[test]
@@ -155,7 +168,7 @@ mod tests {
         render.render().unwrap();
 
         let result = String::from_utf8(buffer).unwrap();
-        assert_eq!(result, "\u{1b}[2JHello, world!       ");
+        assert_eq!(result, "\u{1b}[2J\u{1b}[1;1HHello, world!       ");
     }
 
     #[test]
@@ -169,6 +182,21 @@ mod tests {
         render.render().unwrap();
 
         let result = String::from_utf8(buffer).unwrap();
-        assert_eq!(result, "你好 ");
+        assert_eq!(result, "\u{1b}[1;1H你好 ");
+    }
+
+    #[test]
+    fn test_render_position() {
+        let thing = Text::new("test line 1\ntest line 2");
+        let mut buffer = Vec::new();
+        let mut render = Builder::new()
+            .size((10, 2))
+            .clear(false)
+            .pos((10, 10))
+            .build_render(thing, &mut buffer);
+        render.render().unwrap();
+
+        let result = String::from_utf8(buffer).unwrap();
+        assert_eq!(result, "\u{1b}[11;11Htest line \u{1b}[12;11Htest line ");
     }
 }

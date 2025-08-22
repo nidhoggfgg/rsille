@@ -44,7 +44,7 @@ where
     S: Clone + Send + Sync,
     F: FnMut(&mut T, &S) + 'static,
 {
-    fn draw(&mut self, chunk: &mut Chunk) -> Result<(), DrawErr> {
+    fn draw(&mut self, chunk: Chunk) -> Result<(), DrawErr> {
         self.component.draw(chunk)
     }
 }
