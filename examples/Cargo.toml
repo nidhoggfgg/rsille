@@ -19,3 +19,7 @@ path = "vivid_text.rs"
 [[example]]
 name = "basic_canvas"
 path = "basic_canvas.rs"
+
+[[example]]
+name = "boxed"
+path = "boxed.rs"
