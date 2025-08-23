@@ -8,7 +8,6 @@ use crate::tile::Tile;
 use crate::utils::round;
 
 use render::chunk::Chunk;
-use render::style::Stylized;
 use render::{Draw, DrawErr};
 use term::crossterm::cursor::MoveToNextLine;
 use term::crossterm::queue;
@@ -262,9 +261,8 @@ impl Draw for Canvas {
             if let Some((x, y)) = self.bound.get_terminal_xy(*t) {
                 let x = x as u16;
                 let y = y as u16;
-                if let Some(c) = chunk.get_mut(x, y) {
-                    let p: Stylized = (*p).into();
-                    *c = p;
+                if chunk.is_inside(x, y) {
+                    chunk.set(x, y, (*p).into())?;
                 }
             }
         }

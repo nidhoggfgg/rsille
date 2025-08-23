@@ -7,7 +7,7 @@ use term::crossterm::{
 
 use crate::{
     Builder, Draw, DrawErr, DrawUpdate,
-    area::{Area, Position, Size},
+    area::{Position, Size},
     chunk::{Buffer, Chunk},
 };
 
@@ -28,8 +28,8 @@ where
 {
     pub fn render(&mut self) -> std::io::Result<()> {
         // the position in chunk should be (0, 0), the render already move to the target position
-        let area: Area = self.buffer.size.into();
-        let chunk = Chunk::new(&mut self.buffer, area);
+        let buffer_size = self.buffer.size();
+        let chunk = Chunk::new(&mut self.buffer, buffer_size.into())?;
         self.thing.draw(chunk)?;
 
         if self.clear {
@@ -38,20 +38,15 @@ where
 
         queue!(self.out, MoveTo(self.pos.x, self.pos.y))?;
 
-        for (y, line) in self
-            .buffer
-            .content
-            .chunks(self.buffer.size.width as usize)
-            .enumerate()
-        {
-            if y >= self.buffer.size.height as usize {
+        for (y, line) in self.buffer.content().chunks(buffer_size.width as usize).enumerate() {
+            if y >= buffer_size.height as usize {
                 break;
             }
 
             let mut w = 0;
             for c in line {
                 w += c.width() as u16;
-                if w > self.buffer.size.width {
+                if w > buffer_size.width {
                     w -= c.width() as u16;
                     break;
                 }
@@ -59,14 +54,14 @@ where
                 c.queue(&mut self.out)?
             }
 
-            if w < self.buffer.size.width {
+            if w < buffer_size.width {
                 queue!(
                     self.out,
-                    Print(" ".repeat(self.buffer.size.width as usize - w as usize))
+                    Print(" ".repeat(buffer_size.width as usize - w as usize))
                 )?;
             }
 
-            if y < self.buffer.size.height as usize - 1 {
+            if y < buffer_size.height as usize - 1 {
                 queue!(self.out, MoveTo(self.pos.x, self.pos.y + y as u16 + 1))?;
             }
         }
@@ -115,7 +110,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Draw, DrawErr};
+    use crate::{style::Stylized, Draw, DrawErr};
 
     struct Text {
         lines: Vec<String>,
@@ -133,8 +128,8 @@ mod tests {
         fn draw(&mut self, mut chunk: Chunk) -> Result<(), DrawErr> {
             for (y, line) in self.lines.iter().enumerate() {
                 for (x, c) in line.chars().enumerate() {
-                    if let Some(t) = chunk.get_mut(x as u16, y as u16) {
-                        t.set_char(c);
+                    if let Err(_) = chunk.set(x as u16, y as u16, Stylized::raw(c)) {
+                        break;
                     }
                 }
             }
