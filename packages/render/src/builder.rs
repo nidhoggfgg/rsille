@@ -24,11 +24,8 @@ pub struct Builder {
 impl Builder {
     pub fn new() -> Self {
         Self {
-            size: Size {
-                width: 0,
-                height: 0,
-            },
-            pos: Position { x: 0, y: 0 },
+            size: Size::default(),
+            pos: Position::default(),
             enable_raw_mode: false,
             enable_alt_screen: false,
             enable_mouse_capture: false,
@@ -100,15 +97,12 @@ impl Builder {
     }
 
     pub fn size(&mut self, size: (u16, u16)) -> &mut Self {
-        self.size = Size {
-            width: size.0,
-            height: size.1,
-        };
+        self.size = size.into();
         self
     }
 
     pub fn pos(&mut self, pos: (u16, u16)) -> &mut Self {
-        self.pos = Position { x: pos.0, y: pos.1 };
+        self.pos = pos.into();
         self
     }
 
