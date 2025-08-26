@@ -1,4 +1,4 @@
-use render::{chunk::Chunk, Draw, DrawErr, Update};
+use render::{area::Size, chunk::Chunk, Draw, DrawErr, Update};
 use term::event::Event;
 
 use crate::{
@@ -60,5 +60,9 @@ where
 
     fn set_attr(&mut self, attr: SetAttr) {
         self.component.set_attr(attr);
+    }
+
+    fn size(&self) -> Size {
+        self.component.size()
     }
 }

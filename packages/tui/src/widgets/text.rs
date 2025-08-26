@@ -1,13 +1,15 @@
 use std::borrow::Cow;
 
-use render::{chunk::Chunk, style::StylizedLine, Draw, DrawErr, Update};
+use render::{area::Size, chunk::Chunk, style::StylizedLine, Draw, DrawErr, Update};
 use term::event::Event;
 
 use crate::{attr::Attr, Widget};
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Text<'a> {
     text: Vec<StylizedLine<'a>>,
     attr: Attr,
+    size: Size,
     updated: bool,
 }
 
@@ -16,16 +18,25 @@ impl<'a> Text<'a> {
     where
         T: Into<Cow<'a, str>>,
     {
-        let lines = match text.into() {
+        let lines: Vec<StylizedLine<'a>> = match text.into() {
             Cow::Borrowed(s) => s.lines().map(StylizedLine::from).collect(),
             Cow::Owned(s) => s
                 .lines()
                 .map(|x| StylizedLine::from(x.to_owned()))
                 .collect(),
         };
+        let size = Size {
+            width: lines
+                .iter()
+                .map(|x| x.content.iter().map(|y| y.width()).sum::<usize>() as u16)
+                .max()
+                .unwrap_or(0),
+            height: lines.len() as u16,
+        };
         Self {
             text: lines,
             updated: true,
+            size,
             attr: Default::default(),
         }
     }
@@ -50,8 +61,11 @@ impl<'a> Text<'a> {
 impl Draw for Text<'_> {
     fn draw(&mut self, mut chunk: Chunk) -> Result<(), DrawErr> {
         for (y, line) in self.text.iter().enumerate() {
-            for (x, c) in line.content.iter().flat_map(|x| x.into_iter()).enumerate() {
-                if let Err(_) = chunk.set(x as u16, y as u16, c) {
+            let mut real_x = 0;
+            for c in line.content.iter().flat_map(|x| x.into_iter()) {
+                if let Ok(l) = chunk.set(real_x, y as u16, c) {
+                    real_x += l as u16;
+                } else {
                     break;
                 }
             }
@@ -83,5 +97,9 @@ impl Widget for Text<'_> {
 
     fn set_attr(&mut self, attr: crate::attr::SetAttr) {
         self.attr.set(attr);
+    }
+
+    fn size(&self) -> Size {
+        self.size
     }
 }

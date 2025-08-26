@@ -23,3 +23,7 @@ path = "basic_canvas.rs"
 [[example]]
 name = "boxed"
 path = "boxed.rs"
+
+[[example]]
+name = "simple_grid"
+path = "simple_grid.rs"

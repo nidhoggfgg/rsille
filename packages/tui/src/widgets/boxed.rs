@@ -1,11 +1,16 @@
-use render::{chunk::Chunk, style::Stylized, Draw, DrawErr};
+use render::{area::Size, chunk::Chunk, style::Stylized, Draw, DrawErr, Update};
 
-use crate::border::Border;
+use crate::{
+    attr::{Attr, SetAttr},
+    border::Border,
+    Widget,
+};
 
 #[allow(unused)]
 pub struct Boxed<T> {
     inner: T,
     border: Border,
+    attr: Attr,
 }
 
 impl<T> Boxed<T> {
@@ -13,6 +18,7 @@ impl<T> Boxed<T> {
         Self {
             inner,
             border: Border::simple(),
+            attr: Attr::default(),
         }
     }
 
@@ -34,22 +40,56 @@ where
         self.inner.draw(inner_chunk)?;
 
         let area = chunk.area();
-        let size = area.size;
+        let size = area.size();
 
-        chunk.set(0, 0, Stylized::raw(self.border.lt))?;
-        chunk.set(size.width - 1, 0, Stylized::raw(self.border.rt))?;
-        chunk.set(0, size.height - 1, Stylized::raw(self.border.lb))?;
-        chunk.set(size.width - 1, size.height - 1, Stylized::raw(self.border.rb))?;
+        chunk.set_forced(0, 0, Stylized::raw(self.border.lt))?;
+        chunk.set_forced(size.width - 1, 0, Stylized::raw(self.border.rt))?;
+        chunk.set_forced(0, size.height - 1, Stylized::raw(self.border.lb))?;
+        chunk.set_forced(
+            size.width - 1,
+            size.height - 1,
+            Stylized::raw(self.border.rb),
+        )?;
 
         for x in 1..size.width - 1 {
-            chunk.set(x, 0, Stylized::raw(self.border.te))?;
-            chunk.set(x, size.height - 1, Stylized::raw(self.border.be))?;
+            chunk.set_forced(x, 0, Stylized::raw(self.border.te))?;
+            chunk.set_forced(x, size.height - 1, Stylized::raw(self.border.be))?;
         }
         for y in 1..size.height - 1 {
-            chunk.set(0, y, Stylized::raw(self.border.le))?;
-            chunk.set(size.width - 1, y, Stylized::raw(self.border.re))?;
+            chunk.set_forced(0, y, Stylized::raw(self.border.le))?;
+            chunk.set_forced(size.width - 1, y, Stylized::raw(self.border.re))?;
         }
 
         Ok(())
+    }
+}
+
+impl<T> Update for Boxed<T>
+where
+    T: Update,
+{
+    fn on_events(&mut self, events: &[term::event::Event]) -> Result<(), DrawErr> {
+        self.inner.on_events(events)
+    }
+
+    fn update(&mut self) -> Result<bool, DrawErr> {
+        self.inner.update()
+    }
+}
+
+impl<T> Widget for Boxed<T>
+where
+    T: Widget,
+{
+    fn set_attr(&mut self, attr: SetAttr) {
+        self.attr.set(attr);
+    }
+
+    fn get_attr(&self) -> &Attr {
+        &self.attr
+    }
+
+    fn size(&self) -> Size {
+        self.inner.size()
     }
 }

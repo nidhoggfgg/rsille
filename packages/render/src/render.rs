@@ -8,7 +8,8 @@ use term::crossterm::{
 use crate::{
     Builder, Draw, DrawErr, DrawUpdate,
     area::{Position, Size},
-    chunk::{Buffer, Chunk},
+    buffer::Buffer,
+    chunk::Chunk,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -38,13 +39,21 @@ where
 
         queue!(self.out, MoveTo(self.pos.x, self.pos.y))?;
 
-        for (y, line) in self.buffer.content().chunks(buffer_size.width as usize).enumerate() {
+        for (y, line) in self
+            .buffer
+            .content()
+            .chunks(buffer_size.width as usize)
+            .enumerate()
+        {
             if y >= buffer_size.height as usize {
                 break;
             }
 
             let mut w = 0;
             for c in line {
+                if c.is_occupied {
+                    continue;
+                }
                 w += c.width() as u16;
                 if w > buffer_size.width {
                     w -= c.width() as u16;
@@ -110,7 +119,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{style::Stylized, Draw, DrawErr};
+    use crate::{Draw, DrawErr, style::Stylized};
 
     struct Text {
         lines: Vec<String>,

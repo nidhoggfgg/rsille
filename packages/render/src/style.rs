@@ -92,8 +92,21 @@ impl Stylized {
     }
 }
 
+impl From<char> for Stylized {
+    fn from(c: char) -> Self {
+        Self::new(c, Default::default())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct StylizedLine<'a> {
     pub content: Vec<StylizedText<'a>>,
+}
+
+impl<'a> StylizedLine<'a> {
+    pub fn width(&self) -> usize {
+        self.content.iter().map(|x| x.width()).sum()
+    }
 }
 
 impl<'a> From<&'a str> for StylizedLine<'a> {
@@ -126,6 +139,7 @@ impl<'a> From<Vec<StylizedText<'a>>> for StylizedLine<'a> {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct StylizedText<'a> {
     pub content: Cow<'a, str>,
     pub style: Style,
@@ -151,6 +165,10 @@ impl<'a> StylizedText<'a> {
             Stylized::new(c, self.style).queue(buffer)?;
         }
         Ok(())
+    }
+
+    pub fn width(&self) -> usize {
+        self.content.chars().map(|x| x.width().unwrap_or(0)).sum()
     }
 }
 
