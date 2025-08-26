@@ -49,25 +49,12 @@ where
                 break;
             }
 
-            let mut w = 0;
             for c in line {
                 if c.is_occupied {
                     continue;
                 }
-                w += c.width() as u16;
-                if w > buffer_size.width {
-                    w -= c.width() as u16;
-                    break;
-                }
 
                 c.queue(&mut self.out)?
-            }
-
-            if w < buffer_size.width {
-                queue!(
-                    self.out,
-                    Print(" ".repeat(buffer_size.width as usize - w as usize))
-                )?;
             }
 
             if y < buffer_size.height as usize - 1 {
@@ -136,8 +123,11 @@ mod tests {
     impl Draw for Text {
         fn draw(&mut self, mut chunk: Chunk) -> Result<(), DrawErr> {
             for (y, line) in self.lines.iter().enumerate() {
-                for (x, c) in line.chars().enumerate() {
-                    if let Err(_) = chunk.set(x as u16, y as u16, Stylized::raw(c)) {
+                let mut x = 0;
+                for c in line.chars() {
+                    if let Ok(w) = chunk.set(x as u16, y as u16, Stylized::raw(c)) {
+                        x += w;
+                    } else {
                         break;
                     }
                 }
