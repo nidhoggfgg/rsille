@@ -27,7 +27,7 @@ members = [
     "packages/canvas",
     "packages/render",
     "packages/tui",
-    "packages/term", "examples",
+    "packages/term",
 ]
 resolver = "3"
 exclude = ["examples"]
