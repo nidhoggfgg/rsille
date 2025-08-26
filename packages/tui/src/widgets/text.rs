@@ -5,7 +5,7 @@ use term::event::Event;
 
 use crate::{attr::Attr, Widget};
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct Text<'a> {
     text: Vec<StylizedLine<'a>>,
     attr: Attr,

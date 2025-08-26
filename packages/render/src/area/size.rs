@@ -1,6 +1,6 @@
-use std::cmp::Ordering;
+use std::ops::Add;
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Copy, Default)]
+#[derive(Debug, Clone, Hash, Copy, Default)]
 pub struct Size {
     pub width: u16,
     pub height: u16,
@@ -46,6 +46,10 @@ impl Size {
 
         (width_parts, height_parts)
     }
+
+    pub fn less_any(&self, other: Size) -> bool {
+        self.width < other.width || self.height < other.height
+    }
 }
 
 impl From<(u16, u16)> for Size {
@@ -60,79 +64,16 @@ impl From<Size> for (u16, u16) {
     }
 }
 
-impl PartialEq<(u16, u16)> for Size {
-    fn eq(&self, other: &(u16, u16)) -> bool {
-        self.width == other.0 && self.height == other.1
-    }
-}
-
-impl PartialEq<Size> for (u16, u16) {
-    fn eq(&self, other: &Size) -> bool {
-        self.0 == other.width && self.1 == other.height
-    }
-}
-
-impl PartialOrd<(u16, u16)> for Size {
-    fn partial_cmp(&self, other: &(u16, u16)) -> Option<Ordering> {
-        Some(self.width.cmp(&other.0).then(self.height.cmp(&other.1)))
-    }
-}
-
-impl PartialOrd<Size> for (u16, u16) {
-    fn partial_cmp(&self, other: &Size) -> Option<Ordering> {
-        Some(self.0.cmp(&other.width).then(self.1.cmp(&other.height)))
+impl Add<Size> for Size {
+    type Output = Size;
+    fn add(self, rhs: Size) -> Self::Output {
+        (self.width + rhs.width, self.height + rhs.height).into()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_partial_eq() {
-        assert_eq!(
-            Size {
-                width: 10,
-                height: 10
-            },
-            (10, 10)
-        );
-        assert_eq!(
-            (10, 10),
-            Size {
-                width: 10,
-                height: 10
-            }
-        );
-    }
-
-    #[test]
-    fn test_partial_ord() {
-        assert!(
-            Size {
-                width: 10,
-                height: 10
-            } < (11, 10)
-        );
-        assert!(
-            Size {
-                width: 10,
-                height: 10
-            } < (10, 11)
-        );
-        assert!(
-            Size {
-                width: 10,
-                height: 10
-            } > (9, 10)
-        );
-        assert!(
-            Size {
-                width: 10,
-                height: 10
-            } > (10, 9)
-        );
-    }
 
     #[test]
     fn test_split_mxn_basic() {
