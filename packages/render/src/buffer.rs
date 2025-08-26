@@ -4,7 +4,7 @@ use crate::{
     style::Stylized,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct Buffer {
     size: Size,
     content: Vec<Cell>,
@@ -20,11 +20,11 @@ impl Buffer {
     }
 
     pub fn index(&self, pos: Position) -> Option<usize> {
-        if pos.x < self.size.width && pos.y < self.size.height {
-            Some((pos.y * self.size.width + pos.x) as usize)
-        } else {
-            None
+        if self.size.less_any((pos.x, pos.y).into()) {
+            return None;
         }
+
+        Some((pos.y * self.size.width + pos.x) as usize)
     }
 
     pub fn is_occupied(&self, pos: Position) -> bool {
@@ -98,7 +98,7 @@ impl Buffer {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct Cell {
     pub content: Stylized,
     pub is_occupied: bool,

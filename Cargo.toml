@@ -8,6 +8,7 @@ keywords = ["braille", "terminal", "tui", "cli", "animation"]
 readme = "README.md"
 license = "MIT"
 repository = "https://github.com/nidhoggfgg/rsille.git"
+exclude = ["examples", "imgs", "pyrsille"]
 
 [dependencies]
 canvas = { path = "packages/canvas" }
@@ -23,19 +24,13 @@ default = []
 
 [workspace]
 members = [
-    # pub
-    "pyrsille",
-
-    # internal
     "packages/canvas",
     "packages/render",
     "packages/tui",
-    "packages/term",
-
-    # examples
-    "examples",
+    "packages/term", "examples",
 ]
 resolver = "3"
+exclude = ["examples"]
 
 [workspace.dependencies]
 tokio = { version = "1", features = ["full"] }

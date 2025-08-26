@@ -6,7 +6,7 @@ use crate::{
     event_loop::EventLoop,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Hash)]
+#[derive(Debug, Clone, Copy, Hash)]
 pub struct Builder {
     pub(super) enable_raw_mode: bool,
     pub(super) enable_alt_screen: bool,

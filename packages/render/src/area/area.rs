@@ -3,12 +3,13 @@ use crate::{
     area::{Position, Size},
 };
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Copy, Default)]
+#[derive(Debug, Clone, Hash, Copy, Default)]
 pub struct Area {
     pos: Position,
     size: Size,
 }
 
+// x, y in Area is relative to the postion
 impl Area {
     pub fn new(pos: Position, size: Size) -> Self {
         Self { pos, size }
@@ -27,10 +28,7 @@ impl Area {
             return None;
         }
 
-        Some(Position {
-            x: x + self.pos.x,
-            y: y + self.pos.y,
-        })
+        Some((x + self.pos.x, y + self.pos.y).into())
     }
 
     pub fn is_inside(&self, x: u16, y: u16) -> bool {
@@ -38,20 +36,18 @@ impl Area {
     }
 
     pub fn shrink(self, top: u16, bottom: u16, left: u16, right: u16) -> Result<Self, DrawErr> {
-        if self.size < (left + right, top + bottom) {
+        if self.size.less_any((right, bottom).into()) {
             return Err(DrawErr);
         }
 
         Ok(Self {
-            pos: Position {
-                x: self.pos.x + left,
-                y: self.pos.y + top,
-            },
-            size: Size {
-                width: self.size.width - right,
-                height: self.size.height - bottom,
-            },
+            pos: (self.pos.x + left, self.pos.y + top).into(),
+            size: (self.size.width - right, self.size.height - bottom).into(),
         })
+    }
+
+    pub fn real_size(&self) -> Size {
+        (self.size.width + self.pos.x, self.size.height + self.pos.y).into()
     }
 }
 

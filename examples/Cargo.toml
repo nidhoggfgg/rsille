@@ -1,9 +1,7 @@
 [package]
-name = "examples"
+name = "rsille_example"
 version = "0.1.0"
-edition = "2021"
-license = "MIT"
-publish = false
+edition = "2024"
 
 [dependencies]
 rsille = { path = "../" }

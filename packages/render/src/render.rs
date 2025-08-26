@@ -5,14 +5,9 @@ use term::crossterm::{
     terminal::{Clear, ClearType},
 };
 
-use crate::{
-    Builder, Draw, DrawErr, DrawUpdate,
-    area::{Position, Size},
-    buffer::Buffer,
-    chunk::Chunk,
-};
+use crate::{Builder, Draw, DrawErr, DrawUpdate, area::Position, buffer::Buffer, chunk::Chunk};
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Default)]
 pub struct Render<W, T> {
     pub(crate) pos: Position,
     pub(crate) buffer: Buffer,
@@ -76,10 +71,7 @@ where
     {
         Self {
             pos: builder.pos,
-            buffer: Buffer::new(Size {
-                width: builder.size.width,
-                height: builder.size.height,
-            }),
+            buffer: Buffer::new(builder.size),
             thing,
             out: writer,
             clear: builder.clear,
