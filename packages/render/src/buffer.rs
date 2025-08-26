@@ -122,6 +122,7 @@ impl Cell {
         }
     }
 
+    #[allow(unused)]
     pub fn width(&self) -> usize {
         self.content.width()
     }
