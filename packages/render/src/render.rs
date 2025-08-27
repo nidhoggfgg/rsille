@@ -20,7 +20,7 @@ pub struct Render<W, T> {
 impl<W, T> Render<W, T>
 where
     W: std::io::Write,
-    T: Draw + Sync + Send,
+    T: Draw,
 {
     pub fn render(&mut self) -> std::io::Result<()> {
         // the position in chunk should be (0, 0), the render already move to the target position
@@ -66,7 +66,7 @@ where
 
     pub(crate) fn from_builder(builder: &Builder, thing: T, writer: W) -> Self
     where
-        T: Draw + Send + Sync + 'static,
+        T: Draw,
         W: std::io::Write,
     {
         Self {

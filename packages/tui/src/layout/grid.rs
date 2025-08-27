@@ -126,4 +126,8 @@ impl<const N: usize, const M: usize> Widget for Grid<N, M> {
     fn size(&self) -> Size {
         todo!()
     }
+
+    fn id(&self) -> String {
+        self.attr.id.clone()
+    }
 }
