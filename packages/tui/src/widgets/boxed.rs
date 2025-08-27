@@ -92,4 +92,8 @@ where
     fn size(&self) -> Size {
         self.inner.size()
     }
+
+    fn id(&self) -> String {
+        self.attr.id.clone()
+    }
 }

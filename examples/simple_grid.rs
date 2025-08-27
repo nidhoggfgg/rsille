@@ -3,8 +3,10 @@ use std::io::stdout;
 use rsille::{
     render,
     tui::{
+        dom::Document,
         layout::grid::Grid,
         widgets::{Boxed, Text},
+        Widget,
     },
 };
 
@@ -29,10 +31,14 @@ fn main() {
             Box::new(Text::new("dd\ndd")),
         ],
     ];
+
+    let mut doc = Document::new();
     let grid = Grid::<4, 3>::with_simple_border(widgets);
+    grid.register_widget(&mut doc);
+
     let mut render = render::Builder::new()
         .size((30, 15))
-        .build_render(grid, stdout());
+        .build_render(doc, stdout());
 
     render.render().unwrap();
 }

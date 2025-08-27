@@ -102,4 +102,8 @@ impl Widget for Text<'_> {
     fn size(&self) -> Size {
         self.size
     }
+
+    fn id(&self) -> String {
+        self.attr.id.clone()
+    }
 }

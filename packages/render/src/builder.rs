@@ -118,7 +118,7 @@ impl Builder {
 
     pub fn build_render<T, W>(&self, thing: T, writer: W) -> Render<W, T>
     where
-        T: Draw + Send + Sync + 'static,
+        T: Draw,
         W: std::io::Write,
     {
         Render::from_builder(self, thing, writer)
