@@ -1,7 +1,7 @@
-use crate::{DrawErr, chunk::Chunk};
+use crate::{DrawErr, area::Size, chunk::Chunk};
 
 pub trait Draw {
-    fn draw(&mut self, chunk: Chunk) -> Result<(), DrawErr>;
+    fn draw(&mut self, chunk: Chunk) -> Result<Size, DrawErr>;
 }
 
 pub trait Update {

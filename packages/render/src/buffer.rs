@@ -89,7 +89,7 @@ impl Buffer {
         self.size
     }
 
-    pub(crate) fn content(&self) -> &[Cell] {
+    pub fn content(&self) -> &[Cell] {
         &self.content
     }
 
@@ -99,13 +99,21 @@ impl Buffer {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct Cell {
+pub struct Cell {
     pub content: Stylized,
     pub is_occupied: bool,
     pub owner: Option<usize>,
 }
 
 impl Cell {
+    pub fn raw(c: char) -> Self {
+        Self {
+            content: Stylized::raw(c),
+            is_occupied: false,
+            owner: None,
+        }
+    }
+
     pub fn new(content: Stylized) -> Self {
         Self {
             content,
@@ -122,12 +130,10 @@ impl Cell {
         }
     }
 
-    #[allow(unused)]
     pub fn width(&self) -> usize {
         self.content.width()
     }
 
-    #[allow(unused)]
     pub fn width_cjk(&self) -> usize {
         self.content.width_cjk()
     }

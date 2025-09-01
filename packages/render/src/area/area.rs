@@ -36,13 +36,17 @@ impl Area {
     }
 
     pub fn shrink(self, top: u16, bottom: u16, left: u16, right: u16) -> Result<Self, DrawErr> {
-        if self.size.less_any((right, bottom).into()) {
+        if self.size.less_any((left + right, bottom + top).into()) {
             return Err(DrawErr);
         }
 
         Ok(Self {
             pos: (self.pos.x + left, self.pos.y + top).into(),
-            size: (self.size.width - right, self.size.height - bottom).into(),
+            size: (
+                self.size.width - left - right,
+                self.size.height - bottom - top,
+            )
+                .into(),
         })
     }
 

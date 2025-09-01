@@ -98,7 +98,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Draw, DrawErr, style::Stylized};
+    use crate::{Draw, DrawErr, area::Size, style::Stylized};
 
     struct Text {
         lines: Vec<String>,
@@ -113,7 +113,9 @@ mod tests {
     }
 
     impl Draw for Text {
-        fn draw(&mut self, mut chunk: Chunk) -> Result<(), DrawErr> {
+        fn draw(&mut self, mut chunk: Chunk) -> Result<Size, DrawErr> {
+            let mut width = 0;
+            let mut height = 0;
             for (y, line) in self.lines.iter().enumerate() {
                 let mut x = 0;
                 for c in line.chars() {
@@ -123,8 +125,12 @@ mod tests {
                         break;
                     }
                 }
+                if x > width {
+                    width = x;
+                }
+                height = y + 1;
             }
-            Ok(())
+            Ok((width as u16, height as u16).into())
         }
     }
 

@@ -7,17 +7,9 @@ edition = "2024"
 rsille = { path = "../" }
 
 [[example]]
-name = "basic_text"
-path = "basic_text.rs"
-
-[[example]]
 name = "basic_canvas"
 path = "basic_canvas.rs"
 
 [[example]]
-name = "boxed"
-path = "boxed.rs"
-
-[[example]]
-name = "simple_grid"
-path = "simple_grid.rs"
+name = "simple"
+path = "simple.rs"
