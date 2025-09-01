@@ -7,6 +7,7 @@ use crate::braille::{Pixel, PixelOp};
 use crate::tile::Tile;
 use crate::utils::round;
 
+use render::area::Size;
 use render::chunk::Chunk;
 use render::{Draw, DrawErr};
 use term::crossterm::cursor::MoveToNextLine;
@@ -256,7 +257,7 @@ impl Canvas {
 }
 
 impl Draw for Canvas {
-    fn draw(&mut self, mut chunk: Chunk) -> Result<(), DrawErr> {
+    fn draw(&mut self, mut chunk: Chunk) -> Result<Size, DrawErr> {
         for (t, p) in &self.pixels {
             if let Some((x, y)) = self.bound.get_terminal_xy(*t) {
                 let x = x as u16;
@@ -266,6 +267,6 @@ impl Draw for Canvas {
                 }
             }
         }
-        Ok(())
+        Ok(chunk.area().size())
     }
 }

@@ -1,5 +1,3 @@
-mod boxed;
-mod text;
-
-pub use boxed::Boxed;
-pub use text::Text;
+pub mod div;
+pub mod paragraph;
+pub mod span;
