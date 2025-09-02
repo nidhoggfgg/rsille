@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 #[derive(Debug, Clone, PartialEq, Eq, Copy)]
 pub enum Tag {
     // 文档结构标签
@@ -146,6 +148,24 @@ impl From<&str> for Tag {
 
             _ => Tag::Div, // 默认使用div标签
         }
+    }
+}
+
+impl From<String> for Tag {
+    fn from(value: String) -> Self {
+        value.as_str().into()
+    }
+}
+
+impl From<Cow<'_, str>> for Tag {
+    fn from(value: Cow<'_, str>) -> Self {
+        value.into_owned().into()
+    }
+}
+
+impl From<&tl::Bytes<'_>> for Tag {
+    fn from(value: &tl::Bytes<'_>) -> Self {
+        String::from_utf8_lossy(value.as_bytes().to_ascii_lowercase().as_slice()).into()
     }
 }
 

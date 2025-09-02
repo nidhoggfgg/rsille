@@ -1,8 +1,10 @@
-use render::{area::Size, chunk::Chunk, Draw, DrawErr};
+use render::area::Size;
+use render::chunk::Chunk;
+use render::DrawErr;
 
-use crate::style::Style;
-use crate::style::StyleDisplay;
-use crate::{node::Node, tag::Tag, Document};
+use crate::style::{Style, StyleDisplay};
+use crate::Document;
+use crate::{node::Node, tag::Tag};
 
 #[derive(Debug, Clone)]
 pub struct Element {
@@ -31,16 +33,10 @@ impl Element {
             children: Vec::new(),
         }
     }
-
-    pub fn register(&self, doc: &mut Document) {
-        for child in self.children.iter() {
-            child.register(doc);
-        }
-    }
 }
 
-impl Draw for Element {
-    fn draw(&mut self, mut chunk: Chunk) -> Result<Size, DrawErr> {
+impl Element {
+    pub fn draw_impl(&self, mut chunk: Chunk, doc: &Document) -> Result<Size, DrawErr> {
         if self.style.display == StyleDisplay::Hidden {
             return Ok(Size::default());
         }
@@ -51,8 +47,8 @@ impl Draw for Element {
 
         let available_size = chunk.area().size();
 
-        for child in &mut self.children {
-            let display = child.display();
+        for child in &self.children {
+            let display = child.display(&doc);
 
             // display: block then move to new line
             if display == StyleDisplay::Block || last_display == StyleDisplay::Block {
@@ -72,7 +68,7 @@ impl Draw for Element {
 
             // shrink the chunk to the right position
             let now_chunk = chunk.shrink(curr_y, 0, curr_x, 0)?;
-            let size = child.draw_impl(now_chunk, Some(&self.style))?;
+            let size = child.draw_impl(now_chunk, doc)?;
 
             if size.height > line_height {
                 line_height = size.height;

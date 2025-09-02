@@ -1,66 +1,90 @@
-use std::{cell::RefCell, rc::Rc};
-
 use render::style::{Style, StylizedLine};
 use render::{area::Size, chunk::Chunk, Draw, DrawErr};
 use term::crossterm::style::Colors;
 
 use crate::style::StyleDisplay;
-use crate::{Document, Element};
+use crate::{Document};
 
 #[derive(Debug, Clone)]
 pub enum Node {
-    Element(Rc<RefCell<Element>>),
+    Element(usize),
 
-    // text
     Text(String),
+    Comment(String),
 }
 
 impl Node {
-    pub fn register(&self, doc: &mut Document) {
-        if let Node::Element(element) = self {
-            doc.register(element.borrow().id.clone(), element.clone());
-            element.borrow().register(doc);
-        }
-    }
-
-    pub fn display(&self) -> StyleDisplay {
+    pub fn display(&self, doc: &Document) -> StyleDisplay {
         match self {
-            Node::Element(element) => element.borrow().style.display,
+            Node::Element(idx) => doc.elements[*idx].style.display,
             Node::Text(_) => StyleDisplay::Inline,
+            Node::Comment(_) => StyleDisplay::Hidden,
         }
     }
 }
 
+fn draw_text(text: &str, mut chunk: Chunk, style: Option<&crate::style::Style>) -> Result<Size, DrawErr> {
+    let mut color = None;
+    if let Some(style) = style {
+        color = style.color;
+    }
+    let lines: Vec<StylizedLine> = text
+        .lines()
+        .map(|l| {
+            StylizedLine::new(
+                l,
+                Style {
+                    colors: Some(Colors {
+                        foreground: color,
+                        background: None,
+                    }),
+                    attr: None,
+                },
+            )
+        })
+        .collect();
+    let mut max_width = 0u16;
+    let mut height = 0u16;
+    for (y, line) in lines.iter().enumerate() {
+        let y = y as u16;
+        if y >= chunk.area().size().height {
+            break;
+        }
+        let mut real_x = 0u16;
+        for c in line.content.iter().flat_map(|t| t.into_iter()) {
+            if real_x >= chunk.area().size().width {
+                break;
+            }
+            if let Ok(l) = chunk.set(real_x, y, c) {
+                real_x += l as u16;
+            } else {
+                break;
+            }
+        }
+        if real_x > max_width {
+            max_width = real_x;
+        }
+        height = y + 1;
+    }
+    Ok((max_width, height).into())
+}
+
 impl Node {
-    pub fn draw_impl(
-        &mut self,
-        mut chunk: Chunk,
-        style: Option<&crate::style::Style>,
-    ) -> Result<Size, DrawErr> {
+    pub fn draw_impl(&self, chunk: Chunk, doc: &Document) -> Result<Size, DrawErr> {
         match self {
-            Node::Element(element) => element.borrow_mut().draw(chunk),
+            Node::Element(idx) => doc.elements[*idx].draw_impl(chunk, doc),
+            Node::Text(text) => draw_text(text, chunk, None),
+            Node::Comment(_) => Ok(Size::default()),
+        }
+    }
+}
+
+impl Draw for Node {
+    fn draw(&mut self, mut chunk: Chunk) -> Result<Size, DrawErr> {
+        match self {
+            Node::Element(_) => Err(DrawErr),
             Node::Text(text) => {
-                let mut color = None;
-
-                if let Some(style) = style {
-                    color = style.color;
-                }
-
-                let lines: Vec<StylizedLine> = text
-                    .lines()
-                    .map(|l| {
-                        StylizedLine::new(
-                            l,
-                            Style {
-                                colors: Some(Colors {
-                                    foreground: color,
-                                    background: None,
-                                }),
-                                attr: None,
-                            },
-                        )
-                    })
-                    .collect();
+                let lines: Vec<StylizedLine> = text.lines().map(StylizedLine::from).collect();
                 let mut max_width = 0u16;
                 let mut height = 0u16;
                 for (y, line) in lines.iter().enumerate() {
@@ -86,15 +110,11 @@ impl Node {
                 }
                 Ok((max_width, height).into())
             }
+            Node::Comment(_) => Ok(Size::default()),
         }
     }
 }
 
-impl Draw for Node {
-    fn draw(&mut self, chunk: Chunk) -> Result<Size, DrawErr> {
-        self.draw_impl(chunk, None)
-    }
-}
 
 #[cfg(test)]
 mod tests {
