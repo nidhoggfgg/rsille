@@ -10,3 +10,4 @@ render = { path = "../render" }
 unicode-width = {workspace = true}
 tokio = { workspace = true }
 rayon = { workspace = true }
+tl = { workspace = true }

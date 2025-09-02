@@ -39,6 +39,7 @@ unicode-width = "0.2.0"
 crossterm = { version = "0.28.1", features = ["event-stream"] }
 async-trait = "0.1.84"
 futures = "0.3.31"
+tl = "0.7.8"
 
 [profile.release]
 lto = true
