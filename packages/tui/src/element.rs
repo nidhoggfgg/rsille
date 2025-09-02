@@ -72,7 +72,7 @@ impl Draw for Element {
 
             // shrink the chunk to the right position
             let now_chunk = chunk.shrink(curr_y, 0, curr_x, 0)?;
-            let size = child.draw(now_chunk)?;
+            let size = child.draw_impl(now_chunk, Some(&self.style))?;
 
             if size.height > line_height {
                 line_height = size.height;
