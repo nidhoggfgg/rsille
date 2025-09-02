@@ -24,7 +24,11 @@ impl Document {
     }
 
     pub fn set_root(&mut self, root: Element) {
-        self.root = Some(Node::Element(Rc::new(RefCell::new(root))));
+        root.register(self);
+        let id = root.id.clone();
+        let root = Rc::new(RefCell::new(root));
+        self.elements.insert(id, root.clone());
+        self.root = Some(Node::Element(root));
     }
 
     pub fn register(&mut self, id: String, element: Rc<RefCell<Element>>) {

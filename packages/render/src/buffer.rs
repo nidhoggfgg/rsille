@@ -141,4 +141,12 @@ impl Cell {
     pub fn queue(&self, buffer: &mut impl std::io::Write) -> std::io::Result<()> {
         self.content.queue(buffer)
     }
+
+    pub fn has_color(&self) -> bool {
+        self.content.has_color()
+    }
+
+    pub fn has_attr(&self) -> bool {
+        self.content.has_attr()
+    }
 }

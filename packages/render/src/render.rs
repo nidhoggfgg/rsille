@@ -1,7 +1,7 @@
 use term::crossterm::{
     cursor::MoveTo,
     queue,
-    style::Print,
+    style::{Print, ResetColor},
     terminal::{Clear, ClearType},
 };
 
@@ -34,6 +34,7 @@ where
 
         queue!(self.out, MoveTo(self.pos.x, self.pos.y))?;
 
+        let mut has_color_cache = false;
         for (y, line) in self
             .buffer
             .content()
@@ -49,7 +50,12 @@ where
                     continue;
                 }
 
-                c.queue(&mut self.out)?
+                if has_color_cache && !c.has_color() {
+                    queue!(self.out, ResetColor)?;
+                }
+
+                c.queue(&mut self.out)?;
+                has_color_cache = c.has_color();
             }
 
             if y < buffer_size.height as usize - 1 {

@@ -24,6 +24,14 @@ impl Style {
     pub fn set_attr(&mut self, attr: Attributes) {
         self.attr = Some(attr);
     }
+
+    pub fn has_color(&self) -> bool {
+        self.colors.is_some()
+    }
+
+    pub fn has_attr(&self) -> bool {
+        self.attr.is_some()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Copy)]
@@ -46,6 +54,14 @@ impl Stylized {
 
     pub fn set_char(&mut self, c: char) {
         self.c = Some(c);
+    }
+
+    pub fn has_color(&self) -> bool {
+        self.style.has_color()
+    }
+
+    pub fn has_attr(&self) -> bool {
+        self.style.has_attr()
     }
 
     pub fn queue(&self, buffer: &mut impl io::Write) -> io::Result<()> {
@@ -106,6 +122,15 @@ pub struct StylizedLine<'a> {
 impl<'a> StylizedLine<'a> {
     pub fn width(&self) -> usize {
         self.content.iter().map(|x| x.width()).sum()
+    }
+
+    pub fn new<T>(content: T, style: Style) -> Self
+    where
+        T: Into<Cow<'a, str>>,
+    {
+        Self {
+            content: vec![StylizedText::new(content, style)],
+        }
     }
 }
 

@@ -1,7 +1,8 @@
 use std::{cell::RefCell, rc::Rc};
 
-use render::style::StylizedLine;
+use render::style::{Style, StylizedLine};
 use render::{area::Size, chunk::Chunk, Draw, DrawErr};
+use term::crossterm::style::Colors;
 
 use crate::style::StyleDisplay;
 use crate::{Document, Element};
@@ -30,12 +31,36 @@ impl Node {
     }
 }
 
-impl Draw for Node {
-    fn draw(&mut self, mut chunk: Chunk) -> Result<Size, DrawErr> {
+impl Node {
+    pub fn draw_impl(
+        &mut self,
+        mut chunk: Chunk,
+        style: Option<&crate::style::Style>,
+    ) -> Result<Size, DrawErr> {
         match self {
             Node::Element(element) => element.borrow_mut().draw(chunk),
             Node::Text(text) => {
-                let lines: Vec<StylizedLine> = text.lines().map(StylizedLine::from).collect();
+                let mut color = None;
+
+                if let Some(style) = style {
+                    color = style.color;
+                }
+
+                let lines: Vec<StylizedLine> = text
+                    .lines()
+                    .map(|l| {
+                        StylizedLine::new(
+                            l,
+                            Style {
+                                colors: Some(Colors {
+                                    foreground: color,
+                                    background: None,
+                                }),
+                                attr: None,
+                            },
+                        )
+                    })
+                    .collect();
                 let mut max_width = 0u16;
                 let mut height = 0u16;
                 for (y, line) in lines.iter().enumerate() {
@@ -62,6 +87,12 @@ impl Draw for Node {
                 Ok((max_width, height).into())
             }
         }
+    }
+}
+
+impl Draw for Node {
+    fn draw(&mut self, chunk: Chunk) -> Result<Size, DrawErr> {
+        self.draw_impl(chunk, None)
     }
 }
 
