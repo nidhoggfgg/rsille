@@ -67,6 +67,9 @@ where
             queue!(self.out, Print("\n"))?;
         }
 
+        // ensure the output is flushed to terminal
+        self.out.flush()?;
+
         Ok(())
     }
 
@@ -125,7 +128,7 @@ mod tests {
             for (y, line) in self.lines.iter().enumerate() {
                 let mut x = 0;
                 for c in line.chars() {
-                    if let Ok(w) = chunk.set(x as u16, y as u16, Stylized::raw(c)) {
+                    if let Ok(w) = chunk.set(x as u16, y as u16, Stylized::plain(c)) {
                         x += w;
                     } else {
                         break;

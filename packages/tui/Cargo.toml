@@ -7,7 +7,10 @@ license = "MIT"
 [dependencies]
 term = { path = "../term" }
 render = { path = "../render" }
-unicode-width = {workspace = true}
+unicode-width = { workspace = true }
 tokio = { workspace = true }
-rayon = { workspace = true }
-tl = { workspace = true }
+crossterm = { workspace = true }
+taffy = "0.9.1"
+thiserror = "2.0"
+async-trait = { workspace = true }
+futures = { workspace = true }
