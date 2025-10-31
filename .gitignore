@@ -4,3 +4,26 @@ test-files
 examples/test.rs
 .vscode
 *.log
+
+# Rust build artifacts
+debug/
+release/
+*.rs.bk
+*.rlib
+*.prof*
+
+# IDE
+.idea/
+
+# Environment
+.env*
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.swp

@@ -108,7 +108,7 @@ pub struct Cell {
 impl Cell {
     pub fn raw(c: char) -> Self {
         Self {
-            content: Stylized::raw(c),
+            content: Stylized::plain(c),
             is_occupied: false,
             owner: None,
         }

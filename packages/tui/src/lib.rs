@@ -1,10 +1,12 @@
-mod doc;
-mod element;
+pub mod app;
+pub mod buffer;
+pub mod error;
+pub mod event;
+pub mod layout;
 pub mod style;
-pub mod tag;
+pub mod widget;
 
-pub mod node;
-pub mod widgets;
+// Convenience re-exports
+pub mod prelude;
 
-pub use doc::Document;
-pub use element::*;
+pub use error::{Result, WidgetError};

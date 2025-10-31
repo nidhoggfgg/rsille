@@ -98,6 +98,8 @@ where
         // first enter alt screen then enable raw mode
         if alt_screen {
             term::enter_alt_screen().unwrap();
+            // Clear the alt screen to remove any previous content
+            term::clear().unwrap();
         }
         if raw_mode {
             term::enable_raw_mode().unwrap();
