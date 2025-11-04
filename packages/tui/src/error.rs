@@ -1,31 +1,47 @@
 //! Error types for the TUI framework
 
-use thiserror::Error;
+use std::fmt;
 
 /// Result type alias for TUI operations
 pub type Result<T> = std::result::Result<T, WidgetError>;
 
 /// Errors that can occur during widget operations
-#[derive(Debug, Error)]
+#[derive(Debug)]
 pub enum WidgetError {
-    #[error("Invalid widget configuration: {0}")]
     InvalidConfig(String),
-
-    #[error("Circular containment detected")]
     CircularContainment,
-
-    #[error("Widget not found: {0}")]
     WidgetNotFound(String),
-
-    #[error("Render error: {0}")]
     RenderError(String),
-
-    #[error("Layout error: {0}")]
     LayoutError(String),
-
-    #[error("Event handling error: {0}")]
     EventError(String),
+    Io(std::io::Error),
+}
 
-    #[error("IO error: {0}")]
-    Io(#[from] std::io::Error),
+impl fmt::Display for WidgetError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            WidgetError::InvalidConfig(msg) => write!(f, "Invalid widget configuration: {}", msg),
+            WidgetError::CircularContainment => write!(f, "Circular containment detected"),
+            WidgetError::WidgetNotFound(name) => write!(f, "Widget not found: {}", name),
+            WidgetError::RenderError(msg) => write!(f, "Render error: {}", msg),
+            WidgetError::LayoutError(msg) => write!(f, "Layout error: {}", msg),
+            WidgetError::EventError(msg) => write!(f, "Event handling error: {}", msg),
+            WidgetError::Io(err) => write!(f, "IO error: {}", err),
+        }
+    }
+}
+
+impl std::error::Error for WidgetError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            WidgetError::Io(err) => Some(err),
+            _ => None,
+        }
+    }
+}
+
+impl From<std::io::Error> for WidgetError {
+    fn from(err: std::io::Error) -> Self {
+        WidgetError::Io(err)
+    }
 }
