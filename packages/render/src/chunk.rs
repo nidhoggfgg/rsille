@@ -9,7 +9,7 @@ pub struct Chunk<'a> {
 impl<'a> Chunk<'a> {
     pub fn new(buffer: &'a mut Buffer, area: Area) -> Result<Self, DrawErr> {
         if buffer.size().less_any(area.real_size()) {
-            return Err(DrawErr);
+            return Err(DrawErr::invalid_area(area.real_size(), buffer.size()));
         }
 
         Ok(Self { buffer, area })
@@ -20,29 +20,39 @@ impl<'a> Chunk<'a> {
     }
 
     pub fn set(&mut self, x: u16, y: u16, content: Stylized) -> Result<usize, DrawErr> {
-        if x + content.width() as u16 > self.area.size().width {
-            return Err(DrawErr);
+        let content_width = content.width() as u16;
+        if x + content_width > self.area.size().width {
+            return Err(DrawErr::content_too_wide(
+                content_width,
+                self.area.size().width,
+                x,
+            ));
         }
 
         if let Some(pos) = self.area.to_absolute(x, y) {
             if self.buffer.is_occupied(pos) {
-                return Err(DrawErr);
+                return Err(DrawErr::position_occupied(pos));
             }
             self.buffer.set(pos, content)
         } else {
-            Err(DrawErr)
+            Err(DrawErr::out_of_bounds((x, y).into(), self.area.size()))
         }
     }
 
     pub fn set_forced(&mut self, x: u16, y: u16, content: Stylized) -> Result<usize, DrawErr> {
-        if x + content.width() as u16 > self.area.size().width {
-            return Err(DrawErr);
+        let content_width = content.width() as u16;
+        if x + content_width > self.area.size().width {
+            return Err(DrawErr::content_too_wide(
+                content_width,
+                self.area.size().width,
+                x,
+            ));
         }
 
         if let Some(pos) = self.area.to_absolute(x, y) {
             self.buffer.set_forced(pos, content)
         } else {
-            Err(DrawErr)
+            Err(DrawErr::out_of_bounds((x, y).into(), self.area.size()))
         }
     }
 
