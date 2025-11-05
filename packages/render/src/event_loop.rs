@@ -4,12 +4,14 @@ use std::{
     time::Duration,
 };
 
+use crossterm::{
+    cursor::{Hide, Show},
+    event::{DisableMouseCapture, EnableMouseCapture, Event, EventStream, KeyEvent},
+    execute,
+    terminal::{Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen},
+};
 use futures::{FutureExt, StreamExt};
 use log::{error, warn};
-use term::{
-    crossterm::event::EventStream,
-    event::{Event, KeyEvent},
-};
 use tokio::{select, sync::mpsc};
 
 use crate::{Builder, DrawErr, DrawUpdate, Render};
@@ -31,17 +33,17 @@ impl TerminalGuard {
     ) -> Result<Self, DrawErr> {
         // Setup terminal in the correct order
         if alt_screen {
-            term::enter_alt_screen().map_err(DrawErr::TerminalSetup)?;
-            term::clear().map_err(DrawErr::TerminalSetup)?;
+            execute!(stdout(), EnterAlternateScreen).map_err(DrawErr::TerminalSetup)?;
+            execute!(stdout(), Clear(ClearType::All)).map_err(DrawErr::TerminalSetup)?;
         }
         if raw_mode {
-            term::enable_raw_mode().map_err(DrawErr::TerminalSetup)?;
+            crossterm::terminal::enable_raw_mode().map_err(DrawErr::TerminalSetup)?;
         }
         if mouse_capture {
-            term::enable_mouse_capture().map_err(DrawErr::TerminalSetup)?;
+            execute!(stdout(), EnableMouseCapture).map_err(DrawErr::TerminalSetup)?;
         }
         if hide_cursor {
-            term::hide_cursor().map_err(DrawErr::TerminalSetup)?;
+            execute!(stdout(), Hide).map_err(DrawErr::TerminalSetup)?;
         }
 
         Ok(Self {
@@ -58,16 +60,16 @@ impl Drop for TerminalGuard {
         // Cleanup in reverse order, ignoring errors since we're in Drop
         // We use let _ to explicitly ignore errors since there's nothing we can do in Drop
         if self.hide_cursor {
-            let _ = term::show_cursor();
+            let _ = execute!(stdout(), Show);
         }
         if self.mouse_capture {
-            let _ = term::disable_mouse_capture();
+            let _ = execute!(stdout(), DisableMouseCapture);
         }
         if self.raw_mode {
-            let _ = term::disable_raw_mode();
+            let _ = crossterm::terminal::disable_raw_mode();
         }
         if self.alt_screen {
-            let _ = term::leave_alt_screen();
+            let _ = execute!(stdout(), LeaveAlternateScreen);
         }
     }
 }
@@ -287,11 +289,12 @@ fn event_thread(
                 maybe_event = event => {
                     match maybe_event {
                         Some(Ok(event)) => {
-                            let event = Event::from(event);
-                            if event == Event::Key(exit_code) {
-                                // User requested exit
-                                let _ = stop_tx.send(());
-                                break;
+                            if let Event::Key(key_event) = event {
+                                if key_event == exit_code {
+                                    // User requested exit
+                                    let _ = stop_tx.send(());
+                                    break;
+                                }
                             }
                             if events.len() < max_event_per_frame {
                                 events.push(event);

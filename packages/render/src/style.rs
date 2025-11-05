@@ -1,6 +1,6 @@
 use std::{borrow::Cow, io};
 
-use term::crossterm::{
+use crossterm::{
     queue,
     style::{Attributes, Colors, Print, SetAttributes, SetColors},
 };

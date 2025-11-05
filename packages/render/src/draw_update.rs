@@ -5,7 +5,7 @@ pub trait Draw {
 }
 
 pub trait Update {
-    fn on_events(&mut self, events: &[term::event::Event]) -> Result<(), DrawErr>;
+    fn on_events(&mut self, events: &[crossterm::event::Event]) -> Result<(), DrawErr>;
     fn update(&mut self) -> Result<bool, DrawErr>;
 }
 

@@ -4,7 +4,6 @@ pub mod message;
 
 pub use message::{MessageChannel, MessageSender};
 
-use crate::buffer::Buffer;
 use crate::error::Result;
 use crate::event::{Event, FocusManager, KeyCode, Modifiers};
 use crate::layout::Container;
@@ -28,6 +27,9 @@ pub struct AppWrapper<State, F, V, M> {
     view_fn: V,
     messages: Vec<M>,
     needs_redraw: bool,
+    // Performance optimization: cache widget tree to avoid rebuilding every frame
+    cached_container: Option<Box<Container<M>>>,
+    state_changed: bool,
 }
 
 impl<State> App<State> {
@@ -103,30 +105,6 @@ impl<State> App<State> {
         Ok(())
     }
 
-    /// Render a single widget (helper for testing)
-    ///
-    /// # Examples
-    /// ```
-    /// use tui::prelude::*;
-    ///
-    /// struct State;
-    /// let app = App::new(State);
-    /// let label = Label::new("Test");
-    /// // app.render_widget(&label)?; // Would render in real scenario
-    /// ```
-    pub fn render_widget(&self, widget: &dyn Widget) -> Result<()> {
-        let (width, height) = crossterm::terminal::size()?;
-        let mut buffer = Buffer::new(width, height);
-        let area = buffer.area();
-
-        widget.render(&mut buffer, area);
-
-        // Buffer flush to terminal will be implemented when integrating with render package
-        buffer.flush()?;
-
-        Ok(())
-    }
-
     /// Get a reference to the application state
     pub fn state(&self) -> &State {
         &self.state
@@ -138,7 +116,7 @@ impl<State> App<State> {
     }
 
     /// Apply focus state from FocusManager to container widgets
-    fn apply_focus<M>(&mut self, container: &mut Container<M>) {
+    fn apply_focus<M: Clone>(&mut self, container: &mut Container<M>) {
         let focus_manager = self
             .focus_manager
             .get_or_insert_with(|| FocusManager::new(container.children()));
@@ -151,7 +129,7 @@ impl<State> App<State> {
     }
 
     /// Handle Tab key for focus navigation
-    fn handle_tab<M>(&mut self, container: &mut Container<M>, shift: bool) {
+    fn handle_tab<M: Clone>(&mut self, container: &mut Container<M>, shift: bool) {
         if let Some(ref mut focus_manager) = self.focus_manager {
             if shift {
                 focus_manager.prev();
@@ -201,6 +179,8 @@ where
             view_fn,
             messages: Vec::new(),
             needs_redraw: true,
+            cached_container: None,
+            state_changed: true, // Start with state_changed=true to build initial tree
         }
     }
 }
@@ -212,34 +192,34 @@ where
     M: Clone + std::fmt::Debug,
 {
     fn draw(&mut self, mut chunk: Chunk) -> std::result::Result<Size, DrawErr> {
-        // Create view from current state
-        let mut container = (self.view_fn)(&self.app.state);
+        // Rebuild widget tree only if state changed or no cache exists
+        if self.state_changed || self.cached_container.is_none() {
+            let mut container = (self.view_fn)(&self.app.state);
 
-        // Initialize focus management
-        self.app.apply_focus(&mut container);
+            // Initialize focus management
+            self.app.apply_focus(&mut container);
 
-        // Create a buffer from the chunk area
+            // Cache the container
+            self.cached_container = Some(Box::new(container));
+
+            // Reset state_changed flag after rebuilding
+            self.state_changed = false;
+        }
+
+        // Get reference to cached container for rendering
+        let container = self.cached_container.as_mut()
+            .expect("Container should be cached after rebuild");
+
+        // Get the chunk area
         let area = chunk.area();
         let size = area.size();
-        let mut buffer = Buffer::new(size.width, size.height);
 
         // Create a Rect from the area for rendering (starting at 0,0 since chunk handles positioning)
         use crate::widget::common::Rect;
         let rect = Rect::new(0, 0, size.width, size.height);
 
-        // Render the widget tree
-        container.render(&mut buffer, rect);
-
-        // Copy buffer content to chunk
-        for y in 0..size.height {
-            for x in 0..size.width {
-                if let Some(cell) = buffer.get(x, y) {
-                    // Convert our Cell to render::style::Stylized
-                    let stylized = convert_cell_to_stylized(cell);
-                    let _ = chunk.set_forced(x, y, stylized);
-                }
-            }
-        }
+        // Render the widget tree directly to chunk
+        container.render(&mut chunk, rect);
 
         Ok(size)
     }
@@ -251,7 +231,14 @@ where
     V: Fn(&State) -> Container<M>,
     M: Clone + std::fmt::Debug,
 {
-    fn on_events(&mut self, events: &[term::event::Event]) -> std::result::Result<(), DrawErr> {
+    fn on_events(&mut self, events: &[crossterm::event::Event]) -> std::result::Result<(), DrawErr> {
+        // Ensure we have a container (should be cached from draw, but check anyway)
+        if self.cached_container.is_none() {
+            let mut container = (self.view_fn)(&self.app.state);
+            self.app.apply_focus(&mut container);
+            self.cached_container = Some(Box::new(container));
+        }
+
         for event in events {
             // Convert render event to our Event type
             let our_event = render_event_to_our(event);
@@ -259,17 +246,21 @@ where
             // Handle Tab navigation
             if let Event::Key(ref key_ev) = our_event {
                 if key_ev.code == KeyCode::Tab {
-                    let mut container = (self.view_fn)(&self.app.state);
+                    // Tab navigation modifies focus, need to rebuild on next draw
+                    let container = self.cached_container.as_mut()
+                        .expect("Container should be cached");
                     let shift = key_ev.modifiers.contains_shift();
-                    self.app.handle_tab(&mut container, shift);
+                    self.app.handle_tab(container, shift);
                     self.needs_redraw = true;
+                    // Note: We don't set state_changed because focus is not part of state
+                    // But we'll need to reapply focus on next rebuild
                     continue;
                 }
             }
 
-            // Route event to widgets and collect messages
-            let mut container = (self.view_fn)(&self.app.state);
-            self.app.apply_focus(&mut container);
+            // Route event to widgets and collect messages using cached container
+            let container = self.cached_container.as_mut()
+                .expect("Container should be cached");
             let (_result, messages) = container.handle_event_with_messages(&our_event);
 
             // Store messages for processing in update()
@@ -282,8 +273,14 @@ where
 
     fn update(&mut self) -> std::result::Result<bool, DrawErr> {
         // Process all collected messages
+        let had_messages = !self.messages.is_empty();
         for msg in self.messages.drain(..) {
             (self.update_fn)(&mut self.app.state, msg);
+        }
+
+        // If we processed any messages, state has changed
+        if had_messages {
+            self.state_changed = true;
         }
 
         // Return whether we need to redraw
@@ -293,15 +290,15 @@ where
     }
 }
 
-/// Convert render event to our Event type
-fn render_event_to_our(event: &term::event::Event) -> Event {
+/// Convert crossterm event to our Event type
+fn render_event_to_our(event: &crossterm::event::Event) -> Event {
     match event {
-        term::event::Event::Key(key_event) => Event::Key(crate::event::KeyEvent {
+        crossterm::event::Event::Key(key_event) => Event::Key(crate::event::KeyEvent {
             code: render_keycode_to_our(key_event.code),
             modifiers: render_modifiers_to_our(key_event.modifiers),
         }),
-        term::event::Event::Mouse(mouse_event) => {
-            use term::event::{MouseButton as RMB, MouseEventKind as RMK};
+        crossterm::event::Event::Mouse(mouse_event) => {
+            use crossterm::event::{MouseButton as RMB, MouseEventKind as RMK};
 
             let kind = match mouse_event.kind {
                 RMK::Down(RMB::Left) => {
@@ -344,7 +341,7 @@ fn render_event_to_our(event: &term::event::Event) -> Event {
                 render_modifiers_to_our(mouse_event.modifiers),
             ))
         }
-        term::event::Event::Terminal(term::event::TerminalEvent::Resize(_, _)) => {
+        crossterm::event::Event::Resize(_, _) => {
             // Terminal was resized, re-render on next loop
             Event::Key(crate::event::KeyEvent::new(KeyCode::Null)) // Placeholder
         }
@@ -352,9 +349,9 @@ fn render_event_to_our(event: &term::event::Event) -> Event {
     }
 }
 
-/// Convert render KeyCode to our KeyCode
-fn render_keycode_to_our(code: term::event::KeyCode) -> KeyCode {
-    use term::event::KeyCode as RK;
+/// Convert crossterm KeyCode to our KeyCode
+fn render_keycode_to_our(code: crossterm::event::KeyCode) -> KeyCode {
+    use crossterm::event::KeyCode as RK;
     match code {
         RK::Backspace => KeyCode::Backspace,
         RK::Enter => KeyCode::Enter,
@@ -377,9 +374,9 @@ fn render_keycode_to_our(code: term::event::KeyCode) -> KeyCode {
     }
 }
 
-/// Convert render KeyModifiers to our Modifiers
-fn render_modifiers_to_our(modifiers: term::event::KeyModifiers) -> Modifiers {
-    use term::event::KeyModifiers as RM;
+/// Convert crossterm KeyModifiers to our Modifiers
+fn render_modifiers_to_our(modifiers: crossterm::event::KeyModifiers) -> Modifiers {
+    use crossterm::event::KeyModifiers as RM;
     let mut mods = Modifiers::empty();
 
     if modifiers.contains(RM::SHIFT) {
@@ -393,68 +390,4 @@ fn render_modifiers_to_our(modifiers: term::event::KeyModifiers) -> Modifiers {
     }
 
     mods
-}
-
-/// Convert our Cell to render::style::Stylized
-fn convert_cell_to_stylized(cell: &crate::buffer::Cell) -> render::style::Stylized {
-    use render::style::Style;
-    use term::crossterm::style::Attributes;
-
-    // Only create Colors if we have actual colors to set
-    // This prevents SetColors from being called on empty cells,
-    // which would apply the terminal's default background color
-    let colors = if cell.fg.is_some() || cell.bg.is_some() {
-        let fg = cell.fg.map(convert_color_to_crossterm);
-        let bg = cell.bg.map(convert_color_to_crossterm);
-        Some(term::crossterm::style::Colors {
-            foreground: fg,
-            background: bg,
-        })
-    } else {
-        None
-    };
-
-    // Only create Attributes if we have modifiers
-    let attr = if !cell.modifiers.is_empty() {
-        let mut a = Attributes::default();
-        if cell.modifiers.contains_bold() {
-            a = a | term::crossterm::style::Attribute::Bold;
-        }
-        if cell.modifiers.contains_italic() {
-            a = a | term::crossterm::style::Attribute::Italic;
-        }
-        if cell.modifiers.contains_underlined() {
-            a = a | term::crossterm::style::Attribute::Underlined;
-        }
-        Some(a)
-    } else {
-        None
-    };
-
-    // Use the appropriate Style constructor based on what we have
-    let style = match (colors, attr) {
-        (Some(c), Some(a)) => Style::with_both(c, a),
-        (Some(c), None) => Style::with_colors(c),
-        (None, Some(a)) => Style::with_attr(a),
-        (None, None) => Style::default(),
-    };
-
-    render::style::Stylized::new(cell.symbol, style)
-}
-
-/// Convert our Color to crossterm Color
-fn convert_color_to_crossterm(color: crate::style::Color) -> crossterm::style::Color {
-    use crossterm::style::Color as CC;
-    match color {
-        crate::style::Color::Black => CC::Black,
-        crate::style::Color::Red => CC::DarkRed,
-        crate::style::Color::Green => CC::DarkGreen,
-        crate::style::Color::Yellow => CC::DarkYellow,
-        crate::style::Color::Blue => CC::DarkBlue,
-        crate::style::Color::Magenta => CC::DarkMagenta,
-        crate::style::Color::Cyan => CC::DarkCyan,
-        crate::style::Color::White => CC::White,
-        crate::style::Color::Rgb(r, g, b) => CC::Rgb { r, g, b },
-        crate::style::Color::Indexed(i) => CC::AnsiValue(i),
-    }
 }

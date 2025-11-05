@@ -14,7 +14,6 @@ pub struct TextInput<M = ()> {
     style: Style,
     focused: bool,
     on_change: Option<EventHandler<M>>,
-    pending_message: Option<M>,
 }
 
 impl<M> std::fmt::Debug for TextInput<M> {
@@ -25,7 +24,6 @@ impl<M> std::fmt::Debug for TextInput<M> {
             .field("style", &self.style)
             .field("focused", &self.focused)
             .field("on_change", &self.on_change.is_some())
-            .field("pending_message", &self.pending_message.is_some())
             .finish()
     }
 }
@@ -49,7 +47,6 @@ impl<M> TextInput<M> {
             style: Style::default(),
             focused: false,
             on_change: None,
-            pending_message: None,
         }
     }
 
@@ -86,11 +83,6 @@ impl<M> TextInput<M> {
     /// Set focus state (managed by FocusManager)
     pub(crate) fn set_focused(&mut self, focused: bool) {
         self.focused = focused;
-    }
-
-    /// Take the pending message if any
-    pub(crate) fn take_message(&mut self) -> Option<M> {
-        self.pending_message.take()
     }
 
     /// Move cursor to the left
@@ -137,16 +129,11 @@ impl<M> TextInput<M> {
             self.value.remove(self.cursor);
         }
     }
-
-    /// Trigger the change handler if present
-    #[allow(dead_code)] // Will be used in message-based event handling
-    pub(crate) fn trigger_change(&self) -> Option<M> {
-        self.on_change.as_ref().map(|handler| handler())
-    }
 }
 
 impl<M> Widget for TextInput<M> {
-    fn render(&self, buf: &mut Buffer, area: Rect) {
+    type Message = M;
+    fn render(&self, chunk: &mut render::chunk::Chunk, area: Rect) {
         if area.width == 0 || area.height == 0 {
             return;
         }
@@ -187,10 +174,13 @@ impl<M> Widget for TextInput<M> {
             display_text
         };
 
-        buf.set_string(area.x, area.y, &final_text, self.style);
+        // Convert TUI style to render style
+        let render_style = crate::style::to_render_style(&self.style);
+
+        let _ = chunk.set_string(area.x, area.y, &final_text, render_style);
     }
 
-    fn handle_event(&mut self, event: &Event) -> EventResult {
+    fn handle_event(&mut self, event: &Event) -> EventResult<M> {
         // Only handle events when focused
         if !self.focused {
             return EventResult::Ignored;
@@ -230,11 +220,12 @@ impl<M> Widget for TextInput<M> {
             // Trigger change handler if content changed
             if changed {
                 if let Some(ref handler) = self.on_change {
-                    self.pending_message = Some(handler());
+                    let message = handler();
+                    return EventResult::consumed_with(message);
                 }
             }
 
-            return EventResult::Consumed;
+            return EventResult::consumed();
         }
 
         EventResult::Ignored

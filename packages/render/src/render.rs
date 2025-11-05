@@ -1,4 +1,4 @@
-use term::crossterm::{
+use crossterm::{
     cursor::MoveTo,
     queue,
     style::{Print, ResetColor},
@@ -34,32 +34,69 @@ where
 
         queue!(self.out, MoveTo(self.pos.x, self.pos.y))?;
 
-        let mut has_color_cache = false;
-        for (y, line) in self
-            .buffer
-            .content()
-            .chunks(buffer_size.width as usize)
-            .enumerate()
-        {
-            if y >= buffer_size.height as usize {
-                break;
-            }
-
-            for c in line {
-                if c.is_occupied {
-                    continue;
+        // Differential rendering: only output changed cells
+        if let Some(previous) = self.buffer.previous() {
+            // We have previous frame, do differential rendering
+            let mut has_color_cache = false;
+            for (y, (line, prev_line)) in self
+                .buffer
+                .content()
+                .chunks(buffer_size.width as usize)
+                .zip(previous.chunks(buffer_size.width as usize))
+                .enumerate()
+            {
+                if y >= buffer_size.height as usize {
+                    break;
                 }
 
-                if has_color_cache && !c.has_color() {
-                    queue!(self.out, ResetColor)?;
+                for (x, (c, prev_c)) in line.iter().zip(prev_line.iter()).enumerate() {
+                    if c.is_occupied {
+                        continue;
+                    }
+
+                    // Only render if cell changed
+                    if c != prev_c {
+                        // Move cursor to this position
+                        queue!(self.out, MoveTo(self.pos.x + x as u16, self.pos.y + y as u16))?;
+
+                        if has_color_cache && !c.has_color() {
+                            queue!(self.out, ResetColor)?;
+                        }
+
+                        c.queue(&mut self.out)?;
+                        has_color_cache = c.has_color();
+                    }
+                }
+            }
+        } else {
+            // First render or no previous buffer, do full render
+            let mut has_color_cache = false;
+            for (y, line) in self
+                .buffer
+                .content()
+                .chunks(buffer_size.width as usize)
+                .enumerate()
+            {
+                if y >= buffer_size.height as usize {
+                    break;
                 }
 
-                c.queue(&mut self.out)?;
-                has_color_cache = c.has_color();
-            }
+                for c in line {
+                    if c.is_occupied {
+                        continue;
+                    }
 
-            if y < buffer_size.height as usize - 1 {
-                queue!(self.out, MoveTo(self.pos.x, self.pos.y + y as u16 + 1))?;
+                    if has_color_cache && !c.has_color() {
+                        queue!(self.out, ResetColor)?;
+                    }
+
+                    c.queue(&mut self.out)?;
+                    has_color_cache = c.has_color();
+                }
+
+                if y < buffer_size.height as usize - 1 {
+                    queue!(self.out, MoveTo(self.pos.x, self.pos.y + y as u16 + 1))?;
+                }
             }
         }
 
@@ -69,6 +106,9 @@ where
 
         // ensure the output is flushed to terminal
         self.out.flush()?;
+
+        // Save current buffer for next frame's diff
+        self.buffer.clear();
 
         Ok(())
     }
@@ -99,7 +139,7 @@ where
         self.thing.update()
     }
 
-    pub fn on_events(&mut self, events: &[term::event::Event]) -> Result<(), DrawErr> {
+    pub fn on_events(&mut self, events: &[crossterm::event::Event]) -> Result<(), DrawErr> {
         self.thing.on_events(events)
     }
 }

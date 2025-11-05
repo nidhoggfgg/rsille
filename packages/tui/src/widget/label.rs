@@ -47,16 +47,21 @@ impl Label {
 }
 
 impl Widget for Label {
-    fn render(&self, buf: &mut Buffer, area: Rect) {
+    type Message = ();
+
+    fn render(&self, chunk: &mut render::chunk::Chunk, area: Rect) {
         if area.width == 0 || area.height == 0 {
             return;
         }
 
+        // Convert TUI style to render style
+        let render_style = crate::style::to_render_style(&self.style);
+
         // Render text at the widget's position
-        buf.set_string(area.x, area.y, &self.content, self.style);
+        let _ = chunk.set_string(area.x, area.y, &self.content, render_style);
     }
 
-    fn handle_event(&mut self, _event: &Event) -> EventResult {
+    fn handle_event(&mut self, _event: &Event) -> EventResult<()> {
         // Labels don't handle events
         EventResult::Ignored
     }

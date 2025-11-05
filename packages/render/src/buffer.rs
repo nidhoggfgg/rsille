@@ -8,6 +8,7 @@ use crate::{
 pub struct Buffer {
     size: Size,
     content: Vec<Cell>,
+    previous: Option<Vec<Cell>>,
 }
 
 // every position in the buffer is absolute
@@ -16,6 +17,7 @@ impl Buffer {
         Self {
             size,
             content: vec![Cell::space(); (size.width * size.height) as usize],
+            previous: None,
         }
     }
 
@@ -95,6 +97,24 @@ impl Buffer {
 
     fn index_unchecked(&self, pos: Position) -> usize {
         (pos.y * self.size.width + pos.x) as usize
+    }
+
+    /// Clear the buffer for the next frame, preserving previous for diffing
+    pub fn clear(&mut self) {
+        // Save current content as previous
+        self.previous = Some(self.content.clone());
+        // Reset all cells to empty
+        self.content.fill(Cell::space());
+    }
+
+    /// Reset diff state (clears previous buffer)
+    pub fn reset_diff(&mut self) {
+        self.previous = None;
+    }
+
+    /// Get the previous buffer state for diffing
+    pub fn previous(&self) -> Option<&[Cell]> {
+        self.previous.as_deref()
     }
 }
 

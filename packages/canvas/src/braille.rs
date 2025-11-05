@@ -2,7 +2,7 @@ use core::fmt;
 use std::io;
 
 use render::style::Stylized;
-use term::crossterm::{queue, style::Print};
+use crossterm::{queue, style::Print};
 
 // http://www.alanwood.net/unicode/braille_patterns.html
 // dots:

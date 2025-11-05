@@ -17,7 +17,7 @@ impl TaffyBridge {
     }
 
     /// Compute layout for a list of widgets
-    pub fn compute_layout<M>(
+    pub fn compute_layout<M: Clone>(
         &mut self,
         widgets: &[AnyWidget<M>],
         available: TuiRect,
@@ -34,7 +34,7 @@ impl TaffyBridge {
         // Create Taffy nodes for each widget
         let mut nodes = Vec::new();
         for widget in widgets {
-            let constraints = widget.as_widget().constraints();
+            let constraints = widget.constraints();
             let style = self.constraints_to_style(constraints, direction);
             let node = self.tree.new_leaf(style).unwrap();
             nodes.push(node);

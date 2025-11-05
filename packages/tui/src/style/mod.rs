@@ -140,3 +140,64 @@ impl Modifiers {
         self.bits == 0
     }
 }
+
+/// Convert TUI Style to render::style::Style
+pub fn to_render_style(style: &Style) -> render::style::Style {
+    use render::style::Style as RenderStyle;
+    use crossterm::style::{Attributes, Colors};
+
+    // Convert colors if present
+    let colors = if style.fg_color.is_some() || style.bg_color.is_some() {
+        let fg = style.fg_color.map(color_to_crossterm);
+        let bg = style.bg_color.map(color_to_crossterm);
+        Some(Colors {
+            foreground: fg,
+            background: bg,
+        })
+    } else {
+        None
+    };
+
+    // Convert modifiers if present
+    let attr = if !style.modifiers.is_empty() {
+        let mut a = Attributes::default();
+        if style.modifiers.contains_bold() {
+            a = a | crossterm::style::Attribute::Bold;
+        }
+        if style.modifiers.contains_italic() {
+            a = a | crossterm::style::Attribute::Italic;
+        }
+        if style.modifiers.contains_underlined() {
+            a = a | crossterm::style::Attribute::Underlined;
+        }
+        Some(a)
+    } else {
+        None
+    };
+
+    // Create render style
+    match (colors, attr) {
+        (Some(c), Some(a)) => RenderStyle::with_both(c, a),
+        (Some(c), None) => RenderStyle::with_colors(c),
+        (None, Some(a)) => RenderStyle::with_attr(a),
+        (None, None) => RenderStyle::default(),
+    }
+}
+
+/// Convert TUI Color to crossterm Color
+fn color_to_crossterm(color: Color) -> crossterm::style::Color {
+    use crossterm::style::Color as CC;
+    match color {
+        Color::Black => CC::Black,
+        Color::Red => CC::DarkRed,
+        Color::Green => CC::DarkGreen,
+        Color::Yellow => CC::DarkYellow,
+        Color::Blue => CC::DarkBlue,
+        Color::Magenta => CC::DarkMagenta,
+        Color::Cyan => CC::DarkCyan,
+        Color::White => CC::White,
+        Color::Rgb(r, g, b) => CC::Rgb { r, g, b },
+        Color::Indexed(i) => CC::AnsiValue(i),
+    }
+}
+

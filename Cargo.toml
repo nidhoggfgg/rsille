@@ -14,21 +14,12 @@ exclude = ["examples", "imgs", "pyrsille"]
 canvas = { path = "packages/canvas" }
 tui = { path = "packages/tui" }
 render = { path = "packages/render" }
-term = { path = "packages/term" }
-
-[dev-dependencies]
-criterion = "0.4"
 
 [features]
 default = []
 
 [workspace]
-members = [
-    "packages/canvas",
-    "packages/render",
-    "packages/tui",
-    "packages/term",
-]
+members = ["packages/canvas", "packages/render", "packages/tui"]
 resolver = "3"
 exclude = ["examples"]
 
