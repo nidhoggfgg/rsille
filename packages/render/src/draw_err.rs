@@ -1,7 +1,8 @@
 use crate::area::{Position, Size};
+use std::io;
 
-/// Errors that can occur during drawing operations
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Errors that can occur during drawing and rendering operations
+#[derive(Debug)]
 pub enum DrawErr {
     /// Position is out of bounds
     OutOfBounds { pos: Position, bounds: Size },
@@ -20,6 +21,18 @@ pub enum DrawErr {
         available_width: u16,
         x: u16,
     },
+    /// Terminal setup operation failed (enter alt screen, enable raw mode, etc.)
+    TerminalSetup(io::Error),
+    /// Terminal cleanup operation failed (leave alt screen, disable raw mode, etc.)
+    TerminalCleanup(io::Error),
+    /// Thread panicked during execution
+    ThreadPanic(String),
+    /// Channel was closed unexpectedly
+    ChannelClosed,
+    /// Failed to create tokio runtime
+    RuntimeCreation(io::Error),
+    /// IO error during rendering
+    Io(io::Error),
 }
 
 impl DrawErr {
@@ -56,6 +69,18 @@ impl DrawErr {
             available_width,
             x,
         }
+    }
+
+    /// Create a ThreadPanic error from a panic payload
+    pub fn thread_panic(payload: Box<dyn std::any::Any + Send>) -> Self {
+        let panic_msg = if let Some(s) = payload.downcast_ref::<&str>() {
+            s.to_string()
+        } else if let Some(s) = payload.downcast_ref::<String>() {
+            s.clone()
+        } else {
+            "Thread panicked with unknown payload".to_string()
+        };
+        Self::ThreadPanic(panic_msg)
     }
 
     /// Get detailed context about this error
@@ -112,13 +137,31 @@ impl DrawErr {
                     (x + content_width).saturating_sub(*available_width)
                 )
             }
+            Self::TerminalSetup(err) => format!("Terminal setup failed: {}", err),
+            Self::TerminalCleanup(err) => format!("Terminal cleanup failed: {}", err),
+            Self::ThreadPanic(msg) => format!("Thread panicked: {}", msg),
+            Self::ChannelClosed => "Communication channel closed unexpectedly".to_string(),
+            Self::RuntimeCreation(err) => format!("Failed to create tokio runtime: {}", err),
+            Self::Io(err) => format!("IO error: {}", err),
         }
     }
 }
 
 impl From<DrawErr> for std::io::Error {
     fn from(value: DrawErr) -> Self {
-        std::io::Error::other(value)
+        match value {
+            DrawErr::Io(e) => e,
+            DrawErr::TerminalSetup(e) => e,
+            DrawErr::TerminalCleanup(e) => e,
+            DrawErr::RuntimeCreation(e) => e,
+            other => std::io::Error::other(other),
+        }
+    }
+}
+
+impl From<io::Error> for DrawErr {
+    fn from(err: io::Error) -> Self {
+        DrawErr::Io(err)
     }
 }
 
@@ -173,8 +216,24 @@ impl std::fmt::Display for DrawErr {
                     content_width, x, available_width
                 )
             }
+            DrawErr::TerminalSetup(err) => write!(f, "Terminal setup failed: {}", err),
+            DrawErr::TerminalCleanup(err) => write!(f, "Terminal cleanup failed: {}", err),
+            DrawErr::ThreadPanic(msg) => write!(f, "Thread panicked: {}", msg),
+            DrawErr::ChannelClosed => write!(f, "Communication channel closed unexpectedly"),
+            DrawErr::RuntimeCreation(err) => write!(f, "Failed to create tokio runtime: {}", err),
+            DrawErr::Io(err) => write!(f, "IO error: {}", err),
         }
     }
 }
 
-impl core::error::Error for DrawErr {}
+impl core::error::Error for DrawErr {
+    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
+        match self {
+            DrawErr::TerminalSetup(err) => Some(err),
+            DrawErr::TerminalCleanup(err) => Some(err),
+            DrawErr::RuntimeCreation(err) => Some(err),
+            DrawErr::Io(err) => Some(err),
+            _ => None,
+        }
+    }
+}

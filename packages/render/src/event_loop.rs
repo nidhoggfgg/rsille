@@ -5,13 +5,72 @@ use std::{
 };
 
 use futures::{FutureExt, StreamExt};
+use log::{error, warn};
 use term::{
     crossterm::event::EventStream,
     event::{Event, KeyEvent},
 };
 use tokio::{select, sync::mpsc};
 
-use crate::{Builder, DrawUpdate, Render};
+use crate::{Builder, DrawErr, DrawUpdate, Render};
+
+struct TerminalGuard {
+    hide_cursor: bool,
+    mouse_capture: bool,
+    raw_mode: bool,
+    alt_screen: bool,
+}
+
+impl TerminalGuard {
+    /// Create and initialize terminal guard with the given settings
+    fn new(
+        alt_screen: bool,
+        raw_mode: bool,
+        mouse_capture: bool,
+        hide_cursor: bool,
+    ) -> Result<Self, DrawErr> {
+        // Setup terminal in the correct order
+        if alt_screen {
+            term::enter_alt_screen().map_err(DrawErr::TerminalSetup)?;
+            term::clear().map_err(DrawErr::TerminalSetup)?;
+        }
+        if raw_mode {
+            term::enable_raw_mode().map_err(DrawErr::TerminalSetup)?;
+        }
+        if mouse_capture {
+            term::enable_mouse_capture().map_err(DrawErr::TerminalSetup)?;
+        }
+        if hide_cursor {
+            term::hide_cursor().map_err(DrawErr::TerminalSetup)?;
+        }
+
+        Ok(Self {
+            hide_cursor,
+            mouse_capture,
+            raw_mode,
+            alt_screen,
+        })
+    }
+}
+
+impl Drop for TerminalGuard {
+    fn drop(&mut self) {
+        // Cleanup in reverse order, ignoring errors since we're in Drop
+        // We use let _ to explicitly ignore errors since there's nothing we can do in Drop
+        if self.hide_cursor {
+            let _ = term::show_cursor();
+        }
+        if self.mouse_capture {
+            let _ = term::disable_mouse_capture();
+        }
+        if self.raw_mode {
+            let _ = term::disable_raw_mode();
+        }
+        if self.alt_screen {
+            let _ = term::leave_alt_screen();
+        }
+    }
+}
 
 pub struct EventLoop<T> {
     render: Render<Stdout, T>,
@@ -89,27 +148,14 @@ where
         self
     }
 
-    pub fn run(self) {
-        let alt_screen = self.alt_screen;
-        let raw_mode = self.raw_mode;
-        let mouse_capture = self.mouse_capture;
-        let hide_cursor = self.hide_cursor;
-
-        // first enter alt screen then enable raw mode
-        if alt_screen {
-            term::enter_alt_screen().unwrap();
-            // Clear the alt screen to remove any previous content
-            term::clear().unwrap();
-        }
-        if raw_mode {
-            term::enable_raw_mode().unwrap();
-        }
-        if mouse_capture {
-            term::enable_mouse_capture().unwrap();
-        }
-        if hide_cursor {
-            term::hide_cursor().unwrap();
-        }
+    pub fn run(self) -> Result<(), DrawErr> {
+        // Create terminal guard - this will automatically cleanup on drop
+        let _guard = TerminalGuard::new(
+            self.alt_screen,
+            self.raw_mode,
+            self.mouse_capture,
+            self.hide_cursor,
+        )?;
 
         let (render_tx, render_rx) = mpsc::channel(1);
         let (event_tx, event_rx) = mpsc::channel(1);
@@ -117,22 +163,13 @@ where
 
         let event_thread = self.make_event_thread(render_rx, event_tx, stop_tx);
         let render_thread = self.make_render_thread(render_tx, event_rx, stop_rx);
-        event_thread.join().unwrap();
-        render_thread.join().unwrap();
 
-        // some cleanup, reverse the order of enable and disable
-        if hide_cursor {
-            term::show_cursor().unwrap();
-        }
-        if mouse_capture {
-            term::disable_mouse_capture().unwrap();
-        }
-        if raw_mode {
-            term::disable_raw_mode().unwrap();
-        }
-        if alt_screen {
-            term::leave_alt_screen().unwrap();
-        }
+        // Join threads and handle panics gracefully
+        event_thread.join().map_err(DrawErr::thread_panic)?;
+        render_thread.join().map_err(DrawErr::thread_panic)?;
+
+        // Terminal cleanup happens automatically via TerminalGuard's Drop
+        Ok(())
     }
 
     fn make_event_thread(
@@ -169,16 +206,27 @@ where
                 }
 
                 // collect events
-                let events = event_rx.blocking_recv().unwrap();
+                let events = match event_rx.blocking_recv() {
+                    Some(events) => events,
+                    None => {
+                        // Channel closed, exit gracefully
+                        warn!("Event channel closed, stopping render thread");
+                        break;
+                    }
+                };
 
                 let now = std::time::Instant::now();
 
-                // update
-                self.render.on_events(&events).unwrap_or(());
-                self.render.update().unwrap_or(false);
+                if let Err(e) = self.render.on_events(&events) {
+                    error!("Error processing events: {}", e);
+                }
+                if let Err(e) = self.render.update() {
+                    error!("Error updating render state: {}", e);
+                }
 
-                // draw
-                self.render.render().unwrap_or(());
+                if let Err(e) = self.render.render() {
+                    error!("Error rendering: {}", e);
+                }
 
                 // frame limit
                 let used_time = now.elapsed();
@@ -186,7 +234,11 @@ where
                     thread::sleep(time_per_frame - used_time);
                 }
 
-                if render_tx.blocking_send(()).is_err() {}
+                // Notify event thread we're ready for more events
+                // If send fails, event thread has stopped, so we should stop too
+                if render_tx.blocking_send(()).is_err() {
+                    break;
+                }
             }
         })
     }
@@ -199,19 +251,37 @@ fn event_thread(
     exit_code: KeyEvent,
     max_event_per_frame: usize,
 ) {
-    let rt = tokio::runtime::Builder::new_current_thread()
+    let rt = match tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
-        .unwrap();
+    {
+        Ok(rt) => rt,
+        Err(e) => {
+            error!("Failed to create tokio runtime: {}", e);
+            let _ = stop_tx.send(());
+            return;
+        }
+    };
+
     rt.block_on(async move {
         let mut reader = EventStream::new();
         let mut events = Vec::new();
-        event_tx.send(Vec::new()).await.unwrap();
+
+        // Send initial empty event list
+        if event_tx.send(Vec::new()).await.is_err() {
+            warn!("Failed to send initial events, render thread may have stopped");
+            return;
+        }
+
         loop {
             let event = reader.next().fuse();
             select! {
                 Some(_) = render_rx.recv() => {
-                    event_tx.send(events).await.unwrap();
+                    // Send collected events to render thread
+                    if event_tx.send(events).await.is_err() {
+                        // Render thread has stopped, exit gracefully
+                        break;
+                    }
                     events = Vec::new();
                 }
                 maybe_event = event => {
@@ -219,15 +289,24 @@ fn event_thread(
                         Some(Ok(event)) => {
                             let event = Event::from(event);
                             if event == Event::Key(exit_code) {
-                                stop_tx.send(()).unwrap();
+                                // User requested exit
+                                let _ = stop_tx.send(());
                                 break;
                             }
                             if events.len() < max_event_per_frame {
                                 events.push(event);
                             }
                         }
-                        Some(Err(_e)) => {}
-                        None => {}
+                        Some(Err(e)) => {
+                            error!("Error reading event: {}", e);
+                            // Continue processing despite errors
+                        }
+                        None => {
+                            // Event stream ended
+                            warn!("Event stream ended");
+                            let _ = stop_tx.send(());
+                            break;
+                        }
                     }
                 }
             }

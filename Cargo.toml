@@ -40,6 +40,7 @@ crossterm = { version = "0.28.1", features = ["event-stream"] }
 async-trait = "0.1.84"
 futures = "0.3.31"
 taffy = "0.9.1"
+log = "0.4.28"
 
 [profile.release]
 lto = true
