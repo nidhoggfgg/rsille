@@ -52,11 +52,11 @@ impl Buffer {
     pub fn set(&mut self, pos: Position, content: Stylized) -> Result<usize, DrawErr> {
         let i = self.index_unchecked(pos);
         if i >= self.content.len() {
-            return Err(DrawErr);
+            return Err(DrawErr::out_of_bounds(pos, self.size));
         }
 
         if self.content[i].is_occupied {
-            return Err(DrawErr);
+            return Err(DrawErr::position_occupied(pos));
         }
 
         self.set_forced(pos, content)
@@ -66,7 +66,7 @@ impl Buffer {
         let i = self.index_unchecked(pos);
         let width = content.width();
         if i + width > self.content.len() || i == self.content.len() {
-            return Err(DrawErr);
+            return Err(DrawErr::out_of_bounds(pos, self.size));
         }
 
         if self.content[i].is_occupied
