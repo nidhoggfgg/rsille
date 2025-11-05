@@ -7,11 +7,13 @@ use super::*;
 pub struct List;
 
 impl Widget for List {
-    fn render(&self, _buf: &mut Buffer, _area: Rect) {
+    type Message = ();
+
+    fn render(&self, _chunk: &mut render::chunk::Chunk, _area: Rect) {
         // Implemented in Phase 7
     }
 
-    fn handle_event(&mut self, _event: &Event) -> EventResult {
+    fn handle_event(&mut self, _event: &Event) -> EventResult<()> {
         EventResult::Ignored
     }
 

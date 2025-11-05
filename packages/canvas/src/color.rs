@@ -1,7 +1,7 @@
 use std::io;
 
 use render::style::Stylized;
-use term::crossterm::{
+use crossterm::{
     queue,
     style::{Color, Colors, Print, ResetColor, SetColors},
 };

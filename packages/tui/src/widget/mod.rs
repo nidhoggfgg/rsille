@@ -22,28 +22,30 @@ pub use list::List;
 pub use progress_bar::ProgressBar;
 pub use text_input::TextInput;
 
-use crate::buffer::Buffer;
 use crate::event::{Event, EventResult};
 use crate::layout::Constraints;
 
 /// Core widget trait that all TUI widgets implement
 pub trait Widget {
-    /// Render the widget into the provided buffer at the specified area.
+    /// The type of message this widget can produce
+    type Message;
+
+    /// Render the widget into the provided chunk at the specified area.
     ///
     /// # Arguments
-    /// * `buf` - Mutable buffer to draw into
+    /// * `chunk` - Mutable chunk to draw into
     /// * `area` - Rectangular area allocated for this widget
-    fn render(&self, buf: &mut Buffer, area: Rect);
+    fn render(&self, chunk: &mut render::chunk::Chunk, area: Rect);
 
-    /// Handle an input event and return the result.
+    /// Handle an input event and return the result with any generated messages.
     ///
     /// # Arguments
     /// * `event` - The event to handle (keyboard, resize, etc.)
     ///
     /// # Returns
-    /// * `EventResult::Consumed` if event was handled
+    /// * `EventResult::Consumed(messages)` if event was handled, with any produced messages
     /// * `EventResult::Ignored` if event should propagate
-    fn handle_event(&mut self, event: &Event) -> EventResult;
+    fn handle_event(&mut self, event: &Event) -> EventResult<Self::Message>;
 
     /// Return the size constraints for this widget.
     ///

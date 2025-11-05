@@ -1,5 +1,5 @@
 pub mod app;
-pub mod buffer;
+pub mod effect;
 pub mod error;
 pub mod event;
 pub mod layout;

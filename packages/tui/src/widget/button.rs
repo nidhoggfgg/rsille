@@ -12,7 +12,6 @@ pub struct Button<M = ()> {
     style: Style,
     focused: bool,
     on_click: Option<EventHandler<M>>,
-    pending_message: Option<M>,
 }
 
 impl<M> std::fmt::Debug for Button<M> {
@@ -22,7 +21,6 @@ impl<M> std::fmt::Debug for Button<M> {
             .field("style", &self.style)
             .field("focused", &self.focused)
             .field("on_click", &self.on_click.is_some())
-            .field("pending_message", &self.pending_message.is_some())
             .finish()
     }
 }
@@ -42,7 +40,6 @@ impl<M> Button<M> {
             style: Style::default(),
             focused: false,
             on_click: None,
-            pending_message: None,
         }
     }
 
@@ -84,15 +81,11 @@ impl<M> Button<M> {
     pub fn label(&self) -> &str {
         &self.label
     }
-
-    /// Take the pending message if any
-    pub(crate) fn take_message(&mut self) -> Option<M> {
-        self.pending_message.take()
-    }
 }
 
 impl<M> Widget for Button<M> {
-    fn render(&self, buf: &mut Buffer, area: Rect) {
+    type Message = M;
+    fn render(&self, chunk: &mut render::chunk::Chunk, area: Rect) {
         if area.width < 4 || area.height == 0 {
             return;
         }
@@ -103,19 +96,22 @@ impl<M> Widget for Button<M> {
 
         let button_text = format!("{}{}{}", prefix, self.label, suffix);
 
-        buf.set_string(area.x, area.y, &button_text, self.style);
+        // Convert TUI style to render style
+        let render_style = crate::style::to_render_style(&self.style);
+
+        let _ = chunk.set_string(area.x, area.y, &button_text, render_style);
     }
 
-    fn handle_event(&mut self, event: &Event) -> EventResult {
+    fn handle_event(&mut self, event: &Event) -> EventResult<M> {
         match event {
             Event::Key(key_event) if self.focused => {
                 // Handle Enter or Space key as activation when focused
                 match key_event.code {
                     KeyCode::Enter | KeyCode::Space => {
-                        // Trigger click handler and store the message
+                        // Trigger click handler and return the message
                         if let Some(ref handler) = self.on_click {
-                            self.pending_message = Some(handler());
-                            return EventResult::Consumed;
+                            let message = handler();
+                            return EventResult::consumed_with(message);
                         }
                     }
                     _ => {}
@@ -126,10 +122,10 @@ impl<M> Widget for Button<M> {
                 if let crate::event::MouseEventKind::Up(crate::event::MouseButton::Left) =
                     mouse_event.kind
                 {
-                    // Trigger click handler and store the message
+                    // Trigger click handler and return the message
                     if let Some(ref handler) = self.on_click {
-                        self.pending_message = Some(handler());
-                        return EventResult::Consumed;
+                        let message = handler();
+                        return EventResult::consumed_with(message);
                     }
                 }
             }

@@ -19,31 +19,54 @@ pub enum AnyWidget<M = ()> {
 }
 
 impl<M> AnyWidget<M> {
-    /// Get a reference to the underlying widget
-    pub fn as_widget(&self) -> &dyn Widget {
+    /// Render the widget
+    pub fn render(&self, chunk: &mut render::chunk::Chunk, area: Rect)
+    where
+        M: Clone,
+    {
         match self {
-            AnyWidget::Label(w) => w as &dyn Widget,
-            AnyWidget::Button(w) => w as &dyn Widget,
-            AnyWidget::KeyboardController(w) => w as &dyn Widget,
-            AnyWidget::TextInput(w) => w as &dyn Widget,
-            AnyWidget::Checkbox(w) => w as &dyn Widget,
-            AnyWidget::List(w) => w as &dyn Widget,
-            AnyWidget::ProgressBar(w) => w as &dyn Widget,
-            AnyWidget::Container(w) => w as &dyn Widget,
+            AnyWidget::Label(w) => w.render(chunk, area),
+            AnyWidget::Button(w) => w.render(chunk, area),
+            AnyWidget::KeyboardController(w) => w.render(chunk, area),
+            AnyWidget::TextInput(w) => w.render(chunk, area),
+            AnyWidget::Checkbox(w) => w.render(chunk, area),
+            AnyWidget::List(w) => w.render(chunk, area),
+            AnyWidget::ProgressBar(w) => w.render(chunk, area),
+            AnyWidget::Container(w) => w.render(chunk, area),
         }
     }
 
-    /// Get a mutable reference to the underlying widget
-    pub fn as_widget_mut(&mut self) -> &mut dyn Widget {
+    /// Get widget constraints
+    pub fn constraints(&self) -> Constraints
+    where
+        M: Clone,
+    {
         match self {
-            AnyWidget::Label(w) => w as &mut dyn Widget,
-            AnyWidget::Button(w) => w as &mut dyn Widget,
-            AnyWidget::KeyboardController(w) => w as &mut dyn Widget,
-            AnyWidget::TextInput(w) => w as &mut dyn Widget,
-            AnyWidget::Checkbox(w) => w as &mut dyn Widget,
-            AnyWidget::List(w) => w as &mut dyn Widget,
-            AnyWidget::ProgressBar(w) => w as &mut dyn Widget,
-            AnyWidget::Container(w) => w as &mut dyn Widget,
+            AnyWidget::Label(w) => w.constraints(),
+            AnyWidget::Button(w) => w.constraints(),
+            AnyWidget::KeyboardController(w) => w.constraints(),
+            AnyWidget::TextInput(w) => w.constraints(),
+            AnyWidget::Checkbox(w) => w.constraints(),
+            AnyWidget::List(w) => w.constraints(),
+            AnyWidget::ProgressBar(w) => w.constraints(),
+            AnyWidget::Container(w) => w.constraints(),
+        }
+    }
+
+    /// Check if widget is focusable
+    pub fn focusable(&self) -> bool
+    where
+        M: Clone,
+    {
+        match self {
+            AnyWidget::Label(w) => w.focusable(),
+            AnyWidget::Button(w) => w.focusable(),
+            AnyWidget::KeyboardController(w) => w.focusable(),
+            AnyWidget::TextInput(w) => w.focusable(),
+            AnyWidget::Checkbox(w) => w.focusable(),
+            AnyWidget::List(w) => w.focusable(),
+            AnyWidget::ProgressBar(w) => w.focusable(),
+            AnyWidget::Container(w) => w.focusable(),
         }
     }
 
@@ -62,50 +85,48 @@ impl<M> AnyWidget<M> {
     }
 
     /// Handle event and collect any generated messages
-    pub fn handle_event_with_messages(&mut self, event: &Event) -> (EventResult, Vec<M>)
+    ///
+    /// Now simplified: messages are directly extracted from EventResult<M>
+    pub fn handle_event_with_messages(&mut self, event: &Event) -> (EventResult<M>, Vec<M>)
     where
         M: Clone,
     {
         match self {
-            AnyWidget::Label(w) => (w.handle_event(event), vec![]),
+            AnyWidget::Label(w) => {
+                let _result = w.handle_event(event);
+                // Labels produce no messages (type is ())
+                (EventResult::Ignored, vec![])
+            }
             AnyWidget::Button(w) => {
                 let result = w.handle_event(event);
-                let messages = if result.is_consumed() {
-                    w.take_message().into_iter().collect()
-                } else {
-                    vec![]
-                };
+                let messages = result.messages_ref().to_vec();
                 (result, messages)
             }
             AnyWidget::KeyboardController(w) => {
                 let result = w.handle_event(event);
-                let messages = if result.is_consumed() {
-                    w.take_message().into_iter().collect()
-                } else {
-                    vec![]
-                };
+                let messages = result.messages_ref().to_vec();
                 (result, messages)
             }
             AnyWidget::TextInput(w) => {
                 let result = w.handle_event(event);
-                let messages = if result.is_consumed() {
-                    w.take_message().into_iter().collect()
-                } else {
-                    vec![]
-                };
+                let messages = result.messages_ref().to_vec();
                 (result, messages)
             }
             AnyWidget::Checkbox(w) => {
                 let result = w.handle_event(event);
-                let messages = if result.is_consumed() {
-                    w.take_message().into_iter().collect()
-                } else {
-                    vec![]
-                };
+                let messages = result.messages_ref().to_vec();
                 (result, messages)
             }
-            AnyWidget::List(w) => (w.handle_event(event), vec![]),
-            AnyWidget::ProgressBar(w) => (w.handle_event(event), vec![]),
+            AnyWidget::List(w) => {
+                let _result = w.handle_event(event);
+                // Lists produce no messages (type is ())
+                (EventResult::Ignored, vec![])
+            }
+            AnyWidget::ProgressBar(w) => {
+                let _result = w.handle_event(event);
+                // ProgressBars produce no messages (type is ())
+                (EventResult::Ignored, vec![])
+            }
             AnyWidget::Container(w) => w.handle_event_with_messages(event),
         }
     }

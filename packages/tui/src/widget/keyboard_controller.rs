@@ -29,7 +29,6 @@ pub struct KeyboardController<M = ()> {
     on_up: Option<EventHandler<M>>,
     on_down: Option<EventHandler<M>>,
     key_handlers: std::collections::HashMap<KeyCode, EventHandler<M>>,
-    pending_message: Option<M>,
 }
 
 impl<M> std::fmt::Debug for KeyboardController<M> {
@@ -38,7 +37,6 @@ impl<M> std::fmt::Debug for KeyboardController<M> {
             .field("on_up", &self.on_up.is_some())
             .field("on_down", &self.on_down.is_some())
             .field("key_handlers", &self.key_handlers.len())
-            .field("pending_message", &self.pending_message.is_some())
             .finish()
     }
 }
@@ -57,7 +55,6 @@ impl<M> KeyboardController<M> {
             on_up: None,
             on_down: None,
             key_handlers: HashMap::new(),
-            pending_message: None,
         }
     }
 
@@ -126,32 +123,29 @@ impl<M> KeyboardController<M> {
     pub(crate) fn set_focused(&mut self, _focused: bool) {
         // KeyboardController doesn't have visual focus state
     }
-
-    /// Take the pending message if any
-    pub(crate) fn take_message(&mut self) -> Option<M> {
-        self.pending_message.take()
-    }
 }
 
 impl<M> Widget for KeyboardController<M> {
-    fn render(&self, _buf: &mut Buffer, _area: Rect) {
+    type Message = M;
+
+    fn render(&self, _chunk: &mut render::chunk::Chunk, _area: Rect) {
         // KeyboardController doesn't render anything - it's invisible
     }
 
-    fn handle_event(&mut self, event: &Event) -> EventResult {
+    fn handle_event(&mut self, event: &Event) -> EventResult<M> {
         if let Event::Key(key_event) = event {
             // Check for Up/Down keys first
             match key_event.code {
                 KeyCode::Up => {
                     if let Some(ref handler) = self.on_up {
-                        self.pending_message = Some(handler());
-                        return EventResult::Consumed;
+                        let message = handler();
+                        return EventResult::consumed_with(message);
                     }
                 }
                 KeyCode::Down => {
                     if let Some(ref handler) = self.on_down {
-                        self.pending_message = Some(handler());
-                        return EventResult::Consumed;
+                        let message = handler();
+                        return EventResult::consumed_with(message);
                     }
                 }
                 _ => {}
@@ -159,8 +153,8 @@ impl<M> Widget for KeyboardController<M> {
 
             // Check for other registered key handlers
             if let Some(handler) = self.key_handlers.get(&key_event.code) {
-                self.pending_message = Some(handler());
-                return EventResult::Consumed;
+                let message = handler();
+                return EventResult::consumed_with(message);
             }
         }
 

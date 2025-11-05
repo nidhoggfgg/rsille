@@ -1,4 +1,4 @@
-use term::crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::{
     Draw, DrawUpdate, Render,

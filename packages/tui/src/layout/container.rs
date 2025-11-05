@@ -1,12 +1,11 @@
 //! Container widget for layout composition
 
 use super::taffy_bridge::TaffyBridge;
-use crate::buffer::Buffer;
 use crate::event::{Event, EventResult};
 use crate::layout::Constraints;
 use crate::style::{Padding, Style};
 use crate::widget::{any::AnyWidget, common::Rect, Widget};
-use std::cell::RefCell;
+use std::sync::{Arc, RwLock};
 
 /// Layout direction
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -23,8 +22,8 @@ pub struct Container<M = ()> {
     padding: Padding,
     style: Style,
     /// Cached layout areas from last render (for mouse event handling)
-    cached_child_areas: RefCell<Vec<Rect>>,
-    cached_inner_area: RefCell<Option<Rect>>,
+    cached_child_areas: Arc<RwLock<Vec<Rect>>>,
+    cached_inner_area: Arc<RwLock<Option<Rect>>>,
 }
 
 impl<M> std::fmt::Debug for Container<M> {
@@ -58,8 +57,8 @@ impl<M> Container<M> {
             gap: 0,
             padding: Padding::ZERO,
             style: Style::default(),
-            cached_child_areas: RefCell::new(Vec::new()),
-            cached_inner_area: RefCell::new(None),
+            cached_child_areas: Arc::new(RwLock::new(Vec::new())),
+            cached_inner_area: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -81,8 +80,8 @@ impl<M> Container<M> {
             gap: 0,
             padding: Padding::ZERO,
             style: Style::default(),
-            cached_child_areas: RefCell::new(Vec::new()),
-            cached_inner_area: RefCell::new(None),
+            cached_child_areas: Arc::new(RwLock::new(Vec::new())),
+            cached_inner_area: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -140,7 +139,7 @@ impl<M> Container<M> {
     }
 
     /// Handle event and collect any generated messages
-    pub fn handle_event_with_messages(&mut self, event: &Event) -> (EventResult, Vec<M>)
+    pub fn handle_event_with_messages(&mut self, event: &Event) -> (EventResult<M>, Vec<M>)
     where
         M: Clone,
     {
@@ -149,7 +148,7 @@ impl<M> Container<M> {
         // For mouse events, check if the click is within any child's area
         if let Event::Mouse(mouse_event) = event {
             // Only handle clicks within our cached layout
-            let cached_areas = self.cached_child_areas.borrow();
+            let cached_areas = self.cached_child_areas.read().unwrap();
             if !cached_areas.is_empty() {
                 for (idx, child_area) in cached_areas.iter().enumerate() {
                     // Check if mouse is within this child's area
@@ -164,7 +163,7 @@ impl<M> Container<M> {
                             all_messages.extend(messages);
 
                             if result.is_consumed() {
-                                return (EventResult::Consumed, all_messages);
+                                return (EventResult::consumed(), all_messages);
                             }
                         }
                     }
@@ -179,7 +178,7 @@ impl<M> Container<M> {
             all_messages.extend(messages);
 
             if result.is_consumed() {
-                return (EventResult::Consumed, all_messages);
+                return (EventResult::consumed(), all_messages);
             }
         }
 
@@ -187,11 +186,16 @@ impl<M> Container<M> {
     }
 }
 
-impl<M> Widget for Container<M> {
-    fn render(&self, buf: &mut Buffer, area: Rect) {
+impl<M: Clone> Widget for Container<M> {
+    type Message = M;
+
+    fn render(&self, chunk: &mut render::chunk::Chunk, area: Rect) {
         if area.width == 0 || area.height == 0 {
             return;
         }
+
+        // Convert TUI style to render style
+        let render_style = crate::style::to_render_style(&self.style);
 
         // Calculate area inside border (if any)
         let border_area = if self.style.border.is_some() {
@@ -210,13 +214,35 @@ impl<M> Widget for Container<M> {
         };
 
         // Apply container background if specified (only inside border)
-        if let Some(bg) = self.style.bg_color {
-            buf.fill_bg(border_area, bg);
+        if self.style.bg_color.is_some() {
+            for y in 0..border_area.height {
+                for x in 0..border_area.width {
+                    let _ = chunk.set_char(border_area.x + x, border_area.y + y, ' ', render_style);
+                }
+            }
         }
 
         // Draw border after background (so it's on top)
         if let Some(border) = self.style.border {
-            buf.draw_border(area, border);
+            let chars = border.chars();
+
+            // Top and bottom borders
+            for x in 1..area.width.saturating_sub(1) {
+                let _ = chunk.set_char(area.x + x, area.y, chars.horizontal, render_style);
+                let _ = chunk.set_char(area.x + x, area.y + area.height - 1, chars.horizontal, render_style);
+            }
+
+            // Left and right borders
+            for y in 1..area.height.saturating_sub(1) {
+                let _ = chunk.set_char(area.x, area.y + y, chars.vertical, render_style);
+                let _ = chunk.set_char(area.x + area.width - 1, area.y + y, chars.vertical, render_style);
+            }
+
+            // Corners
+            let _ = chunk.set_char(area.x, area.y, chars.top_left, render_style);
+            let _ = chunk.set_char(area.x + area.width - 1, area.y, chars.top_right, render_style);
+            let _ = chunk.set_char(area.x, area.y + area.height - 1, chars.bottom_left, render_style);
+            let _ = chunk.set_char(area.x + area.width - 1, area.y + area.height - 1, chars.bottom_right, render_style);
         }
 
         // Calculate inner area after padding
@@ -231,23 +257,24 @@ impl<M> Widget for Container<M> {
         let child_areas = bridge.compute_layout(&self.children, inner, self.direction, self.gap);
 
         // Cache layout info for mouse event handling
-        *self.cached_child_areas.borrow_mut() = child_areas.clone();
-        *self.cached_inner_area.borrow_mut() = Some(inner);
+        *self.cached_child_areas.write().unwrap() = child_areas.clone();
+        *self.cached_inner_area.write().unwrap() = Some(inner);
 
         // Render each child in its allocated area
         for (child, child_area) in self.children.iter().zip(child_areas) {
-            child.as_widget().render(buf, child_area);
+            child.render(chunk, child_area);
         }
     }
 
-    fn handle_event(&mut self, event: &Event) -> EventResult {
-        // Try each child until one consumes the event
-        for child in &mut self.children {
-            if child.as_widget_mut().handle_event(event).is_consumed() {
-                return EventResult::Consumed;
-            }
+    fn handle_event(&mut self, event: &Event) -> EventResult<M> {
+        let (result, messages) = self.handle_event_with_messages(event);
+        if result.is_consumed() && !messages.is_empty() {
+            EventResult::Consumed(messages)
+        } else if result.is_consumed() {
+            EventResult::consumed()
+        } else {
+            EventResult::Ignored
         }
-        EventResult::Ignored
     }
 
     fn constraints(&self) -> Constraints {
@@ -267,7 +294,7 @@ impl<M> Widget for Container<M> {
                 let total_height = self
                     .children
                     .iter()
-                    .map(|c| c.as_widget().constraints().min_height)
+                    .map(|c| c.constraints().min_height)
                     .sum::<u16>()
                     + (self.children.len() as u16 - 1) * self.gap
                     + self.padding.vertical_total()
@@ -276,7 +303,7 @@ impl<M> Widget for Container<M> {
                 let max_width = self
                     .children
                     .iter()
-                    .map(|c| c.as_widget().constraints().min_width)
+                    .map(|c| c.constraints().min_width)
                     .max()
                     .unwrap_or(0)
                     + self.padding.horizontal_total()
@@ -294,7 +321,7 @@ impl<M> Widget for Container<M> {
                 let total_width = self
                     .children
                     .iter()
-                    .map(|c| c.as_widget().constraints().min_width)
+                    .map(|c| c.constraints().min_width)
                     .sum::<u16>()
                     + (self.children.len() as u16 - 1) * self.gap
                     + self.padding.horizontal_total()
@@ -303,7 +330,7 @@ impl<M> Widget for Container<M> {
                 let max_height = self
                     .children
                     .iter()
-                    .map(|c| c.as_widget().constraints().min_height)
+                    .map(|c| c.constraints().min_height)
                     .max()
                     .unwrap_or(0)
                     + self.padding.vertical_total()

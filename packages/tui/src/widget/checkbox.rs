@@ -14,7 +14,6 @@ pub struct Checkbox<M = ()> {
     style: Style,
     focused: bool,
     on_toggle: Option<EventHandler<M>>,
-    pending_message: Option<M>,
 }
 
 impl<M> std::fmt::Debug for Checkbox<M> {
@@ -25,7 +24,6 @@ impl<M> std::fmt::Debug for Checkbox<M> {
             .field("style", &self.style)
             .field("focused", &self.focused)
             .field("on_toggle", &self.on_toggle.is_some())
-            .field("pending_message", &self.pending_message.is_some())
             .finish()
     }
 }
@@ -47,7 +45,6 @@ impl<M> Checkbox<M> {
             style: Style::default(),
             focused: false,
             on_toggle: None,
-            pending_message: None,
         }
     }
 
@@ -96,11 +93,6 @@ impl<M> Checkbox<M> {
         self.focused = focused;
     }
 
-    /// Take the pending message if any
-    pub(crate) fn take_message(&mut self) -> Option<M> {
-        self.pending_message.take()
-    }
-
     /// Toggle the checked state
     fn toggle(&mut self) {
         self.checked = !self.checked;
@@ -108,7 +100,9 @@ impl<M> Checkbox<M> {
 }
 
 impl<M> Widget for Checkbox<M> {
-    fn render(&self, buf: &mut Buffer, area: Rect) {
+    type Message = M;
+
+    fn render(&self, chunk: &mut render::chunk::Chunk, area: Rect) {
         if area.width < 4 || area.height == 0 {
             return;
         }
@@ -123,21 +117,25 @@ impl<M> Widget for Checkbox<M> {
             format!("{}{} {}", prefix, box_char, self.label)
         };
 
-        buf.set_string(area.x, area.y, &checkbox_text, self.style);
+        // Convert TUI style to render style
+        let render_style = crate::style::to_render_style(&self.style);
+
+        let _ = chunk.set_string(area.x, area.y, &checkbox_text, render_style);
     }
 
-    fn handle_event(&mut self, event: &Event) -> EventResult {
+    fn handle_event(&mut self, event: &Event) -> EventResult<M> {
         match event {
             Event::Key(key_event) if self.focused => {
                 // Handle Space/Enter key as toggle when focused
                 match key_event.code {
                     KeyCode::Space | KeyCode::Enter => {
                         self.toggle();
-                        // Trigger toggle handler and store the message
+                        // Trigger toggle handler and return the message
                         if let Some(ref handler) = self.on_toggle {
-                            self.pending_message = Some(handler());
+                            let message = handler();
+                            return EventResult::consumed_with(message);
                         }
-                        return EventResult::Consumed;
+                        return EventResult::consumed();
                     }
                     _ => {}
                 }
@@ -148,11 +146,12 @@ impl<M> Widget for Checkbox<M> {
                     mouse_event.kind
                 {
                     self.toggle();
-                    // Trigger toggle handler and store the message
+                    // Trigger toggle handler and return the message
                     if let Some(ref handler) = self.on_toggle {
-                        self.pending_message = Some(handler());
+                        let message = handler();
+                        return EventResult::consumed_with(message);
                     }
-                    return EventResult::Consumed;
+                    return EventResult::consumed();
                 }
             }
             _ => {}

@@ -5,7 +5,6 @@ edition = "2021"
 license = "MIT"
 
 [dependencies]
-term = { path = "../term" }
 render = { path = "../render" }
 unicode-width = { workspace = true }
 tokio = { workspace = true }

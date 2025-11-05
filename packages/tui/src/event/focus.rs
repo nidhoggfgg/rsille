@@ -25,7 +25,7 @@ impl FocusManager {
     /// let widgets: Vec<AnyWidget<()>> = vec![];
     /// let manager = FocusManager::new(&widgets);
     /// ```
-    pub fn new<M>(widgets: &[AnyWidget<M>]) -> Self {
+    pub fn new<M: Clone>(widgets: &[AnyWidget<M>]) -> Self {
         let focus_order = Self::build_focus_order(widgets);
         let current_index = if focus_order.is_empty() {
             None
@@ -40,10 +40,10 @@ impl FocusManager {
     }
 
     /// Build focus order by traversing widget tree
-    fn build_focus_order<M>(widgets: &[AnyWidget<M>]) -> Vec<WidgetId> {
+    fn build_focus_order<M: Clone>(widgets: &[AnyWidget<M>]) -> Vec<WidgetId> {
         let mut order = Vec::new();
         for (id, widget) in widgets.iter().enumerate() {
-            if widget.as_widget().focusable() {
+            if widget.focusable() {
                 order.push(id);
             }
         }
@@ -102,7 +102,7 @@ impl FocusManager {
     }
 
     /// Rebuild focus order (call after widget tree changes)
-    pub fn rebuild<M>(&mut self, widgets: &[AnyWidget<M>]) {
+    pub fn rebuild<M: Clone>(&mut self, widgets: &[AnyWidget<M>]) {
         let old_current = self.current();
         self.focus_order = Self::build_focus_order(widgets);
 

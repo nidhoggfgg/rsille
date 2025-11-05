@@ -1,4 +1,4 @@
-use crate::{DrawErr, area::Area, buffer::Buffer, style::Stylized};
+use crate::{DrawErr, area::Area, buffer::Buffer, style::{Style, Stylized}};
 
 #[derive(Debug)]
 pub struct Chunk<'a> {
@@ -74,5 +74,40 @@ impl<'a> Chunk<'a> {
 
     pub fn from_area(&mut self, area: Area) -> Result<Chunk<'_>, DrawErr> {
         Chunk::new(self.buffer, area)
+    }
+
+    /// Set a string at the specified position with style
+    /// This is a convenience method for TUI-style rendering
+    pub fn set_string(&mut self, x: u16, y: u16, string: &str, style: Style) -> Result<(), DrawErr> {
+        let mut current_x = x;
+        for ch in string.chars() {
+            if current_x >= self.area.size().width {
+                break; // Stop if we exceed the chunk width
+            }
+            let stylized = Stylized::new(ch, style);
+            match self.set_forced(current_x, y, stylized) {
+                Ok(width) => current_x += width as u16,
+                Err(_) => break, // Stop on error
+            }
+        }
+        Ok(())
+    }
+
+    /// Fill a rectangular area with a character
+    pub fn fill(&mut self, x: u16, y: u16, width: u16, height: u16, ch: char, style: Style) -> Result<(), DrawErr> {
+        for dy in 0..height {
+            for dx in 0..width {
+                let stylized = Stylized::new(ch, style);
+                let _ = self.set_forced(x + dx, y + dy, stylized);
+            }
+        }
+        Ok(())
+    }
+
+    /// Set a single character at the specified position
+    pub fn set_char(&mut self, x: u16, y: u16, ch: char, style: Style) -> Result<(), DrawErr> {
+        let stylized = Stylized::new(ch, style);
+        self.set_forced(x, y, stylized)?;
+        Ok(())
     }
 }

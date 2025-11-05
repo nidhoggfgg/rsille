@@ -10,12 +10,12 @@ use crate::utils::round;
 use render::area::Size;
 use render::chunk::Chunk;
 use render::{Draw, DrawErr};
-use term::crossterm::cursor::MoveToNextLine;
-use term::crossterm::queue;
-use term::crossterm::style::Print;
+use crossterm::cursor::MoveToNextLine;
+use crossterm::queue;
+use crossterm::style::Print;
 
 use crate::color::Colored;
-use term::crossterm::style::Colors;
+use crossterm::style::Colors;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PaintErr;
@@ -77,7 +77,7 @@ impl Canvas {
 
     /// Prints the canvas content to stdout.
     pub fn print(&self) {
-        let is_raw = term::crossterm::terminal::is_raw_mode_enabled().unwrap_or(false);
+        let is_raw = crossterm::terminal::is_raw_mode_enabled().unwrap_or(false);
         let mut stdout = std::io::stdout();
         self.print_on(&mut stdout, is_raw).unwrap();
     }

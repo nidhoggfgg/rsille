@@ -7,8 +7,8 @@ license = "MIT"
 
 [dependencies]
 tui = { path = "../tui" }
-term = { path = "../term" }
 render = { path = "../render" }
+crossterm = { workspace = true }
 
 [dev-dependencies]
 criterion = "0.5.1"
