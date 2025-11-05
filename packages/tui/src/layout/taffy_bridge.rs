@@ -147,7 +147,7 @@ impl TaffyBridge {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::widget::{Label, Widget, AnyWidget};
+    use crate::widget::{Label, AnyWidget};
     use crate::layout::container::Direction;
 
     #[test]
@@ -157,12 +157,6 @@ mod tests {
         // Create test labels with known sizes
         let label1 = Label::new("Hello"); // 5 chars
         let label2 = Label::new("World!"); // 6 chars
-
-        let constraints1 = label1.constraints();
-        let constraints2 = label2.constraints();
-
-        println!("Label1 constraints: {:?}", constraints1);
-        println!("Label2 constraints: {:?}", constraints2);
 
         // Available area: 80x24 terminal
         let available = TuiRect::new(0, 0, 80, 24);
@@ -175,11 +169,6 @@ mod tests {
 
         // Compute layout
         let results = bridge.compute_layout(&widgets, available, Direction::Vertical, 1);
-
-        println!("Layout results:");
-        for (i, rect) in results.iter().enumerate() {
-            println!("  Child {}: {}x{} at ({}, {})", i, rect.width, rect.height, rect.x, rect.y);
-        }
 
         // Assert reasonable values
         assert!(results[0].width > 0, "First child should have non-zero width");

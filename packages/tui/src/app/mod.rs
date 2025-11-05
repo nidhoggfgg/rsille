@@ -9,6 +9,7 @@ use crate::error::Result;
 use crate::event::{Event, FocusManager, KeyCode, Modifiers};
 use crate::layout::Container;
 use crate::widget::Widget;
+use crate::WidgetError;
 
 // Re-export for AppWrapper
 pub use render::{area::Size, chunk::Chunk, Draw, DrawErr, DrawUpdate, Update};
@@ -95,7 +96,9 @@ impl<State> App<State> {
             .size((width, height))
             .build_event_loop(app_wrapper);
 
-        event_loop.run();
+        event_loop
+            .run()
+            .map_err(|e| WidgetError::RenderError(e.to_string()))?;
 
         Ok(())
     }

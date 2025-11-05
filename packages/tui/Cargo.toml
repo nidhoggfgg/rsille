@@ -13,3 +13,4 @@ crossterm = { workspace = true }
 taffy = { workspace = true }
 async-trait = { workspace = true }
 futures = { workspace = true }
+log = { workspace = true }

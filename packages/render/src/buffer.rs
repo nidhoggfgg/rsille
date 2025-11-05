@@ -69,11 +69,11 @@ impl Buffer {
             return Err(DrawErr::out_of_bounds(pos, self.size));
         }
 
-        if self.content[i].is_occupied
-            && let Some(owner) = self.content[i].owner
-        {
-            for j in owner..i {
-                self.content[j] = Cell::space();
+        if self.content[i].is_occupied {
+            if let Some(owner) = self.content[i].owner {
+                for j in owner..i {
+                    self.content[j] = Cell::space();
+                }
             }
         }
 
