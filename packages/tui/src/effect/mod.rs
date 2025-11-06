@@ -25,13 +25,11 @@ use std::time::Duration;
 mod runtime;
 pub use runtime::EffectRuntime;
 
+#[derive(Default)]
 /// An effect that will produce a message of type M
 pub enum Effect<M> {
     /// Execute after a delay
-    Delay {
-        duration: Duration,
-        message: M,
-    },
+    Delay { duration: Duration, message: M },
     /// Execute a task asynchronously
     Task {
         task: Arc<dyn Fn() -> M + Send + Sync>,
@@ -39,6 +37,7 @@ pub enum Effect<M> {
     /// Execute multiple effects in batch
     Batch(Vec<Effect<M>>),
     /// No operation (useful for conditional effect creation)
+    #[default]
     None,
 }
 
@@ -89,9 +88,9 @@ impl<M> Effect<M> {
             Effect::Task { task } => Effect::Task {
                 task: Arc::new(move || f(task())),
             },
-            Effect::Batch(effects) => Effect::Batch(
-                effects.into_iter().map(|e| e.map(f.clone())).collect(),
-            ),
+            Effect::Batch(effects) => {
+                Effect::Batch(effects.into_iter().map(|e| e.map(f.clone())).collect())
+            }
             Effect::None => Effect::None,
         }
     }
@@ -109,12 +108,6 @@ impl<M> std::fmt::Debug for Effect<M> {
             }
             Effect::None => write!(f, "Effect::None"),
         }
-    }
-}
-
-impl<M> Default for Effect<M> {
-    fn default() -> Self {
-        Effect::None
     }
 }
 

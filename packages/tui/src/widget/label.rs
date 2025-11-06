@@ -49,8 +49,8 @@ impl Label {
 impl Widget for Label {
     type Message = ();
 
-    fn render(&self, chunk: &mut render::chunk::Chunk, area: Rect) {
-        if area.width == 0 || area.height == 0 {
+    fn render(&self, chunk: &mut render::chunk::Chunk, area: Area) {
+        if area.width() == 0 || area.height() == 0 {
             return;
         }
 
@@ -58,7 +58,7 @@ impl Widget for Label {
         let render_style = crate::style::to_render_style(&self.style);
 
         // Render text at the widget's position
-        let _ = chunk.set_string(area.x, area.y, &self.content, render_style);
+        let _ = chunk.set_string(area.x(), area.y(), &self.content, render_style);
     }
 
     fn handle_event(&mut self, _event: &Event) -> EventResult<()> {

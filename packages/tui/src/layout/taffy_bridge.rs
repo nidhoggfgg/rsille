@@ -1,7 +1,7 @@
 //! Bridge to Taffy layout engine
 
 use crate::layout::Constraints;
-use crate::widget::{AnyWidget, Rect as TuiRect};
+use crate::widget::{AnyWidget, Area};
 use taffy::prelude::*;
 
 /// Layout manager using Taffy for flexbox layout
@@ -20,10 +20,10 @@ impl TaffyBridge {
     pub fn compute_layout<M: Clone>(
         &mut self,
         widgets: &[AnyWidget<M>],
-        available: TuiRect,
+        available: Area,
         direction: super::container::Direction,
         gap: u16,
-    ) -> Vec<TuiRect> {
+    ) -> Vec<Area> {
         // Clear previous tree
         self.tree = TaffyTree::new();
 
@@ -56,8 +56,8 @@ impl TaffyBridge {
             },
             // IMPORTANT: Set the container size to match available space
             size: Size {
-                width: length(available.width as f32),
-                height: length(available.height as f32),
+                width: length(available.width() as f32),
+                height: length(available.height() as f32),
             },
             ..Default::default()
         };
@@ -69,8 +69,8 @@ impl TaffyBridge {
 
         // Compute layout
         let available_size = Size {
-            width: AvailableSpace::Definite(available.width as f32),
-            height: AvailableSpace::Definite(available.height as f32),
+            width: AvailableSpace::Definite(available.width() as f32),
+            height: AvailableSpace::Definite(available.height() as f32),
         };
 
         self.tree.compute_layout(container, available_size).unwrap();
@@ -79,11 +79,9 @@ impl TaffyBridge {
         let mut results = Vec::new();
         for node in nodes.iter() {
             let layout = self.tree.layout(*node).unwrap();
-            results.push(TuiRect::new(
-                available.x + layout.location.x as u16,
-                available.y + layout.location.y as u16,
-                layout.size.width as u16,
-                layout.size.height as u16,
+            results.push(Area::new(
+                (available.x() + layout.location.x as u16, available.y() + layout.location.y as u16).into(),
+                (layout.size.width as u16, layout.size.height as u16).into(),
             ));
         }
 
@@ -159,7 +157,7 @@ mod tests {
         let label2 = Label::new("World!"); // 6 chars
 
         // Available area: 80x24 terminal
-        let available = TuiRect::new(0, 0, 80, 24);
+        let available = Area::new((0, 0).into(), (80, 24).into());
 
         // Create widgets
         let widgets: Vec<AnyWidget> = vec![
@@ -171,9 +169,9 @@ mod tests {
         let results = bridge.compute_layout(&widgets, available, Direction::Vertical, 1);
 
         // Assert reasonable values
-        assert!(results[0].width > 0, "First child should have non-zero width");
-        assert!(results[0].height > 0, "First child should have non-zero height");
-        assert!(results[1].width > 0, "Second child should have non-zero width");
-        assert!(results[1].height > 0, "Second child should have non-zero height");
+        assert!(results[0].width() > 0, "First child should have non-zero width");
+        assert!(results[0].height() > 0, "First child should have non-zero height");
+        assert!(results[1].width() > 0, "Second child should have non-zero width");
+        assert!(results[1].height() > 0, "Second child should have non-zero height");
     }
 }

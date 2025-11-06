@@ -133,8 +133,8 @@ impl<M> TextInput<M> {
 
 impl<M> Widget for TextInput<M> {
     type Message = M;
-    fn render(&self, chunk: &mut render::chunk::Chunk, area: Rect) {
-        if area.width == 0 || area.height == 0 {
+    fn render(&self, chunk: &mut render::chunk::Chunk, area: Area) {
+        if area.width() == 0 || area.height() == 0 {
             return;
         }
 
@@ -154,7 +154,7 @@ impl<M> Widget for TextInput<M> {
         };
 
         // Truncate or pad to fit area
-        let max_width = area.width as usize;
+        let max_width = area.width() as usize;
         let text_width = display_text.width();
 
         let final_text = if text_width > max_width {
@@ -177,7 +177,7 @@ impl<M> Widget for TextInput<M> {
         // Convert TUI style to render style
         let render_style = crate::style::to_render_style(&self.style);
 
-        let _ = chunk.set_string(area.x, area.y, &final_text, render_style);
+        let _ = chunk.set_string(area.x(), area.y(), &final_text, render_style);
     }
 
     fn handle_event(&mut self, event: &Event) -> EventResult<M> {

@@ -4,12 +4,13 @@
 ///
 /// This type allows widgets to return both event handling status and generated messages.
 /// When an event is consumed, it can optionally produce one or more messages.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum EventResult<M = ()> {
     /// Event was handled by the widget, stop propagation
     /// Contains any messages generated during event handling
     Consumed(Vec<M>),
     /// Event was not handled, continue propagation
+    #[default]
     Ignored,
 }
 
@@ -58,7 +59,9 @@ impl<M> EventResult<M> {
     /// Map messages to a different type
     pub fn map<N>(self, f: impl Fn(M) -> N) -> EventResult<N> {
         match self {
-            EventResult::Consumed(messages) => EventResult::Consumed(messages.into_iter().map(f).collect()),
+            EventResult::Consumed(messages) => {
+                EventResult::Consumed(messages.into_iter().map(f).collect())
+            }
             EventResult::Ignored => EventResult::Ignored,
         }
     }
@@ -70,15 +73,9 @@ impl<M> EventResult<M> {
                 msgs1.extend(msgs2);
                 EventResult::Consumed(msgs1)
             }
-            (EventResult::Consumed(msgs), EventResult::Ignored) |
-            (EventResult::Ignored, EventResult::Consumed(msgs)) => EventResult::Consumed(msgs),
+            (EventResult::Consumed(msgs), EventResult::Ignored)
+            | (EventResult::Ignored, EventResult::Consumed(msgs)) => EventResult::Consumed(msgs),
             (EventResult::Ignored, EventResult::Ignored) => EventResult::Ignored,
         }
-    }
-}
-
-impl<M> Default for EventResult<M> {
-    fn default() -> Self {
-        EventResult::Ignored
     }
 }

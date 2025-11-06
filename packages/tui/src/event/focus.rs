@@ -6,7 +6,7 @@ use crate::widget::AnyWidget;
 pub type WidgetId = usize;
 
 /// Manages focus state and navigation order for interactive widgets
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct FocusManager {
     /// IDs of focusable widgets in order
     focus_order: Vec<WidgetId>,
@@ -114,15 +114,6 @@ impl FocusManager {
         } else {
             Some(0)
         };
-    }
-}
-
-impl Default for FocusManager {
-    fn default() -> Self {
-        Self {
-            focus_order: Vec::new(),
-            current_index: None,
-        }
     }
 }
 
