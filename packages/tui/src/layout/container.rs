@@ -4,8 +4,8 @@ use super::taffy_bridge::TaffyBridge;
 use crate::event::{Event, EventResult};
 use crate::layout::Constraints;
 use crate::style::{Padding, Style};
-use crate::widget::{any::AnyWidget, common::Rect, Widget};
-use std::sync::{Arc, RwLock};
+use crate::widget::{any::AnyWidget, Area, Widget};
+use std::sync::RwLock;
 
 /// Layout direction
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -22,8 +22,7 @@ pub struct Container<M = ()> {
     padding: Padding,
     style: Style,
     /// Cached layout areas from last render (for mouse event handling)
-    cached_child_areas: Arc<RwLock<Vec<Rect>>>,
-    cached_inner_area: Arc<RwLock<Option<Rect>>>,
+    cached_child_areas: RwLock<Vec<Area>>,
 }
 
 impl<M> std::fmt::Debug for Container<M> {
@@ -39,6 +38,18 @@ impl<M> std::fmt::Debug for Container<M> {
 }
 
 impl<M> Container<M> {
+    /// Create a new container with the specified direction
+    fn with_direction(children: Vec<AnyWidget<M>>, direction: Direction) -> Self {
+        Self {
+            children,
+            direction,
+            gap: 0,
+            padding: Padding::ZERO,
+            style: Style::default(),
+            cached_child_areas: RwLock::new(Vec::new()),
+        }
+    }
+
     /// Create a new container with vertical layout
     ///
     /// # Examples
@@ -51,15 +62,7 @@ impl<M> Container<M> {
     /// ]);
     /// ```
     pub fn vertical(children: Vec<AnyWidget<M>>) -> Self {
-        Self {
-            children,
-            direction: Direction::Vertical,
-            gap: 0,
-            padding: Padding::ZERO,
-            style: Style::default(),
-            cached_child_areas: Arc::new(RwLock::new(Vec::new())),
-            cached_inner_area: Arc::new(RwLock::new(None)),
-        }
+        Self::with_direction(children, Direction::Vertical)
     }
 
     /// Create a new container with horizontal layout
@@ -74,15 +77,7 @@ impl<M> Container<M> {
     /// ]);
     /// ```
     pub fn horizontal(children: Vec<AnyWidget<M>>) -> Self {
-        Self {
-            children,
-            direction: Direction::Horizontal,
-            gap: 0,
-            padding: Padding::ZERO,
-            style: Style::default(),
-            cached_child_areas: Arc::new(RwLock::new(Vec::new())),
-            cached_inner_area: Arc::new(RwLock::new(None)),
-        }
+        Self::with_direction(children, Direction::Horizontal)
     }
 
     /// Create a new empty container
@@ -152,10 +147,10 @@ impl<M> Container<M> {
             if !cached_areas.is_empty() {
                 for (idx, child_area) in cached_areas.iter().enumerate() {
                     // Check if mouse is within this child's area
-                    if mouse_event.column >= child_area.x
-                        && mouse_event.column < child_area.x + child_area.width
-                        && mouse_event.row >= child_area.y
-                        && mouse_event.row < child_area.y + child_area.height
+                    if mouse_event.column >= child_area.x()
+                        && mouse_event.column < child_area.x() + child_area.width()
+                        && mouse_event.row >= child_area.y()
+                        && mouse_event.row < child_area.y() + child_area.height()
                     {
                         // Route event to this specific child
                         if let Some(child) = self.children.get_mut(idx) {
@@ -189,8 +184,8 @@ impl<M> Container<M> {
 impl<M: Clone> Widget for Container<M> {
     type Message = M;
 
-    fn render(&self, chunk: &mut render::chunk::Chunk, area: Rect) {
-        if area.width == 0 || area.height == 0 {
+    fn render(&self, chunk: &mut render::chunk::Chunk, area: Area) {
+        if area.width() == 0 || area.height() == 0 {
             return;
         }
 
@@ -200,14 +195,12 @@ impl<M: Clone> Widget for Container<M> {
         // Calculate area inside border (if any)
         let border_area = if self.style.border.is_some() {
             // Reserve 1 cell on each side for border
-            if area.width < 2 || area.height < 2 {
+            if area.width() < 2 || area.height() < 2 {
                 return; // Not enough space for border
             }
-            Rect::new(
-                area.x + 1,
-                area.y + 1,
-                area.width - 2,
-                area.height - 2,
+            Area::new(
+                (area.x() + 1, area.y() + 1).into(),
+                (area.width() - 2, area.height() - 2).into(),
             )
         } else {
             area
@@ -215,9 +208,9 @@ impl<M: Clone> Widget for Container<M> {
 
         // Apply container background if specified (only inside border)
         if self.style.bg_color.is_some() {
-            for y in 0..border_area.height {
-                for x in 0..border_area.width {
-                    let _ = chunk.set_char(border_area.x + x, border_area.y + y, ' ', render_style);
+            for y in 0..border_area.height() {
+                for x in 0..border_area.width() {
+                    let _ = chunk.set_char(border_area.x() + x, border_area.y() + y, ' ', render_style);
                 }
             }
         }
@@ -227,28 +220,33 @@ impl<M: Clone> Widget for Container<M> {
             let chars = border.chars();
 
             // Top and bottom borders
-            for x in 1..area.width.saturating_sub(1) {
-                let _ = chunk.set_char(area.x + x, area.y, chars.horizontal, render_style);
-                let _ = chunk.set_char(area.x + x, area.y + area.height - 1, chars.horizontal, render_style);
+            for x in 1..area.width().saturating_sub(1) {
+                let _ = chunk.set_char(area.x() + x, area.y(), chars.horizontal, render_style);
+                let _ = chunk.set_char(area.x() + x, area.y() + area.height() - 1, chars.horizontal, render_style);
             }
 
             // Left and right borders
-            for y in 1..area.height.saturating_sub(1) {
-                let _ = chunk.set_char(area.x, area.y + y, chars.vertical, render_style);
-                let _ = chunk.set_char(area.x + area.width - 1, area.y + y, chars.vertical, render_style);
+            for y in 1..area.height().saturating_sub(1) {
+                let _ = chunk.set_char(area.x(), area.y() + y, chars.vertical, render_style);
+                let _ = chunk.set_char(area.x() + area.width() - 1, area.y() + y, chars.vertical, render_style);
             }
 
             // Corners
-            let _ = chunk.set_char(area.x, area.y, chars.top_left, render_style);
-            let _ = chunk.set_char(area.x + area.width - 1, area.y, chars.top_right, render_style);
-            let _ = chunk.set_char(area.x, area.y + area.height - 1, chars.bottom_left, render_style);
-            let _ = chunk.set_char(area.x + area.width - 1, area.y + area.height - 1, chars.bottom_right, render_style);
+            let _ = chunk.set_char(area.x(), area.y(), chars.top_left, render_style);
+            let _ = chunk.set_char(area.x() + area.width() - 1, area.y(), chars.top_right, render_style);
+            let _ = chunk.set_char(area.x(), area.y() + area.height() - 1, chars.bottom_left, render_style);
+            let _ = chunk.set_char(area.x() + area.width() - 1, area.y() + area.height() - 1, chars.bottom_right, render_style);
         }
 
         // Calculate inner area after padding
-        let inner = border_area.shrink(self.padding);
+        let inner = border_area.shrink_saturating(
+            self.padding.top,
+            self.padding.bottom,
+            self.padding.left,
+            self.padding.right,
+        );
 
-        if inner.width == 0 || inner.height == 0 {
+        if inner.width() == 0 || inner.height() == 0 {
             return;
         }
 
@@ -258,7 +256,6 @@ impl<M: Clone> Widget for Container<M> {
 
         // Cache layout info for mouse event handling
         *self.cached_child_areas.write().unwrap() = child_areas.clone();
-        *self.cached_inner_area.write().unwrap() = Some(inner);
 
         // Render each child in its allocated area
         for (child, child_area) in self.children.iter().zip(child_areas) {

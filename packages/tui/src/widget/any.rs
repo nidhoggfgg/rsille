@@ -3,6 +3,36 @@
 use super::*;
 use crate::layout::Container;
 
+/// Macro to reduce repetitive match dispatching in AnyWidget
+macro_rules! dispatch_widget_method {
+    // With arguments
+    ($self:expr, $method:ident, $($args:expr),+) => {
+        match $self {
+            AnyWidget::Label(w) => w.$method($($args),*),
+            AnyWidget::Button(w) => w.$method($($args),*),
+            AnyWidget::KeyboardController(w) => w.$method($($args),*),
+            AnyWidget::TextInput(w) => w.$method($($args),*),
+            AnyWidget::Checkbox(w) => w.$method($($args),*),
+            AnyWidget::List(w) => w.$method($($args),*),
+            AnyWidget::ProgressBar(w) => w.$method($($args),*),
+            AnyWidget::Container(w) => w.$method($($args),*),
+        }
+    };
+    // Without arguments
+    ($self:expr, $method:ident) => {
+        match $self {
+            AnyWidget::Label(w) => w.$method(),
+            AnyWidget::Button(w) => w.$method(),
+            AnyWidget::KeyboardController(w) => w.$method(),
+            AnyWidget::TextInput(w) => w.$method(),
+            AnyWidget::Checkbox(w) => w.$method(),
+            AnyWidget::List(w) => w.$method(),
+            AnyWidget::ProgressBar(w) => w.$method(),
+            AnyWidget::Container(w) => w.$method(),
+        }
+    };
+}
+
 /// Type-safe heterogeneous widget container.
 ///
 /// Used by Container to hold mixed widget types.
@@ -20,20 +50,11 @@ pub enum AnyWidget<M = ()> {
 
 impl<M> AnyWidget<M> {
     /// Render the widget
-    pub fn render(&self, chunk: &mut render::chunk::Chunk, area: Rect)
+    pub fn render(&self, chunk: &mut render::chunk::Chunk, area: Area)
     where
         M: Clone,
     {
-        match self {
-            AnyWidget::Label(w) => w.render(chunk, area),
-            AnyWidget::Button(w) => w.render(chunk, area),
-            AnyWidget::KeyboardController(w) => w.render(chunk, area),
-            AnyWidget::TextInput(w) => w.render(chunk, area),
-            AnyWidget::Checkbox(w) => w.render(chunk, area),
-            AnyWidget::List(w) => w.render(chunk, area),
-            AnyWidget::ProgressBar(w) => w.render(chunk, area),
-            AnyWidget::Container(w) => w.render(chunk, area),
-        }
+        dispatch_widget_method!(self, render, chunk, area)
     }
 
     /// Get widget constraints
@@ -41,16 +62,7 @@ impl<M> AnyWidget<M> {
     where
         M: Clone,
     {
-        match self {
-            AnyWidget::Label(w) => w.constraints(),
-            AnyWidget::Button(w) => w.constraints(),
-            AnyWidget::KeyboardController(w) => w.constraints(),
-            AnyWidget::TextInput(w) => w.constraints(),
-            AnyWidget::Checkbox(w) => w.constraints(),
-            AnyWidget::List(w) => w.constraints(),
-            AnyWidget::ProgressBar(w) => w.constraints(),
-            AnyWidget::Container(w) => w.constraints(),
-        }
+        dispatch_widget_method!(self, constraints)
     }
 
     /// Check if widget is focusable
@@ -58,43 +70,36 @@ impl<M> AnyWidget<M> {
     where
         M: Clone,
     {
-        match self {
-            AnyWidget::Label(w) => w.focusable(),
-            AnyWidget::Button(w) => w.focusable(),
-            AnyWidget::KeyboardController(w) => w.focusable(),
-            AnyWidget::TextInput(w) => w.focusable(),
-            AnyWidget::Checkbox(w) => w.focusable(),
-            AnyWidget::List(w) => w.focusable(),
-            AnyWidget::ProgressBar(w) => w.focusable(),
-            AnyWidget::Container(w) => w.focusable(),
-        }
+        dispatch_widget_method!(self, focusable)
     }
 
     /// Set focus state on the widget (for focus management and testing)
     pub fn set_focused(&mut self, focused: bool) {
         match self {
-            AnyWidget::Label(_) => {} // Labels are not focusable
+            AnyWidget::Label(_) | AnyWidget::List(_) | AnyWidget::ProgressBar(_) | AnyWidget::Container(_) => {}
             AnyWidget::Button(w) => w.set_focused(focused),
             AnyWidget::KeyboardController(w) => w.set_focused(focused),
             AnyWidget::TextInput(w) => w.set_focused(focused),
             AnyWidget::Checkbox(w) => w.set_focused(focused),
-            AnyWidget::List(_) => {}        // Lists handle focus internally
-            AnyWidget::ProgressBar(_) => {} // Progress bars are not focusable
-            AnyWidget::Container(_) => {}   // Containers don't hold focus directly
         }
     }
 
     /// Handle event and collect any generated messages
-    ///
-    /// Now simplified: messages are directly extracted from EventResult<M>
     pub fn handle_event_with_messages(&mut self, event: &Event) -> (EventResult<M>, Vec<M>)
     where
         M: Clone,
     {
         match self {
             AnyWidget::Label(w) => {
-                let _result = w.handle_event(event);
-                // Labels produce no messages (type is ())
+                let _ = w.handle_event(event);
+                (EventResult::Ignored, vec![])
+            }
+            AnyWidget::List(w) => {
+                let _ = w.handle_event(event);
+                (EventResult::Ignored, vec![])
+            }
+            AnyWidget::ProgressBar(w) => {
+                let _ = w.handle_event(event);
                 (EventResult::Ignored, vec![])
             }
             AnyWidget::Button(w) => {
@@ -116,16 +121,6 @@ impl<M> AnyWidget<M> {
                 let result = w.handle_event(event);
                 let messages = result.messages_ref().to_vec();
                 (result, messages)
-            }
-            AnyWidget::List(w) => {
-                let _result = w.handle_event(event);
-                // Lists produce no messages (type is ())
-                (EventResult::Ignored, vec![])
-            }
-            AnyWidget::ProgressBar(w) => {
-                let _result = w.handle_event(event);
-                // ProgressBars produce no messages (type is ())
-                (EventResult::Ignored, vec![])
             }
             AnyWidget::Container(w) => w.handle_event_with_messages(event),
         }

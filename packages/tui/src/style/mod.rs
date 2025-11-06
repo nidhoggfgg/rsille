@@ -13,7 +13,7 @@ pub use padding::Padding;
 pub struct Style {
     pub fg_color: Option<Color>,
     pub bg_color: Option<Color>,
-    pub modifiers: Modifiers,
+    pub modifiers: TextModifiers,
     pub border: Option<BorderStyle>,
     pub padding: Padding,
 }
@@ -23,7 +23,7 @@ impl Style {
         Self {
             fg_color: None,
             bg_color: None,
-            modifiers: Modifiers::empty(),
+            modifiers: TextModifiers::empty(),
             border: None,
             padding: Padding::ZERO,
         }
@@ -84,11 +84,11 @@ pub enum Color {
 
 /// Text modifiers
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Modifiers {
+pub struct TextModifiers {
     bits: u8,
 }
 
-impl Modifiers {
+impl TextModifiers {
     const BOLD: u8 = 0b00001;
     const DIM: u8 = 0b00010;
     const ITALIC: u8 = 0b00100;
@@ -143,8 +143,8 @@ impl Modifiers {
 
 /// Convert TUI Style to render::style::Style
 pub fn to_render_style(style: &Style) -> render::style::Style {
-    use render::style::Style as RenderStyle;
     use crossterm::style::{Attributes, Colors};
+    use render::style::Style as RenderStyle;
 
     // Convert colors if present
     let colors = if style.fg_color.is_some() || style.bg_color.is_some() {
@@ -200,4 +200,3 @@ fn color_to_crossterm(color: Color) -> crossterm::style::Color {
         Color::Indexed(i) => CC::AnsiValue(i),
     }
 }
-

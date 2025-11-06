@@ -1,26 +1,30 @@
 //! Widget system - core trait and types
 
 pub mod any;
-pub mod common;
 
-// Widget implementations (will be added in US1)
+// Widget implementations
 pub mod button;
 pub mod checkbox;
 pub mod keyboard_controller;
 pub mod label;
-pub mod list;
-pub mod progress_bar;
 pub mod text_input;
+
+// Incomplete widgets - not yet exported to public API
+#[allow(dead_code)]
+mod list;
+#[allow(dead_code)]
+mod progress_bar;
 
 pub use any::AnyWidget;
 pub use button::Button;
 pub use checkbox::Checkbox;
-pub use common::{Position, Rect, Size};
 pub use keyboard_controller::KeyboardController;
 pub use label::Label;
-pub use list::List;
-pub use progress_bar::ProgressBar;
 pub use text_input::TextInput;
+// Note: List and ProgressBar are not exported until fully implemented
+
+// Re-export Area from render package
+pub use render::area::Area;
 
 use crate::event::{Event, EventResult};
 use crate::layout::Constraints;
@@ -35,7 +39,7 @@ pub trait Widget {
     /// # Arguments
     /// * `chunk` - Mutable chunk to draw into
     /// * `area` - Rectangular area allocated for this widget
-    fn render(&self, chunk: &mut render::chunk::Chunk, area: Rect);
+    fn render(&self, chunk: &mut render::chunk::Chunk, area: Area);
 
     /// Handle an input event and return the result with any generated messages.
     ///

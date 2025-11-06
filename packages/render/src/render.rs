@@ -5,7 +5,7 @@ use crossterm::{
     terminal::{Clear, ClearType},
 };
 
-use crate::{Builder, Draw, DrawErr, DrawUpdate, area::Position, buffer::Buffer, chunk::Chunk};
+use crate::{Builder, Draw, DrawErr, DrawUpdate, area::{Position, Size}, buffer::Buffer, chunk::Chunk};
 
 #[derive(Debug, Clone, Default)]
 pub struct Render<W, T> {
@@ -141,6 +141,16 @@ where
 
     pub fn on_events(&mut self, events: &[crossterm::event::Event]) -> Result<(), DrawErr> {
         self.thing.on_events(events)
+    }
+
+    /// Resize the render buffer
+    pub fn resize(&mut self, new_size: Size) {
+        self.buffer.resize(new_size);
+    }
+
+    /// Get current render size
+    pub fn size(&self) -> Size {
+        self.buffer.size()
     }
 }
 

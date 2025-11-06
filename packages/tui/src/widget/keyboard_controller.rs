@@ -128,7 +128,7 @@ impl<M> KeyboardController<M> {
 impl<M> Widget for KeyboardController<M> {
     type Message = M;
 
-    fn render(&self, _chunk: &mut render::chunk::Chunk, _area: Rect) {
+    fn render(&self, _chunk: &mut render::chunk::Chunk, _area: Area) {
         // KeyboardController doesn't render anything - it's invisible
     }
 

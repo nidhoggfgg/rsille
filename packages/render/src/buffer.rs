@@ -116,6 +116,18 @@ impl Buffer {
     pub fn previous(&self) -> Option<&[Cell]> {
         self.previous.as_deref()
     }
+
+    /// Resize the buffer to a new size
+    pub fn resize(&mut self, new_size: Size) {
+        if self.size == new_size {
+            return;
+        }
+
+        self.size = new_size;
+        self.content = vec![Cell::space(); (new_size.width * new_size.height) as usize];
+        // Clear previous buffer on resize to force full redraw
+        self.previous = None;
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -168,5 +180,43 @@ impl Cell {
 
     pub fn has_attr(&self) -> bool {
         self.content.has_attr()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_buffer_resize() {
+        let mut buffer = Buffer::new(Size { width: 10, height: 10 });
+
+        // Initial size should be 10x10
+        assert_eq!(buffer.size(), Size { width: 10, height: 10 });
+        assert_eq!(buffer.content.len(), 100);
+
+        // Resize to 20x15
+        buffer.resize(Size { width: 20, height: 15 });
+
+        // Check new size
+        assert_eq!(buffer.size(), Size { width: 20, height: 15 });
+        assert_eq!(buffer.content.len(), 300);
+
+        // Previous buffer should be cleared on resize
+        assert!(buffer.previous().is_none());
+    }
+
+    #[test]
+    fn test_buffer_resize_same_size() {
+        let mut buffer = Buffer::new(Size { width: 10, height: 10 });
+        buffer.clear(); // Create a previous buffer
+
+        assert!(buffer.previous().is_some());
+
+        // Resize to same size should do nothing
+        buffer.resize(Size { width: 10, height: 10 });
+
+        // Previous buffer should still exist
+        assert!(buffer.previous().is_some());
     }
 }

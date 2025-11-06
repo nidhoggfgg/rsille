@@ -1,3 +1,4 @@
+pub mod animation;
 pub mod app;
 pub mod effect;
 pub mod error;

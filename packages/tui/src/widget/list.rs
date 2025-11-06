@@ -9,7 +9,7 @@ pub struct List;
 impl Widget for List {
     type Message = ();
 
-    fn render(&self, _chunk: &mut render::chunk::Chunk, _area: Rect) {
+    fn render(&self, _chunk: &mut render::chunk::Chunk, _area: Area) {
         // Implemented in Phase 7
     }
 

@@ -23,6 +23,36 @@ impl Area {
         self.size
     }
 
+    // Convenience accessors for compatibility with flat-field access patterns
+    pub fn x(&self) -> u16 {
+        self.pos.x
+    }
+
+    pub fn y(&self) -> u16 {
+        self.pos.y
+    }
+
+    pub fn width(&self) -> u16 {
+        self.size.width
+    }
+
+    pub fn height(&self) -> u16 {
+        self.size.height
+    }
+
+    /// Returns the total area in cells (width * height)
+    pub fn area(&self) -> usize {
+        (self.size.width as usize) * (self.size.height as usize)
+    }
+
+    /// Check if this area intersects with another
+    pub fn intersects(&self, other: &Area) -> bool {
+        self.pos.x < other.pos.x + other.size.width
+            && self.pos.x + self.size.width > other.pos.x
+            && self.pos.y < other.pos.y + other.size.height
+            && self.pos.y + self.size.height > other.pos.y
+    }
+
     pub fn to_absolute(&self, x: u16, y: u16) -> Option<Position> {
         if !self.is_inside(x, y) {
             return None;
@@ -49,6 +79,19 @@ impl Area {
             )
                 .into(),
         })
+    }
+
+    /// Shrink the area with saturating subtraction (never returns an error)
+    pub fn shrink_saturating(self, top: u16, bottom: u16, left: u16, right: u16) -> Self {
+        let new_x = self.pos.x + left;
+        let new_y = self.pos.y + top;
+        let new_width = self.size.width.saturating_sub(left + right);
+        let new_height = self.size.height.saturating_sub(top + bottom);
+
+        Self {
+            pos: (new_x, new_y).into(),
+            size: (new_width, new_height).into(),
+        }
     }
 
     pub fn real_size(&self) -> Size {

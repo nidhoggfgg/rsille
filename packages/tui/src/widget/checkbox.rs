@@ -102,8 +102,8 @@ impl<M> Checkbox<M> {
 impl<M> Widget for Checkbox<M> {
     type Message = M;
 
-    fn render(&self, chunk: &mut render::chunk::Chunk, area: Rect) {
-        if area.width < 4 || area.height == 0 {
+    fn render(&self, chunk: &mut render::chunk::Chunk, area: Area) {
+        if area.width() < 4 || area.height() == 0 {
             return;
         }
 
@@ -120,7 +120,7 @@ impl<M> Widget for Checkbox<M> {
         // Convert TUI style to render style
         let render_style = crate::style::to_render_style(&self.style);
 
-        let _ = chunk.set_string(area.x, area.y, &checkbox_text, render_style);
+        let _ = chunk.set_string(area.x(), area.y(), &checkbox_text, render_style);
     }
 
     fn handle_event(&mut self, event: &Event) -> EventResult<M> {
@@ -128,7 +128,7 @@ impl<M> Widget for Checkbox<M> {
             Event::Key(key_event) if self.focused => {
                 // Handle Space/Enter key as toggle when focused
                 match key_event.code {
-                    KeyCode::Space | KeyCode::Enter => {
+                    KeyCode::Char(' ') | KeyCode::Enter => {
                         self.toggle();
                         // Trigger toggle handler and return the message
                         if let Some(ref handler) = self.on_toggle {

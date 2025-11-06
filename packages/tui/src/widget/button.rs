@@ -85,8 +85,8 @@ impl<M> Button<M> {
 
 impl<M> Widget for Button<M> {
     type Message = M;
-    fn render(&self, chunk: &mut render::chunk::Chunk, area: Rect) {
-        if area.width < 4 || area.height == 0 {
+    fn render(&self, chunk: &mut render::chunk::Chunk, area: Area) {
+        if area.width() < 4 || area.height() == 0 {
             return;
         }
 
@@ -99,7 +99,7 @@ impl<M> Widget for Button<M> {
         // Convert TUI style to render style
         let render_style = crate::style::to_render_style(&self.style);
 
-        let _ = chunk.set_string(area.x, area.y, &button_text, render_style);
+        let _ = chunk.set_string(area.x(), area.y(), &button_text, render_style);
     }
 
     fn handle_event(&mut self, event: &Event) -> EventResult<M> {
@@ -107,7 +107,7 @@ impl<M> Widget for Button<M> {
             Event::Key(key_event) if self.focused => {
                 // Handle Enter or Space key as activation when focused
                 match key_event.code {
-                    KeyCode::Enter | KeyCode::Space => {
+                    KeyCode::Enter | KeyCode::Char(' ') => {
                         // Trigger click handler and return the message
                         if let Some(ref handler) = self.on_click {
                             let message = handler();

@@ -219,6 +219,13 @@ where
 
                 let now = std::time::Instant::now();
 
+                // Check for resize events and update render buffer size
+                for event in &events {
+                    if let Event::Resize(width, height) = event {
+                        self.render.resize((*width, *height).into());
+                    }
+                }
+
                 if let Err(e) = self.render.on_events(&events) {
                     error!("Error processing events: {}", e);
                 }
@@ -275,16 +282,22 @@ fn event_thread(
             return;
         }
 
+        // Create a timer for continuous rendering (60 FPS = ~16.67ms per frame)
+        let mut interval = tokio::time::interval(Duration::from_millis(16));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
         loop {
             let event = reader.next().fuse();
             select! {
-                Some(_) = render_rx.recv() => {
-                    // Send collected events to render thread
-                    if event_tx.send(events).await.is_err() {
-                        // Render thread has stopped, exit gracefully
+                _ = interval.tick() => {
+                    // Timer tick - wait for render thread to be ready, then send events
+                    if render_rx.recv().await.is_none() {
                         break;
                     }
-                    events = Vec::new();
+                    if event_tx.send(events.clone()).await.is_err() {
+                        break;
+                    }
+                    events.clear();
                 }
                 maybe_event = event => {
                     match maybe_event {
