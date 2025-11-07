@@ -1,11 +1,16 @@
 use crossterm::{
-    cursor::MoveTo,
+    cursor::{MoveTo, MoveToNextLine, MoveToPreviousLine},
     queue,
     style::{Print, ResetColor},
     terminal::{Clear, ClearType},
 };
 
-use crate::{Builder, Draw, DrawErr, DrawUpdate, area::{Position, Size}, buffer::Buffer, chunk::Chunk};
+use crate::{
+    area::{Position, Size},
+    buffer::Buffer,
+    chunk::Chunk,
+    Builder, Draw, DrawErr, DrawUpdate,
+};
 
 #[derive(Debug, Clone, Default)]
 pub struct Render<W, T> {
@@ -15,6 +20,7 @@ pub struct Render<W, T> {
     out: W,
     clear: bool,
     append_newline: bool,
+    inline_mode: bool,
 }
 
 impl<W, T> Render<W, T>
@@ -32,44 +38,18 @@ where
             queue!(self.out, Clear(ClearType::All))?;
         }
 
-        queue!(self.out, MoveTo(self.pos.x, self.pos.y))?;
-
-        // Differential rendering: only output changed cells
-        if let Some(previous) = self.buffer.previous() {
-            // We have previous frame, do differential rendering
-            let mut has_color_cache = false;
-            for (y, (line, prev_line)) in self
-                .buffer
-                .content()
-                .chunks(buffer_size.width as usize)
-                .zip(previous.chunks(buffer_size.width as usize))
-                .enumerate()
-            {
-                if y >= buffer_size.height as usize {
-                    break;
-                }
-
-                for (x, (c, prev_c)) in line.iter().zip(prev_line.iter()).enumerate() {
-                    if c.is_occupied {
-                        continue;
-                    }
-
-                    // Only render if cell changed
-                    if c != prev_c {
-                        // Move cursor to this position
-                        queue!(self.out, MoveTo(self.pos.x + x as u16, self.pos.y + y as u16))?;
-
-                        if has_color_cache && !c.has_color() {
-                            queue!(self.out, ResetColor)?;
-                        }
-
-                        c.queue(&mut self.out)?;
-                        has_color_cache = c.has_color();
-                    }
+        // In inline mode, use absolute positioning with MoveTo
+        if self.inline_mode {
+            if let Some(previous) = self.buffer.previous() {
+                // 有前一帧，清除掉
+                for _ in previous.chunks(buffer_size.width as usize) {
+                    // 清除当前行
+                    queue!(self.out, Clear(ClearType::CurrentLine))?;
+                    // 回到上一行
+                    queue!(self.out, MoveToPreviousLine(1))?;
                 }
             }
-        } else {
-            // First render or no previous buffer, do full render
+            // 总是全量渲染
             let mut has_color_cache = false;
             for (y, line) in self
                 .buffer
@@ -94,8 +74,75 @@ where
                     has_color_cache = c.has_color();
                 }
 
-                if y < buffer_size.height as usize - 1 {
-                    queue!(self.out, MoveTo(self.pos.x, self.pos.y + y as u16 + 1))?;
+                queue!(self.out, MoveToNextLine(1))?;
+            }
+        } else {
+            // Fullscreen mode: use absolute positioning with differential rendering
+            // Differential rendering: only output changed cells
+            if let Some(previous) = self.buffer.previous() {
+                // We have previous frame, do differential rendering
+                let mut has_color_cache = false;
+                for (y, (line, prev_line)) in self
+                    .buffer
+                    .content()
+                    .chunks(buffer_size.width as usize)
+                    .zip(previous.chunks(buffer_size.width as usize))
+                    .enumerate()
+                {
+                    if y >= buffer_size.height as usize {
+                        break;
+                    }
+
+                    for (x, (c, prev_c)) in line.iter().zip(prev_line.iter()).enumerate() {
+                        if c.is_occupied {
+                            continue;
+                        }
+
+                        // Only render if cell changed
+                        if c != prev_c {
+                            // Move cursor to this position (absolute positioning)
+                            queue!(
+                                self.out,
+                                MoveTo(self.pos.x + x as u16, self.pos.y + y as u16)
+                            )?;
+
+                            if has_color_cache && !c.has_color() {
+                                queue!(self.out, ResetColor)?;
+                            }
+
+                            c.queue(&mut self.out)?;
+                            has_color_cache = c.has_color();
+                        }
+                    }
+                }
+            } else {
+                // First render or no previous buffer, do full render
+                let mut has_color_cache = false;
+                for (y, line) in self
+                    .buffer
+                    .content()
+                    .chunks(buffer_size.width as usize)
+                    .enumerate()
+                {
+                    if y >= buffer_size.height as usize {
+                        break;
+                    }
+
+                    // Move cursor to the start of this line (absolute positioning)
+                    queue!(self.out, MoveTo(self.pos.x, self.pos.y + y as u16))?;
+
+                    for c in line {
+                        if c.is_occupied {
+                            continue;
+                        }
+
+                        if has_color_cache && !c.has_color() {
+                            queue!(self.out, ResetColor)?;
+                        }
+
+                        c.queue(&mut self.out)?;
+                        has_color_cache = c.has_color();
+                    }
                 }
             }
         }
@@ -125,6 +172,7 @@ where
             out: writer,
             clear: builder.clear,
             append_newline: builder.append_newline,
+            inline_mode: builder.inline_mode,
         }
     }
 }
@@ -157,7 +205,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Draw, DrawErr, area::Size, style::Stylized};
+    use crate::{area::Size, style::Stylized, Draw, DrawErr};
 
     struct Text {
         lines: Vec<String>,

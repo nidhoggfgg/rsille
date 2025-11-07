@@ -9,7 +9,7 @@ pub struct ProgressBar;
 impl Widget for ProgressBar {
     type Message = ();
 
-    fn render(&self, _chunk: &mut render::chunk::Chunk, _area: Area) {
+    fn render(&self, _chunk: &mut render::chunk::Chunk) {
         // Implemented in Phase 7
     }
 

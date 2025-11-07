@@ -1,31 +1,10 @@
 //! CSS-style syntax support for widget styling
 
 use super::{BorderStyle, Color, Padding, Style};
-use crate::layout::Constraints;
+use crate::{layout::Constraints, style::CssError};
 use std::collections::HashMap;
 
 /// CSS parsing error
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum CssError {
-    InvalidProperty(String),
-    InvalidValue { property: String, value: String },
-    ParseError(String),
-}
-
-impl std::fmt::Display for CssError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            CssError::InvalidProperty(prop) => write!(f, "Invalid CSS property: {}", prop),
-            CssError::InvalidValue { property, value } => {
-                write!(f, "Invalid value '{}' for property '{}'", value, property)
-            }
-            CssError::ParseError(msg) => write!(f, "CSS parse error: {}", msg),
-        }
-    }
-}
-
-impl std::error::Error for CssError {}
-
 /// Parse CSS-style string into a map of properties
 /// Supports formats:
 /// - "color: red; background-color: blue"
@@ -82,38 +61,32 @@ pub fn parse_color(value: &str) -> Result<Color, CssError> {
     // Hex color: #RRGGBB or #RGB
     if let Some(hex) = value.strip_prefix('#') {
         if hex.len() == 6 {
-            let r = u8::from_str_radix(&hex[0..2], 16)
-                .map_err(|_| CssError::InvalidValue {
-                    property: "color".to_string(),
-                    value: value.clone(),
-                })?;
-            let g = u8::from_str_radix(&hex[2..4], 16)
-                .map_err(|_| CssError::InvalidValue {
-                    property: "color".to_string(),
-                    value: value.clone(),
-                })?;
-            let b = u8::from_str_radix(&hex[4..6], 16)
-                .map_err(|_| CssError::InvalidValue {
-                    property: "color".to_string(),
-                    value: value.clone(),
-                })?;
+            let r = u8::from_str_radix(&hex[0..2], 16).map_err(|_| CssError::InvalidValue {
+                property: "color".to_string(),
+                value: value.clone(),
+            })?;
+            let g = u8::from_str_radix(&hex[2..4], 16).map_err(|_| CssError::InvalidValue {
+                property: "color".to_string(),
+                value: value.clone(),
+            })?;
+            let b = u8::from_str_radix(&hex[4..6], 16).map_err(|_| CssError::InvalidValue {
+                property: "color".to_string(),
+                value: value.clone(),
+            })?;
             return Ok(Color::Rgb(r, g, b));
         } else if hex.len() == 3 {
-            let r = u8::from_str_radix(&hex[0..1], 16)
-                .map_err(|_| CssError::InvalidValue {
-                    property: "color".to_string(),
-                    value: value.clone(),
-                })?;
-            let g = u8::from_str_radix(&hex[1..2], 16)
-                .map_err(|_| CssError::InvalidValue {
-                    property: "color".to_string(),
-                    value: value.clone(),
-                })?;
-            let b = u8::from_str_radix(&hex[2..3], 16)
-                .map_err(|_| CssError::InvalidValue {
-                    property: "color".to_string(),
-                    value: value.clone(),
-                })?;
+            let r = u8::from_str_radix(&hex[0..1], 16).map_err(|_| CssError::InvalidValue {
+                property: "color".to_string(),
+                value: value.clone(),
+            })?;
+            let g = u8::from_str_radix(&hex[1..2], 16).map_err(|_| CssError::InvalidValue {
+                property: "color".to_string(),
+                value: value.clone(),
+            })?;
+            let b = u8::from_str_radix(&hex[2..3], 16).map_err(|_| CssError::InvalidValue {
+                property: "color".to_string(),
+                value: value.clone(),
+            })?;
             return Ok(Color::Rgb(r * 17, g * 17, b * 17));
         }
     }
@@ -166,29 +139,39 @@ pub fn parse_padding(value: &str) -> Result<Padding, CssError> {
 
     match parts.len() {
         1 => {
-            let uniform = parts[0].parse::<u16>().map_err(|_| CssError::InvalidValue {
-                property: "padding".to_string(),
-                value: value.to_string(),
-            })?;
+            let uniform = parts[0]
+                .parse::<u16>()
+                .map_err(|_| CssError::InvalidValue {
+                    property: "padding".to_string(),
+                    value: value.to_string(),
+                })?;
             Ok(Padding::uniform(uniform))
         }
         4 => {
-            let top = parts[0].parse::<u16>().map_err(|_| CssError::InvalidValue {
-                property: "padding".to_string(),
-                value: value.to_string(),
-            })?;
-            let right = parts[1].parse::<u16>().map_err(|_| CssError::InvalidValue {
-                property: "padding".to_string(),
-                value: value.to_string(),
-            })?;
-            let bottom = parts[2].parse::<u16>().map_err(|_| CssError::InvalidValue {
-                property: "padding".to_string(),
-                value: value.to_string(),
-            })?;
-            let left = parts[3].parse::<u16>().map_err(|_| CssError::InvalidValue {
-                property: "padding".to_string(),
-                value: value.to_string(),
-            })?;
+            let top = parts[0]
+                .parse::<u16>()
+                .map_err(|_| CssError::InvalidValue {
+                    property: "padding".to_string(),
+                    value: value.to_string(),
+                })?;
+            let right = parts[1]
+                .parse::<u16>()
+                .map_err(|_| CssError::InvalidValue {
+                    property: "padding".to_string(),
+                    value: value.to_string(),
+                })?;
+            let bottom = parts[2]
+                .parse::<u16>()
+                .map_err(|_| CssError::InvalidValue {
+                    property: "padding".to_string(),
+                    value: value.to_string(),
+                })?;
+            let left = parts[3]
+                .parse::<u16>()
+                .map_err(|_| CssError::InvalidValue {
+                    property: "padding".to_string(),
+                    value: value.to_string(),
+                })?;
             Ok(Padding::new(top, right, bottom, left))
         }
         _ => Err(CssError::InvalidValue {
@@ -387,7 +370,10 @@ mod tests {
 
     #[test]
     fn test_parse_rgb_color() {
-        assert_eq!(parse_color("rgb(255, 0, 0)").unwrap(), Color::Rgb(255, 0, 0));
+        assert_eq!(
+            parse_color("rgb(255, 0, 0)").unwrap(),
+            Color::Rgb(255, 0, 0)
+        );
     }
 
     #[test]
@@ -409,7 +395,8 @@ mod tests {
 
     #[test]
     fn test_style_from_css() {
-        let style = Style::from_css("color: red; background-color: blue; font-weight: bold").unwrap();
+        let style =
+            Style::from_css("color: red; background-color: blue; font-weight: bold").unwrap();
         assert_eq!(style.fg_color, Some(Color::Red));
         assert_eq!(style.bg_color, Some(Color::Blue));
         assert!(style.modifiers.contains_bold());

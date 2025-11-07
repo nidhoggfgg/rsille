@@ -10,9 +10,8 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 #[derive(Clone)]
 pub struct TextInput<M = ()> {
     value: String,
-    cursor: usize,
+    cursor: usize, // Character index (not byte index)
     style: Style,
-    focused: bool,
     on_change: Option<EventHandler<M>>,
 }
 
@@ -22,7 +21,6 @@ impl<M> std::fmt::Debug for TextInput<M> {
             .field("value", &self.value)
             .field("cursor", &self.cursor)
             .field("style", &self.style)
-            .field("focused", &self.focused)
             .field("on_change", &self.on_change.is_some())
             .finish()
     }
@@ -40,12 +38,11 @@ impl<M> TextInput<M> {
     /// ```
     pub fn new(value: impl Into<String>) -> Self {
         let value = value.into();
-        let cursor = value.len();
+        let cursor = value.chars().count(); // Use char count instead of byte len
         Self {
             value,
             cursor,
             style: Style::default(),
-            focused: false,
             on_change: None,
         }
     }
@@ -80,9 +77,13 @@ impl<M> TextInput<M> {
         &self.value
     }
 
-    /// Set focus state (managed by FocusManager)
-    pub(crate) fn set_focused(&mut self, focused: bool) {
-        self.focused = focused;
+    /// Convert character index to byte index
+    fn char_to_byte_idx(&self, char_idx: usize) -> usize {
+        self.value
+            .char_indices()
+            .nth(char_idx)
+            .map(|(byte_idx, _)| byte_idx)
+            .unwrap_or(self.value.len())
     }
 
     /// Move cursor to the left
@@ -94,7 +95,8 @@ impl<M> TextInput<M> {
 
     /// Move cursor to the right
     fn move_cursor_right(&mut self) {
-        if self.cursor < self.value.len() {
+        let char_count = self.value.chars().count();
+        if self.cursor < char_count {
             self.cursor += 1;
         }
     }
@@ -106,51 +108,55 @@ impl<M> TextInput<M> {
 
     /// Move cursor to end
     fn move_cursor_end(&mut self) {
-        self.cursor = self.value.len();
+        self.cursor = self.value.chars().count();
     }
 
     /// Insert a character at the cursor position
     fn insert_char(&mut self, ch: char) {
-        self.value.insert(self.cursor, ch);
+        let byte_idx = self.char_to_byte_idx(self.cursor);
+        self.value.insert(byte_idx, ch);
         self.cursor += 1;
     }
 
     /// Delete character before cursor (backspace)
     fn delete_before(&mut self) {
         if self.cursor > 0 {
-            self.value.remove(self.cursor - 1);
+            let byte_idx = self.char_to_byte_idx(self.cursor - 1);
+            self.value.remove(byte_idx);
             self.cursor -= 1;
         }
     }
 
     /// Delete character at cursor (delete key)
     fn delete_at_cursor(&mut self) {
-        if self.cursor < self.value.len() {
-            self.value.remove(self.cursor);
+        let char_count = self.value.chars().count();
+        if self.cursor < char_count {
+            let byte_idx = self.char_to_byte_idx(self.cursor);
+            self.value.remove(byte_idx);
         }
     }
 }
 
 impl<M> Widget for TextInput<M> {
     type Message = M;
-    fn render(&self, chunk: &mut render::chunk::Chunk, area: Area) {
+    fn render(&self, chunk: &mut render::chunk::Chunk) {
+        let area = chunk.area();
         if area.width() == 0 || area.height() == 0 {
             return;
         }
 
         // Calculate display text with cursor
-        let display_text = if self.focused {
-            // Show cursor position
-            let before = &self.value[..self.cursor];
-            let after = &self.value[self.cursor..];
+        let display_text = {
+            // Show cursor position using character boundaries
+            let byte_idx = self.char_to_byte_idx(self.cursor);
+            let before = &self.value[..byte_idx];
+            let after = &self.value[byte_idx..];
 
             if self.value.is_empty() {
                 "_".to_string()
             } else {
                 format!("{}|{}", before, after)
             }
-        } else {
-            self.value.clone()
         };
 
         // Truncate or pad to fit area
@@ -175,17 +181,12 @@ impl<M> Widget for TextInput<M> {
         };
 
         // Convert TUI style to render style
-        let render_style = crate::style::to_render_style(&self.style);
+        let render_style = self.style.to_render_style();
 
-        let _ = chunk.set_string(area.x(), area.y(), &final_text, render_style);
+        let _ = chunk.set_string(0, 0, &final_text, render_style);
     }
 
     fn handle_event(&mut self, event: &Event) -> EventResult<M> {
-        // Only handle events when focused
-        if !self.focused {
-            return EventResult::Ignored;
-        }
-
         if let Event::Key(key_event) = event {
             let mut changed = false;
 
@@ -240,9 +241,5 @@ impl<M> Widget for TextInput<M> {
             max_height: Some(1),
             flex: Some(1.0), // Flexible width
         }
-    }
-
-    fn focusable(&self) -> bool {
-        true
     }
 }

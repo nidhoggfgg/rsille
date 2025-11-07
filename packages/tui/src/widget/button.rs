@@ -10,7 +10,6 @@ use crate::style::Style;
 pub struct Button<M = ()> {
     label: String,
     style: Style,
-    focused: bool,
     on_click: Option<EventHandler<M>>,
 }
 
@@ -19,7 +18,6 @@ impl<M> std::fmt::Debug for Button<M> {
         f.debug_struct("Button")
             .field("label", &self.label)
             .field("style", &self.style)
-            .field("focused", &self.focused)
             .field("on_click", &self.on_click.is_some())
             .finish()
     }
@@ -38,7 +36,6 @@ impl<M> Button<M> {
         Self {
             label: label.into(),
             style: Style::default(),
-            focused: false,
             on_click: None,
         }
     }
@@ -52,7 +49,7 @@ impl<M> Button<M> {
     /// Attach a click handler that emits a message when activated
     ///
     /// The button can be activated by:
-    /// - Keyboard: Press Enter or Space when the button is focused
+    /// - Keyboard: Press Enter or Space
     /// - Mouse: Click the button with the left mouse button
     ///
     /// # Examples
@@ -72,11 +69,6 @@ impl<M> Button<M> {
         self
     }
 
-    /// Set focus state (managed by FocusManager)
-    pub(crate) fn set_focused(&mut self, focused: bool) {
-        self.focused = focused;
-    }
-
     /// Get the label text
     pub fn label(&self) -> &str {
         &self.label
@@ -85,27 +77,25 @@ impl<M> Button<M> {
 
 impl<M> Widget for Button<M> {
     type Message = M;
-    fn render(&self, chunk: &mut render::chunk::Chunk, area: Area) {
+    fn render(&self, chunk: &mut render::chunk::Chunk) {
+        let area = chunk.area();
         if area.width() < 4 || area.height() == 0 {
             return;
         }
 
         // Render button with brackets: [ Label ]
-        let prefix = if self.focused { "[>" } else { "[ " };
-        let suffix = if self.focused { "<]" } else { " ]" };
-
-        let button_text = format!("{}{}{}", prefix, self.label, suffix);
+        let button_text = format!("[ {} ]", self.label);
 
         // Convert TUI style to render style
-        let render_style = crate::style::to_render_style(&self.style);
+        let render_style = self.style.to_render_style();
 
-        let _ = chunk.set_string(area.x(), area.y(), &button_text, render_style);
+        let _ = chunk.set_string(0, 0, &button_text, render_style);
     }
 
     fn handle_event(&mut self, event: &Event) -> EventResult<M> {
         match event {
-            Event::Key(key_event) if self.focused => {
-                // Handle Enter or Space key as activation when focused
+            Event::Key(key_event) => {
+                // Handle Enter or Space key as activation
                 match key_event.code {
                     KeyCode::Enter | KeyCode::Char(' ') => {
                         // Trigger click handler and return the message
@@ -149,9 +139,5 @@ impl<M> Widget for Button<M> {
             max_height: Some(height),
             flex: None,
         }
-    }
-
-    fn focusable(&self) -> bool {
-        true
     }
 }

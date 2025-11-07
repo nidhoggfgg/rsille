@@ -9,8 +9,8 @@
 //!
 //! Run with: cargo run --example animations
 
-use tui::prelude::*;
 use std::time::Duration;
+use tui::prelude::*;
 
 /// Application state
 #[derive(Debug)]
@@ -71,20 +71,23 @@ fn update(state: &mut AnimationState, msg: Message) {
                 Color::Cyan,
             ];
             state.color_index = (state.color_index + 1) % colors.len();
-            state.color_transition.transition_to(
-                colors[state.color_index],
-                Duration::from_millis(600),
-            );
+            state
+                .color_transition
+                .transition_to(colors[state.color_index], Duration::from_millis(600));
         }
 
         Message::MoveLeft => {
             state.position_x = (state.position_x - 10.0).max(0.0);
-            state.position.slide_to(state.position_x, 0.0, Duration::from_millis(400));
+            state
+                .position
+                .slide_to(state.position_x, 0.0, Duration::from_millis(400));
         }
 
         Message::MoveRight => {
             state.position_x = (state.position_x + 10.0).min(50.0);
-            state.position.slide_to(state.position_x, 0.0, Duration::from_millis(400));
+            state
+                .position
+                .slide_to(state.position_x, 0.0, Duration::from_millis(400));
         }
 
         Message::StartEasings => {
@@ -145,17 +148,15 @@ fn view(state: &AnimationState) -> Container<Message> {
     let position_label = Label::new("→ Sliding Text")
         .style(Style::default().fg(Color::Cyan))
         .into();
-    let position_container: AnyWidget<Message> =
-        Container::horizontal(vec![position_label])
-            .padding(Padding::new(position_padding, 0, 0, 0))
-            .into();
+    let position_container: AnyWidget<Message> = Container::horizontal(vec![position_label])
+        .padding(Padding::new(position_padding, 0, 0, 0))
+        .into();
 
     // Easing comparison
-    let mut easing_widgets: Vec<AnyWidget<Message>> = vec![
-        Label::new("Easing Functions Comparison:")
+    let mut easing_widgets: Vec<AnyWidget<Message>> =
+        vec![Label::new("Easing Functions Comparison:")
             .style(Style::default().fg(Color::Yellow).bold())
-            .into(),
-    ];
+            .into()];
 
     for (name, animation) in &state.easing_animations {
         let progress = animation.eased_progress();

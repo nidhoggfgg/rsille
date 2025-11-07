@@ -1,10 +1,13 @@
 //! Container widget for layout composition
 
+use render::area::Area;
+
+use super::border_renderer::{render_background, render_border};
 use super::taffy_bridge::TaffyBridge;
 use crate::event::{Event, EventResult};
 use crate::layout::Constraints;
 use crate::style::{Padding, Style};
-use crate::widget::{any::AnyWidget, Area, Widget};
+use crate::widget::{AnyWidget, Widget};
 use std::sync::RwLock;
 
 /// Layout direction
@@ -123,14 +126,9 @@ impl<M> Container<M> {
         self.children.is_empty()
     }
 
-    /// Get reference to children (for focus management)
+    /// Get reference to children
     pub fn children(&self) -> &[AnyWidget<M>] {
         &self.children
-    }
-
-    /// Get mutable reference to children (for focus management)
-    pub(crate) fn children_mut(&mut self) -> &mut [AnyWidget<M>] {
-        &mut self.children
     }
 
     /// Handle event and collect any generated messages
@@ -184,13 +182,14 @@ impl<M> Container<M> {
 impl<M: Clone> Widget for Container<M> {
     type Message = M;
 
-    fn render(&self, chunk: &mut render::chunk::Chunk, area: Area) {
+    fn render(&self, chunk: &mut render::chunk::Chunk) {
+        let area = chunk.area();
         if area.width() == 0 || area.height() == 0 {
             return;
         }
 
         // Convert TUI style to render style
-        let render_style = crate::style::to_render_style(&self.style);
+        let render_style = self.style.to_render_style();
 
         // Calculate area inside border (if any)
         let border_area = if self.style.border.is_some() {
@@ -208,34 +207,12 @@ impl<M: Clone> Widget for Container<M> {
 
         // Apply container background if specified (only inside border)
         if self.style.bg_color.is_some() {
-            for y in 0..border_area.height() {
-                for x in 0..border_area.width() {
-                    let _ = chunk.set_char(border_area.x() + x, border_area.y() + y, ' ', render_style);
-                }
-            }
+            render_background(chunk, border_area, render_style);
         }
 
         // Draw border after background (so it's on top)
         if let Some(border) = self.style.border {
-            let chars = border.chars();
-
-            // Top and bottom borders
-            for x in 1..area.width().saturating_sub(1) {
-                let _ = chunk.set_char(area.x() + x, area.y(), chars.horizontal, render_style);
-                let _ = chunk.set_char(area.x() + x, area.y() + area.height() - 1, chars.horizontal, render_style);
-            }
-
-            // Left and right borders
-            for y in 1..area.height().saturating_sub(1) {
-                let _ = chunk.set_char(area.x(), area.y() + y, chars.vertical, render_style);
-                let _ = chunk.set_char(area.x() + area.width() - 1, area.y() + y, chars.vertical, render_style);
-            }
-
-            // Corners
-            let _ = chunk.set_char(area.x(), area.y(), chars.top_left, render_style);
-            let _ = chunk.set_char(area.x() + area.width() - 1, area.y(), chars.top_right, render_style);
-            let _ = chunk.set_char(area.x(), area.y() + area.height() - 1, chars.bottom_left, render_style);
-            let _ = chunk.set_char(area.x() + area.width() - 1, area.y() + area.height() - 1, chars.bottom_right, render_style);
+            render_border(chunk, area, border, render_style);
         }
 
         // Calculate inner area after padding
@@ -257,9 +234,12 @@ impl<M: Clone> Widget for Container<M> {
         // Cache layout info for mouse event handling
         *self.cached_child_areas.write().unwrap() = child_areas.clone();
 
-        // Render each child in its allocated area
+        // Render each child in its allocated area using sequential sub-chunk creation
         for (child, child_area) in self.children.iter().zip(child_areas) {
-            child.render(chunk, child_area);
+            // Create a sub-chunk for this child
+            if let Ok(mut child_chunk) = chunk.from_area(child_area) {
+                child.render(&mut child_chunk);
+            }
         }
     }
 
@@ -342,11 +322,6 @@ impl<M: Clone> Widget for Container<M> {
                 }
             }
         }
-    }
-
-    fn focusable(&self) -> bool {
-        // Container itself not focusable, but may contain focusable children
-        false
     }
 }
 
