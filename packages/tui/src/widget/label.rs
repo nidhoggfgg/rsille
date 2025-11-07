@@ -49,16 +49,17 @@ impl Label {
 impl Widget for Label {
     type Message = ();
 
-    fn render(&self, chunk: &mut render::chunk::Chunk, area: Area) {
+    fn render(&self, chunk: &mut render::chunk::Chunk) {
+        let area = chunk.area();
         if area.width() == 0 || area.height() == 0 {
             return;
         }
 
         // Convert TUI style to render style
-        let render_style = crate::style::to_render_style(&self.style);
+        let render_style = self.style.to_render_style();
 
-        // Render text at the widget's position
-        let _ = chunk.set_string(area.x(), area.y(), &self.content, render_style);
+        // Render text at relative coordinates (0, 0)
+        let _ = chunk.set_string(0, 0, &self.content, render_style);
     }
 
     fn handle_event(&mut self, _event: &Event) -> EventResult<()> {
@@ -81,9 +82,5 @@ impl Widget for Label {
             max_height: Some(height),
             flex: None,
         }
-    }
-
-    fn focusable(&self) -> bool {
-        false
     }
 }

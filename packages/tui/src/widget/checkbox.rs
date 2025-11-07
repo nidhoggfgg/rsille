@@ -12,7 +12,6 @@ pub struct Checkbox<M = ()> {
     label: String,
     checked: bool,
     style: Style,
-    focused: bool,
     on_toggle: Option<EventHandler<M>>,
 }
 
@@ -22,7 +21,6 @@ impl<M> std::fmt::Debug for Checkbox<M> {
             .field("label", &self.label)
             .field("checked", &self.checked)
             .field("style", &self.style)
-            .field("focused", &self.focused)
             .field("on_toggle", &self.on_toggle.is_some())
             .finish()
     }
@@ -43,7 +41,6 @@ impl<M> Checkbox<M> {
             label: label.into(),
             checked,
             style: Style::default(),
-            focused: false,
             on_toggle: None,
         }
     }
@@ -57,7 +54,7 @@ impl<M> Checkbox<M> {
     /// Attach a toggle handler that emits a message when toggled
     ///
     /// The checkbox can be toggled by:
-    /// - Keyboard: Press Space or Enter when the checkbox is focused
+    /// - Keyboard: Press Space or Enter
     /// - Mouse: Click the checkbox with the left mouse button
     ///
     /// # Examples
@@ -88,11 +85,6 @@ impl<M> Checkbox<M> {
         &self.label
     }
 
-    /// Set focus state (managed by FocusManager)
-    pub(crate) fn set_focused(&mut self, focused: bool) {
-        self.focused = focused;
-    }
-
     /// Toggle the checked state
     fn toggle(&mut self) {
         self.checked = !self.checked;
@@ -102,31 +94,31 @@ impl<M> Checkbox<M> {
 impl<M> Widget for Checkbox<M> {
     type Message = M;
 
-    fn render(&self, chunk: &mut render::chunk::Chunk, area: Area) {
+    fn render(&self, chunk: &mut render::chunk::Chunk) {
+        let area = chunk.area();
         if area.width() < 4 || area.height() == 0 {
             return;
         }
 
         // Render checkbox: [X] Label or [ ] Label
         let box_char = if self.checked { "[X]" } else { "[ ]" };
-        let prefix = if self.focused { ">" } else { "" };
 
         let checkbox_text = if self.label.is_empty() {
-            format!("{}{}", prefix, box_char)
+            format!("{}", box_char)
         } else {
-            format!("{}{} {}", prefix, box_char, self.label)
+            format!("{} {}", box_char, self.label)
         };
 
         // Convert TUI style to render style
-        let render_style = crate::style::to_render_style(&self.style);
+        let render_style = self.style.to_render_style();
 
-        let _ = chunk.set_string(area.x(), area.y(), &checkbox_text, render_style);
+        let _ = chunk.set_string(0, 0, &checkbox_text, render_style);
     }
 
     fn handle_event(&mut self, event: &Event) -> EventResult<M> {
         match event {
-            Event::Key(key_event) if self.focused => {
-                // Handle Space/Enter key as toggle when focused
+            Event::Key(key_event) => {
+                // Handle Space/Enter key as toggle
                 match key_event.code {
                     KeyCode::Char(' ') | KeyCode::Enter => {
                         self.toggle();
@@ -161,13 +153,13 @@ impl<M> Widget for Checkbox<M> {
     }
 
     fn constraints(&self) -> Constraints {
-        // Checkbox width = 3 (for "[ ]") + 1 (space) + label width + 1 (focus indicator)
+        // Checkbox width = 3 (for "[ ]") + 1 (space) + label width
         let width =
             3 + if self.label.is_empty() {
                 0
             } else {
                 1 + self.label.width() as u16
-            } + 1;
+            };
 
         let height = 1;
 
@@ -178,9 +170,5 @@ impl<M> Widget for Checkbox<M> {
             max_height: Some(height),
             flex: None,
         }
-    }
-
-    fn focusable(&self) -> bool {
-        true
     }
 }

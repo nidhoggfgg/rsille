@@ -1,11 +1,11 @@
 use std::{
-    io::{Stdout, stdout},
+    io::{stdout, Stdout, Write},
     thread,
     time::Duration,
 };
 
 use crossterm::{
-    cursor::{Hide, Show},
+    cursor::{position, Hide, MoveToNextLine, Show},
     event::{DisableMouseCapture, EnableMouseCapture, Event, EventStream, KeyEvent},
     execute,
     terminal::{Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen},
@@ -83,6 +83,7 @@ pub struct EventLoop<T> {
     alt_screen: bool,
     mouse_capture: bool,
     hide_cursor: bool,
+    inline_mode: bool,
 }
 
 impl<T> EventLoop<T>
@@ -102,6 +103,7 @@ where
             alt_screen: builder.enable_alt_screen,
             mouse_capture: builder.enable_mouse_capture,
             hide_cursor: builder.enable_hide_cursor,
+            inline_mode: builder.inline_mode,
         }
     }
 
@@ -150,14 +152,39 @@ where
         self
     }
 
-    pub fn run(self) -> Result<(), DrawErr> {
-        // Create terminal guard - this will automatically cleanup on drop
+    pub fn run(mut self) -> Result<(), DrawErr> {
+        // Create terminal guard first - this will automatically cleanup on drop
         let _guard = TerminalGuard::new(
             self.alt_screen,
             self.raw_mode,
             self.mouse_capture,
             self.hide_cursor,
         )?;
+
+        // In inline mode, capture the current cursor position AFTER enabling raw mode
+        // Raw mode is needed for position() to work properly
+        if self.inline_mode {
+            // Get current cursor position
+            match position() {
+                Ok((x, y)) => {
+                    self.render.pos = (x, y).into();
+                    // not a newline, move to the next line
+                    if x != 0 {
+                        execute!(stdout(), MoveToNextLine(1))?;
+                        self.render.pos.down(1);
+                    }
+                }
+                Err(e) => {
+                    // If we can't get cursor position, use (0, 0) as fallback
+                    // This might happen in non-interactive environments
+                    warn!(
+                        "Failed to get cursor position in inline mode: {}, using (0, 0)",
+                        e
+                    );
+                    self.render.pos = (0, 0).into();
+                }
+            }
+        }
 
         let (render_tx, render_rx) = mpsc::channel(1);
         let (event_tx, event_rx) = mpsc::channel(1);

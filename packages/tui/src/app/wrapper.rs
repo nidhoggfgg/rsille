@@ -1,7 +1,7 @@
 use render::{area::Size, chunk::Chunk, Draw, DrawErr, Update};
 
 use crate::{
-    event::{Event, KeyCode},
+    event::Event,
     layout::Container,
     widget::Widget,
 };
@@ -48,10 +48,7 @@ where
     fn draw(&mut self, mut chunk: Chunk) -> std::result::Result<Size, DrawErr> {
         // Always rebuild widget tree to support animations
         // Animations update based on time, so we need to call view() every frame
-        let mut container = (self.view_fn)(&self.app.state);
-
-        // Initialize focus management
-        self.app.apply_focus(&mut container);
+        let container = (self.view_fn)(&self.app.state);
 
         // Cache the container
         self.cached_container = Some(Box::new(container));
@@ -65,16 +62,11 @@ where
             .as_mut()
             .expect("Container should be cached after rebuild");
 
-        // Get the chunk area
-        let area = chunk.area();
-        let size = area.size();
-
-        // Create an Area from the chunk size for rendering (starting at 0,0 since chunk handles positioning)
-        use render::area::Area;
-        let render_area = Area::new((0, 0).into(), size);
+        // Get the chunk area for size
+        let size = chunk.area().size();
 
         // Render the widget tree directly to chunk
-        container.render(&mut chunk, render_area);
+        container.render(&mut chunk);
 
         Ok(size)
     }
@@ -92,8 +84,7 @@ where
     ) -> std::result::Result<(), DrawErr> {
         // Ensure we have a container (should be cached from draw, but check anyway)
         if self.cached_container.is_none() {
-            let mut container = (self.view_fn)(&self.app.state);
-            self.app.apply_focus(&mut container);
+            let container = (self.view_fn)(&self.app.state);
             self.cached_container = Some(Box::new(container));
         }
 
@@ -105,23 +96,6 @@ where
                 // Clear cache to force rebuild with new size
                 self.cached_container = None;
                 continue;
-            }
-
-            // Handle Tab navigation
-            if let Event::Key(ref key_ev) = event {
-                if key_ev.code == KeyCode::Tab {
-                    // Tab navigation modifies focus, need to rebuild on next draw
-                    let container = self
-                        .cached_container
-                        .as_mut()
-                        .expect("Container should be cached");
-                    let shift = key_ev.modifiers.contains(crate::event::KeyModifiers::SHIFT);
-                    self.app.handle_tab(container, shift);
-                    self.needs_redraw = true;
-                    // Note: We don't set state_changed because focus is not part of state
-                    // But we'll need to reapply focus on next rebuild
-                    continue;
-                }
             }
 
             // Route event to widgets and collect messages using cached container

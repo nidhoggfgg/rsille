@@ -1,12 +1,14 @@
 //! Styling types for widget appearance
 
-pub mod border;
-pub mod css;
-pub mod padding;
+mod border;
+mod css;
+mod error;
+mod padding;
 
 pub use border::BorderStyle;
-pub use css::CssError;
 pub use padding::Padding;
+
+pub use error::CssError;
 
 /// Widget style configuration
 #[derive(Debug, Clone, Copy)]
@@ -62,6 +64,49 @@ impl Style {
     pub fn padding(mut self, padding: Padding) -> Self {
         self.padding = padding;
         self
+    }
+
+    /// Convert to render style
+    pub fn to_render_style(&self) -> render::style::Style {
+        use crossterm::style::{Attributes, Colors};
+        use render::style::Style as RenderStyle;
+
+        // Convert colors if present
+        let colors = if self.fg_color.is_some() || self.bg_color.is_some() {
+            let fg = self.fg_color.map(color_to_crossterm);
+            let bg = self.bg_color.map(color_to_crossterm);
+            Some(Colors {
+                foreground: fg,
+                background: bg,
+            })
+        } else {
+            None
+        };
+
+        // Convert modifiers if present
+        let attr = if !self.modifiers.is_empty() {
+            let mut a = Attributes::default();
+            if self.modifiers.contains_bold() {
+                a = a | crossterm::style::Attribute::Bold;
+            }
+            if self.modifiers.contains_italic() {
+                a = a | crossterm::style::Attribute::Italic;
+            }
+            if self.modifiers.contains_underlined() {
+                a = a | crossterm::style::Attribute::Underlined;
+            }
+            Some(a)
+        } else {
+            None
+        };
+
+        // Create render style
+        match (colors, attr) {
+            (Some(c), Some(a)) => RenderStyle::with_both(c, a),
+            (Some(c), None) => RenderStyle::with_colors(c),
+            (None, Some(a)) => RenderStyle::with_attr(a),
+            (None, None) => RenderStyle::default(),
+        }
     }
 }
 
@@ -138,49 +183,6 @@ impl TextModifiers {
 
     pub const fn is_empty(&self) -> bool {
         self.bits == 0
-    }
-}
-
-/// Convert TUI Style to render::style::Style
-pub fn to_render_style(style: &Style) -> render::style::Style {
-    use crossterm::style::{Attributes, Colors};
-    use render::style::Style as RenderStyle;
-
-    // Convert colors if present
-    let colors = if style.fg_color.is_some() || style.bg_color.is_some() {
-        let fg = style.fg_color.map(color_to_crossterm);
-        let bg = style.bg_color.map(color_to_crossterm);
-        Some(Colors {
-            foreground: fg,
-            background: bg,
-        })
-    } else {
-        None
-    };
-
-    // Convert modifiers if present
-    let attr = if !style.modifiers.is_empty() {
-        let mut a = Attributes::default();
-        if style.modifiers.contains_bold() {
-            a = a | crossterm::style::Attribute::Bold;
-        }
-        if style.modifiers.contains_italic() {
-            a = a | crossterm::style::Attribute::Italic;
-        }
-        if style.modifiers.contains_underlined() {
-            a = a | crossterm::style::Attribute::Underlined;
-        }
-        Some(a)
-    } else {
-        None
-    };
-
-    // Create render style
-    match (colors, attr) {
-        (Some(c), Some(a)) => RenderStyle::with_both(c, a),
-        (Some(c), None) => RenderStyle::with_colors(c),
-        (None, Some(a)) => RenderStyle::with_attr(a),
-        (None, None) => RenderStyle::default(),
     }
 }
 

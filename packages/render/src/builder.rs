@@ -1,9 +1,9 @@
 use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::{
-    Draw, DrawUpdate, Render,
     area::{Position, Size},
     event_loop::EventLoop,
+    Draw, DrawUpdate, Render,
 };
 
 #[derive(Debug, Clone, Copy, Hash)]
@@ -19,6 +19,7 @@ pub struct Builder {
     pub(super) pos: Position,
     pub(super) clear: bool,
     pub(super) append_newline: bool,
+    pub(super) inline_mode: bool,
 }
 
 impl Builder {
@@ -35,6 +36,7 @@ impl Builder {
             max_event_per_frame: 10,
             clear: true,
             append_newline: false,
+            inline_mode: false,
         }
     }
 
@@ -113,6 +115,24 @@ impl Builder {
 
     pub fn append_newline(&mut self, append_newline: bool) -> &mut Self {
         self.append_newline = append_newline;
+        self
+    }
+
+    /// Enable inline mode for non-fullscreen, CLI-style interaction
+    ///
+    /// When enabled:
+    /// - Disables alternate screen (renders to current terminal position)
+    /// - Keeps cursor visible by default
+    /// - Suitable for modern CLI tools (npm, yarn style)
+    /// - Automatically sets clear=false to preserve previous output
+    pub fn inline_mode(&mut self, enable: bool) -> &mut Self {
+        self.inline_mode = enable;
+        if enable {
+            // In inline mode, we should not use alt screen
+            self.enable_alt_screen = false;
+            // Typically don't clear in inline mode
+            self.clear = false;
+        }
         self
     }
 

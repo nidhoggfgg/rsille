@@ -119,16 +119,58 @@ impl<M> KeyboardController<M> {
         self
     }
 
-    /// Set focus state (managed by FocusManager)
-    pub(crate) fn set_focused(&mut self, _focused: bool) {
-        // KeyboardController doesn't have visual focus state
+    /// Attach handlers for multiple keys at once
+    ///
+    /// This is a convenience method for registering multiple key handlers.
+    ///
+    /// # Examples
+    /// ```
+    /// use tui::widget::KeyboardController;
+    /// use tui::event::KeyCode;
+    ///
+    /// #[derive(Clone)]
+    /// enum Message { A, B, C }
+    ///
+    /// let controller = KeyboardController::new()
+    ///     .on_keys(&[
+    ///         (KeyCode::Char('a'), Message::A),
+    ///         (KeyCode::Char('b'), Message::B),
+    ///         (KeyCode::Char('c'), Message::C),
+    ///     ]);
+    /// ```
+    pub fn on_keys(mut self, mappings: &[(KeyCode, M)]) -> Self
+    where
+        M: Clone + Send + Sync + 'static,
+    {
+        for (key_code, message) in mappings {
+            let msg = message.clone();
+            self.key_handlers.insert(*key_code, std::sync::Arc::new(move || msg.clone()));
+        }
+        self
+    }
+
+    /// Attach handlers for character keys using a closure
+    pub fn on_chars<F>(mut self, chars: &[char], handler: F) -> Self
+    where
+        F: Fn(char) -> M + Send + Sync + 'static,
+        M: 'static,
+    {
+        let handler = std::sync::Arc::new(handler);
+        for &ch in chars {
+            let handler_clone = handler.clone();
+            self.key_handlers.insert(
+                KeyCode::Char(ch),
+                std::sync::Arc::new(move || handler_clone(ch)),
+            );
+        }
+        self
     }
 }
 
 impl<M> Widget for KeyboardController<M> {
     type Message = M;
 
-    fn render(&self, _chunk: &mut render::chunk::Chunk, _area: Area) {
+    fn render(&self, _chunk: &mut render::chunk::Chunk) {
         // KeyboardController doesn't render anything - it's invisible
     }
 
@@ -170,10 +212,5 @@ impl<M> Widget for KeyboardController<M> {
             max_height: Some(0),
             flex: None,
         }
-    }
-
-    fn focusable(&self) -> bool {
-        // KeyboardController should be focusable to receive events
-        true
     }
 }

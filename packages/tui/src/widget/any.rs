@@ -9,11 +9,11 @@ macro_rules! dispatch_widget_method {
     ($self:expr, $method:ident, $($args:expr),+) => {
         match $self {
             AnyWidget::Label(w) => w.$method($($args),*),
+            AnyWidget::Spacer(w) => w.$method($($args),*),
             AnyWidget::Button(w) => w.$method($($args),*),
             AnyWidget::KeyboardController(w) => w.$method($($args),*),
             AnyWidget::TextInput(w) => w.$method($($args),*),
             AnyWidget::Checkbox(w) => w.$method($($args),*),
-            AnyWidget::List(w) => w.$method($($args),*),
             AnyWidget::ProgressBar(w) => w.$method($($args),*),
             AnyWidget::Container(w) => w.$method($($args),*),
         }
@@ -22,11 +22,11 @@ macro_rules! dispatch_widget_method {
     ($self:expr, $method:ident) => {
         match $self {
             AnyWidget::Label(w) => w.$method(),
+            AnyWidget::Spacer(w) => w.$method(),
             AnyWidget::Button(w) => w.$method(),
             AnyWidget::KeyboardController(w) => w.$method(),
             AnyWidget::TextInput(w) => w.$method(),
             AnyWidget::Checkbox(w) => w.$method(),
-            AnyWidget::List(w) => w.$method(),
             AnyWidget::ProgressBar(w) => w.$method(),
             AnyWidget::Container(w) => w.$method(),
         }
@@ -39,22 +39,22 @@ macro_rules! dispatch_widget_method {
 #[derive(Debug)]
 pub enum AnyWidget<M = ()> {
     Label(label::Label),
+    Spacer(spacer::Spacer),
     Button(button::Button<M>),
     KeyboardController(keyboard_controller::KeyboardController<M>),
     TextInput(text_input::TextInput<M>),
     Checkbox(checkbox::Checkbox<M>),
-    List(list::List),
     ProgressBar(progress_bar::ProgressBar),
     Container(Container<M>),
 }
 
 impl<M> AnyWidget<M> {
     /// Render the widget
-    pub fn render(&self, chunk: &mut render::chunk::Chunk, area: Area)
+    pub fn render(&self, chunk: &mut render::chunk::Chunk)
     where
         M: Clone,
     {
-        dispatch_widget_method!(self, render, chunk, area)
+        dispatch_widget_method!(self, render, chunk)
     }
 
     /// Get widget constraints
@@ -63,25 +63,6 @@ impl<M> AnyWidget<M> {
         M: Clone,
     {
         dispatch_widget_method!(self, constraints)
-    }
-
-    /// Check if widget is focusable
-    pub fn focusable(&self) -> bool
-    where
-        M: Clone,
-    {
-        dispatch_widget_method!(self, focusable)
-    }
-
-    /// Set focus state on the widget (for focus management and testing)
-    pub fn set_focused(&mut self, focused: bool) {
-        match self {
-            AnyWidget::Label(_) | AnyWidget::List(_) | AnyWidget::ProgressBar(_) | AnyWidget::Container(_) => {}
-            AnyWidget::Button(w) => w.set_focused(focused),
-            AnyWidget::KeyboardController(w) => w.set_focused(focused),
-            AnyWidget::TextInput(w) => w.set_focused(focused),
-            AnyWidget::Checkbox(w) => w.set_focused(focused),
-        }
     }
 
     /// Handle event and collect any generated messages
@@ -94,7 +75,7 @@ impl<M> AnyWidget<M> {
                 let _ = w.handle_event(event);
                 (EventResult::Ignored, vec![])
             }
-            AnyWidget::List(w) => {
+            AnyWidget::Spacer(w) => {
                 let _ = w.handle_event(event);
                 (EventResult::Ignored, vec![])
             }
@@ -134,6 +115,12 @@ impl<M> From<label::Label> for AnyWidget<M> {
     }
 }
 
+impl<M> From<spacer::Spacer> for AnyWidget<M> {
+    fn from(w: spacer::Spacer) -> Self {
+        AnyWidget::Spacer(w)
+    }
+}
+
 impl<M> From<button::Button<M>> for AnyWidget<M> {
     fn from(w: button::Button<M>) -> Self {
         AnyWidget::Button(w)
@@ -155,12 +142,6 @@ impl<M> From<text_input::TextInput<M>> for AnyWidget<M> {
 impl<M> From<checkbox::Checkbox<M>> for AnyWidget<M> {
     fn from(w: checkbox::Checkbox<M>) -> Self {
         AnyWidget::Checkbox(w)
-    }
-}
-
-impl<M> From<list::List> for AnyWidget<M> {
-    fn from(w: list::List) -> Self {
-        AnyWidget::List(w)
     }
 }
 

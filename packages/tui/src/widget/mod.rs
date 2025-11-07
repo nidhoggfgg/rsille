@@ -1,17 +1,15 @@
 //! Widget system - core trait and types
 
-pub mod any;
+mod any;
 
 // Widget implementations
-pub mod button;
-pub mod checkbox;
-pub mod keyboard_controller;
-pub mod label;
-pub mod text_input;
+mod button;
+mod checkbox;
+mod keyboard_controller;
+mod label;
+mod spacer;
+mod text_input;
 
-// Incomplete widgets - not yet exported to public API
-#[allow(dead_code)]
-mod list;
 #[allow(dead_code)]
 mod progress_bar;
 
@@ -20,11 +18,8 @@ pub use button::Button;
 pub use checkbox::Checkbox;
 pub use keyboard_controller::KeyboardController;
 pub use label::Label;
+pub use spacer::Spacer;
 pub use text_input::TextInput;
-// Note: List and ProgressBar are not exported until fully implemented
-
-// Re-export Area from render package
-pub use render::area::Area;
 
 use crate::event::{Event, EventResult};
 use crate::layout::Constraints;
@@ -34,12 +29,14 @@ pub trait Widget {
     /// The type of message this widget can produce
     type Message;
 
-    /// Render the widget into the provided chunk at the specified area.
+    /// Render the widget into the provided chunk.
+    ///
+    /// The widget should draw at relative coordinates (0, 0) within the chunk.
+    /// The chunk contains its area which defines the widget's allocated space.
     ///
     /// # Arguments
-    /// * `chunk` - Mutable chunk to draw into
-    /// * `area` - Rectangular area allocated for this widget
-    fn render(&self, chunk: &mut render::chunk::Chunk, area: Area);
+    /// * `chunk` - Mutable chunk to draw into, containing the widget's allocated area
+    fn render(&self, chunk: &mut render::chunk::Chunk);
 
     /// Handle an input event and return the result with any generated messages.
     ///
@@ -55,13 +52,4 @@ pub trait Widget {
     ///
     /// Used by layout manager to calculate widget positions.
     fn constraints(&self) -> Constraints;
-
-    /// Whether this widget can receive keyboard focus.
-    ///
-    /// # Returns
-    /// * `true` for interactive widgets (Button, TextInput, etc.)
-    /// * `false` for display-only widgets (Label, ProgressBar, etc.)
-    fn focusable(&self) -> bool {
-        false // default: not focusable
-    }
 }
