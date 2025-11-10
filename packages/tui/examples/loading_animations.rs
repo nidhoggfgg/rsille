@@ -8,8 +8,8 @@
 //!
 //! Run with: cargo run --example loading_animations
 
-use tui::prelude::*;
 use std::time::Duration;
+use tui::prelude::*;
 
 /// Spinner frame characters
 const SPINNER_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -37,6 +37,7 @@ struct LoadingState {
 }
 
 /// Messages
+#[allow(unused)]
 #[derive(Clone, Debug)]
 enum Message {
     Tick,
@@ -84,7 +85,9 @@ fn update(state: &mut LoadingState, msg: Message) {
             state.progress = AnimatedValue::transition(0.0, target, Duration::from_millis(1500));
             state.progress.start();
 
-            state.status_color.transition_to(Color::Yellow, Duration::from_millis(300));
+            state
+                .status_color
+                .transition_to(Color::Yellow, Duration::from_millis(300));
         }
 
         Message::NextStage => {
@@ -94,7 +97,8 @@ fn update(state: &mut LoadingState, msg: Message) {
                 // Animate to next stage
                 let current = state.progress.current();
                 let target = (state.loading_stage + 1) as f32 / state.stage_names.len() as f32;
-                state.progress = AnimatedValue::transition(current, target, Duration::from_millis(1500));
+                state.progress =
+                    AnimatedValue::transition(current, target, Duration::from_millis(1500));
                 state.progress.start();
 
                 // Change status color
@@ -103,10 +107,14 @@ fn update(state: &mut LoadingState, msg: Message) {
                     2..=3 => Color::Cyan,
                     _ => Color::Green,
                 };
-                state.status_color.transition_to(color, Duration::from_millis(300));
+                state
+                    .status_color
+                    .transition_to(color, Duration::from_millis(300));
             } else {
                 // Completed
-                state.status_color.transition_to(Color::Green, Duration::from_millis(300));
+                state
+                    .status_color
+                    .transition_to(Color::Green, Duration::from_millis(300));
             }
         }
 
@@ -116,7 +124,9 @@ fn update(state: &mut LoadingState, msg: Message) {
             state.loading_stage = 0;
             state.progress = AnimatedValue::new(0.0);
             state.pulse_opacity = OpacityTransition::with_opacity(1.0);
-            state.status_color.transition_to(Color::White, Duration::from_millis(300));
+            state
+                .status_color
+                .transition_to(Color::White, Duration::from_millis(300));
         }
     }
 }

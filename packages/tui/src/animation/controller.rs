@@ -2,7 +2,7 @@
 
 use super::Animation;
 use std::collections::HashMap;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 /// Animation state
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -45,7 +45,8 @@ impl AnimationController {
     pub fn start(&mut self, name: &str) -> bool {
         if let Some(animation) = self.animations.get_mut(name) {
             animation.start();
-            self.states.insert(name.to_string(), AnimationState::Running);
+            self.states
+                .insert(name.to_string(), AnimationState::Running);
             true
         } else {
             false
@@ -66,7 +67,8 @@ impl AnimationController {
     pub fn resume(&mut self, name: &str) -> bool {
         if let Some(state) = self.states.get(name) {
             if *state == AnimationState::Paused {
-                self.states.insert(name.to_string(), AnimationState::Running);
+                self.states
+                    .insert(name.to_string(), AnimationState::Running);
                 return true;
             }
         }
@@ -91,7 +93,10 @@ impl AnimationController {
 
     /// Get the state of an animation
     pub fn state(&self, name: &str) -> AnimationState {
-        self.states.get(name).copied().unwrap_or(AnimationState::Idle)
+        self.states
+            .get(name)
+            .copied()
+            .unwrap_or(AnimationState::Idle)
     }
 
     /// Update all animations
@@ -150,141 +155,5 @@ impl AnimationController {
 impl Default for AnimationController {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-/// Helper for sequencing animations
-pub struct AnimationSequence {
-    steps: Vec<(Animation, Option<Duration>)>, // (animation, optional delay before next)
-    current_step: usize,
-    state: AnimationState,
-}
-
-impl AnimationSequence {
-    /// Create a new animation sequence
-    pub fn new() -> Self {
-        Self {
-            steps: Vec::new(),
-            current_step: 0,
-            state: AnimationState::Idle,
-        }
-    }
-
-    /// Add an animation to the sequence
-    pub fn then(mut self, animation: Animation) -> Self {
-        self.steps.push((animation, None));
-        self
-    }
-
-    /// Add an animation with a delay after it completes
-    pub fn then_wait(mut self, animation: Animation, delay: Duration) -> Self {
-        self.steps.push((animation, Some(delay)));
-        self
-    }
-
-    /// Start the sequence
-    pub fn start(&mut self) {
-        if !self.steps.is_empty() {
-            self.current_step = 0;
-            self.steps[0].0.start();
-            self.state = AnimationState::Running;
-        }
-    }
-
-    /// Update the sequence - returns true if still running
-    pub fn update(&mut self) -> bool {
-        if self.state != AnimationState::Running {
-            return false;
-        }
-
-        if self.current_step >= self.steps.len() {
-            self.state = AnimationState::Completed;
-            return false;
-        }
-
-        let (current_anim, delay) = &mut self.steps[self.current_step];
-
-        if current_anim.is_complete() {
-            // Check if there's a delay
-            if let Some(_delay) = delay {
-                // TODO: Implement delay handling
-                // For now, just move to next step
-            }
-
-            // Move to next step
-            self.current_step += 1;
-
-            if self.current_step < self.steps.len() {
-                self.steps[self.current_step].0.start();
-            } else {
-                self.state = AnimationState::Completed;
-                return false;
-            }
-        }
-
-        true
-    }
-
-    /// Get current progress (0.0 to 1.0) across entire sequence
-    pub fn progress(&self) -> f32 {
-        if self.steps.is_empty() {
-            return 1.0;
-        }
-
-        let steps_completed = self.current_step as f32;
-        let total_steps = self.steps.len() as f32;
-
-        if self.current_step < self.steps.len() {
-            let current_progress = self.steps[self.current_step].0.eased_progress();
-            (steps_completed + current_progress) / total_steps
-        } else {
-            1.0
-        }
-    }
-
-    /// Check if sequence is complete
-    pub fn is_complete(&self) -> bool {
-        self.state == AnimationState::Completed
-    }
-
-    /// Get current state
-    pub fn state(&self) -> AnimationState {
-        self.state
-    }
-}
-
-impl Default for AnimationSequence {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_controller_basic() {
-        let mut controller = AnimationController::new();
-        let animation = Animation::new(Duration::from_millis(100));
-
-        controller.register("test", animation);
-        assert_eq!(controller.count(), 1);
-        assert_eq!(controller.state("test"), AnimationState::Idle);
-
-        controller.start("test");
-        assert_eq!(controller.state("test"), AnimationState::Running);
-    }
-
-    #[test]
-    fn test_sequence() {
-        let mut seq = AnimationSequence::new();
-        seq = seq
-            .then(Animation::new(Duration::from_millis(10)))
-            .then(Animation::new(Duration::from_millis(10)));
-
-        seq.start();
-        assert_eq!(seq.state(), AnimationState::Running);
-        assert!(!seq.is_complete());
     }
 }

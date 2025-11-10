@@ -5,8 +5,8 @@
 //!
 //! Run with: cargo run --example smooth_transitions
 
-use tui::prelude::*;
 use std::time::Duration;
+use tui::prelude::*;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Screen {
@@ -24,6 +24,7 @@ struct AppState {
     selected_index: usize,
 }
 
+#[allow(unused)]
 /// Messages
 #[derive(Clone, Debug)]
 enum Message {
@@ -39,7 +40,10 @@ fn update(state: &mut AppState, msg: Message) {
         Message::NavigateTo(screen) => {
             if state.current_screen != screen {
                 // Fade out current screen
-                state.transition.opacity.fade_out(Duration::from_millis(150));
+                state
+                    .transition
+                    .opacity
+                    .fade_out(Duration::from_millis(150));
                 state.current_screen = screen;
 
                 // Set flag to fade in after short delay
@@ -87,7 +91,11 @@ fn render_menu(state: &AppState) -> Container<Message> {
             Style::default().fg(Color::White)
         };
 
-        let prefix = if i == state.selected_index { "► " } else { "  " };
+        let prefix = if i == state.selected_index {
+            "► "
+        } else {
+            "  "
+        };
         items.push(
             Label::new(format!("{}{}", prefix, item))
                 .style(style)
@@ -102,7 +110,9 @@ fn render_menu(state: &AppState) -> Container<Message> {
             .into(),
     );
 
-    Container::vertical(items).gap(0).padding(Padding::new(2, 2, 1, 1))
+    Container::vertical(items)
+        .gap(0)
+        .padding(Padding::new(2, 2, 1, 1))
 }
 
 /// Render settings screen
@@ -168,7 +178,7 @@ fn view(state: &AppState) -> Container<Message> {
     let opacity_level = (opacity * 255.0) as u8;
     let dimmed = opacity > 0.5;
 
-    let mut screen_content = match state.current_screen {
+    let screen_content = match state.current_screen {
         Screen::Menu => render_menu(state),
         Screen::Settings => render_settings(),
         Screen::About => render_about(),

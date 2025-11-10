@@ -11,8 +11,21 @@ impl Position {
         self.x += x;
     }
 
+    pub fn left(&mut self, x: u16) {
+        self.x -= x;
+    }
+
+    pub fn up(&mut self, y: u16) {
+        self.y -= y;
+    }
+
     pub fn down(&mut self, y: u16) {
         self.y += y;
+    }
+
+    pub fn reset(&mut self) {
+        self.x = 0;
+        self.y = 0;
     }
 
     pub fn reset_x(&mut self) {

@@ -12,3 +12,10 @@ futures = { workspace = true }
 rayon = { workspace = true }
 unicode-width = { workspace = true }
 log = { workspace = true }
+
+[dev-dependencies]
+criterion = { version = "0.7", features = ["html_reports"] }
+
+[[bench]]
+name = "buffer_bench"
+harness = false

@@ -20,6 +20,7 @@ pub struct Builder {
     pub(super) clear: bool,
     pub(super) append_newline: bool,
     pub(super) inline_mode: bool,
+    pub(super) inline_max_height: u16,
 }
 
 impl Builder {
@@ -37,6 +38,7 @@ impl Builder {
             clear: true,
             append_newline: false,
             inline_mode: false,
+            inline_max_height: 50,
         }
     }
 
@@ -133,6 +135,15 @@ impl Builder {
             // Typically don't clear in inline mode
             self.clear = false;
         }
+        self
+    }
+
+    /// Set maximum height for inline mode (default: 50)
+    ///
+    /// This limits how many lines inline mode can use when rendering.
+    /// Actual height will be min(content_height, max_height, terminal_height)
+    pub fn inline_max_height(&mut self, max_height: u16) -> &mut Self {
+        self.inline_max_height = max_height;
         self
     }
 

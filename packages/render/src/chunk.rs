@@ -1,4 +1,9 @@
-use crate::{DrawErr, area::Area, buffer::Buffer, style::{Style, Stylized}};
+use crate::{
+    area::Area,
+    buffer::Buffer,
+    style::{Style, Stylized},
+    DrawErr,
+};
 
 #[derive(Debug)]
 pub struct Chunk<'a> {
@@ -50,7 +55,7 @@ impl<'a> Chunk<'a> {
         }
 
         if let Some(pos) = self.area.to_absolute(x, y) {
-            self.buffer.set_forced(pos, content)
+            self.buffer.overwrite(pos, content)
         } else {
             Err(DrawErr::out_of_bounds((x, y).into(), self.area.size()))
         }
@@ -78,7 +83,13 @@ impl<'a> Chunk<'a> {
 
     /// Set a string at the specified position with style
     /// This is a convenience method for TUI-style rendering
-    pub fn set_string(&mut self, x: u16, y: u16, string: &str, style: Style) -> Result<(), DrawErr> {
+    pub fn set_string(
+        &mut self,
+        x: u16,
+        y: u16,
+        string: &str,
+        style: Style,
+    ) -> Result<(), DrawErr> {
         let mut current_x = x;
         for ch in string.chars() {
             if current_x >= self.area.size().width {
@@ -94,7 +105,15 @@ impl<'a> Chunk<'a> {
     }
 
     /// Fill a rectangular area with a character
-    pub fn fill(&mut self, x: u16, y: u16, width: u16, height: u16, ch: char, style: Style) -> Result<(), DrawErr> {
+    pub fn fill(
+        &mut self,
+        x: u16,
+        y: u16,
+        width: u16,
+        height: u16,
+        ch: char,
+        style: Style,
+    ) -> Result<(), DrawErr> {
         for dy in 0..height {
             for dx in 0..width {
                 let stylized = Stylized::new(ch, style);
