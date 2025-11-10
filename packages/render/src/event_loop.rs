@@ -1,5 +1,5 @@
 use std::{
-    io::{stdout, Stdout, Write},
+    io::{stdout, Stdout},
     thread,
     time::Duration,
 };
@@ -152,6 +152,15 @@ where
         self
     }
 
+    /// Set initial used height for inline mode
+    ///
+    /// This should be called before run() to set the initial rendering height
+    /// without reallocating the buffer. Only effective in inline mode.
+    pub fn set_initial_used_height(&mut self, height: u16) -> &mut Self {
+        self.render.set_used_height(height);
+        self
+    }
+
     pub fn run(mut self) -> Result<(), DrawErr> {
         // Create terminal guard first - this will automatically cleanup on drop
         let _guard = TerminalGuard::new(
@@ -229,6 +238,8 @@ where
 
         thread::spawn(move || {
             loop {
+                let now = std::time::Instant::now();
+
                 // check stop signal
                 if stop_rx.try_recv().is_ok() {
                     break;
@@ -244,8 +255,6 @@ where
                     }
                 };
 
-                let now = std::time::Instant::now();
-
                 // Check for resize events and update render buffer size
                 for event in &events {
                     if let Event::Resize(width, height) = event {
@@ -258,6 +267,20 @@ where
                 }
                 if let Err(e) = self.render.update() {
                     error!("Error updating render state: {}", e);
+                }
+
+                // Query required size BEFORE rendering
+                // This allows dynamic size adjustment based on current state
+                let current_size = self.render.size();
+                if let Some(new_size) = self.render.thing().required_size(current_size) {
+                    // In inline mode, use set_used_height to avoid buffer reallocation
+                    // Buffer capacity remains constant at inline_max_height
+                    if self.inline_mode {
+                        self.render.set_used_height(new_size.height);
+                    } else {
+                        // In fullscreen mode, do full resize
+                        self.render.resize(new_size);
+                    }
                 }
 
                 if let Err(e) = self.render.render() {

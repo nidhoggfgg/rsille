@@ -1,6 +1,6 @@
 use crate::{
-    DrawErr,
     area::{Position, Size},
+    DrawErr,
 };
 
 #[derive(Debug, Clone, Hash, Copy, Default)]
@@ -43,14 +43,6 @@ impl Area {
     /// Returns the total area in cells (width * height)
     pub fn area(&self) -> usize {
         (self.size.width as usize) * (self.size.height as usize)
-    }
-
-    /// Check if this area intersects with another
-    pub fn intersects(&self, other: &Area) -> bool {
-        self.pos.x < other.pos.x + other.size.width
-            && self.pos.x + self.size.width > other.pos.x
-            && self.pos.y < other.pos.y + other.size.height
-            && self.pos.y + self.size.height > other.pos.y
     }
 
     pub fn to_absolute(&self, x: u16, y: u16) -> Option<Position> {

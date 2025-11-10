@@ -1,10 +1,6 @@
 use render::{area::Size, chunk::Chunk, Draw, DrawErr, Update};
 
-use crate::{
-    event::Event,
-    layout::Container,
-    widget::Widget,
-};
+use crate::{event::Event, layout::Container, widget::Widget};
 
 use super::runtime::App;
 
@@ -18,6 +14,10 @@ pub struct AppWrapper<State, F, V, M> {
     // Performance optimization: cache widget tree to avoid rebuilding every frame
     cached_container: Option<Box<Container<M>>>,
     state_changed: bool,
+    // Inline mode configuration
+    pub(crate) inline_mode: bool,
+    pub(crate) inline_max_height: u16,
+    pub(crate) terminal_width: u16,
 }
 
 impl<State, F, V, M> AppWrapper<State, F, V, M>
@@ -35,7 +35,22 @@ where
             needs_redraw: true,
             cached_container: None,
             state_changed: true, // Start with state_changed=true to build initial tree
+            inline_mode: false,
+            inline_max_height: 50,
+            terminal_width: 80,
         }
+    }
+
+    pub fn with_inline_config(
+        mut self,
+        inline_mode: bool,
+        inline_max_height: u16,
+        terminal_width: u16,
+    ) -> Self {
+        self.inline_mode = inline_mode;
+        self.inline_max_height = inline_max_height;
+        self.terminal_width = terminal_width;
+        self
     }
 }
 
@@ -123,9 +138,42 @@ where
         // If we processed any messages, state has changed
         if had_messages {
             self.state_changed = true;
+            // Rebuild container now so required_size() will see updated tree
+            // This is crucial for inline mode where height is calculated from container constraints
+            let container = (self.view_fn)(&self.app.state);
+            self.cached_container = Some(Box::new(container));
         }
 
         // Always return true to ensure continuous rendering for animations
         Ok(true)
+    }
+
+    fn required_size(&self, current_size: Size) -> Option<Size> {
+        if !self.inline_mode {
+            return None;
+        }
+
+        // Use cached container to calculate required height
+        // At this point, cached_container should reflect current state
+        // (built during previous draw or initial setup)
+        if let Some(container) = &self.cached_container {
+            let constraints = container.constraints();
+            let required_height = constraints.min_height;
+
+            // min(max(current_size.height, required_height), inline_max_height)
+            let height = required_height
+                .max(current_size.height)
+                .min(self.inline_max_height);
+
+            // Only return new size if height changed
+            if height != current_size.height {
+                return Some(Size {
+                    width: current_size.width,
+                    height,
+                });
+            }
+        }
+
+        None
     }
 }

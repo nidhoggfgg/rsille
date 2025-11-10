@@ -45,6 +45,7 @@ enum Message {
     MoveRight,
     StartEasings,
     TogglePulse,
+    #[allow(unused)]
     Tick, // For animation updates
 }
 

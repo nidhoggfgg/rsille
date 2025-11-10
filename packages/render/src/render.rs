@@ -21,6 +21,8 @@ pub struct Render<W, T> {
     clear: bool,
     append_newline: bool,
     inline_mode: bool,
+    previous_inline_height: u16,
+    used_height: u16, // Actual height to render (for inline mode, avoids buffer reallocation)
 }
 
 impl<W, T> Render<W, T>
@@ -38,111 +40,126 @@ where
             queue!(self.out, Clear(ClearType::All))?;
         }
 
-        // In inline mode, use absolute positioning with MoveTo
+        // Inline mode: use relative positioning with line-level differential rendering
         if self.inline_mode {
-            if let Some(previous) = self.buffer.previous() {
-                // 有前一帧，清除掉
-                for _ in previous.chunks(buffer_size.width as usize) {
-                    // 清除当前行
+            let current_height = self.used_height;
+
+            // If height decreased, clear the extra lines from previous frame
+            if self.previous_inline_height > current_height {
+                let extra_lines = self.previous_inline_height - current_height;
+                for _ in 0..extra_lines {
+                    queue!(self.out, MoveToPreviousLine(1))?;
                     queue!(self.out, Clear(ClearType::CurrentLine))?;
-                    // 回到上一行
+                }
+            }
+
+            // Move cursor back to the start position
+            if self.buffer.previous().is_some() {
+                for _ in 0..current_height.min(self.previous_inline_height) {
                     queue!(self.out, MoveToPreviousLine(1))?;
                 }
             }
-            // 总是全量渲染
+
+            // Render with line-level diffing
             let mut has_color_cache = false;
-            for (y, line) in self
-                .buffer
-                .content()
-                .chunks(buffer_size.width as usize)
-                .enumerate()
-            {
-                if y >= buffer_size.height as usize {
+            for line_diff in self.buffer.diff_lines() {
+                if line_diff.line_num >= current_height {
                     break;
                 }
 
-                for c in line {
-                    if c.is_occupied {
-                        continue;
+                match line_diff.state {
+                    crate::buffer::LineState::Unchanged => {
+                        // Line hasn't changed, just move to next line without re-rendering
+                        // queue!(self.out, Print("\n"))?;
+                        queue!(self.out, MoveToNextLine(1))?;
                     }
-
-                    if has_color_cache && !c.has_color() {
-                        queue!(self.out, ResetColor)?;
-                    }
-
-                    c.queue(&mut self.out)?;
-                    has_color_cache = c.has_color();
-                }
-
-                queue!(self.out, MoveToNextLine(1))?;
-            }
-        } else {
-            // Fullscreen mode: use absolute positioning with differential rendering
-            // Differential rendering: only output changed cells
-            if let Some(previous) = self.buffer.previous() {
-                // We have previous frame, do differential rendering
-                let mut has_color_cache = false;
-                for (y, (line, prev_line)) in self
-                    .buffer
-                    .content()
-                    .chunks(buffer_size.width as usize)
-                    .zip(previous.chunks(buffer_size.width as usize))
-                    .enumerate()
-                {
-                    if y >= buffer_size.height as usize {
-                        break;
-                    }
-
-                    for (x, (c, prev_c)) in line.iter().zip(prev_line.iter()).enumerate() {
-                        if c.is_occupied {
-                            continue;
-                        }
-
-                        // Only render if cell changed
-                        if c != prev_c {
-                            // Move cursor to this position (absolute positioning)
-                            queue!(
-                                self.out,
-                                MoveTo(self.pos.x + x as u16, self.pos.y + y as u16)
-                            )?;
-
-                            if has_color_cache && !c.has_color() {
+                    crate::buffer::LineState::Changed {
+                        cells,
+                        current_len,
+                        previous_len,
+                    } => {
+                        // Line has changed, render it with smart overwrite
+                        for cell in cells {
+                            if has_color_cache && !cell.has_color() {
                                 queue!(self.out, ResetColor)?;
                             }
 
-                            c.queue(&mut self.out)?;
-                            has_color_cache = c.has_color();
+                            cell.queue(&mut self.out)?;
+                            has_color_cache = cell.has_color();
                         }
+
+                        // If current line is shorter than previous, clear trailing spaces
+                        if current_len < previous_len {
+                            let trailing_spaces = previous_len - current_len;
+                            for _ in 0..trailing_spaces {
+                                queue!(self.out, Print(' '))?;
+                            }
+                        }
+
+                        // in inline mode, "\n" could make the terminal scroll up
+                        // i know this is wired, but the "\n" doesn't move cursor
+                        // println!("position: {:?}", cursor::position().unwrap()); // --> position: (0, x)
+                        // queue!(stdout(), Print("\r\n")).unwrap();                // --> empty line
+                        // println!("position: {:?}", cursor::position().unwrap()); // --> position: (0, x) <- this is not x+1!
+                        queue!(self.out, Print("\r\n"))?;
+                        queue!(self.out, MoveToPreviousLine(1))?;
+                        queue!(self.out, MoveToNextLine(1))?;
                     }
                 }
-            } else {
-                // First render or no previous buffer, do full render
+            }
+
+            // Update previous height for next frame
+            self.previous_inline_height = current_height;
+        } else {
+            // Fullscreen mode: use absolute positioning with differential rendering
+            if let Some(diff_iter) = self.buffer.diff() {
+                // We have previous frame, do differential rendering
                 let mut has_color_cache = false;
-                for (y, line) in self
-                    .buffer
-                    .content()
-                    .chunks(buffer_size.width as usize)
-                    .enumerate()
-                {
-                    if y >= buffer_size.height as usize {
+                for (x, y, cell) in diff_iter {
+                    if y >= buffer_size.height {
                         break;
                     }
 
-                    // Move cursor to the start of this line (absolute positioning)
-                    queue!(self.out, MoveTo(self.pos.x, self.pos.y + y as u16))?;
+                    // Move cursor to this position (absolute positioning)
+                    queue!(self.out, MoveTo(self.pos.x + x, self.pos.y + y))?;
 
-                    for c in line {
-                        if c.is_occupied {
-                            continue;
-                        }
-
-                        if has_color_cache && !c.has_color() {
-                            queue!(self.out, ResetColor)?;
-                        }
-
-                        c.queue(&mut self.out)?;
-                        has_color_cache = c.has_color();
+                    if has_color_cache && !cell.has_color() {
+                        queue!(self.out, ResetColor)?;
                     }
+
+                    cell.queue(&mut self.out)?;
+                    has_color_cache = cell.has_color();
+                }
+            } else {
+                // First render or no previous buffer, do full render
+                // Optimize by rendering line by line instead of cell by cell
+                let mut has_color_cache = false;
+                let mut current_line = 0u16;
+                let mut need_move = true;
+
+                for (_x, y, cell) in self.buffer.all_cells() {
+                    if y >= buffer_size.height {
+                        break;
+                    }
+
+                    // Move to the start of a new line when y changes
+                    if y != current_line {
+                        current_line = y;
+                        need_move = true;
+                    }
+
+                    // Only move cursor when starting a new line
+                    if need_move {
+                        queue!(self.out, MoveTo(self.pos.x, self.pos.y + y))?;
+                        need_move = false;
+                    }
+
+                    if has_color_cache && !cell.has_color() {
+                        queue!(self.out, ResetColor)?;
+                    }
+
+                    cell.queue(&mut self.out)?;
+                    has_color_cache = cell.has_color();
                 }
             }
         }
@@ -173,6 +190,8 @@ where
             clear: builder.clear,
             append_newline: builder.append_newline,
             inline_mode: builder.inline_mode,
+            previous_inline_height: 0,
+            used_height: builder.size.height, // Initialize to buffer capacity
         }
     }
 }
@@ -194,11 +213,32 @@ where
     /// Resize the render buffer
     pub fn resize(&mut self, new_size: Size) {
         self.buffer.resize(new_size);
+        self.used_height = new_size.height; // Update used_height when resizing
+    }
+
+    /// Set the used height for rendering (inline mode optimization)
+    ///
+    /// This changes the actual height rendered without reallocating the buffer.
+    /// Used in inline mode to avoid frequent buffer reallocations.
+    /// The height must not exceed the buffer's capacity.
+    pub fn set_used_height(&mut self, height: u16) {
+        let max_height = self.buffer.size().height;
+        self.used_height = height.min(max_height);
     }
 
     /// Get current render size
     pub fn size(&self) -> Size {
         self.buffer.size()
+    }
+
+    /// Get reference to the drawable thing
+    pub fn thing(&self) -> &T {
+        &self.thing
+    }
+
+    /// Get mutable reference to the drawable thing
+    pub fn thing_mut(&mut self) -> &mut T {
+        &mut self.thing
     }
 }
 
