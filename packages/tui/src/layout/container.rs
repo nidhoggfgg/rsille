@@ -6,7 +6,7 @@ use super::border_renderer::{render_background, render_border};
 use super::taffy_bridge::TaffyBridge;
 use crate::event::{Event, EventResult};
 use crate::layout::Constraints;
-use crate::style::{Padding, Style};
+use crate::style::{BorderStyle, Padding, Style, ThemeManager};
 use crate::widget::{IntoWidget, Widget};
 use std::sync::RwLock;
 
@@ -23,6 +23,7 @@ pub struct Container<M = ()> {
     direction: Direction,
     gap: u16,
     padding: Padding,
+    border: Option<BorderStyle>,
     style: Style,
     /// Cached layout areas from last render (for mouse event handling)
     cached_child_areas: RwLock<Vec<Area>>,
@@ -35,6 +36,7 @@ impl<M> std::fmt::Debug for Container<M> {
             .field("direction", &self.direction)
             .field("gap", &self.gap)
             .field("padding", &self.padding)
+            .field("border", &self.border)
             .field("style", &self.style)
             .finish()
     }
@@ -48,6 +50,7 @@ impl<M> Container<M> {
             direction,
             gap: 0,
             padding: Padding::ZERO,
+            border: None,
             style: Style::default(),
             cached_child_areas: RwLock::new(Vec::new()),
         }
@@ -103,6 +106,12 @@ impl<M> Container<M> {
     /// Set the container style
     pub fn style(mut self, style: Style) -> Self {
         self.style = style;
+        self
+    }
+
+    /// Set the container border
+    pub fn border(mut self, border: BorderStyle) -> Self {
+        self.border = Some(border);
         self
     }
 
@@ -256,11 +265,15 @@ impl<M: Clone> Widget<M> for Container<M> {
             return;
         }
 
+        // Apply theme: merge explicit style with theme default
+        let theme_style = ThemeManager::global().with_theme(|theme| theme.styles.surface);
+        let final_style = self.style.merge(theme_style);
+
         // Convert TUI style to render style
-        let render_style = self.style.to_render_style();
+        let render_style = final_style.to_render_style();
 
         // Calculate area inside border (if any)
-        let border_area = if self.style.border.is_some() {
+        let border_area = if self.border.is_some() {
             // Reserve 1 cell on each side for border
             if area.width() < 2 || area.height() < 2 {
                 return; // Not enough space for border
@@ -274,12 +287,12 @@ impl<M: Clone> Widget<M> for Container<M> {
         };
 
         // Apply container background if specified (only inside border)
-        if self.style.bg_color.is_some() {
+        if final_style.bg_color.is_some() {
             render_background(chunk, border_area, render_style);
         }
 
         // Draw border after background (so it's on top)
-        if let Some(border) = self.style.border {
+        if let Some(border) = self.border {
             render_border(chunk, area, border, render_style);
         }
 
@@ -324,7 +337,7 @@ impl<M: Clone> Widget<M> for Container<M> {
 
     fn constraints(&self) -> Constraints {
         // Calculate border size (2 cells if border exists, 0 otherwise)
-        let border_size = if self.style.border.is_some() { 2 } else { 0 };
+        let border_size = if self.border.is_some() { 2 } else { 0 };
 
         if self.children.is_empty() {
             return Constraints::fixed(

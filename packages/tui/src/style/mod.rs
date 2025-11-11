@@ -4,20 +4,25 @@ mod border;
 mod css;
 mod error;
 mod padding;
+mod theme;
+mod theme_manager;
 
 pub use border::BorderStyle;
 pub use padding::Padding;
 
 pub use error::CssError;
+pub use theme::{Theme, ThemeBuilder, ThemeColors, ThemeStyles};
+pub use theme_manager::ThemeManager;
 
-/// Widget style configuration
+/// Widget style configuration (visual properties only)
+///
+/// Style contains only visual/themeable properties like colors and text modifiers.
+/// Layout properties like border and padding should be set directly on widgets.
 #[derive(Debug, Clone, Copy)]
 pub struct Style {
     pub fg_color: Option<Color>,
     pub bg_color: Option<Color>,
     pub modifiers: TextModifiers,
-    pub border: Option<BorderStyle>,
-    pub padding: Padding,
 }
 
 impl Style {
@@ -26,8 +31,6 @@ impl Style {
             fg_color: None,
             bg_color: None,
             modifiers: TextModifiers::empty(),
-            border: None,
-            padding: Padding::ZERO,
         }
     }
 
@@ -56,14 +59,37 @@ impl Style {
         self
     }
 
-    pub fn border(mut self, border: BorderStyle) -> Self {
-        self.border = Some(border);
-        self
+    /// Merge this style with another, preferring this style's values when set
+    ///
+    /// This is useful for combining explicit widget styles with theme defaults.
+    /// Values from `self` take precedence over values from `other`.
+    ///
+    /// # Example
+    /// ```no_run
+    /// use tui::style::{Style, Color};
+    ///
+    /// let theme_style = Style::default().fg(Color::White).bg(Color::Blue);
+    /// let widget_style = Style::default().fg(Color::Red); // Override fg only
+    /// let final_style = widget_style.merge(theme_style);
+    /// // final_style has fg=Red (from widget_style) and bg=Blue (from theme_style)
+    /// ```
+    pub fn merge(self, other: Style) -> Self {
+        Self {
+            fg_color: self.fg_color.or(other.fg_color),
+            bg_color: self.bg_color.or(other.bg_color),
+            modifiers: if self.modifiers.is_empty() {
+                other.modifiers
+            } else {
+                self.modifiers
+            },
+        }
     }
 
-    pub fn padding(mut self, padding: Padding) -> Self {
-        self.padding = padding;
-        self
+    /// Check if this style has any values set
+    pub fn is_empty(&self) -> bool {
+        self.fg_color.is_none()
+            && self.bg_color.is_none()
+            && self.modifiers.is_empty()
     }
 
     /// Convert to render style

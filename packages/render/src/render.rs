@@ -33,7 +33,16 @@ where
     pub fn render(&mut self) -> std::io::Result<()> {
         // the position in chunk should be (0, 0), the render already move to the target position
         let buffer_size = self.buffer.size();
-        let chunk = Chunk::new(&mut self.buffer, buffer_size.into())?;
+        // In inline mode, use used_height to ensure borders render within visible area
+        let render_size = if self.inline_mode {
+            Size {
+                width: buffer_size.width,
+                height: self.used_height,
+            }
+        } else {
+            buffer_size
+        };
+        let chunk = Chunk::new(&mut self.buffer, render_size.into())?;
         self.thing.draw(chunk)?;
 
         if self.clear {

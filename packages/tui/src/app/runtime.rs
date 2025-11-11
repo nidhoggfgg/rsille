@@ -1,3 +1,4 @@
+use crate::style::{Theme, ThemeManager};
 use crate::{layout::Container, widget::Widget, Result, WidgetError};
 
 /// Application runtime for managing TUI lifecycle
@@ -9,6 +10,20 @@ pub struct App<State> {
 impl<State> App<State> {
     pub fn new(state: State) -> Self {
         Self { state }
+    }
+
+    /// Set the initial theme for the application
+    ///
+    /// # Example
+    /// ```no_run
+    /// use tui::prelude::*;
+    ///
+    /// let app = App::new(state)
+    ///     .with_theme(Theme::dark());
+    /// ```
+    pub fn with_theme(self, theme: Theme) -> Self {
+        ThemeManager::global().set_theme(theme);
+        self
     }
 
     pub fn run<M, F, V>(self, update: F, view: V) -> Result<()>

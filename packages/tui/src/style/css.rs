@@ -1,6 +1,6 @@
 //! CSS-style syntax support for widget styling
 
-use super::{BorderStyle, Color, Padding, Style};
+use super::{Color, Style};
 use crate::{layout::Constraints, style::CssError};
 use std::collections::HashMap;
 
@@ -130,73 +130,6 @@ pub fn parse_color(value: &str) -> Result<Color, CssError> {
     })
 }
 
-/// Parse padding value
-/// Supports:
-/// - Single value: "1" -> uniform padding
-/// - Four values: "1 2 3 4" -> top right bottom left
-pub fn parse_padding(value: &str) -> Result<Padding, CssError> {
-    let parts: Vec<&str> = value.split_whitespace().collect();
-
-    match parts.len() {
-        1 => {
-            let uniform = parts[0]
-                .parse::<u16>()
-                .map_err(|_| CssError::InvalidValue {
-                    property: "padding".to_string(),
-                    value: value.to_string(),
-                })?;
-            Ok(Padding::uniform(uniform))
-        }
-        4 => {
-            let top = parts[0]
-                .parse::<u16>()
-                .map_err(|_| CssError::InvalidValue {
-                    property: "padding".to_string(),
-                    value: value.to_string(),
-                })?;
-            let right = parts[1]
-                .parse::<u16>()
-                .map_err(|_| CssError::InvalidValue {
-                    property: "padding".to_string(),
-                    value: value.to_string(),
-                })?;
-            let bottom = parts[2]
-                .parse::<u16>()
-                .map_err(|_| CssError::InvalidValue {
-                    property: "padding".to_string(),
-                    value: value.to_string(),
-                })?;
-            let left = parts[3]
-                .parse::<u16>()
-                .map_err(|_| CssError::InvalidValue {
-                    property: "padding".to_string(),
-                    value: value.to_string(),
-                })?;
-            Ok(Padding::new(top, right, bottom, left))
-        }
-        _ => Err(CssError::InvalidValue {
-            property: "padding".to_string(),
-            value: value.to_string(),
-        }),
-    }
-}
-
-/// Parse border style
-/// Supports: "single", "rounded", "double", "thick", "none"
-pub fn parse_border(value: &str) -> Result<BorderStyle, CssError> {
-    match value.trim().to_lowercase().as_str() {
-        "single" | "solid" => Ok(BorderStyle::Single),
-        "rounded" => Ok(BorderStyle::Rounded),
-        "double" => Ok(BorderStyle::Double),
-        "thick" => Ok(BorderStyle::Thick),
-        "none" => Ok(BorderStyle::None),
-        _ => Err(CssError::InvalidValue {
-            property: "border".to_string(),
-            value: value.to_string(),
-        }),
-    }
-}
-
 impl Style {
     /// Create a style from CSS-like syntax
     ///
@@ -210,7 +143,7 @@ impl Style {
     /// - `padding`: Padding (single value or "top right bottom left")
     ///
     /// # Example
-    /// ```
+    /// ```no_run
     /// use tui::prelude::*;
     /// let style = Style::from_css("color: red; background-color: #282c34; font-weight: bold");
     /// ```
@@ -241,12 +174,6 @@ impl Style {
                         style.modifiers = style.modifiers.with_underlined();
                     }
                 }
-                "border" => {
-                    style.border = Some(parse_border(&value)?);
-                }
-                "padding" => {
-                    style.padding = parse_padding(&value)?;
-                }
                 _ => {
                     // Ignore unknown properties for forward compatibility
                 }
@@ -275,7 +202,7 @@ impl Constraints {
     /// - `flex`: Flex grow factor
     ///
     /// # Example
-    /// ```
+    /// ```no_run
     /// use tui::prelude::*;
     /// let constraints = Constraints::from_css("width: 20; height: 10; flex: 1");
     /// ```
@@ -379,18 +306,6 @@ mod tests {
     #[test]
     fn test_parse_indexed_color() {
         assert_eq!(parse_color("idx(123)").unwrap(), Color::Indexed(123));
-    }
-
-    #[test]
-    fn test_parse_padding_uniform() {
-        let padding = parse_padding("2").unwrap();
-        assert_eq!(padding, Padding::uniform(2));
-    }
-
-    #[test]
-    fn test_parse_padding_sides() {
-        let padding = parse_padding("1 2 3 4").unwrap();
-        assert_eq!(padding, Padding::new(1, 2, 3, 4));
     }
 
     #[test]

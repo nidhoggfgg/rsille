@@ -3,7 +3,7 @@
 use super::*;
 use crate::event::handler::EventHandler;
 use crate::event::KeyCode;
-use crate::style::{Color, Style};
+use crate::style::{Color, Style, ThemeManager};
 
 /// Button widget for triggering actions
 #[derive(Clone)]
@@ -103,8 +103,12 @@ impl<M: Send + Sync> Widget<M> for Button<M> {
         // Render button with brackets: [ Label ]
         let button_text = format!("[ {} ]", self.label);
 
+        // Apply theme: merge explicit style with theme default
+        let theme_style = ThemeManager::global().with_theme(|theme| theme.styles.primary_action);
+        let final_style = self.style.merge(theme_style);
+
         // Convert TUI style to render style
-        let render_style = self.style.to_render_style();
+        let render_style = final_style.to_render_style();
 
         let _ = chunk.set_string(0, 0, &button_text, render_style);
     }

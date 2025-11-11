@@ -3,7 +3,7 @@
 use super::*;
 use crate::event::handler::EventHandler;
 use crate::event::KeyCode;
-use crate::style::Style;
+use crate::style::{Style, ThemeManager};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 /// TextInput widget for user text entry
@@ -179,8 +179,12 @@ impl<M: Send + Sync> Widget<M> for TextInput<M> {
             display_text
         };
 
+        // Apply theme: merge explicit style with theme default
+        let theme_style = ThemeManager::global().with_theme(|theme| theme.styles.interactive);
+        let final_style = self.style.merge(theme_style);
+
         // Convert TUI style to render style
-        let render_style = self.style.to_render_style();
+        let render_style = final_style.to_render_style();
 
         let _ = chunk.set_string(0, 0, &final_text, render_style);
     }

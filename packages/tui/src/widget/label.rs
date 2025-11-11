@@ -1,7 +1,7 @@
 //! Label widget - text display
 
 use super::*;
-use crate::style::{Color, Style};
+use crate::style::{Color, Style, ThemeManager};
 
 /// Label widget for displaying text
 #[derive(Debug, Clone)]
@@ -85,8 +85,12 @@ impl<M: Send + Sync> Widget<M> for Label<M> {
             return;
         }
 
+        // Apply theme: merge explicit style with theme default
+        let theme_style = ThemeManager::global().with_theme(|theme| theme.styles.text);
+        let final_style = self.style.merge(theme_style);
+
         // Convert TUI style to render style
-        let render_style = self.style.to_render_style();
+        let render_style = final_style.to_render_style();
 
         // Render text at relative coordinates (0, 0)
         let _ = chunk.set_string(0, 0, &self.content, render_style);
