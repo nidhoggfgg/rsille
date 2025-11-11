@@ -91,8 +91,7 @@ impl<M> Checkbox<M> {
     }
 }
 
-impl<M> Widget for Checkbox<M> {
-    type Message = M;
+impl<M: Send + Sync> Widget<M> for Checkbox<M> {
 
     fn render(&self, chunk: &mut render::chunk::Chunk) {
         let area = chunk.area();

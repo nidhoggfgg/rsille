@@ -6,4 +6,4 @@ pub mod container;
 pub mod taffy_bridge;
 
 pub use constraints::Constraints;
-pub use container::{Container, Direction};
+pub use container::{col, row, Container, Direction};

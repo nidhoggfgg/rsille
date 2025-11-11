@@ -3,7 +3,7 @@
 use super::*;
 use crate::event::handler::EventHandler;
 use crate::event::KeyCode;
-use crate::style::Style;
+use crate::style::{Color, Style};
 
 /// Button widget for triggering actions
 #[derive(Clone)]
@@ -73,10 +73,27 @@ impl<M> Button<M> {
     pub fn label(&self) -> &str {
         &self.label
     }
+
+    /// Set the foreground color (fluent API)
+    pub fn fg(mut self, color: Color) -> Self {
+        self.style = self.style.fg(color);
+        self
+    }
+
+    /// Set the background color (fluent API)
+    pub fn bg(mut self, color: Color) -> Self {
+        self.style = self.style.bg(color);
+        self
+    }
+
+    /// Make the text bold (fluent API)
+    pub fn bold(mut self) -> Self {
+        self.style = self.style.bold();
+        self
+    }
 }
 
-impl<M> Widget for Button<M> {
-    type Message = M;
+impl<M: Send + Sync> Widget<M> for Button<M> {
     fn render(&self, chunk: &mut render::chunk::Chunk) {
         let area = chunk.area();
         if area.width() < 4 || area.height() == 0 {
@@ -140,4 +157,18 @@ impl<M> Widget for Button<M> {
             flex: None,
         }
     }
+}
+
+/// Create a new button widget (convenience function)
+///
+/// # Examples
+/// ```
+/// use tui::prelude::*;
+///
+/// let button = button("Click me")
+///     .on_click(|| Message::Click)
+///     .fg(Color::Blue);
+/// ```
+pub fn button<M>(label: impl Into<String>) -> Button<M> {
+    Button::new(label)
 }

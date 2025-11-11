@@ -165,10 +165,28 @@ impl<M> KeyboardController<M> {
         }
         self
     }
+
+    /// Attach a handler for a character key (convenience method)
+    ///
+    /// Shorthand for `on_key(KeyCode::Char(c), handler)`.
+    ///
+    /// # Examples
+    /// ```
+    /// use tui::prelude::*;
+    ///
+    /// let controller = keyboard_controller()
+    ///     .on('t', || Message::Tick)
+    ///     .on('q', || Message::Quit);
+    /// ```
+    pub fn on<F>(self, ch: char, handler: F) -> Self
+    where
+        F: Fn() -> M + Send + Sync + 'static,
+    {
+        self.on_key(KeyCode::Char(ch), handler)
+    }
 }
 
-impl<M> Widget for KeyboardController<M> {
-    type Message = M;
+impl<M: Send + Sync> Widget<M> for KeyboardController<M> {
 
     fn render(&self, _chunk: &mut render::chunk::Chunk) {
         // KeyboardController doesn't render anything - it's invisible
@@ -213,4 +231,18 @@ impl<M> Widget for KeyboardController<M> {
             flex: None,
         }
     }
+}
+
+/// Create a new keyboard controller (convenience function)
+///
+/// # Examples
+/// ```
+/// use tui::prelude::*;
+///
+/// let controller = keyboard_controller()
+///     .on('t', || Message::Tick)
+///     .on('q', || Message::Quit);
+/// ```
+pub fn keyboard_controller<M>() -> KeyboardController<M> {
+    KeyboardController::new()
 }

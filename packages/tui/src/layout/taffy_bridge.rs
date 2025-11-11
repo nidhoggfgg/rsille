@@ -1,7 +1,7 @@
 //! Bridge to Taffy layout engine
 
 use crate::layout::Constraints;
-use crate::widget::AnyWidget;
+use crate::widget::Widget;
 use render::area::Area;
 use taffy::prelude::*;
 
@@ -20,7 +20,7 @@ impl TaffyBridge {
     /// Compute layout for a list of widgets
     pub fn compute_layout<M: Clone>(
         &mut self,
-        widgets: &[AnyWidget<M>],
+        widgets: &[Box<dyn Widget<M>>],
         available: Area,
         direction: super::container::Direction,
         gap: u16,
@@ -151,7 +151,7 @@ impl TaffyBridge {
 mod tests {
     use super::*;
     use crate::layout::container::Direction;
-    use crate::widget::{AnyWidget, Label};
+    use crate::widget::Label;
 
     #[test]
     fn test_taffy_layout_calculation() {
@@ -165,7 +165,7 @@ mod tests {
         let available = Area::new((0, 0).into(), (80, 24).into());
 
         // Create widgets
-        let widgets: Vec<AnyWidget> = vec![label1.into(), label2.into()];
+        let widgets: Vec<Box<dyn Widget<()>>> = vec![Box::new(label1), Box::new(label2)];
 
         // Compute layout
         let results = bridge.compute_layout(&widgets, available, Direction::Vertical, 1);
