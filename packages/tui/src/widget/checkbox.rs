@@ -3,7 +3,7 @@
 use super::*;
 use crate::event::handler::EventHandler;
 use crate::event::KeyCode;
-use crate::style::Style;
+use crate::style::{Style, ThemeManager};
 use unicode_width::UnicodeWidthStr;
 
 /// Checkbox widget for boolean values
@@ -108,8 +108,12 @@ impl<M: Send + Sync> Widget<M> for Checkbox<M> {
             format!("{} {}", box_char, self.label)
         };
 
+        // Apply theme: merge explicit style with theme default
+        let theme_style = ThemeManager::global().with_theme(|theme| theme.styles.interactive);
+        let final_style = self.style.merge(theme_style);
+
         // Convert TUI style to render style
-        let render_style = self.style.to_render_style();
+        let render_style = final_style.to_render_style();
 
         let _ = chunk.set_string(0, 0, &checkbox_text, render_style);
     }

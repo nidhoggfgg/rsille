@@ -9,3 +9,4 @@ render = { path = "../render" }
 unicode-width = { workspace = true }
 crossterm = { workspace = true }
 taffy = { workspace = true }
+once_cell = "1.20"
