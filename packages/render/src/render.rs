@@ -42,126 +42,9 @@ where
 
         // Inline mode: use relative positioning with line-level differential rendering
         if self.inline_mode {
-            let current_height = self.used_height;
-
-            // If height decreased, clear the extra lines from previous frame
-            if self.previous_inline_height > current_height {
-                let extra_lines = self.previous_inline_height - current_height;
-                for _ in 0..extra_lines {
-                    queue!(self.out, MoveToPreviousLine(1))?;
-                    queue!(self.out, Clear(ClearType::CurrentLine))?;
-                }
-            }
-
-            // Move cursor back to the start position
-            if self.buffer.previous().is_some() {
-                for _ in 0..current_height.min(self.previous_inline_height) {
-                    queue!(self.out, MoveToPreviousLine(1))?;
-                }
-            }
-
-            // Render with line-level diffing
-            let mut has_color_cache = false;
-            for line_diff in self.buffer.diff_lines() {
-                if line_diff.line_num >= current_height {
-                    break;
-                }
-
-                match line_diff.state {
-                    crate::buffer::LineState::Unchanged => {
-                        // Line hasn't changed, just move to next line without re-rendering
-                        // queue!(self.out, Print("\n"))?;
-                        queue!(self.out, MoveToNextLine(1))?;
-                    }
-                    crate::buffer::LineState::Changed {
-                        cells,
-                        current_len,
-                        previous_len,
-                    } => {
-                        // Line has changed, render it with smart overwrite
-                        for cell in cells {
-                            if has_color_cache && !cell.has_color() {
-                                queue!(self.out, ResetColor)?;
-                            }
-
-                            cell.queue(&mut self.out)?;
-                            has_color_cache = cell.has_color();
-                        }
-
-                        // If current line is shorter than previous, clear trailing spaces
-                        if current_len < previous_len {
-                            let trailing_spaces = previous_len - current_len;
-                            for _ in 0..trailing_spaces {
-                                queue!(self.out, Print(' '))?;
-                            }
-                        }
-
-                        // in inline mode, "\n" could make the terminal scroll up
-                        // i know this is wired, but the "\n" doesn't move cursor
-                        // println!("position: {:?}", cursor::position().unwrap()); // --> position: (0, x)
-                        // queue!(stdout(), Print("\r\n")).unwrap();                // --> empty line
-                        // println!("position: {:?}", cursor::position().unwrap()); // --> position: (0, x) <- this is not x+1!
-                        queue!(self.out, Print("\r\n"))?;
-                        queue!(self.out, MoveToPreviousLine(1))?;
-                        queue!(self.out, MoveToNextLine(1))?;
-                    }
-                }
-            }
-
-            // Update previous height for next frame
-            self.previous_inline_height = current_height;
+            self.render_inline()?;
         } else {
-            // Fullscreen mode: use absolute positioning with differential rendering
-            if let Some(diff_iter) = self.buffer.diff() {
-                // We have previous frame, do differential rendering
-                let mut has_color_cache = false;
-                for (x, y, cell) in diff_iter {
-                    if y >= buffer_size.height {
-                        break;
-                    }
-
-                    // Move cursor to this position (absolute positioning)
-                    queue!(self.out, MoveTo(self.pos.x + x, self.pos.y + y))?;
-
-                    if has_color_cache && !cell.has_color() {
-                        queue!(self.out, ResetColor)?;
-                    }
-
-                    cell.queue(&mut self.out)?;
-                    has_color_cache = cell.has_color();
-                }
-            } else {
-                // First render or no previous buffer, do full render
-                // Optimize by rendering line by line instead of cell by cell
-                let mut has_color_cache = false;
-                let mut current_line = 0u16;
-                let mut need_move = true;
-
-                for (_x, y, cell) in self.buffer.all_cells() {
-                    if y >= buffer_size.height {
-                        break;
-                    }
-
-                    // Move to the start of a new line when y changes
-                    if y != current_line {
-                        current_line = y;
-                        need_move = true;
-                    }
-
-                    // Only move cursor when starting a new line
-                    if need_move {
-                        queue!(self.out, MoveTo(self.pos.x, self.pos.y + y))?;
-                        need_move = false;
-                    }
-
-                    if has_color_cache && !cell.has_color() {
-                        queue!(self.out, ResetColor)?;
-                    }
-
-                    cell.queue(&mut self.out)?;
-                    has_color_cache = cell.has_color();
-                }
-            }
+            self.render_fullscreen()?;
         }
 
         if self.append_newline {
@@ -174,6 +57,132 @@ where
         // Save current buffer for next frame's diff
         self.buffer.clear();
 
+        Ok(())
+    }
+
+    fn render_fullscreen(&mut self) -> std::io::Result<()> {
+        let buffer_size = self.buffer.size();
+        // Fullscreen mode: use absolute positioning with differential rendering
+        if let Some(diff_iter) = self.buffer.diff() {
+            // We have previous frame, do differential rendering
+            let mut has_color_cache = false;
+            for (x, y, cell) in diff_iter {
+                if y >= buffer_size.height {
+                    break;
+                }
+
+                // Move cursor to this position (absolute positioning)
+                queue!(self.out, MoveTo(self.pos.x + x, self.pos.y + y))?;
+
+                if has_color_cache && !cell.has_color() {
+                    queue!(self.out, ResetColor)?;
+                }
+
+                cell.queue(&mut self.out)?;
+                has_color_cache = cell.has_color();
+            }
+        } else {
+            // First render or no previous buffer, do full render
+            // Optimize by rendering line by line instead of cell by cell
+            let mut has_color_cache = false;
+            let mut current_line = 0u16;
+            let mut need_move = true;
+
+            for (_x, y, cell) in self.buffer.all_cells() {
+                if y >= buffer_size.height {
+                    break;
+                }
+
+                // Move to the start of a new line when y changes
+                if y != current_line {
+                    current_line = y;
+                    need_move = true;
+                }
+
+                // Only move cursor when starting a new line
+                if need_move {
+                    queue!(self.out, MoveTo(self.pos.x, self.pos.y + y))?;
+                    need_move = false;
+                }
+
+                if has_color_cache && !cell.has_color() {
+                    queue!(self.out, ResetColor)?;
+                }
+
+                cell.queue(&mut self.out)?;
+                has_color_cache = cell.has_color();
+            }
+        }
+        Ok(())
+    }
+
+    fn render_inline(&mut self) -> std::io::Result<()> {
+        let current_height = self.used_height;
+
+        // If height decreased, clear the extra lines from previous frame
+        if self.previous_inline_height > current_height {
+            let extra_lines = self.previous_inline_height - current_height;
+            for _ in 0..extra_lines {
+                queue!(self.out, MoveToPreviousLine(1))?;
+                queue!(self.out, Clear(ClearType::CurrentLine))?;
+            }
+        }
+
+        // Move cursor back to the start position
+        if self.buffer.previous().is_some() {
+            let lines = current_height.min(self.previous_inline_height);
+            queue!(self.out, MoveToPreviousLine(lines))?;
+        }
+
+        // Render with line-level diffing
+        let mut has_color_cache = false;
+        for line_diff in self.buffer.diff_lines() {
+            if line_diff.line_num >= current_height {
+                break;
+            }
+
+            match line_diff.state {
+                crate::buffer::LineState::Unchanged => {
+                    // Line hasn't changed, just move to next line without re-rendering
+                    queue!(self.out, MoveToNextLine(1))?;
+                }
+                crate::buffer::LineState::Changed {
+                    cells,
+                    current_len,
+                    previous_len,
+                } => {
+                    // Line has changed, render it with smart overwrite
+                    for cell in cells {
+                        if has_color_cache && !cell.has_color() {
+                            queue!(self.out, ResetColor)?;
+                        }
+
+                        cell.queue(&mut self.out)?;
+                        has_color_cache = cell.has_color();
+                    }
+
+                    // If current line is shorter than previous, clear trailing spaces
+                    if current_len < previous_len {
+                        let trailing_spaces = previous_len - current_len;
+                        for _ in 0..trailing_spaces {
+                            queue!(self.out, Print(' '))?;
+                        }
+                    }
+
+                    // in inline mode, "\n" could make the terminal scroll up
+                    // i know this is wired, but the "\n" doesn't move cursor
+                    // println!("position: {:?}", cursor::position().unwrap()); // --> position: (0, x)
+                    // queue!(stdout(), Print("\r\n")).unwrap();                // --> empty line
+                    // println!("position: {:?}", cursor::position().unwrap()); // --> position: (0, x) <- this is not x+1!
+                    queue!(self.out, Print("\r\n"))?;
+                    queue!(self.out, MoveToPreviousLine(1))?;
+                    queue!(self.out, MoveToNextLine(1))?;
+                }
+            }
+        }
+
+        // Update previous height for next frame
+        self.previous_inline_height = current_height;
         Ok(())
     }
 

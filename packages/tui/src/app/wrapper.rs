@@ -159,11 +159,7 @@ where
         if let Some(container) = &self.cached_container {
             let constraints = container.constraints();
             let required_height = constraints.min_height;
-
-            // min(max(current_size.height, required_height), inline_max_height)
-            let height = required_height
-                .max(current_size.height)
-                .min(self.inline_max_height);
+            let height = required_height.min(self.inline_max_height);
 
             // Only return new size if height changed
             if height != current_size.height {

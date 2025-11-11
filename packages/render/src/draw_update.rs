@@ -1,9 +1,13 @@
-use crate::{DrawErr, area::Size, chunk::Chunk};
+use crate::{area::Size, chunk::Chunk, DrawErr};
 
+/// core trait for Render
+/// in Render.render, it will call this trait's draw method to draw the content
 pub trait Draw {
     fn draw(&mut self, chunk: Chunk) -> Result<Size, DrawErr>;
 }
 
+/// core trait for EventLoop
+/// in every frame, call on_events -> update -> required_size -> Render.render(draw)
 pub trait Update {
     fn on_events(&mut self, events: &[crossterm::event::Event]) -> Result<(), DrawErr>;
     fn update(&mut self) -> Result<bool, DrawErr>;
@@ -16,7 +20,7 @@ pub trait Update {
     ///
     /// Primary use case: inline mode dynamic height adjustment
     fn required_size(&self, _current_size: Size) -> Option<Size> {
-        None  // Default: no size change requested
+        None // Default: no size change requested
     }
 }
 

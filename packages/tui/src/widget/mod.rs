@@ -1,6 +1,6 @@
 //! Widget system - core trait and types
 
-mod any;
+mod into_widget;
 
 // Widget implementations
 mod button;
@@ -10,25 +10,22 @@ mod label;
 mod spacer;
 mod text_input;
 
-#[allow(dead_code)]
-mod progress_bar;
-
-pub use any::AnyWidget;
-pub use button::Button;
+pub use button::{button, Button};
 pub use checkbox::Checkbox;
-pub use keyboard_controller::KeyboardController;
-pub use label::Label;
-pub use spacer::Spacer;
+pub use into_widget::IntoWidget;
+pub use keyboard_controller::{keyboard_controller, KeyboardController};
+pub use label::{label, Label};
+pub use spacer::{spacer, Spacer};
 pub use text_input::TextInput;
 
 use crate::event::{Event, EventResult};
 use crate::layout::Constraints;
 
 /// Core widget trait that all TUI widgets implement
-pub trait Widget {
-    /// The type of message this widget can produce
-    type Message;
-
+///
+/// This trait uses a generic parameter `M` for the message type, allowing widgets
+/// to be stored as trait objects: `Box<dyn Widget<M>>`.
+pub trait Widget<M>: Send + Sync {
     /// Render the widget into the provided chunk.
     ///
     /// The widget should draw at relative coordinates (0, 0) within the chunk.
@@ -46,7 +43,7 @@ pub trait Widget {
     /// # Returns
     /// * `EventResult::Consumed(messages)` if event was handled, with any produced messages
     /// * `EventResult::Ignored` if event should propagate
-    fn handle_event(&mut self, event: &Event) -> EventResult<Self::Message>;
+    fn handle_event(&mut self, event: &Event) -> EventResult<M>;
 
     /// Return the size constraints for this widget.
     ///

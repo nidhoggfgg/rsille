@@ -1,17 +1,18 @@
 //! Label widget - text display
 
 use super::*;
-use crate::style::Style;
+use crate::style::{Color, Style};
 
 /// Label widget for displaying text
 #[derive(Debug, Clone)]
-pub struct Label {
+pub struct Label<M = ()> {
     content: String,
     style: Style,
     wrap: bool,
+    _phantom: std::marker::PhantomData<M>,
 }
 
-impl Label {
+impl<M> Label<M> {
     /// Create a new label with the specified text
     ///
     /// # Examples
@@ -25,6 +26,7 @@ impl Label {
             content: content.into(),
             style: Style::default(),
             wrap: false,
+            _phantom: std::marker::PhantomData,
         }
     }
 
@@ -44,11 +46,39 @@ impl Label {
     pub fn content(&self) -> &str {
         &self.content
     }
+
+    /// Set the foreground color (fluent API)
+    pub fn fg(mut self, color: Color) -> Self {
+        self.style = self.style.fg(color);
+        self
+    }
+
+    /// Set the background color (fluent API)
+    pub fn bg(mut self, color: Color) -> Self {
+        self.style = self.style.bg(color);
+        self
+    }
+
+    /// Make the text bold (fluent API)
+    pub fn bold(mut self) -> Self {
+        self.style = self.style.bold();
+        self
+    }
+
+    /// Make the text italic (fluent API)
+    pub fn italic(mut self) -> Self {
+        self.style = self.style.italic();
+        self
+    }
+
+    /// Make the text underlined (fluent API)
+    pub fn underline(mut self) -> Self {
+        self.style = self.style.underlined();
+        self
+    }
 }
 
-impl Widget for Label {
-    type Message = ();
-
+impl<M: Send + Sync> Widget<M> for Label<M> {
     fn render(&self, chunk: &mut render::chunk::Chunk) {
         let area = chunk.area();
         if area.width() == 0 || area.height() == 0 {
@@ -62,7 +92,7 @@ impl Widget for Label {
         let _ = chunk.set_string(0, 0, &self.content, render_style);
     }
 
-    fn handle_event(&mut self, _event: &Event) -> EventResult<()> {
+    fn handle_event(&mut self, _event: &Event) -> EventResult<M> {
         // Labels don't handle events
         EventResult::Ignored
     }
@@ -83,4 +113,18 @@ impl Widget for Label {
             flex: None,
         }
     }
+}
+
+/// Create a new label widget (convenience function)
+///
+/// # Examples
+/// ```
+/// use tui::prelude::*;
+///
+/// let label = label("Hello, World!")
+///     .fg(Color::Green)
+///     .bold();
+/// ```
+pub fn label<M>(content: impl Into<String>) -> Label<M> {
+    Label::new(content)
 }

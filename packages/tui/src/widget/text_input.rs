@@ -137,8 +137,7 @@ impl<M> TextInput<M> {
     }
 }
 
-impl<M> Widget for TextInput<M> {
-    type Message = M;
+impl<M: Send + Sync> Widget<M> for TextInput<M> {
     fn render(&self, chunk: &mut render::chunk::Chunk) {
         let area = chunk.area();
         if area.width() == 0 || area.height() == 0 {

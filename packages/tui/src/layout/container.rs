@@ -7,7 +7,7 @@ use super::taffy_bridge::TaffyBridge;
 use crate::event::{Event, EventResult};
 use crate::layout::Constraints;
 use crate::style::{Padding, Style};
-use crate::widget::{AnyWidget, Widget};
+use crate::widget::{IntoWidget, Widget};
 use std::sync::RwLock;
 
 /// Layout direction
@@ -19,7 +19,7 @@ pub enum Direction {
 
 /// Container widget that arranges children using flexbox layout
 pub struct Container<M = ()> {
-    children: Vec<AnyWidget<M>>,
+    children: Vec<Box<dyn Widget<M>>>,
     direction: Direction,
     gap: u16,
     padding: Padding,
@@ -42,7 +42,7 @@ impl<M> std::fmt::Debug for Container<M> {
 
 impl<M> Container<M> {
     /// Create a new container with the specified direction
-    fn with_direction(children: Vec<AnyWidget<M>>, direction: Direction) -> Self {
+    fn with_direction(children: Vec<Box<dyn Widget<M>>>, direction: Direction) -> Self {
         Self {
             children,
             direction,
@@ -60,11 +60,11 @@ impl<M> Container<M> {
     /// use tui::prelude::*;
     ///
     /// let container: Container<()> = Container::vertical(vec![
-    ///     Label::new("Line 1").into(),
-    ///     Label::new("Line 2").into(),
+    ///     Box::new(Label::new("Line 1")),
+    ///     Box::new(Label::new("Line 2")),
     /// ]);
     /// ```
-    pub fn vertical(children: Vec<AnyWidget<M>>) -> Self {
+    pub fn vertical(children: Vec<Box<dyn Widget<M>>>) -> Self {
         Self::with_direction(children, Direction::Vertical)
     }
 
@@ -75,11 +75,11 @@ impl<M> Container<M> {
     /// use tui::prelude::*;
     ///
     /// let container: Container<()> = Container::horizontal(vec![
-    ///     Button::new("OK").into(),
-    ///     Button::new("Cancel").into(),
+    ///     Box::new(Button::new("OK")),
+    ///     Box::new(Button::new("Cancel")),
     /// ]);
     /// ```
-    pub fn horizontal(children: Vec<AnyWidget<M>>) -> Self {
+    pub fn horizontal(children: Vec<Box<dyn Widget<M>>>) -> Self {
         Self::with_direction(children, Direction::Horizontal)
     }
 
@@ -106,13 +106,81 @@ impl<M> Container<M> {
         self
     }
 
-    /// Add a child widget
-    pub fn add_child(&mut self, child: impl Into<AnyWidget<M>>) {
-        self.children.push(child.into());
+    /// Conditionally modify the container
+    ///
+    /// If the condition is true, applies the given function to the container.
+    /// Otherwise, returns the container unchanged.
+    ///
+    /// # Examples
+    /// ```
+    /// use tui::prelude::*;
+    ///
+    /// let show_footer = true;
+    /// let container = col()
+    ///     .child(label("Header"))
+    ///     .when(show_footer, |c| c.child(label("Footer")));
+    /// ```
+    pub fn when<F>(self, condition: bool, f: F) -> Self
+    where
+        F: FnOnce(Self) -> Self,
+    {
+        if condition {
+            f(self)
+        } else {
+            self
+        }
     }
 
+    /// Add a child widget
+    pub fn add_child(&mut self, child: Box<dyn Widget<M>>) {
+        self.children.push(child);
+    }
+}
+
+// Methods that require Send + Sync bounds
+impl<M: Send + Sync> Container<M> {
+    /// Add a single child widget using fluent API
+    ///
+    /// # Examples
+    /// ```
+    /// use tui::prelude::*;
+    ///
+    /// let container = col()
+    ///     .child(label("Hello"))
+    ///     .child(label("World"));
+    /// ```
+    pub fn child(mut self, widget: impl IntoWidget<M>) -> Self {
+        self.children.push(widget.into_widget());
+        self
+    }
+
+    /// Add multiple child widgets using fluent API
+    ///
+    /// Accepts any iterator that yields items implementing `IntoWidget<M>`.
+    ///
+    /// # Examples
+    /// ```
+    /// use tui::prelude::*;
+    ///
+    /// let items = vec!["Item 1", "Item 2", "Item 3"];
+    /// let container = col()
+    ///     .children(items.iter().map(|text| label(text)));
+    /// ```
+    pub fn children<I>(mut self, widgets: I) -> Self
+    where
+        I: IntoIterator,
+        I::Item: IntoWidget<M>,
+    {
+        self.children
+            .extend(widgets.into_iter().map(|w| w.into_widget()));
+        self
+    }
+}
+
+impl<M> Container<M> {
+
     /// Remove a child at the specified index
-    pub fn remove_child(&mut self, index: usize) -> AnyWidget<M> {
+    pub fn remove_child(&mut self, index: usize) -> Box<dyn Widget<M>> {
         self.children.remove(index)
     }
 
@@ -127,7 +195,7 @@ impl<M> Container<M> {
     }
 
     /// Get reference to children
-    pub fn children(&self) -> &[AnyWidget<M>] {
+    pub fn child_widgets(&self) -> &[Box<dyn Widget<M>>] {
         &self.children
     }
 
@@ -152,7 +220,8 @@ impl<M> Container<M> {
                     {
                         // Route event to this specific child
                         if let Some(child) = self.children.get_mut(idx) {
-                            let (result, messages) = child.handle_event_with_messages(event);
+                            let result = child.handle_event(event);
+                            let messages = result.messages_ref().to_vec();
                             all_messages.extend(messages);
 
                             if result.is_consumed() {
@@ -167,7 +236,8 @@ impl<M> Container<M> {
 
         // For non-mouse events, try each child until one consumes the event
         for child in &mut self.children {
-            let (result, messages) = child.handle_event_with_messages(event);
+            let result = child.handle_event(event);
+            let messages = result.messages_ref().to_vec();
             all_messages.extend(messages);
 
             if result.is_consumed() {
@@ -179,9 +249,7 @@ impl<M> Container<M> {
     }
 }
 
-impl<M: Clone> Widget for Container<M> {
-    type Message = M;
-
+impl<M: Clone> Widget<M> for Container<M> {
     fn render(&self, chunk: &mut render::chunk::Chunk) {
         let area = chunk.area();
         if area.width() == 0 || area.height() == 0 {
@@ -329,4 +397,38 @@ impl<M> Default for Container<M> {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Create a new empty vertical container
+///
+/// Shorthand for `Container::new()` (which defaults to vertical).
+///
+/// # Examples
+/// ```
+/// use tui::prelude::*;
+///
+/// let container = col()
+///     .gap(1)
+///     .child(label("Line 1"))
+///     .child(label("Line 2"));
+/// ```
+pub fn col<M>() -> Container<M> {
+    Container::new()
+}
+
+/// Create a new empty horizontal container
+///
+/// Shorthand for `Container::horizontal(Vec::new())`.
+///
+/// # Examples
+/// ```
+/// use tui::prelude::*;
+///
+/// let container = row()
+///     .gap(2)
+///     .child(button("OK"))
+///     .child(button("Cancel"));
+/// ```
+pub fn row<M>() -> Container<M> {
+    Container::horizontal(Vec::new())
 }

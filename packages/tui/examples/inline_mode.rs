@@ -58,53 +58,33 @@ fn view(state: &AppState) -> Container<Message> {
         percentage
     );
 
-    let mut widgets: Vec<AnyWidget<Message>> = vec![
-        Label::new(format!("{} {}", spinner, state.message))
-            .style(Style::default().fg(Color::Cyan))
-            .into(),
-        Label::new(bar)
-            .style(Style::default().fg(Color::Green))
-            .into(),
-        Label::new("").into(), // Empty line for spacing
-    ];
-
-    // Add dynamic items (demonstrates height adaptation)
-    if !state.items.is_empty() {
-        let items = state
-            .items
-            .iter()
-            .map(|item| Label::new(format!("  • {}", item)).into())
-            .collect();
-        widgets.push(Container::vertical(items).into());
-        widgets.push(Label::new("").into()); // Empty line for spacing
-    }
-
-    // Controls
-    widgets.extend(vec![
-        Label::new("Controls:")
-            .style(Style::default().fg(Color::Magenta))
-            .into(),
-        Label::new("  t - tick progress")
-            .style(Style::default().fg(Color::Indexed(8)))
-            .into(),
-        Label::new("  a - add item (watch height grow!)")
-            .style(Style::default().fg(Color::Indexed(8)))
-            .into(),
-        Label::new("  r - remove item (watch height shrink!)")
-            .style(Style::default().fg(Color::Indexed(8)))
-            .into(),
-        Label::new("  Esc - quit")
-            .style(Style::default().fg(Color::Indexed(8)))
-            .into(),
-        // Keyboard controller
-        KeyboardController::new()
-            .on_key(KeyCode::Char('t'), || Message::Tick)
-            .on_key(KeyCode::Char('a'), || Message::AddItem)
-            .on_key(KeyCode::Char('r'), || Message::RemoveItem)
-            .into(),
-    ]);
-
-    Container::vertical(widgets).gap(0)
+    col()
+        .gap(0)
+        .child(label(format!("{} {}", spinner, state.message)).fg(Color::Cyan))
+        .child(label(bar).fg(Color::Green))
+        .child(spacer())
+        .when(!state.items.is_empty(), |c| {
+            c.children(
+                state
+                    .items
+                    .iter()
+                    .map(|item| label(format!("  • {}", item)).fg(Color::Yellow)),
+            )
+            .child(spacer())
+        })
+        .child(label("Controls:").fg(Color::Magenta))
+        .children([
+            label("  t - tick progress").fg(Color::Indexed(8)),
+            label("  a - add item (watch height grow!)").fg(Color::Indexed(8)),
+            label("  r - remove item (watch height shrink!)").fg(Color::Indexed(8)),
+            label("  Esc - quit").fg(Color::Indexed(8)),
+        ])
+        .child(
+            keyboard_controller()
+                .on('t', || Message::Tick)
+                .on('a', || Message::AddItem)
+                .on('r', || Message::RemoveItem),
+        )
 }
 
 fn main() -> Result<()> {
