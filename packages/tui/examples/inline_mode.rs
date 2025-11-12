@@ -62,7 +62,6 @@ fn view(state: &AppState) -> Container<Message> {
         .gap(0)
         .child(label(format!("{} {}", spinner, state.message)).fg(Color::Cyan))
         .child(label(bar).fg(Color::Green))
-        .child(spacer())
         .when(!state.items.is_empty(), |c| {
             c.children(
                 state
@@ -70,7 +69,6 @@ fn view(state: &AppState) -> Container<Message> {
                     .iter()
                     .map(|item| label(format!("  • {}", item)).fg(Color::Yellow)),
             )
-            .child(spacer())
         })
         .child(label("Controls:").fg(Color::Magenta))
         .children([

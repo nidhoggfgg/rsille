@@ -1,4 +1,5 @@
 use crossterm::event::{KeyCode, KeyEvent};
+use log::info;
 
 use crate::{
     area::{Position, Size},
@@ -152,6 +153,15 @@ impl Builder {
         T: Draw,
         W: std::io::Write,
     {
+        info!(
+            target: "render::builder",
+            "building render: size={}x{}, pos=({},{}), inline={}, clear={}, alt_screen={}",
+            self.size.width, self.size.height,
+            self.pos.x, self.pos.y,
+            self.inline_mode,
+            self.clear,
+            self.enable_alt_screen
+        );
         Render::from_builder(self, thing, writer)
     }
 
@@ -159,6 +169,14 @@ impl Builder {
     where
         T: DrawUpdate + Send + Sync + 'static,
     {
+        info!(
+            target: "render::builder",
+            "building event loop: fps={:?}, max_events={}, raw_mode={}, hide_cursor={}",
+            self.frame_limit,
+            self.max_event_per_frame,
+            self.enable_raw_mode,
+            self.enable_hide_cursor
+        );
         EventLoop::from_builder(self, thing)
     }
 }

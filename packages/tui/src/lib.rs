@@ -1,4 +1,3 @@
-pub mod animation;
 pub mod app;
 pub mod error;
 pub mod event;
