@@ -1,10 +1,12 @@
 use std::{borrow::Cow, io};
 
 use crossterm::{
-    queue,
     style::{Attributes, Colors, Print, SetAttributes, SetColors},
 };
+use log::trace;
 use unicode_width::UnicodeWidthChar;
+
+use crate::queue_with_log;
 
 /// 样式定义，包含颜色和文本属性
 #[derive(Debug, Clone, PartialEq, Eq, Default, Copy)]
@@ -189,13 +191,24 @@ impl Stylized {
     /// 将字符和样式输出到缓冲区
     pub fn queue(&self, buffer: &mut impl io::Write) -> io::Result<()> {
         if let Some(ch) = self.c {
+            #[cfg(debug_assertions)]
+            if self.style.colors.is_some() || self.style.attr.is_some() {
+                trace!(
+                    target: "render::style",
+                    "applying style to '{}': colors={:?}, attr={:?}",
+                    if ch.is_whitespace() { ' ' } else { ch },
+                    self.style.colors,
+                    self.style.attr
+                );
+            }
+
             if let Some(colors) = self.style.colors {
-                queue!(buffer, SetColors(colors))?;
+                queue_with_log!(buffer, SetColors(colors))?;
             }
             if let Some(attr) = self.style.attr {
-                queue!(buffer, SetAttributes(attr))?;
+                queue_with_log!(buffer, SetAttributes(attr))?;
             }
-            queue!(buffer, Print(ch))?;
+            queue_with_log!(buffer, Print(ch))?;
         }
         Ok(())
     }

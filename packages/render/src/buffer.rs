@@ -1,3 +1,5 @@
+use log::info;
+
 use crate::{
     area::{Position, Size},
     style::Stylized,
@@ -125,6 +127,13 @@ impl Buffer {
         if self.size == new_size {
             return;
         }
+
+        info!(
+            target: "render::buffer",
+            "buffer resize: {}x{} -> {}x{}",
+            self.size.width, self.size.height,
+            new_size.width, new_size.height
+        );
 
         self.size = new_size;
         self.content = vec![Cell::space(); (new_size.width * new_size.height) as usize];

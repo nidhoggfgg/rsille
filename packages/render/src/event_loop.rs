@@ -11,7 +11,7 @@ use crossterm::{
     terminal::{Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use futures::{FutureExt, StreamExt};
-use log::{error, warn};
+use log::{error, info, warn};
 use tokio::{select, sync::mpsc};
 
 use crate::{Builder, DrawErr, DrawUpdate, Render};
@@ -170,6 +170,15 @@ where
             self.hide_cursor,
         )?;
 
+        info!(
+            target: "render::event_loop",
+            "event loop started: mode={}, frame_limit={:?}, raw_mode={}, alt_screen={}",
+            if self.inline_mode { "inline" } else { "fullscreen" },
+            self.frame_limit,
+            self.raw_mode,
+            self.alt_screen
+        );
+
         // In inline mode, capture the current cursor position AFTER enabling raw mode
         // Raw mode is needed for position() to work properly
         if self.inline_mode {
@@ -205,6 +214,11 @@ where
         // Join threads and handle panics gracefully
         event_thread.join().map_err(DrawErr::thread_panic)?;
         render_thread.join().map_err(DrawErr::thread_panic)?;
+
+        info!(
+            target: "render::event_loop",
+            "event loop stopped"
+        );
 
         // Terminal cleanup happens automatically via TerminalGuard's Drop
         Ok(())

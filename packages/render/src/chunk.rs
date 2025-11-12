@@ -1,3 +1,5 @@
+use log::trace;
+
 use crate::{
     area::Area,
     buffer::Buffer,
@@ -27,6 +29,11 @@ impl<'a> Chunk<'a> {
     pub fn set(&mut self, x: u16, y: u16, content: Stylized) -> Result<usize, DrawErr> {
         let content_width = content.width() as u16;
         if x + content_width > self.area.size().width {
+            trace!(
+                target: "render::chunk",
+                "content too wide at ({}, {}): width={}, available={}",
+                x, y, content_width, self.area.size().width - x
+            );
             return Err(DrawErr::content_too_wide(
                 content_width,
                 self.area.size().width,
@@ -36,10 +43,20 @@ impl<'a> Chunk<'a> {
 
         if let Some(pos) = self.area.to_absolute(x, y) {
             if self.buffer.is_occupied(pos) {
+                trace!(
+                    target: "render::chunk",
+                    "position occupied at ({}, {})",
+                    x, y
+                );
                 return Err(DrawErr::position_occupied(pos));
             }
             self.buffer.set(pos, content)
         } else {
+            trace!(
+                target: "render::chunk",
+                "out of bounds at ({}, {}), area size: {}x{}",
+                x, y, self.area.size().width, self.area.size().height
+            );
             Err(DrawErr::out_of_bounds((x, y).into(), self.area.size()))
         }
     }
@@ -47,6 +64,11 @@ impl<'a> Chunk<'a> {
     pub fn set_forced(&mut self, x: u16, y: u16, content: Stylized) -> Result<usize, DrawErr> {
         let content_width = content.width() as u16;
         if x + content_width > self.area.size().width {
+            trace!(
+                target: "render::chunk",
+                "forced set: content too wide at ({}, {}): width={}, available={}",
+                x, y, content_width, self.area.size().width - x
+            );
             return Err(DrawErr::content_too_wide(
                 content_width,
                 self.area.size().width,
@@ -57,6 +79,11 @@ impl<'a> Chunk<'a> {
         if let Some(pos) = self.area.to_absolute(x, y) {
             self.buffer.overwrite(pos, content)
         } else {
+            trace!(
+                target: "render::chunk",
+                "forced set: out of bounds at ({}, {}), area size: {}x{}",
+                x, y, self.area.size().width, self.area.size().height
+            );
             Err(DrawErr::out_of_bounds((x, y).into(), self.area.size()))
         }
     }

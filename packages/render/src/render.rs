@@ -1,9 +1,11 @@
 use crossterm::{
     cursor::{MoveTo, MoveToNextLine, MoveToPreviousLine},
-    queue,
     style::{Attribute, Print, ResetColor, SetAttribute},
     terminal::{Clear, ClearType},
 };
+use log::debug;
+
+use crate::queue_with_log;
 
 use crate::{
     area::{Position, Size},
@@ -31,6 +33,17 @@ where
     T: Draw,
 {
     pub fn render(&mut self) -> std::io::Result<()> {
+        #[cfg(debug_assertions)]
+        let start = std::time::Instant::now();
+
+        debug!(
+            target: "render",
+            "render start: mode={}, size={}x{}",
+            if self.inline_mode { "inline" } else { "fullscreen" },
+            self.buffer.size().width,
+            self.buffer.size().height
+        );
+
         // the position in chunk should be (0, 0), the render already move to the target position
         let buffer_size = self.buffer.size();
         // In inline mode, use used_height to ensure borders render within visible area
@@ -46,7 +59,7 @@ where
         self.thing.draw(chunk)?;
 
         if self.clear {
-            queue!(self.out, Clear(ClearType::All))?;
+            queue_with_log!(self.out, Clear(ClearType::All))?;
         }
 
         // Inline mode: use relative positioning with line-level differential rendering
@@ -57,7 +70,7 @@ where
         }
 
         if self.append_newline {
-            queue!(self.out, Print("\n"))?;
+            queue_with_log!(self.out, Print("\n"))?;
         }
 
         // ensure the output is flushed to terminal
@@ -65,6 +78,13 @@ where
 
         // Save current buffer for next frame's diff
         self.buffer.clear();
+
+        #[cfg(debug_assertions)]
+        debug!(
+            target: "render",
+            "render complete: duration={:.2?}",
+            start.elapsed()
+        );
 
         Ok(())
     }
@@ -74,6 +94,10 @@ where
         // Fullscreen mode: use absolute positioning with differential rendering
         if let Some(diff_iter) = self.buffer.diff() {
             // We have previous frame, do differential rendering
+            debug!(
+                target: "render::diff",
+                "using differential rendering (fullscreen)"
+            );
             let mut has_color_cache = false;
             let mut has_attr_cache = false;
             for (x, y, cell) in diff_iter {
@@ -82,16 +106,16 @@ where
                 }
 
                 // Move cursor to this position (absolute positioning)
-                queue!(self.out, MoveTo(self.pos.x + x, self.pos.y + y))?;
+                queue_with_log!(self.out, MoveTo(self.pos.x + x, self.pos.y + y))?;
 
                 // Reset color if we had color before but current cell doesn't
                 if has_color_cache && !cell.has_color() {
-                    queue!(self.out, ResetColor)?;
+                    queue_with_log!(self.out, ResetColor)?;
                 }
 
                 // Reset attributes if we had attributes before but current cell doesn't
                 if has_attr_cache && !cell.has_attr() {
-                    queue!(self.out, SetAttribute(Attribute::Reset))?;
+                    queue_with_log!(self.out, SetAttribute(Attribute::Reset))?;
                 }
 
                 cell.queue(&mut self.out)?;
@@ -100,6 +124,10 @@ where
             }
         } else {
             // First render or no previous buffer, do full render
+            debug!(
+                target: "render::diff",
+                "using full rendering (fullscreen)"
+            );
             // Optimize by rendering line by line instead of cell by cell
             let mut has_color_cache = false;
             let mut has_attr_cache = false;
@@ -119,18 +147,18 @@ where
 
                 // Only move cursor when starting a new line
                 if need_move {
-                    queue!(self.out, MoveTo(self.pos.x, self.pos.y + y))?;
+                    queue_with_log!(self.out, MoveTo(self.pos.x, self.pos.y + y))?;
                     need_move = false;
                 }
 
                 // Reset color if we had color before but current cell doesn't
                 if has_color_cache && !cell.has_color() {
-                    queue!(self.out, ResetColor)?;
+                    queue_with_log!(self.out, ResetColor)?;
                 }
 
                 // Reset attributes if we had attributes before but current cell doesn't
                 if has_attr_cache && !cell.has_attr() {
-                    queue!(self.out, SetAttribute(Attribute::Reset))?;
+                    queue_with_log!(self.out, SetAttribute(Attribute::Reset))?;
                 }
 
                 cell.queue(&mut self.out)?;
@@ -144,19 +172,26 @@ where
     fn render_inline(&mut self) -> std::io::Result<()> {
         let current_height = self.used_height;
 
+        debug!(
+            target: "render::inline",
+            "inline render: lines={}, prev_lines={}",
+            current_height,
+            self.previous_inline_height
+        );
+
         // If height decreased, clear the extra lines from previous frame
         if self.previous_inline_height > current_height {
             let extra_lines = self.previous_inline_height - current_height;
             for _ in 0..extra_lines {
-                queue!(self.out, MoveToPreviousLine(1))?;
-                queue!(self.out, Clear(ClearType::CurrentLine))?;
+                queue_with_log!(self.out, MoveToPreviousLine(1))?;
+                queue_with_log!(self.out, Clear(ClearType::CurrentLine))?;
             }
         }
 
         // Move cursor back to the start position
         if self.buffer.previous().is_some() {
             let lines = current_height.min(self.previous_inline_height);
-            queue!(self.out, MoveToPreviousLine(lines))?;
+            queue_with_log!(self.out, MoveToPreviousLine(lines))?;
         }
 
         // Render with line-level diffing
@@ -170,7 +205,7 @@ where
             match line_diff.state {
                 crate::buffer::LineState::Unchanged => {
                     // Line hasn't changed, just move to next line without re-rendering
-                    queue!(self.out, MoveToNextLine(1))?;
+                    queue_with_log!(self.out, MoveToNextLine(1))?;
                 }
                 crate::buffer::LineState::Changed {
                     cells,
@@ -181,12 +216,12 @@ where
                     for cell in cells {
                         // Reset color if we had color before but current cell doesn't
                         if has_color_cache && !cell.has_color() {
-                            queue!(self.out, ResetColor)?;
+                            queue_with_log!(self.out, ResetColor)?;
                         }
 
                         // Reset attributes if we had attributes before but current cell doesn't
                         if has_attr_cache && !cell.has_attr() {
-                            queue!(self.out, SetAttribute(Attribute::Reset))?;
+                            queue_with_log!(self.out, SetAttribute(Attribute::Reset))?;
                         }
 
                         cell.queue(&mut self.out)?;
@@ -198,18 +233,18 @@ where
                     if current_len < previous_len {
                         let trailing_spaces = previous_len - current_len;
                         for _ in 0..trailing_spaces {
-                            queue!(self.out, Print(' '))?;
+                            queue_with_log!(self.out, Print(' '))?;
                         }
                     }
 
                     // in inline mode, "\n" could make the terminal scroll up
                     // i know this is wired, but the "\n" doesn't move cursor
                     // println!("position: {:?}", cursor::position().unwrap()); // --> position: (0, x)
-                    // queue!(stdout(), Print("\r\n")).unwrap();                // --> empty line
+                    // queue_with_log!(stdout(), Print("\r\n")).unwrap();                // --> empty line
                     // println!("position: {:?}", cursor::position().unwrap()); // --> position: (0, x) <- this is not x+1!
-                    queue!(self.out, Print("\r\n"))?;
-                    queue!(self.out, MoveToPreviousLine(1))?;
-                    queue!(self.out, MoveToNextLine(1))?;
+                    queue_with_log!(self.out, Print("\r\n"))?;
+                    queue_with_log!(self.out, MoveToPreviousLine(1))?;
+                    queue_with_log!(self.out, MoveToNextLine(1))?;
                 }
             }
         }
