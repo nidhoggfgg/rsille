@@ -18,9 +18,6 @@ use tui::style::{Theme, ThemeManager};
 #[derive(Debug)]
 struct State {
     current_theme: String,
-    counter: i32,
-    checkbox_checked: bool,
-    input_text: String,
 }
 
 /// Messages for theme switching and interactions
@@ -28,10 +25,6 @@ struct State {
 enum Message {
     SwitchToDark,
     SwitchToLight,
-    Increment,
-    Decrement,
-    ToggleCheckbox,
-    InputChanged,
 }
 
 /// Update function - handles theme switching and interactions
@@ -44,18 +37,6 @@ fn update(state: &mut State, msg: Message) {
         Message::SwitchToLight => {
             ThemeManager::global().set_theme(Theme::light());
             state.current_theme = "Light".to_string();
-        }
-        Message::Increment => {
-            state.counter += 1;
-        }
-        Message::Decrement => {
-            state.counter -= 1;
-        }
-        Message::ToggleCheckbox => {
-            state.checkbox_checked = !state.checkbox_checked;
-        }
-        Message::InputChanged => {
-            // Input change handled by widget itself
         }
     }
 }
@@ -76,8 +57,8 @@ fn view(state: &State) -> Container<Message> {
             row()
                 .gap(2)
                 .child(label("Switch Theme:"))
-                .child(button("Dark (d)").on_click(|| Message::SwitchToDark))
-                .child(button("Light (l)").on_click(|| Message::SwitchToLight)),
+                .child(label("Dark (d)"))
+                .child(label("Light (l)")),
         )
         .child(
             keyboard_controller()
@@ -90,9 +71,6 @@ fn view(state: &State) -> Container<Message> {
 fn main() -> Result<()> {
     let app = App::new(State {
         current_theme: "Dark".to_string(),
-        counter: 0,
-        checkbox_checked: false,
-        input_text: "Type here...".to_string(),
     })
     .with_theme(Theme::dark());
 
