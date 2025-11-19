@@ -398,8 +398,8 @@ impl<M: Clone> Widget<M> for Container<M> {
                     min_width: total_width,
                     max_width: None,
                     min_height: max_height,
-                    max_height: None,
-                    flex: Some(1.0),
+                    max_height: Some(max_height), // Fixed: set max_height to ensure fixed height
+                    flex: None, // Fixed: row should not flex vertically
                 }
             }
         }
