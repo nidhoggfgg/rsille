@@ -7,7 +7,7 @@ mod padding;
 mod theme;
 mod theme_manager;
 
-pub use border::BorderStyle;
+pub use border::{BorderChars, BorderStyle};
 pub use padding::Padding;
 
 pub use error::CssError;

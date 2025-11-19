@@ -255,24 +255,26 @@ impl<M: Send + Sync> Widget<M> for Button<M> {
 
         // Render border for Ghost variant
         if matches!(self.variant, ButtonVariant::Ghost) {
-            // Get border color from theme
+            // Get border characters and color from theme
+            use crate::style::BorderStyle;
+            let border_chars = BorderStyle::Single.chars();
             let border_style = ThemeManager::global().with_theme(|theme| {
                 Style::default().fg(theme.colors.border).to_render_style()
             });
 
             // Top and bottom borders
             if width >= 2 {
-                let _ = chunk.set_char(0, 0, '┌', border_style);
-                let _ = chunk.set_char(width - 1, 0, '┐', border_style);
+                let _ = chunk.set_char(0, 0, border_chars.top_left, border_style);
+                let _ = chunk.set_char(width - 1, 0, border_chars.top_right, border_style);
                 for x in 1..width - 1 {
-                    let _ = chunk.set_char(x, 0, '─', border_style);
+                    let _ = chunk.set_char(x, 0, border_chars.horizontal, border_style);
                 }
 
                 if height > 0 {
-                    let _ = chunk.set_char(0, height - 1, '└', border_style);
-                    let _ = chunk.set_char(width - 1, height - 1, '┘', border_style);
+                    let _ = chunk.set_char(0, height - 1, border_chars.bottom_left, border_style);
+                    let _ = chunk.set_char(width - 1, height - 1, border_chars.bottom_right, border_style);
                     for x in 1..width - 1 {
-                        let _ = chunk.set_char(x, height - 1, '─', border_style);
+                        let _ = chunk.set_char(x, height - 1, border_chars.horizontal, border_style);
                     }
                 }
             }
@@ -280,8 +282,8 @@ impl<M: Send + Sync> Widget<M> for Button<M> {
             // Left and right borders
             if height > 2 {
                 for y in 1..height - 1 {
-                    let _ = chunk.set_char(0, y, '│', border_style);
-                    let _ = chunk.set_char(width - 1, y, '│', border_style);
+                    let _ = chunk.set_char(0, y, border_chars.vertical, border_style);
+                    let _ = chunk.set_char(width - 1, y, border_chars.vertical, border_style);
                 }
             }
         }
