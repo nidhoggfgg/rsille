@@ -1,7 +1,7 @@
 use crossterm::{
     cursor::{MoveTo, MoveToNextLine, MoveToPreviousLine},
     queue,
-    style::{Print, ResetColor},
+    style::{Attribute, Print, ResetColor, SetAttribute},
     terminal::{Clear, ClearType},
 };
 
@@ -75,6 +75,7 @@ where
         if let Some(diff_iter) = self.buffer.diff() {
             // We have previous frame, do differential rendering
             let mut has_color_cache = false;
+            let mut has_attr_cache = false;
             for (x, y, cell) in diff_iter {
                 if y >= buffer_size.height {
                     break;
@@ -83,17 +84,25 @@ where
                 // Move cursor to this position (absolute positioning)
                 queue!(self.out, MoveTo(self.pos.x + x, self.pos.y + y))?;
 
+                // Reset color if we had color before but current cell doesn't
                 if has_color_cache && !cell.has_color() {
                     queue!(self.out, ResetColor)?;
                 }
 
+                // Reset attributes if we had attributes before but current cell doesn't
+                if has_attr_cache && !cell.has_attr() {
+                    queue!(self.out, SetAttribute(Attribute::Reset))?;
+                }
+
                 cell.queue(&mut self.out)?;
                 has_color_cache = cell.has_color();
+                has_attr_cache = cell.has_attr();
             }
         } else {
             // First render or no previous buffer, do full render
             // Optimize by rendering line by line instead of cell by cell
             let mut has_color_cache = false;
+            let mut has_attr_cache = false;
             let mut current_line = 0u16;
             let mut need_move = true;
 
@@ -114,12 +123,19 @@ where
                     need_move = false;
                 }
 
+                // Reset color if we had color before but current cell doesn't
                 if has_color_cache && !cell.has_color() {
                     queue!(self.out, ResetColor)?;
                 }
 
+                // Reset attributes if we had attributes before but current cell doesn't
+                if has_attr_cache && !cell.has_attr() {
+                    queue!(self.out, SetAttribute(Attribute::Reset))?;
+                }
+
                 cell.queue(&mut self.out)?;
                 has_color_cache = cell.has_color();
+                has_attr_cache = cell.has_attr();
             }
         }
         Ok(())
@@ -145,6 +161,7 @@ where
 
         // Render with line-level diffing
         let mut has_color_cache = false;
+        let mut has_attr_cache = false;
         for line_diff in self.buffer.diff_lines() {
             if line_diff.line_num >= current_height {
                 break;
@@ -162,12 +179,19 @@ where
                 } => {
                     // Line has changed, render it with smart overwrite
                     for cell in cells {
+                        // Reset color if we had color before but current cell doesn't
                         if has_color_cache && !cell.has_color() {
                             queue!(self.out, ResetColor)?;
                         }
 
+                        // Reset attributes if we had attributes before but current cell doesn't
+                        if has_attr_cache && !cell.has_attr() {
+                            queue!(self.out, SetAttribute(Attribute::Reset))?;
+                        }
+
                         cell.queue(&mut self.out)?;
                         has_color_cache = cell.has_color();
+                        has_attr_cache = cell.has_attr();
                     }
 
                     // If current line is shorter than previous, clear trailing spaces
