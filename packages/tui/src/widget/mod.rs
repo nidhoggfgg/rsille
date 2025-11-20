@@ -40,4 +40,77 @@ pub trait Widget<M>: Send + Sync {
     ///
     /// Used by layout manager to calculate widget positions.
     fn constraints(&self) -> Constraints;
+
+    /// Returns whether this widget can receive keyboard focus.
+    ///
+    /// Focusable widgets can receive keyboard events when focused and will be
+    /// included in the focus chain for Tab navigation.
+    ///
+    /// # Default
+    /// Returns `false` - widgets are not focusable by default.
+    fn focusable(&self) -> bool {
+        false
+    }
+
+    /// Returns whether this widget currently has focus.
+    ///
+    /// This is used for rendering focus indicators (borders, highlights, etc.).
+    ///
+    /// # Default
+    /// Returns `false` - no focus state by default.
+    fn is_focused(&self) -> bool {
+        false
+    }
+
+    /// Set the focus state of this widget.
+    ///
+    /// Called by the framework when focus changes. Widgets should store this state
+    /// and use it for rendering focus indicators and handling keyboard events.
+    ///
+    /// # Arguments
+    /// * `focused` - Whether the widget should be focused
+    ///
+    /// # Default
+    /// Does nothing - widgets can override to track focus state.
+    fn set_focused(&mut self, _focused: bool) {
+        // Default: no-op
+    }
+
+    /// Build focus chain recursively (for containers)
+    ///
+    /// Allows containers to contribute their children's focus paths to the focus chain.
+    /// Called during focus chain building to support nested containers.
+    ///
+    /// # Arguments
+    /// * `current_path` - Current path in the widget tree
+    /// * `chain` - Accumulated focus chain
+    ///
+    /// # Default
+    /// Does nothing - only containers need to implement this.
+    fn build_focus_chain_recursive(
+        &self,
+        _current_path: &mut Vec<usize>,
+        _chain: &mut Vec<crate::focus::FocusPath>,
+    ) {
+        // Default: no-op (leaf widgets don't have children)
+    }
+
+    /// Update focus states recursively (for containers)
+    ///
+    /// Allows containers to update focus states of their children.
+    /// Called during focus state updates to support nested containers.
+    ///
+    /// # Arguments
+    /// * `current_path` - Current path in the widget tree
+    /// * `focus_path` - The path of the focused widget (if any)
+    ///
+    /// # Default
+    /// Does nothing - only containers need to implement this.
+    fn update_focus_states_recursive(
+        &mut self,
+        _current_path: &[usize],
+        _focus_path: Option<&crate::focus::FocusPath>,
+    ) {
+        // Default: no-op (leaf widgets don't have children)
+    }
 }
