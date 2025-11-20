@@ -94,6 +94,11 @@ impl<State> App<State> {
             builder
                 .inline_mode(true)
                 .inline_max_height(buffer_height)
+                // Note: Mouse events are NOT enabled in inline mode because:
+                // 1. User can scroll the terminal, invalidating our coordinate tracking
+                // 2. The rendered content position changes with scrolling
+                // 3. inline mode is for simple CLI output, not interactive UIs
+                // For mouse interaction, use fullscreen mode with run() instead of run_inline()
                 .size((width, buffer_height)); // Allocate buffer at max capacity
         } else {
             // Full-screen mode: use alternate screen

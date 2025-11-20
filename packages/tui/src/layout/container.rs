@@ -296,11 +296,12 @@ impl<M: Clone> Container<M> {
             if !cached_areas.is_empty() {
                 for (idx, child_area) in cached_areas.iter().enumerate() {
                     // Check if mouse is within this child's area
-                    if mouse_event.column >= child_area.x()
+                    let is_hit = mouse_event.column >= child_area.x()
                         && mouse_event.column < child_area.x() + child_area.width()
                         && mouse_event.row >= child_area.y()
-                        && mouse_event.row < child_area.y() + child_area.height()
-                    {
+                        && mouse_event.row < child_area.y() + child_area.height();
+
+                    if is_hit {
                         // Route event to this specific child
                         if let Some(child) = self.children.get_mut(idx) {
                             let result = child.handle_event(event);
