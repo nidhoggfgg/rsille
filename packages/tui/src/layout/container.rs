@@ -5,6 +5,7 @@ use render::area::Area;
 use super::border_renderer::{render_background, render_border};
 use super::taffy_bridge::TaffyBridge;
 use crate::event::{Event, EventResult};
+use crate::focus::FocusPath;
 use crate::layout::Constraints;
 use crate::style::{BorderStyle, Padding, Style, ThemeManager};
 use crate::widget::{IntoWidget, Widget};
@@ -207,17 +208,90 @@ impl<M> Container<M> {
     pub fn child_widgets(&self) -> &[Box<dyn Widget<M>>] {
         &self.children
     }
+}
+
+// Methods that require Clone bound
+impl<M: Clone> Container<M> {
+    /// Build focus chain by recursively collecting focusable widgets
+    ///
+    /// This method traverses the widget tree and collects paths to all focusable widgets.
+    /// It's called before rendering to update the global focus chain.
+    ///
+    /// # Arguments
+    /// * `current_path` - Current path in the widget tree (modified during traversal)
+    /// * `chain` - Accumulated focus chain (paths to focusable widgets)
+    pub fn build_focus_chain(&self, current_path: &mut Vec<usize>, chain: &mut Vec<FocusPath>) {
+        // Container itself is not focusable by default
+        // Subclasses like ScrollView can override focusable() to return true
+        if self.focusable() {
+            chain.push(current_path.clone());
+        }
+
+        // Recursively traverse children
+        for (idx, child) in self.children.iter().enumerate() {
+            current_path.push(idx);
+
+            // If child is focusable, add to chain
+            if child.focusable() {
+                chain.push(current_path.clone());
+            }
+
+            // Recursively build focus chain for nested containers
+            child.build_focus_chain_recursive(current_path, chain);
+
+            current_path.pop();
+        }
+    }
+
+    /// Update focus state for all children based on focus path
+    ///
+    /// Called when focus changes to synchronize widget focus states
+    ///
+    /// # Arguments
+    /// * `current_path` - Current path in the widget tree
+    /// * `focus_path` - The path of the focused widget (if any)
+    pub fn update_focus_states(&mut self, current_path: &[usize], focus_path: Option<&FocusPath>) {
+        for (idx, child) in self.children.iter_mut().enumerate() {
+            let mut child_path = current_path.to_vec();
+            child_path.push(idx);
+
+            let is_focused = focus_path.map_or(false, |fp| fp == &child_path);
+            child.set_focused(is_focused);
+
+            // Recursively update focus states for nested containers
+            child.update_focus_states_recursive(&child_path, focus_path);
+        }
+    }
 
     /// Handle event and collect any generated messages
     pub fn handle_event_with_messages(&mut self, event: &Event) -> (EventResult<M>, Vec<M>)
     where
         M: Clone,
     {
+        self.handle_event_with_focus(event, &[], None)
+    }
+
+    /// Handle event with focus information
+    ///
+    /// Routes events based on focus state for keyboard events.
+    ///
+    /// # Arguments
+    /// * `event` - The event to handle
+    /// * `current_path` - Current path in widget tree
+    /// * `focus_path` - Path to the focused widget (if any)
+    pub fn handle_event_with_focus(
+        &mut self,
+        event: &Event,
+        current_path: &[usize],
+        focus_path: Option<&FocusPath>,
+    ) -> (EventResult<M>, Vec<M>)
+    where
+        M: Clone,
+    {
         let mut all_messages = Vec::new();
 
-        // For mouse events, check if the click is within any child's area
+        // For mouse events, use spatial routing (unchanged)
         if let Event::Mouse(mouse_event) = event {
-            // Only handle clicks within our cached layout
             let cached_areas = self.cached_child_areas.read().unwrap();
             if !cached_areas.is_empty() {
                 for (idx, child_area) in cached_areas.iter().enumerate() {
@@ -243,7 +317,28 @@ impl<M> Container<M> {
             return (EventResult::Ignored, all_messages);
         }
 
-        // For non-mouse events, try each child until one consumes the event
+        // For keyboard events, use focus-based routing
+        if let Event::Key(_) = event {
+            // Check if focus is within our children
+            if let Some(focus) = focus_path {
+                if focus.starts_with(current_path) && focus.len() > current_path.len() {
+                    // Focus is in one of our children
+                    let child_idx = focus[current_path.len()];
+
+                    if let Some(child) = self.children.get_mut(child_idx) {
+                        let result = child.handle_event(event);
+                        let messages = result.messages_ref().to_vec();
+                        all_messages.extend(messages);
+
+                        if result.is_consumed() {
+                            return (EventResult::consumed(), all_messages);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Fallback: try each child sequentially (for events not routed by focus)
         for child in &mut self.children {
             let result = child.handle_event(event);
             let messages = result.messages_ref().to_vec();
@@ -402,6 +497,46 @@ impl<M: Clone> Widget<M> for Container<M> {
                     flex: None, // Fixed: row should not flex vertically
                 }
             }
+        }
+    }
+
+    fn build_focus_chain_recursive(
+        &self,
+        current_path: &mut Vec<usize>,
+        chain: &mut Vec<FocusPath>,
+    ) {
+        // For nested containers, traverse children without adding self again
+        // (self was already added by parent's traversal)
+        for (idx, child) in self.children.iter().enumerate() {
+            current_path.push(idx);
+
+            // If child is focusable, add to chain
+            if child.focusable() {
+                chain.push(current_path.clone());
+            }
+
+            // Recursively build focus chain for nested containers
+            child.build_focus_chain_recursive(current_path, chain);
+
+            current_path.pop();
+        }
+    }
+
+    fn update_focus_states_recursive(
+        &mut self,
+        current_path: &[usize],
+        focus_path: Option<&FocusPath>,
+    ) {
+        // For nested containers, traverse children and update their focus states
+        for (idx, child) in self.children.iter_mut().enumerate() {
+            let mut child_path = current_path.to_vec();
+            child_path.push(idx);
+
+            let is_focused = focus_path.map_or(false, |fp| fp == &child_path);
+            child.set_focused(is_focused);
+
+            // Recursively update focus states for nested containers
+            child.update_focus_states_recursive(&child_path, focus_path);
         }
     }
 }

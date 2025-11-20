@@ -1,6 +1,11 @@
 use render::{area::Size, chunk::Chunk, Draw, DrawErr, Update};
 
-use crate::{event::Event, layout::Container, widget::Widget};
+use crate::{
+    event::{Event, KeyCode, KeyModifiers},
+    focus::FocusManager,
+    layout::Container,
+    widget::Widget,
+};
 
 use super::runtime::App;
 
@@ -18,6 +23,8 @@ pub struct AppWrapper<State, F, V, M> {
     pub(crate) inline_mode: bool,
     pub(crate) inline_max_height: u16,
     pub(crate) terminal_width: u16,
+    // Focus management
+    focus_manager: FocusManager,
 }
 
 impl<State, F, V, M> AppWrapper<State, F, V, M>
@@ -38,6 +45,7 @@ where
             inline_mode: false,
             inline_max_height: 50,
             terminal_width: 80,
+            focus_manager: FocusManager::new(),
         }
     }
 
@@ -71,14 +79,20 @@ where
         // Reset state_changed flag after rebuilding
         self.state_changed = false;
 
+        // Build focus chain from widget tree
+        self.rebuild_focus_chain();
+
+        // Update focus states in widget tree
+        self.update_focus_states();
+
+        // Get the chunk area for size
+        let size = chunk.area().size();
+
         // Get reference to cached container for rendering
         let container = self
             .cached_container
             .as_mut()
             .expect("Container should be cached after rebuild");
-
-        // Get the chunk area for size
-        let size = chunk.area().size();
 
         // Render the widget tree directly to chunk
         container.render(&mut chunk);
@@ -101,6 +115,7 @@ where
         if self.cached_container.is_none() {
             let container = (self.view_fn)(&self.app.state);
             self.cached_container = Some(Box::new(container));
+            self.rebuild_focus_chain();
         }
 
         for event in events {
@@ -113,12 +128,35 @@ where
                 continue;
             }
 
-            // Route event to widgets and collect messages using cached container
+            // Intercept Tab/Shift+Tab for focus navigation
+            if let Event::Key(key_event) = event {
+                match key_event.code {
+                    KeyCode::Tab if key_event.modifiers.contains(KeyModifiers::SHIFT) => {
+                        // Focus previous widget
+                        self.focus_manager.focus_prev();
+                        self.update_focus_states();
+                        self.needs_redraw = true;
+                        continue; // Consume event
+                    }
+                    KeyCode::Tab => {
+                        // Focus next widget
+                        self.focus_manager.focus_next();
+                        self.update_focus_states();
+                        self.needs_redraw = true;
+                        continue; // Consume event
+                    }
+                    _ => {}
+                }
+            }
+
+            // Route event to widgets with focus information
             let container = self
                 .cached_container
                 .as_mut()
                 .expect("Container should be cached");
-            let (_result, messages) = container.handle_event_with_messages(event);
+
+            let focus_path = self.focus_manager.focus_path();
+            let (_result, messages) = container.handle_event_with_focus(event, &[], focus_path);
 
             // Store messages for processing in update()
             self.messages.extend(messages);
@@ -142,6 +180,9 @@ where
             // This is crucial for inline mode where height is calculated from container constraints
             let container = (self.view_fn)(&self.app.state);
             self.cached_container = Some(Box::new(container));
+            // Rebuild focus chain after state change
+            self.rebuild_focus_chain();
+            self.update_focus_states();
         }
 
         // Always return true to ensure continuous rendering for animations
@@ -171,5 +212,31 @@ where
         }
 
         None
+    }
+}
+
+// Private helper methods for focus management
+impl<State, F, V, M> AppWrapper<State, F, V, M>
+where
+    F: Fn(&mut State, M),
+    V: Fn(&State) -> Container<M>,
+    M: Clone + std::fmt::Debug,
+{
+    /// Rebuild focus chain from current widget tree
+    fn rebuild_focus_chain(&mut self) {
+        if let Some(container) = &self.cached_container {
+            let mut chain = Vec::new();
+            let mut path = Vec::new();
+            container.build_focus_chain(&mut path, &mut chain);
+            self.focus_manager.set_focus_chain(chain);
+        }
+    }
+
+    /// Update focus states in widget tree based on current focus
+    fn update_focus_states(&mut self) {
+        if let Some(container) = &mut self.cached_container {
+            let focus_path = self.focus_manager.focus_path();
+            container.update_focus_states(&[], focus_path);
+        }
     }
 }

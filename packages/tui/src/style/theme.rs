@@ -27,6 +27,10 @@ pub struct ThemeColors {
     pub surface: Color,
     /// Border color
     pub border: Color,
+    /// Focus ring color (for borders and outlines when focused)
+    pub focus_ring: Color,
+    /// Focus background highlight color (subtle background change when focused)
+    pub focus_background: Color,
 }
 
 impl ThemeColors {
@@ -44,6 +48,8 @@ impl ThemeColors {
             background: Color::Rgb(24, 24, 27),     // Zinc-900
             surface: Color::Rgb(39, 39, 42),        // Zinc-800
             border: Color::Rgb(63, 63, 70),         // Zinc-700
+            focus_ring: Color::Rgb(129, 140, 248),  // Lighter indigo for focus (Indigo-400)
+            focus_background: Color::Rgb(49, 46, 129), // Dark indigo background (Indigo-950)
         }
     }
 
@@ -61,6 +67,8 @@ impl ThemeColors {
             background: Color::Rgb(250, 250, 250),  // Zinc-50
             surface: Color::Rgb(255, 255, 255),     // White
             border: Color::Rgb(212, 212, 216),      // Zinc-300
+            focus_ring: Color::Rgb(67, 56, 202),    // Darker indigo for focus (Indigo-700)
+            focus_background: Color::Rgb(224, 231, 255), // Light indigo background (Indigo-100)
         }
     }
 }
@@ -132,7 +140,8 @@ impl ThemeStyles {
                 .bold(),
             primary_action_focused: Style::default()
                 .fg(colors.text)
-                .bg(colors.primary),
+                .bg(colors.primary)
+                .bold(), // Make focused state visually distinct
             secondary_action: Style::default()
                 .fg(colors.text)
                 .bg(colors.secondary),
@@ -142,7 +151,8 @@ impl ThemeStyles {
                 .bold(),
             secondary_action_focused: Style::default()
                 .fg(colors.text)
-                .bg(colors.secondary),
+                .bg(colors.secondary)
+                .bold(), // Make focused state visually distinct
 
             // Interactive element styles
             interactive: Style::default()
@@ -150,7 +160,8 @@ impl ThemeStyles {
                 .bg(colors.surface),
             interactive_focused: Style::default()
                 .fg(colors.text)
-                .bg(colors.surface),
+                .bg(colors.surface)
+                .bold(), // Make focused state visually distinct
             interactive_disabled: Style::default()
                 .fg(colors.text_muted)
                 .bg(colors.surface),
@@ -194,7 +205,8 @@ impl ThemeStyles {
                 .bold(),
             primary_action_focused: Style::default()
                 .fg(Color::White)
-                .bg(colors.primary),
+                .bg(colors.primary)
+                .bold(), // Make focused state visually distinct
             secondary_action: Style::default()
                 .fg(Color::White)
                 .bg(colors.secondary),
@@ -204,7 +216,8 @@ impl ThemeStyles {
                 .bold(),
             secondary_action_focused: Style::default()
                 .fg(Color::White)
-                .bg(colors.secondary),
+                .bg(colors.secondary)
+                .bold(), // Make focused state visually distinct
 
             // Interactive element styles
             interactive: Style::default()
@@ -212,7 +225,8 @@ impl ThemeStyles {
                 .bg(colors.surface),
             interactive_focused: Style::default()
                 .fg(colors.text)
-                .bg(colors.surface),
+                .bg(colors.surface)
+                .bold(), // Make focused state visually distinct
             interactive_disabled: Style::default()
                 .fg(colors.text_muted)
                 .bg(colors.surface),
