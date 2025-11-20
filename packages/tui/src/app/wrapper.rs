@@ -69,21 +69,20 @@ where
     M: Clone + std::fmt::Debug,
 {
     fn draw(&mut self, mut chunk: Chunk) -> std::result::Result<Size, DrawErr> {
-        // Always rebuild widget tree to support animations
-        // Animations update based on time, so we need to call view() every frame
-        let container = (self.view_fn)(&self.app.state);
+        // Rebuild widget tree only when state has changed
+        // This preserves internal widget state (like Interactive's pressed state)
+        // between events while still rebuilding when app state changes
+        if self.state_changed || self.cached_container.is_none() {
+            let container = (self.view_fn)(&self.app.state);
+            self.cached_container = Some(Box::new(container));
+            self.state_changed = false;
 
-        // Cache the container
-        self.cached_container = Some(Box::new(container));
+            // Build focus chain from widget tree
+            self.rebuild_focus_chain();
 
-        // Reset state_changed flag after rebuilding
-        self.state_changed = false;
-
-        // Build focus chain from widget tree
-        self.rebuild_focus_chain();
-
-        // Update focus states in widget tree
-        self.update_focus_states();
+            // Update focus states in widget tree
+            self.update_focus_states();
+        }
 
         // Get the chunk area for size
         let size = chunk.area().size();
@@ -159,8 +158,13 @@ where
             let (_result, messages) = container.handle_event_with_focus(event, &[], focus_path);
 
             // Store messages for processing in update()
+            let has_messages = !messages.is_empty();
             self.messages.extend(messages);
-            self.needs_redraw = true;
+
+            // If we got messages, mark that we need to redraw
+            if has_messages {
+                self.needs_redraw = true;
+            }
         }
 
         Ok(())

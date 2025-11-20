@@ -9,6 +9,19 @@
 //! - `row()` - Create empty horizontal containers
 //! - `label()` - Create label widgets
 //! - `keyboard_controller()` - Create keyboard controller widgets
+//! - `interactive()` - Wrap widgets with mouse event handling
+//!
+//! # Available Macros (Legacy)
+//!
+//! The old macro-based API is still available:
+//! - `col![]` - Create vertical containers (macro)
+//! - `row![]` - Create horizontal containers (macro)
+//! - `label!()` - Create label widgets (macro)
+//! - `button!()` - Create button widgets (macro)
+//! - `checkbox!()` - Create checkbox widgets (macro)
+//! - `text_input!()` - Create text input widgets (macro)
+//! - `spacer!()` - Create spacer widgets (macro)
+//! - `keyboard_controller!()` - Create keyboard controller widgets (macro)
 
 pub use crate::app::App;
 pub use crate::error::{Result, WidgetError};
@@ -18,5 +31,6 @@ pub use crate::event::{
 pub use crate::layout::{col, row, Constraints, Container, Direction};
 pub use crate::style::{BorderStyle, Color, CssError, Padding, Style, TextModifiers};
 pub use crate::widget::{
-    keyboard_controller, label, IntoWidget, KeyboardController, Label, Widget,
+    button, interactive, keyboard_controller, label, Button, ButtonVariant, Interactive,
+    IntoWidget, KeyboardController, Label, Widget,
 };
