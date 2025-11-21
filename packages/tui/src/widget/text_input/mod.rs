@@ -6,6 +6,25 @@ use crate::style::{BorderStyle, Style, ThemeManager};
 use std::sync::Arc;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
+/// Text input style variants
+///
+/// Different visual styles for text inputs based on their purpose and context.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TextInputVariant {
+    /// Default bordered input (single line border)
+    Default,
+    /// Borderless input (bottom border only)
+    Borderless,
+    /// Password input (masks characters as dots)
+    Password,
+}
+
+impl Default for TextInputVariant {
+    fn default() -> Self {
+        TextInputVariant::Default
+    }
+}
+
 /// Text input widget
 ///
 /// A single-line text input field with support for editing, cursor navigation,
@@ -13,7 +32,7 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 ///
 /// # Examples
 /// ```
-/// use tui::widget::TextInput;
+/// use tui::widget::{TextInput, TextInputVariant};
 ///
 /// #[derive(Clone, Debug)]
 /// enum Message {
@@ -22,10 +41,16 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 /// }
 ///
 /// let input = TextInput::new()
+///     .variant(TextInputVariant::Default)
 ///     .placeholder("Enter your name...")
 ///     .value("John")
 ///     .on_change(|text| Message::TextChanged(text))
 ///     .on_submit(|text| Message::Submit);
+///
+/// let password = TextInput::new()
+///     .variant(TextInputVariant::Password)
+///     .placeholder("Enter password...")
+///     .on_change(|text| Message::TextChanged(text));
 /// ```
 #[derive(Clone)]
 pub struct TextInput<M = ()> {
@@ -37,6 +62,7 @@ pub struct TextInput<M = ()> {
     cursor_position: usize,
 
     // Configuration
+    variant: TextInputVariant,
     disabled: bool,
 
     // State
@@ -57,6 +83,7 @@ impl<M> std::fmt::Debug for TextInput<M> {
             .field("value", &self.value)
             .field("placeholder", &self.placeholder)
             .field("cursor_position", &self.cursor_position)
+            .field("variant", &self.variant)
             .field("disabled", &self.disabled)
             .field("focused", &self.focused)
             .field("custom_style", &self.custom_style)
@@ -81,6 +108,7 @@ impl<M> TextInput<M> {
             value: String::new(),
             placeholder: None,
             cursor_position: 0,
+            variant: TextInputVariant::default(),
             disabled: false,
             focused: false,
             custom_style: None,
@@ -88,6 +116,20 @@ impl<M> TextInput<M> {
             on_change: None,
             on_submit: None,
         }
+    }
+
+    /// Set the input variant
+    ///
+    /// # Examples
+    /// ```
+    /// use tui::widget::{TextInput, TextInputVariant};
+    ///
+    /// let input = TextInput::<()>::new()
+    ///     .variant(TextInputVariant::Password);
+    /// ```
+    pub fn variant(mut self, variant: TextInputVariant) -> Self {
+        self.variant = variant;
+        self
     }
 
     /// Set the input value
@@ -212,7 +254,7 @@ impl<M> TextInput<M> {
         self
     }
 
-    /// Get the effective style based on current state
+    /// Get the effective style based on current state and variant
     fn get_style(&self) -> Style {
         let base_style = ThemeManager::global().with_theme(|theme| {
             if self.disabled {
@@ -320,6 +362,58 @@ impl<M> TextInput<M> {
             Vec::new()
         }
     }
+
+    /// Render full border (for Default, Filled, Search variants)
+    fn render_full_border(
+        &self,
+        chunk: &mut render::chunk::Chunk,
+        width: u16,
+        height: u16,
+        border_style: render::style::Style,
+    ) {
+        let border_chars = BorderStyle::Single.chars();
+
+        // Top border
+        let _ = chunk.set_char(0, 0, border_chars.top_left, border_style);
+        let _ = chunk.set_char(width - 1, 0, border_chars.top_right, border_style);
+        for x in 1..width - 1 {
+            let _ = chunk.set_char(x, 0, border_chars.horizontal, border_style);
+        }
+
+        // Bottom border
+        let _ = chunk.set_char(0, height - 1, border_chars.bottom_left, border_style);
+        let _ = chunk.set_char(
+            width - 1,
+            height - 1,
+            border_chars.bottom_right,
+            border_style,
+        );
+        for x in 1..width - 1 {
+            let _ = chunk.set_char(x, height - 1, border_chars.horizontal, border_style);
+        }
+
+        // Side borders for middle rows
+        for y in 1..height - 1 {
+            let _ = chunk.set_char(0, y, border_chars.vertical, border_style);
+            let _ = chunk.set_char(width - 1, y, border_chars.vertical, border_style);
+        }
+    }
+
+    /// Render bottom border only (for Borderless variant)
+    fn render_bottom_border(
+        &self,
+        chunk: &mut render::chunk::Chunk,
+        width: u16,
+        height: u16,
+        border_style: render::style::Style,
+    ) {
+        let border_chars = BorderStyle::Single.chars();
+
+        // Only draw horizontal line at bottom
+        for x in 0..width {
+            let _ = chunk.set_char(x, height - 1, border_chars.horizontal, border_style);
+        }
+    }
 }
 
 impl<M> Default for TextInput<M> {
@@ -352,38 +446,35 @@ impl<M: Send + Sync> Widget<M> for TextInput<M> {
             }
         });
 
-        // Render border
-        let border_chars = BorderStyle::Single.chars();
-
-        // Top border
-        let _ = chunk.set_char(0, 0, border_chars.top_left, border_style);
-        let _ = chunk.set_char(width - 1, 0, border_chars.top_right, border_style);
-        for x in 1..width - 1 {
-            let _ = chunk.set_char(x, 0, border_chars.horizontal, border_style);
+        // Render based on variant
+        match self.variant {
+            TextInputVariant::Default | TextInputVariant::Password => {
+                // Render full border
+                self.render_full_border(chunk, width, height, border_style);
+            }
+            TextInputVariant::Borderless => {
+                // Render only bottom border
+                self.render_bottom_border(chunk, width, height, border_style);
+            }
         }
 
-        // Bottom border
-        let _ = chunk.set_char(0, height - 1, border_chars.bottom_left, border_style);
-        let _ = chunk.set_char(
-            width - 1,
-            height - 1,
-            border_chars.bottom_right,
-            border_style,
-        );
-        for x in 1..width - 1 {
-            let _ = chunk.set_char(x, height - 1, border_chars.horizontal, border_style);
-        }
-
-        // Side borders for middle rows
-        for y in 1..height - 1 {
-            let _ = chunk.set_char(0, y, border_chars.vertical, border_style);
-            let _ = chunk.set_char(width - 1, y, border_chars.vertical, border_style);
-        }
-
-        // Text content area: inside the border with 1 char padding
-        let text_y = 1; // Center vertically like Button does
-        let text_start_x = 2u16; // After left border and padding
-        let available_width = (width - 4) as usize; // Subtract borders and padding
+        // Text content area - varies by variant
+        let (text_y, text_start_x, available_width) = match self.variant {
+            TextInputVariant::Borderless => {
+                // Borderless: no top/side borders, just padding
+                let text_y = 1;
+                let text_start_x = 1u16;
+                let available_width = (width - 2) as usize;
+                (text_y, text_start_x, available_width)
+            }
+            _ => {
+                // All other variants: inside the border with padding
+                let text_y = 1;
+                let text_start_x = 2u16;
+                let available_width = (width - 4) as usize;
+                (text_y, text_start_x, available_width)
+            }
+        };
 
         if available_width == 0 {
             return;
@@ -418,11 +509,18 @@ impl<M: Send + Sync> Widget<M> for TextInput<M> {
             let text_before_cursor = &self.value[..self.cursor_position];
             let cursor_visual_pos = text_before_cursor.width();
 
+            // For password variant, mask the text
+            let display_value = if self.variant == TextInputVariant::Password {
+                "•".repeat(self.value.chars().count())
+            } else {
+                self.value.clone()
+            };
+
             // Display text (truncate if needed)
-            let display_text: String = if self.value.width() > available_width {
+            let display_text: String = if display_value.width() > available_width {
                 let mut result = String::new();
                 let mut w = 0;
-                for ch in self.value.chars() {
+                for ch in display_value.chars() {
                     let ch_w = ch.width().unwrap_or(0);
                     if w + ch_w > available_width {
                         break;
@@ -432,7 +530,7 @@ impl<M: Send + Sync> Widget<M> for TextInput<M> {
                 }
                 result
             } else {
-                self.value.clone()
+                display_value
             };
 
             let _ = chunk.set_string(text_start_x, text_y, &display_text, render_style);
@@ -451,6 +549,8 @@ impl<M: Send + Sync> Widget<M> for TextInput<M> {
 
                 let cursor_char = if self.cursor_position >= self.value.len() {
                     ' ' // Block cursor at end
+                } else if self.variant == TextInputVariant::Password {
+                    '•' // Show bullet for password
                 } else {
                     self.value[self.cursor_position..]
                         .chars()

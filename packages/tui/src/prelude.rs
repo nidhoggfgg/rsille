@@ -35,5 +35,5 @@ pub use crate::layout::{col, row, Constraints, Container, Direction};
 pub use crate::style::{BorderStyle, Color, CssError, Padding, Style, TextModifiers};
 pub use crate::widget::{
     button, interactive, keyboard_controller, label, text_input, Button, ButtonVariant,
-    Interactive, IntoWidget, KeyboardController, Label, TextInput, Widget,
+    Interactive, IntoWidget, KeyboardController, Label, TextInput, TextInputVariant, Widget,
 };
