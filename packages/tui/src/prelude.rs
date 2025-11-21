@@ -8,6 +8,9 @@
 //! - `col()` - Create empty vertical containers
 //! - `row()` - Create empty horizontal containers
 //! - `label()` - Create label widgets
+//! - `button()` - Create button widgets
+//! - `text_input()` - Create text input widgets
+//! - `spacer()` - Create spacer widgets
 //! - `keyboard_controller()` - Create keyboard controller widgets
 //! - `interactive()` - Wrap widgets with mouse event handling
 //!
@@ -31,6 +34,6 @@ pub use crate::event::{
 pub use crate::layout::{col, row, Constraints, Container, Direction};
 pub use crate::style::{BorderStyle, Color, CssError, Padding, Style, TextModifiers};
 pub use crate::widget::{
-    button, interactive, keyboard_controller, label, Button, ButtonVariant, Interactive,
-    IntoWidget, KeyboardController, Label, Widget,
+    button, interactive, keyboard_controller, label, text_input, Button, ButtonVariant,
+    Interactive, IntoWidget, KeyboardController, Label, TextInput, Widget,
 };
