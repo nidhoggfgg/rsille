@@ -402,12 +402,12 @@ impl<M: Clone> Widget<M> for Container<M> {
 
         // Apply container background if specified (only inside border)
         if final_style.bg_color.is_some() {
-            render_background(chunk, border_area, render_style);
+            render_background(chunk, render_style);
         }
 
         // Draw border after background (so it's on top)
         if let Some(border) = self.border {
-            render_border(chunk, area, border, render_style);
+            render_border(chunk, border, render_style);
         }
 
         // Calculate inner area after padding
