@@ -106,8 +106,9 @@ impl<M: Send + Sync> Widget<M> for Label<M> {
         use unicode_width::UnicodeWidthStr;
         let width = self.content.width() as u16;
 
-        // Height is 1 line for now (wrapping not implemented yet)
-        let height = 1;
+        // Empty labels should not take any space
+        // This allows label("") to be used as a no-op without affecting layout
+        let height = if self.content.is_empty() { 0 } else { 1 };
 
         Constraints {
             min_width: width,

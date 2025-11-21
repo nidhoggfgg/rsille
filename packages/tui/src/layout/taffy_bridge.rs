@@ -139,8 +139,27 @@ impl TaffyBridge {
 
         let flex_grow = constraints.flex.unwrap_or(0.0);
 
+        // Set min_size and max_size to enforce constraints strictly
+        let min_size = Size {
+            width: Dimension::length(constraints.min_width as f32),
+            height: Dimension::length(constraints.min_height as f32),
+        };
+
+        let max_size = Size {
+            width: constraints
+                .max_width
+                .map(|w| Dimension::length(w as f32))
+                .unwrap_or(Dimension::auto()),
+            height: constraints
+                .max_height
+                .map(|h| Dimension::length(h as f32))
+                .unwrap_or(Dimension::auto()),
+        };
+
         Style {
             size: Size { width, height },
+            min_size,
+            max_size,
             flex_grow,
             ..Default::default()
         }

@@ -7,12 +7,14 @@ mod button;
 mod interactive;
 mod keyboard_controller;
 mod label;
+mod text_input;
 
 pub use button::{button, Button, ButtonVariant};
 pub use interactive::{interactive, Interactive};
 pub use into_widget::IntoWidget;
 pub use keyboard_controller::{keyboard_controller, KeyboardController};
 pub use label::{label, Label};
+pub use text_input::{text_input, TextInput};
 
 use crate::event::{Event, EventResult};
 use crate::layout::Constraints;
