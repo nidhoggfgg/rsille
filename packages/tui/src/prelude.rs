@@ -9,6 +9,8 @@
 //! - `row()` - Create empty horizontal containers
 //! - `label()` - Create label widgets
 //! - `button()` - Create button widgets
+//! - `checkbox()` - Create checkbox widgets
+//! - `radio_group()` - Create radio group widgets
 //! - `text_input()` - Create text input widgets
 //! - `spacer()` - Create spacer widgets
 //! - `keyboard_controller()` - Create keyboard controller widgets
@@ -34,6 +36,7 @@ pub use crate::event::{
 pub use crate::layout::{col, row, Constraints, Container, Direction};
 pub use crate::style::{BorderStyle, Color, CssError, Padding, Style, TextModifiers};
 pub use crate::widget::{
-    button, interactive, keyboard_controller, label, text_input, Button, ButtonVariant,
-    Interactive, IntoWidget, KeyboardController, Label, TextInput, TextInputVariant, Widget,
+    button, checkbox, interactive, keyboard_controller, label, radio_group, text_input, Button,
+    ButtonVariant, Checkbox, Interactive, IntoWidget, KeyboardController, Label, RadioGroup,
+    TextInput, TextInputVariant, Widget,
 };
