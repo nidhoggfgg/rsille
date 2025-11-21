@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+use crate::layout::border_renderer;
 use crate::style::{BorderStyle, Style, ThemeManager};
 use std::sync::Arc;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
@@ -362,58 +363,6 @@ impl<M> TextInput<M> {
             Vec::new()
         }
     }
-
-    /// Render full border (for Default, Filled, Search variants)
-    fn render_full_border(
-        &self,
-        chunk: &mut render::chunk::Chunk,
-        width: u16,
-        height: u16,
-        border_style: render::style::Style,
-    ) {
-        let border_chars = BorderStyle::Single.chars();
-
-        // Top border
-        let _ = chunk.set_char(0, 0, border_chars.top_left, border_style);
-        let _ = chunk.set_char(width - 1, 0, border_chars.top_right, border_style);
-        for x in 1..width - 1 {
-            let _ = chunk.set_char(x, 0, border_chars.horizontal, border_style);
-        }
-
-        // Bottom border
-        let _ = chunk.set_char(0, height - 1, border_chars.bottom_left, border_style);
-        let _ = chunk.set_char(
-            width - 1,
-            height - 1,
-            border_chars.bottom_right,
-            border_style,
-        );
-        for x in 1..width - 1 {
-            let _ = chunk.set_char(x, height - 1, border_chars.horizontal, border_style);
-        }
-
-        // Side borders for middle rows
-        for y in 1..height - 1 {
-            let _ = chunk.set_char(0, y, border_chars.vertical, border_style);
-            let _ = chunk.set_char(width - 1, y, border_chars.vertical, border_style);
-        }
-    }
-
-    /// Render bottom border only (for Borderless variant)
-    fn render_bottom_border(
-        &self,
-        chunk: &mut render::chunk::Chunk,
-        width: u16,
-        height: u16,
-        border_style: render::style::Style,
-    ) {
-        let border_chars = BorderStyle::Single.chars();
-
-        // Only draw horizontal line at bottom
-        for x in 0..width {
-            let _ = chunk.set_char(x, height - 1, border_chars.horizontal, border_style);
-        }
-    }
 }
 
 impl<M> Default for TextInput<M> {
@@ -450,11 +399,11 @@ impl<M: Send + Sync> Widget<M> for TextInput<M> {
         match self.variant {
             TextInputVariant::Default | TextInputVariant::Password => {
                 // Render full border
-                self.render_full_border(chunk, width, height, border_style);
+                border_renderer::render_border(chunk, BorderStyle::Single, border_style);
             }
             TextInputVariant::Borderless => {
                 // Render only bottom border
-                self.render_bottom_border(chunk, width, height, border_style);
+                border_renderer::render_border_bottom(chunk, BorderStyle::Single, border_style);
             }
         }
 
