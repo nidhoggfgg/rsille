@@ -1,6 +1,7 @@
 //! TextInput Component Example
 //!
 //! Demonstrates:
+//! - Different text input variants (Default, Borderless, Password)
 //! - Basic text input with placeholder
 //! - Text editing (insert, delete, backspace)
 //! - Cursor navigation (arrows, Home, End)
@@ -29,6 +30,8 @@ struct State {
     name: String,
     /// Email input value
     email: String,
+    /// Password input value
+    password: String,
     /// Message input value
     message: String,
     /// Submission status
@@ -40,6 +43,7 @@ struct State {
 enum Message {
     NameChanged(String),
     EmailChanged(String),
+    PasswordChanged(String),
     MessageChanged(String),
     Submit,
     Quit,
@@ -54,13 +58,18 @@ fn update(state: &mut State, msg: Message) {
         Message::EmailChanged(value) => {
             state.email = value;
         }
+        Message::PasswordChanged(value) => {
+            state.password = value;
+        }
         Message::MessageChanged(value) => {
             state.message = value;
         }
         Message::Submit => {
             state.submitted = Some(format!(
-                "Submitted: {} <{}> - {}",
-                state.name, state.email, state.message
+                "Submitted: {} <{}> (password: {} chars)",
+                state.name,
+                state.email,
+                state.password.len()
             ));
         }
         Message::Quit => {
@@ -75,28 +84,40 @@ fn view(state: &State) -> Container<Message> {
         .padding(Padding::new(3, 3, 2, 2))
         .gap(1)
         // Header
-        .child(label("Text Input Component Demo").fg(Color::Cyan).bold())
-        // Name input
-        .child(label("Name:").fg(Color::Indexed(8)))
+        .child(label("Text Input Variants Demo").fg(Color::Cyan).bold())
+        .child(label(""))
+        // Default variant
+        .child(label("Default Variant:").fg(Color::Indexed(8)))
         .child(
             text_input()
+                .variant(TextInputVariant::Default)
                 .placeholder("Enter your name...")
                 .value(state.name.clone())
                 .on_change(|text| Message::NameChanged(text)),
         )
-        // Email input
-        .child(label("Email:").fg(Color::Indexed(8)))
+        // Default variant for email
+        .child(label("Email (Default):").fg(Color::Indexed(8)))
         .child(
             text_input()
+                .variant(TextInputVariant::Default)
                 .placeholder("your@email.com")
                 .value(state.email.clone())
                 .on_change(|text| Message::EmailChanged(text)),
         )
-        .child(label(""))
-        // Message input
-        .child(label("Message:").fg(Color::Indexed(8)))
+        // Password variant
+        .child(label("Password Variant (masked):").fg(Color::Indexed(8)))
         .child(
             text_input()
+                .variant(TextInputVariant::Password)
+                .placeholder("Enter password...")
+                .value(state.password.clone())
+                .on_change(|text| Message::PasswordChanged(text)),
+        )
+        // Borderless variant
+        .child(label("Borderless Variant:").fg(Color::Indexed(8)))
+        .child(
+            text_input()
+                .variant(TextInputVariant::Borderless)
                 .placeholder("Type your message...")
                 .value(state.message.clone())
                 .on_change(|text| Message::MessageChanged(text))
@@ -110,9 +131,10 @@ fn view(state: &State) -> Container<Message> {
                 .on_click(|| Message::Submit),
         )
         // Disabled input (for demonstration)
-        .child(label("Disabled input:").fg(Color::Indexed(8)))
+        .child(label("Disabled Input:").fg(Color::Indexed(8)))
         .child(
             text_input()
+                .variant(TextInputVariant::Default)
                 .placeholder("This input is disabled")
                 .disabled(true),
         )
@@ -135,6 +157,7 @@ fn main() -> Result<()> {
     let app = App::new(State {
         name: String::new(),
         email: String::new(),
+        password: String::new(),
         message: String::new(),
         submitted: None,
     });

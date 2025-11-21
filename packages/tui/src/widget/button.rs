@@ -238,9 +238,9 @@ impl<M> Button<M> {
                         .fg(Color::White)
                         .bg(theme.colors.danger)
                         .bold(),
-                    ButtonState::Normal => Style::default()
-                        .fg(Color::White)
-                        .bg(theme.colors.danger),
+                    ButtonState::Normal => {
+                        Style::default().fg(Color::White).bg(theme.colors.danger)
+                    }
                 },
             }
         });
@@ -291,7 +291,9 @@ impl<M: Send + Sync> Widget<M> for Button<M> {
             // Use focus_ring color when focused, otherwise use regular border color
             let border_style = ThemeManager::global().with_theme(|theme| {
                 if is_focused {
-                    Style::default().fg(theme.colors.focus_ring).to_render_style()
+                    Style::default()
+                        .fg(theme.colors.focus_ring)
+                        .to_render_style()
                 } else {
                     Style::default().fg(theme.colors.border).to_render_style()
                 }
@@ -307,9 +309,15 @@ impl<M: Send + Sync> Widget<M> for Button<M> {
 
                 if height > 0 {
                     let _ = chunk.set_char(0, height - 1, border_chars.bottom_left, border_style);
-                    let _ = chunk.set_char(width - 1, height - 1, border_chars.bottom_right, border_style);
+                    let _ = chunk.set_char(
+                        width - 1,
+                        height - 1,
+                        border_chars.bottom_right,
+                        border_style,
+                    );
                     for x in 1..width - 1 {
-                        let _ = chunk.set_char(x, height - 1, border_chars.horizontal, border_style);
+                        let _ =
+                            chunk.set_char(x, height - 1, border_chars.horizontal, border_style);
                     }
                 }
             }

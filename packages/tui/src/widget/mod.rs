@@ -14,7 +14,7 @@ pub use interactive::{interactive, Interactive};
 pub use into_widget::IntoWidget;
 pub use keyboard_controller::{keyboard_controller, KeyboardController};
 pub use label::{label, Label};
-pub use text_input::{text_input, TextInput};
+pub use text_input::{text_input, TextInput, TextInputVariant};
 
 use crate::event::{Event, EventResult};
 use crate::layout::Constraints;

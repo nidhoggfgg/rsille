@@ -10,6 +10,7 @@ use crate::layout::Constraints;
 use crate::style::{BorderStyle, Padding, Style, ThemeManager};
 use crate::widget::{IntoWidget, Widget};
 use std::sync::RwLock;
+use taffy::style::{AlignItems, JustifyContent};
 
 /// Layout direction
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -26,6 +27,8 @@ pub struct Container<M = ()> {
     padding: Padding,
     border: Option<BorderStyle>,
     style: Style,
+    align_items: Option<AlignItems>,
+    justify_content: Option<JustifyContent>,
     /// Cached layout areas from last render (for mouse event handling)
     cached_child_areas: RwLock<Vec<Area>>,
 }
@@ -39,6 +42,8 @@ impl<M> std::fmt::Debug for Container<M> {
             .field("padding", &self.padding)
             .field("border", &self.border)
             .field("style", &self.style)
+            .field("align_items", &self.align_items)
+            .field("justify_content", &self.justify_content)
             .finish()
     }
 }
@@ -53,6 +58,8 @@ impl<M> Container<M> {
             padding: Padding::ZERO,
             border: None,
             style: Style::default(),
+            align_items: None,
+            justify_content: None,
             cached_child_areas: RwLock::new(Vec::new()),
         }
     }
@@ -113,6 +120,18 @@ impl<M> Container<M> {
     /// Set the container border
     pub fn border(mut self, border: BorderStyle) -> Self {
         self.border = Some(border);
+        self
+    }
+
+    /// Set the alignment of items along the cross axis
+    pub fn align_items(mut self, align: AlignItems) -> Self {
+        self.align_items = Some(align);
+        self
+    }
+
+    /// Set the justification of content along the main axis
+    pub fn justify_content(mut self, justify: JustifyContent) -> Self {
+        self.justify_content = Some(justify);
         self
     }
 
@@ -188,7 +207,6 @@ impl<M: Send + Sync> Container<M> {
 }
 
 impl<M> Container<M> {
-
     /// Remove a child at the specified index
     pub fn remove_child(&mut self, index: usize) -> Box<dyn Widget<M>> {
         self.children.remove(index)
@@ -406,7 +424,14 @@ impl<M: Clone> Widget<M> for Container<M> {
 
         // Compute layout using Taffy
         let mut bridge = TaffyBridge::new();
-        let child_areas = bridge.compute_layout(&self.children, inner, self.direction, self.gap);
+        let child_areas = bridge.compute_layout(
+            &self.children,
+            inner,
+            self.direction,
+            self.gap,
+            self.align_items,
+            self.justify_content,
+        );
 
         // Cache layout info for mouse event handling
         *self.cached_child_areas.write().unwrap() = child_areas.clone();
@@ -495,7 +520,7 @@ impl<M: Clone> Widget<M> for Container<M> {
                     max_width: None,
                     min_height: max_height,
                     max_height: Some(max_height), // Fixed: set max_height to ensure fixed height
-                    flex: None, // Fixed: row should not flex vertically
+                    flex: None,                   // Fixed: row should not flex vertically
                 }
             }
         }

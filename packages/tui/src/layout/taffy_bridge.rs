@@ -3,18 +3,19 @@
 use crate::layout::Constraints;
 use crate::widget::Widget;
 use render::area::Area;
+use std::cell::RefCell;
 use taffy::prelude::*;
 
-/// Layout manager using Taffy for flexbox layout
-pub struct TaffyBridge {
-    tree: TaffyTree<()>,
+thread_local! {
+    static TAFFY: RefCell<TaffyTree<()>> = RefCell::new(TaffyTree::new());
 }
+
+/// Layout manager using Taffy for flexbox layout
+pub struct TaffyBridge;
 
 impl TaffyBridge {
     pub fn new() -> Self {
-        Self {
-            tree: TaffyTree::new(),
-        }
+        Self
     }
 
     /// Compute layout for a list of widgets
@@ -24,85 +25,111 @@ impl TaffyBridge {
         available: Area,
         direction: super::container::Direction,
         gap: u16,
+        align_items: Option<AlignItems>,
+        justify_content: Option<JustifyContent>,
     ) -> Vec<Area> {
-        // Clear previous tree
-        self.tree = TaffyTree::new();
-
         if widgets.is_empty() {
             return vec![];
         }
 
-        // Create Taffy nodes for each widget
-        let mut nodes = Vec::new();
-        for widget in widgets {
-            let constraints = widget.constraints();
-            let style = self.constraints_to_style(constraints, direction);
-            let node = self.tree.new_leaf(style).unwrap();
-            nodes.push(node);
-        }
+        TAFFY.with(|t| {
+            let mut tree = t.borrow_mut();
+            // Reset tree for new layout calculation
+            // We create a new tree as clearing is not exposed/efficient in this version
+            *tree = TaffyTree::new();
 
-        // Create container node
-        let flex_direction = match direction {
-            super::container::Direction::Vertical => FlexDirection::Column,
-            super::container::Direction::Horizontal => FlexDirection::Row,
-        };
+            // Create Taffy nodes for each widget
+            let mut nodes = Vec::with_capacity(widgets.len());
+            for widget in widgets {
+                let constraints = widget.constraints();
+                let style = self.constraints_to_style(constraints, direction, align_items);
+                let node = tree.new_leaf(style).unwrap();
+                nodes.push(node);
+            }
 
-        let gap_size = gap as f32;
-        let container_style = Style {
-            display: Display::Flex,
-            flex_direction,
-            gap: Size {
-                width: length(gap_size),
-                height: length(gap_size),
-            },
-            // IMPORTANT: Set the container size to match available space
-            size: Size {
-                width: length(available.width() as f32),
-                height: length(available.height() as f32),
-            },
-            ..Default::default()
-        };
+            // Create container node
+            let flex_direction = match direction {
+                super::container::Direction::Vertical => FlexDirection::Column,
+                super::container::Direction::Horizontal => FlexDirection::Row,
+            };
 
-        let container = self
-            .tree
-            .new_with_children(container_style, &nodes)
-            .unwrap();
+            let gap_size = gap as f32;
+            let container_style = taffy::Style {
+                display: Display::Flex,
+                flex_direction,
+                align_items,
+                justify_content,
+                gap: taffy::Size {
+                    width: length(gap_size),
+                    height: length(gap_size),
+                },
+                // IMPORTANT: Set the container size to match available space
+                size: taffy::Size {
+                    width: length(available.width() as f32),
+                    height: length(available.height() as f32),
+                },
+                ..Default::default()
+            };
 
-        // Compute layout
-        let available_size = Size {
-            width: AvailableSpace::Definite(available.width() as f32),
-            height: AvailableSpace::Definite(available.height() as f32),
-        };
+            let container = tree.new_with_children(container_style, &nodes).unwrap();
 
-        self.tree.compute_layout(container, available_size).unwrap();
+            // Compute layout
+            let available_size = Size {
+                width: AvailableSpace::Definite(available.width() as f32),
+                height: AvailableSpace::Definite(available.height() as f32),
+            };
 
-        // Extract computed positions
-        let mut results = Vec::new();
-        for node in nodes.iter() {
-            let layout = self.tree.layout(*node).unwrap();
-            results.push(Area::new(
-                (
-                    available.x() + layout.location.x as u16,
-                    available.y() + layout.location.y as u16,
-                )
-                    .into(),
-                (layout.size.width as u16, layout.size.height as u16).into(),
-            ));
-        }
+            tree.compute_layout(container, available_size).unwrap();
 
-        results
+            // Extract computed positions
+            let mut results = Vec::with_capacity(nodes.len());
+            for node in nodes.iter() {
+                let layout = tree.layout(*node).unwrap();
+                results.push(Area::new(
+                    (
+                        available.x() + layout.location.x as u16,
+                        available.y() + layout.location.y as u16,
+                    )
+                        .into(),
+                    (layout.size.width as u16, layout.size.height as u16).into(),
+                ));
+            }
+
+            results
+        })
     }
 
     fn constraints_to_style(
         &self,
         constraints: Constraints,
         direction: super::container::Direction,
+        align_items: Option<AlignItems>,
     ) -> Style {
+        let is_stretch = align_items.unwrap_or(AlignItems::Stretch) == AlignItems::Stretch;
+
         let (width, height) = match direction {
             super::container::Direction::Vertical => {
-                // In vertical layout, width should always fill the container
-                let width = Dimension::percent(1.0);
+                // Vertical layout (Column)
+                // Cross axis is Width.
+                let width = if let Some(max) = constraints.max_width {
+                    if max == constraints.min_width {
+                        // Fixed width
+                        Dimension::length(max as f32)
+                    } else {
+                        // Max width constraint
+                        Dimension::auto()
+                    }
+                } else if is_stretch {
+                    // If stretch and no fixed width, use 100% or Auto?
+                    // Taffy: Stretch requires Auto size on cross axis to work?
+                    // Or we can force it with 100%.
+                    // Using 100% forces it even if align-items changes (which we check here).
+                    Dimension::percent(1.0)
+                } else {
+                    Dimension::auto()
+                };
 
+                // Main axis is Height
                 let height = if let Some(max) = constraints.max_height {
                     if max == constraints.min_height {
                         Dimension::length(constraints.min_height as f32)
@@ -116,22 +143,36 @@ impl TaffyBridge {
                 (width, height)
             }
             super::container::Direction::Horizontal => {
-                // In horizontal layout, height fills, width is constrained
+                // Horizontal layout (Row)
+                // Main axis is Width
                 let width = if let Some(max) = constraints.max_width {
                     if max == constraints.min_width {
-                        Dimension::length(constraints.min_width as f32)
-                    } else if constraints.flex.is_some() {
-                        Dimension::percent(1.0)
+                        Dimension::length(max as f32)
                     } else {
                         Dimension::auto()
                     }
                 } else if constraints.flex.is_some() {
-                    Dimension::percent(1.0)
+                    // Flex grow will handle it
+                    Dimension::auto()
                 } else {
                     Dimension::length(constraints.min_width as f32)
                 };
 
-                let height = Dimension::length(constraints.min_height as f32);
+                // Cross axis is Height
+                let height = if let Some(max) = constraints.max_height {
+                    if max == constraints.min_height {
+                        Dimension::length(max as f32)
+                    } else {
+                        Dimension::auto()
+                    }
+                } else if is_stretch {
+                    // Stretch needs Auto or 100%
+                    // If we use percent(1.0), it forces full height of container.
+                    Dimension::percent(1.0)
+                } else {
+                    // If not stretch, default to auto (content size)
+                    Dimension::length(constraints.min_height as f32)
+                };
 
                 (width, height)
             }
@@ -169,8 +210,29 @@ impl TaffyBridge {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::event::{Event, EventResult};
     use crate::layout::container::Direction;
     use crate::widget::Label;
+
+    struct TestWidget {
+        constraints: Constraints,
+    }
+
+    impl TestWidget {
+        fn new(constraints: Constraints) -> Self {
+            Self { constraints }
+        }
+    }
+
+    impl Widget<()> for TestWidget {
+        fn render(&self, _chunk: &mut render::chunk::Chunk) {}
+        fn handle_event(&mut self, _event: &Event) -> EventResult<()> {
+            EventResult::Ignored
+        }
+        fn constraints(&self) -> Constraints {
+            self.constraints
+        }
+    }
 
     #[test]
     fn test_taffy_layout_calculation() {
@@ -187,24 +249,110 @@ mod tests {
         let widgets: Vec<Box<dyn Widget<()>>> = vec![Box::new(label1), Box::new(label2)];
 
         // Compute layout
-        let results = bridge.compute_layout(&widgets, available, Direction::Vertical, 1);
+        let results =
+            bridge.compute_layout(&widgets, available, Direction::Vertical, 1, None, None);
 
         // Assert reasonable values
         assert!(
-            results[0].width() > 0,
-            "First child should have non-zero width"
+            results[0].width() >= 5,
+            "First child should have width at least 5"
         );
         assert!(
-            results[0].height() > 0,
-            "First child should have non-zero height"
+            results[0].height() >= 1,
+            "First child should have height at least 1"
         );
         assert!(
-            results[1].width() > 0,
-            "Second child should have non-zero width"
+            results[1].width() >= 6,
+            "Second child should have width at least 6"
         );
         assert!(
-            results[1].height() > 0,
-            "Second child should have non-zero height"
+            results[1].height() >= 1,
+            "Second child should have height at least 1"
         );
+    }
+
+    #[test]
+    fn test_align_items_center() {
+        let mut bridge = TaffyBridge::new();
+        let label = Label::new("Hello");
+        let widgets: Vec<Box<dyn Widget<()>>> = vec![Box::new(label)];
+        let available = Area::new((0, 0).into(), (80, 24).into());
+
+        // Vertical layout with AlignItems::Center (should not stretch width)
+        let results = bridge.compute_layout(
+            &widgets,
+            available,
+            Direction::Vertical,
+            0,
+            Some(AlignItems::Center),
+            None,
+        );
+
+        // Width should be content size (5), not full width (80)
+        assert_eq!(
+            results[0].width(),
+            5,
+            "Width should be content size when centered"
+        );
+        // Center of 80 is 40. Center of 5 is 2.5.
+        // Left should be 37.5.
+        // Taffy rounding might give 37 or 38.
+        let x = results[0].x();
+        assert!(
+            x == 37 || x == 38,
+            "Should be centered horizontally (approx), got {}",
+            x
+        );
+    }
+
+    #[test]
+    fn test_align_items_stretch() {
+        let mut bridge = TaffyBridge::new();
+        // Use a widget without max_width to test stretching
+        let widget = TestWidget::new(Constraints {
+            min_width: 5,
+            max_width: None,
+            min_height: 1,
+            max_height: Some(1),
+            flex: None,
+        });
+        let widgets: Vec<Box<dyn Widget<()>>> = vec![Box::new(widget)];
+        let available = Area::new((0, 0).into(), (80, 24).into());
+
+        // Vertical layout with AlignItems::Stretch (default)
+        let results = bridge.compute_layout(
+            &widgets,
+            available,
+            Direction::Vertical,
+            0,
+            Some(AlignItems::Stretch),
+            None,
+        );
+
+        // Width should be full width (80)
+        assert_eq!(results[0].width(), 80, "Width should stretch");
+    }
+
+    #[test]
+    fn test_justify_content_center() {
+        let mut bridge = TaffyBridge::new();
+        let label = Label::new("Hello");
+        let widgets: Vec<Box<dyn Widget<()>>> = vec![Box::new(label)];
+        let available = Area::new((0, 0).into(), (80, 24).into());
+
+        // Vertical layout with JustifyContent::Center
+        let results = bridge.compute_layout(
+            &widgets,
+            available,
+            Direction::Vertical,
+            0,
+            None,
+            Some(JustifyContent::Center),
+        );
+
+        // Should be centered vertically
+        // Available height 24. Item height 1. Center is around 11/12.
+        assert!(results[0].y() > 0, "Should be centered vertically");
+        assert!(results[0].y() < 23, "Should be centered vertically");
     }
 }
