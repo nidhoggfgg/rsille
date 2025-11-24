@@ -3,6 +3,7 @@
 use render::area::Area;
 
 use super::border_renderer::{render_background, render_border};
+use super::grid_placement::GridPlacement;
 use super::grid_track::GridTrack;
 use super::taffy_bridge::TaffyBridge;
 use crate::event::{Event, EventResult};
@@ -12,6 +13,42 @@ use crate::style::{BorderStyle, Padding, Style};
 use crate::widget::{IntoWidget, Widget};
 use std::sync::RwLock;
 use taffy::style::{AlignItems, JustifyItems};
+
+/// A grid item with optional placement information
+pub struct GridItem<M> {
+    widget: Box<dyn Widget<M>>,
+    placement: GridPlacement,
+}
+
+impl<M> GridItem<M> {
+    /// Create a new grid item with auto placement
+    pub fn new(widget: Box<dyn Widget<M>>) -> Self {
+        Self {
+            widget,
+            placement: GridPlacement::default(),
+        }
+    }
+
+    /// Create a grid item with specific placement
+    pub fn with_placement(widget: Box<dyn Widget<M>>, placement: GridPlacement) -> Self {
+        Self { widget, placement }
+    }
+
+    /// Get the widget
+    pub fn widget(&self) -> &dyn Widget<M> {
+        &*self.widget
+    }
+
+    /// Get mutable reference to the widget
+    pub fn widget_mut(&mut self) -> &mut dyn Widget<M> {
+        &mut *self.widget
+    }
+
+    /// Get the placement
+    pub fn placement(&self) -> &GridPlacement {
+        &self.placement
+    }
+}
 
 /// Grid container widget that arranges children in a 2D grid
 ///
@@ -29,7 +66,7 @@ use taffy::style::{AlignItems, JustifyItems};
 ///     .child(label("Cell 3"));
 /// ```
 pub struct Grid<M = ()> {
-    children: Vec<Box<dyn Widget<M>>>,
+    children: Vec<GridItem<M>>,
     template_columns: Vec<GridTrack>,
     template_rows: Vec<GridTrack>,
     gap: u16,
@@ -42,6 +79,8 @@ pub struct Grid<M = ()> {
     justify_items: Option<JustifyItems>,
     /// Cached layout areas from last render (for mouse event handling)
     cached_child_areas: RwLock<Vec<Area>>,
+    /// Track if layout needs recalculation
+    layout_dirty: RwLock<bool>,
 }
 
 impl<M> std::fmt::Debug for Grid<M> {
@@ -74,7 +113,23 @@ impl<M> Grid<M> {
             align_items: None,
             justify_items: None,
             cached_child_areas: RwLock::new(Vec::new()),
+            layout_dirty: RwLock::new(true),
         }
+    }
+
+    /// Mark layout as dirty (needs recalculation)
+    fn mark_dirty(&self) {
+        *self.layout_dirty.write().unwrap() = true;
+    }
+
+    /// Check if layout is dirty
+    fn is_layout_dirty(&self) -> bool {
+        *self.layout_dirty.read().unwrap()
+    }
+
+    /// Clear dirty flag
+    fn clear_dirty(&self) {
+        *self.layout_dirty.write().unwrap() = false;
     }
 
     /// Set grid template columns from a string template
@@ -88,6 +143,7 @@ impl<M> Grid<M> {
     /// ```
     pub fn columns(mut self, template: &str) -> Self {
         self.template_columns = GridTrack::parse_template(template);
+        self.mark_dirty();
         self
     }
 
@@ -102,6 +158,7 @@ impl<M> Grid<M> {
     /// ```
     pub fn rows(mut self, template: &str) -> Self {
         self.template_rows = GridTrack::parse_template(template);
+        self.mark_dirty();
         self
     }
 
@@ -121,6 +178,7 @@ impl<M> Grid<M> {
     /// ```
     pub fn template_columns(mut self, tracks: Vec<GridTrack>) -> Self {
         self.template_columns = tracks;
+        self.mark_dirty();
         self
     }
 
@@ -139,6 +197,7 @@ impl<M> Grid<M> {
     /// ```
     pub fn template_rows(mut self, tracks: Vec<GridTrack>) -> Self {
         self.template_rows = tracks;
+        self.mark_dirty();
         self
     }
 
@@ -152,18 +211,21 @@ impl<M> Grid<M> {
     /// ```
     pub fn gap(mut self, gap: u16) -> Self {
         self.gap = gap;
+        self.mark_dirty();
         self
     }
 
     /// Set the row gap separately
     pub fn gap_row(mut self, gap: u16) -> Self {
         self.gap_row = Some(gap);
+        self.mark_dirty();
         self
     }
 
     /// Set the column gap separately
     pub fn gap_column(mut self, gap: u16) -> Self {
         self.gap_column = Some(gap);
+        self.mark_dirty();
         self
     }
 
@@ -211,12 +273,19 @@ impl<M> Grid<M> {
 
     /// Add a child widget
     pub fn add_child(&mut self, child: Box<dyn Widget<M>>) {
-        self.children.push(child);
+        self.children.push(GridItem::new(child));
+        self.mark_dirty();
+    }
+
+    /// Add a child widget with specific placement
+    pub fn add_child_at(&mut self, child: Box<dyn Widget<M>>, placement: GridPlacement) {
+        self.children.push(GridItem::with_placement(child, placement));
+        self.mark_dirty();
     }
 
     /// Get reference to children
-    pub fn child_widgets(&self) -> &[Box<dyn Widget<M>>] {
-        &self.children
+    pub fn child_widgets(&self) -> Vec<&dyn Widget<M>> {
+        self.children.iter().map(|item| item.widget()).collect()
     }
 
     /// Get the number of children
@@ -243,8 +312,86 @@ impl<M: Send + Sync> Grid<M> {
     ///     .child(label("Cell 2"));
     /// ```
     pub fn child(mut self, widget: impl IntoWidget<M>) -> Self {
-        self.children.push(widget.into_widget());
+        self.children.push(GridItem::new(widget.into_widget()));
+        self.mark_dirty();
         self
+    }
+
+    /// Add a child widget with specific grid placement
+    ///
+    /// # Examples
+    /// ```
+    /// use tui::prelude::*;
+    ///
+    /// let grid = grid()
+    ///     .columns("1fr 1fr 1fr")
+    ///     .rows("auto auto")
+    ///     .child_at(
+    ///         label("Header"),
+    ///         GridPlacement::new().column_span(1, 3) // Spans all 3 columns
+    ///     );
+    /// ```
+    pub fn child_at(mut self, widget: impl IntoWidget<M>, placement: GridPlacement) -> Self {
+        self.children.push(GridItem::with_placement(widget.into_widget(), placement));
+        self.mark_dirty();
+        self
+    }
+
+    /// Add a child widget at a specific grid position
+    ///
+    /// # Arguments
+    /// * `widget` - The widget to add
+    /// * `column` - Column position (1-indexed)
+    /// * `row` - Row position (1-indexed)
+    ///
+    /// # Examples
+    /// ```
+    /// use tui::prelude::*;
+    ///
+    /// let grid = grid()
+    ///     .columns("1fr 1fr")
+    ///     .rows("auto auto")
+    ///     .child_area(label("Top Left"), 1, 1)
+    ///     .child_area(label("Top Right"), 2, 1)
+    ///     .child_area(label("Bottom Left"), 1, 2)
+    ///     .child_area(label("Bottom Right"), 2, 2);
+    /// ```
+    pub fn child_area(self, widget: impl IntoWidget<M>, column: i16, row: i16) -> Self {
+        self.child_at(widget, GridPlacement::new().area(column, row))
+    }
+
+    /// Add a child widget that spans multiple columns and rows
+    ///
+    /// # Arguments
+    /// * `widget` - The widget to add
+    /// * `column_start` - Starting column (1-indexed)
+    /// * `row_start` - Starting row (1-indexed)
+    /// * `column_span` - Number of columns to span
+    /// * `row_span` - Number of rows to span
+    ///
+    /// # Examples
+    /// ```
+    /// use tui::prelude::*;
+    ///
+    /// let grid = grid()
+    ///     .columns("1fr 1fr 1fr")
+    ///     .rows("auto auto auto")
+    ///     .child_span(label("Header"), 1, 1, 3, 1)  // Spans all 3 columns
+    ///     .child_span(label("Content"), 1, 2, 2, 2) // 2x2 area
+    ///     .child_span(label("Sidebar"), 3, 2, 1, 2); // Sidebar spans 2 rows
+    /// ```
+    pub fn child_span(
+        self,
+        widget: impl IntoWidget<M>,
+        column_start: i16,
+        row_start: i16,
+        column_span: u16,
+        row_span: u16,
+    ) -> Self {
+        self.child_at(
+            widget,
+            GridPlacement::new().area_span(column_start, row_start, column_span, row_span),
+        )
     }
 
     /// Add multiple child widgets using fluent API
@@ -263,8 +410,10 @@ impl<M: Send + Sync> Grid<M> {
         I: IntoIterator,
         I::Item: IntoWidget<M>,
     {
-        self.children
-            .extend(widgets.into_iter().map(|w| w.into_widget()));
+        for widget in widgets {
+            self.children.push(GridItem::new(widget.into_widget()));
+        }
+        self.mark_dirty();
         self
     }
 }
@@ -274,16 +423,16 @@ impl<M: Clone> Grid<M> {
     pub fn build_focus_chain(&self, current_path: &mut Vec<usize>, chain: &mut Vec<FocusPath>) {
         // Grid itself is not focusable
         // Recursively traverse children
-        for (idx, child) in self.children.iter().enumerate() {
+        for (idx, item) in self.children.iter().enumerate() {
             current_path.push(idx);
 
             // If child is focusable, add to chain
-            if child.focusable() {
+            if item.widget().focusable() {
                 chain.push(current_path.clone());
             }
 
             // Recursively build focus chain for nested containers
-            child.build_focus_chain_recursive(current_path, chain);
+            item.widget().build_focus_chain_recursive(current_path, chain);
 
             current_path.pop();
         }
@@ -291,15 +440,15 @@ impl<M: Clone> Grid<M> {
 
     /// Update focus state for all children based on focus path
     pub fn update_focus_states(&mut self, current_path: &[usize], focus_path: Option<&FocusPath>) {
-        for (idx, child) in self.children.iter_mut().enumerate() {
+        for (idx, item) in self.children.iter_mut().enumerate() {
             let mut child_path = current_path.to_vec();
             child_path.push(idx);
 
             let is_focused = focus_path.map_or(false, |fp| fp == &child_path);
-            child.set_focused(is_focused);
+            item.widget_mut().set_focused(is_focused);
 
             // Recursively update focus states for nested containers
-            child.update_focus_states_recursive(&child_path, focus_path);
+            item.widget_mut().update_focus_states_recursive(&child_path, focus_path);
         }
     }
 
@@ -336,8 +485,8 @@ impl<M: Clone> Grid<M> {
 
                     if is_hit {
                         // Route event to this specific child
-                        if let Some(child) = self.children.get_mut(idx) {
-                            let result = child.handle_event(event);
+                        if let Some(item) = self.children.get_mut(idx) {
+                            let result = item.widget_mut().handle_event(event);
                             let messages = result.messages_ref().to_vec();
                             all_messages.extend(messages);
 
@@ -359,8 +508,8 @@ impl<M: Clone> Grid<M> {
                     // Focus is in one of our children
                     let child_idx = focus[current_path.len()];
 
-                    if let Some(child) = self.children.get_mut(child_idx) {
-                        let result = child.handle_event(event);
+                    if let Some(item) = self.children.get_mut(child_idx) {
+                        let result = item.widget_mut().handle_event(event);
                         let messages = result.messages_ref().to_vec();
                         all_messages.extend(messages);
 
@@ -430,29 +579,45 @@ impl<M: Clone> Widget<M> for Grid<M> {
             return;
         }
 
-        // Compute grid layout
-        let mut layout = TaffyBridge::new();
-        let gap_row = self.gap_row.unwrap_or(self.gap);
-        let gap_column = self.gap_column.unwrap_or(self.gap);
+        // Compute grid layout (only if dirty or needed)
+        let child_areas = if self.is_layout_dirty() {
+            // Use TaffyBridge for proper grid layout
+            let gap_row = self.gap_row.unwrap_or(self.gap);
+            let gap_column = self.gap_column.unwrap_or(self.gap);
 
-        let child_areas = layout.compute_grid_layout(
-            &self.children,
-            padded_area,
-            &self.template_columns,
-            &self.template_rows,
-            gap_row,
-            gap_column,
-            self.align_items,
-            self.justify_items,
-        );
+            let mut bridge = TaffyBridge::new();
 
-        // Cache child areas for event handling
-        *self.cached_child_areas.write().unwrap() = child_areas.clone();
+            // Build items list: (widget ref, placement ref) pairs
+            let items: Vec<(&dyn Widget<M>, &GridPlacement)> = self.children.iter()
+                .map(|item| (item.widget(), item.placement()))
+                .collect();
+
+            // Compute layout using TaffyBridge
+            let areas = bridge.compute_grid_layout_with_placement(
+                &items,
+                padded_area,
+                &self.template_columns,
+                &self.template_rows,
+                gap_row,
+                gap_column,
+                self.align_items,
+                self.justify_items,
+            );
+
+            // Cache the result
+            *self.cached_child_areas.write().unwrap() = areas.clone();
+            self.clear_dirty();
+
+            areas
+        } else {
+            // Use cached layout
+            self.cached_child_areas.read().unwrap().clone()
+        };
 
         // Render children
-        for (child, child_area) in self.children.iter().zip(child_areas.iter()) {
+        for (item, child_area) in self.children.iter().zip(child_areas.iter()) {
             if let Ok(mut child_chunk) = chunk.from_area(*child_area) {
-                child.render(&mut child_chunk);
+                item.widget().render(&mut child_chunk);
             }
         }
     }
@@ -485,16 +650,16 @@ impl<M: Clone> Widget<M> for Grid<M> {
         chain: &mut Vec<FocusPath>,
     ) {
         // For nested grids, traverse children without adding self again
-        for (idx, child) in self.children.iter().enumerate() {
+        for (idx, item) in self.children.iter().enumerate() {
             current_path.push(idx);
 
             // If child is focusable, add to chain
-            if child.focusable() {
+            if item.widget().focusable() {
                 chain.push(current_path.clone());
             }
 
             // Recursively build focus chain for nested containers
-            child.build_focus_chain_recursive(current_path, chain);
+            item.widget().build_focus_chain_recursive(current_path, chain);
 
             current_path.pop();
         }
@@ -506,15 +671,15 @@ impl<M: Clone> Widget<M> for Grid<M> {
         focus_path: Option<&FocusPath>,
     ) {
         // For nested grids, traverse children and update their focus states
-        for (idx, child) in self.children.iter_mut().enumerate() {
+        for (idx, item) in self.children.iter_mut().enumerate() {
             let mut child_path = current_path.to_vec();
             child_path.push(idx);
 
             let is_focused = focus_path.map_or(false, |fp| fp == &child_path);
-            child.set_focused(is_focused);
+            item.widget_mut().set_focused(is_focused);
 
             // Recursively update focus states for nested containers
-            child.update_focus_states_recursive(&child_path, focus_path);
+            item.widget_mut().update_focus_states_recursive(&child_path, focus_path);
         }
     }
 }

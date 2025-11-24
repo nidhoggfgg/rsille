@@ -82,6 +82,7 @@ impl GridTrack {
     /// Parse a track template string into a vector of tracks
     ///
     /// Splits by whitespace and parses each part.
+    /// Supports repeat() function syntax: "repeat(3, 1fr)" expands to "1fr 1fr 1fr"
     ///
     /// # Examples
     /// ```
@@ -89,12 +90,54 @@ impl GridTrack {
     ///
     /// let tracks = GridTrack::parse_template("1fr 20 auto");
     /// assert_eq!(tracks.len(), 3);
+    ///
+    /// let tracks = GridTrack::parse_template("repeat(3, 1fr)");
+    /// assert_eq!(tracks.len(), 3);
     /// ```
     pub fn parse_template(template: &str) -> Vec<Self> {
+        let mut result = Vec::new();
+        let template = template.trim();
+
+        // Handle repeat() function
+        if let Some(repeat_content) = Self::extract_repeat(template) {
+            if let Some((count, track_str)) = Self::parse_repeat_args(&repeat_content) {
+                let track = Self::parse(&track_str);
+                if let Some(t) = track {
+                    for _ in 0..count {
+                        result.push(t);
+                    }
+                }
+                return result;
+            }
+        }
+
+        // Normal parsing
         template
             .split_whitespace()
             .filter_map(|s| Self::parse(s))
             .collect()
+    }
+
+    /// Extract content from repeat() function
+    fn extract_repeat(template: &str) -> Option<String> {
+        let template = template.trim();
+        if template.starts_with("repeat(") && template.ends_with(')') {
+            Some(template[7..template.len() - 1].to_string())
+        } else {
+            None
+        }
+    }
+
+    /// Parse repeat() arguments: "3, 1fr" -> (3, "1fr")
+    fn parse_repeat_args(args: &str) -> Option<(usize, String)> {
+        let parts: Vec<&str> = args.split(',').collect();
+        if parts.len() == 2 {
+            let count = parts[0].trim().parse::<usize>().ok()?;
+            let track_str = parts[1].trim().to_string();
+            Some((count, track_str))
+        } else {
+            None
+        }
     }
 }
 
@@ -142,5 +185,22 @@ mod tests {
     fn test_parse_template_empty() {
         let tracks = GridTrack::parse_template("");
         assert_eq!(tracks.len(), 0);
+    }
+
+    #[test]
+    fn test_parse_template_repeat() {
+        let tracks = GridTrack::parse_template("repeat(3, 1fr)");
+        assert_eq!(tracks.len(), 3);
+        assert_eq!(tracks[0], GridTrack::Fr(1.0));
+        assert_eq!(tracks[1], GridTrack::Fr(1.0));
+        assert_eq!(tracks[2], GridTrack::Fr(1.0));
+    }
+
+    #[test]
+    fn test_parse_template_repeat_fixed() {
+        let tracks = GridTrack::parse_template("repeat(2, 20)");
+        assert_eq!(tracks.len(), 2);
+        assert_eq!(tracks[0], GridTrack::Fixed(20));
+        assert_eq!(tracks[1], GridTrack::Fixed(20));
     }
 }

@@ -100,10 +100,10 @@ impl TaffyBridge {
         })
     }
 
-    /// Compute grid layout for a list of widgets
-    pub fn compute_grid_layout<M: Clone>(
+    /// Compute grid layout for a list of widgets with placement information
+    pub fn compute_grid_layout_with_placement<M: Clone>(
         &mut self,
-        widgets: &[Box<dyn Widget<M>>],
+        items: &[(&dyn Widget<M>, &super::grid_placement::GridPlacement)],
         available: Area,
         template_columns: &[GridTrack],
         template_rows: &[GridTrack],
@@ -112,7 +112,7 @@ impl TaffyBridge {
         align_items: Option<AlignItems>,
         justify_items: Option<JustifyItems>,
     ) -> Vec<Area> {
-        if widgets.is_empty() {
+        if items.is_empty() {
             return vec![];
         }
 
@@ -121,11 +121,11 @@ impl TaffyBridge {
             // Reset tree for new layout calculation
             *tree = TaffyTree::new();
 
-            // Create Taffy nodes for each widget
-            let mut nodes = Vec::with_capacity(widgets.len());
-            for widget in widgets {
+            // Create Taffy nodes for each widget with placement
+            let mut nodes = Vec::with_capacity(items.len());
+            for (widget, placement) in items {
                 let constraints = widget.constraints();
-                let style = self.constraints_to_grid_style(constraints);
+                let style = self.constraints_to_grid_style_with_placement(constraints, placement);
                 let node = tree.new_leaf(style).unwrap();
                 nodes.push(node);
             }
@@ -241,6 +241,69 @@ impl TaffyBridge {
             max_size,
             ..Default::default()
         }
+    }
+
+    /// Convert widget constraints and grid placement to grid item style
+    fn constraints_to_grid_style_with_placement(
+        &self,
+        constraints: Constraints,
+        placement: &super::grid_placement::GridPlacement,
+    ) -> Style {
+        // Start with base style from constraints
+        let mut style = self.constraints_to_grid_style(constraints);
+
+        // Add grid placement information
+        // Convert our GridLine to Taffy's grid positioning
+        use super::grid_placement::GridLine;
+
+        // Grid column placement
+        match (placement.column_start, placement.column_end) {
+            (GridLine::Line(start), GridLine::Line(end)) => {
+                // Explicit start and end
+                style.grid_column = taffy::geometry::Line {
+                    start: taffy::style::GridPlacement::Line(start.into()),
+                    end: taffy::style::GridPlacement::Line(end.into()),
+                };
+            }
+            (GridLine::Line(start), GridLine::Auto) => {
+                // Just start position, auto end
+                style.grid_column = taffy::geometry::Line {
+                    start: taffy::style::GridPlacement::Line(start.into()),
+                    end: taffy::style::GridPlacement::Auto,
+                };
+            }
+            _ => {
+                // Auto placement
+                style.grid_column = taffy::geometry::Line {
+                    start: taffy::style::GridPlacement::Auto,
+                    end: taffy::style::GridPlacement::Auto,
+                };
+            }
+        }
+
+        // Grid row placement
+        match (placement.row_start, placement.row_end) {
+            (GridLine::Line(start), GridLine::Line(end)) => {
+                style.grid_row = taffy::geometry::Line {
+                    start: taffy::style::GridPlacement::Line(start.into()),
+                    end: taffy::style::GridPlacement::Line(end.into()),
+                };
+            }
+            (GridLine::Line(start), GridLine::Auto) => {
+                style.grid_row = taffy::geometry::Line {
+                    start: taffy::style::GridPlacement::Line(start.into()),
+                    end: taffy::style::GridPlacement::Auto,
+                };
+            }
+            _ => {
+                style.grid_row = taffy::geometry::Line {
+                    start: taffy::style::GridPlacement::Auto,
+                    end: taffy::style::GridPlacement::Auto,
+                };
+            }
+        }
+
+        style
     }
 
     fn constraints_to_style(
