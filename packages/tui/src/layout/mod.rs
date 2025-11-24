@@ -14,3 +14,13 @@ pub use grid::{grid, Grid};
 pub use grid_placement::{GridLine, GridPlacement};
 pub use grid_track::GridTrack;
 pub use taffy::style::{AlignItems, JustifyContent, JustifyItems};
+
+/// Defines how a container handles content that overflows its bounds
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Overflow {
+    /// Content is clipped to the container's bounds (default)
+    #[default]
+    Hidden,
+    /// Content can overflow and render outside the container's bounds
+    Visible,
+}

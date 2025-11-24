@@ -4,6 +4,7 @@ use render::area::Area;
 
 use super::border_renderer::{render_background, render_border};
 use super::taffy_bridge::TaffyBridge;
+use super::Overflow;
 use crate::event::{Event, EventResult};
 use crate::focus::FocusPath;
 use crate::layout::Constraints;
@@ -29,6 +30,7 @@ pub struct Container<M = ()> {
     style: Style,
     align_items: Option<AlignItems>,
     justify_content: Option<JustifyContent>,
+    overflow: Overflow,
     /// Cached layout areas from last render (for mouse event handling)
     cached_child_areas: RwLock<Vec<Area>>,
 }
@@ -44,6 +46,7 @@ impl<M> std::fmt::Debug for Container<M> {
             .field("style", &self.style)
             .field("align_items", &self.align_items)
             .field("justify_content", &self.justify_content)
+            .field("overflow", &self.overflow)
             .finish()
     }
 }
@@ -60,6 +63,7 @@ impl<M> Container<M> {
             style: Style::default(),
             align_items: None,
             justify_content: None,
+            overflow: Overflow::default(),
             cached_child_areas: RwLock::new(Vec::new()),
         }
     }
@@ -132,6 +136,12 @@ impl<M> Container<M> {
     /// Set the justification of content along the main axis
     pub fn justify_content(mut self, justify: JustifyContent) -> Self {
         self.justify_content = Some(justify);
+        self
+    }
+
+    /// Set the overflow behavior for children that exceed the container bounds
+    pub fn overflow(mut self, overflow: Overflow) -> Self {
+        self.overflow = overflow;
         self
     }
 
@@ -438,6 +448,24 @@ impl<M: Clone> Widget<M> for Container<M> {
 
         // Render each child in its allocated area using sequential sub-chunk creation
         for (child, child_area) in self.children.iter().zip(child_areas) {
+            // Skip rendering if the child has zero dimensions
+            if child_area.width() == 0 || child_area.height() == 0 {
+                continue;
+            }
+
+            // Apply overflow handling
+            match self.overflow {
+                Overflow::Hidden => {
+                    // Skip child if it's completely outside the inner bounds
+                    if !child_area.intersects(&inner) {
+                        continue;
+                    }
+                }
+                Overflow::Visible => {
+                    // Allow rendering outside bounds
+                }
+            }
+
             // Create a sub-chunk for this child
             if let Ok(mut child_chunk) = chunk.from_area(child_area) {
                 child.render(&mut child_chunk);
