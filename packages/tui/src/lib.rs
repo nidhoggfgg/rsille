@@ -6,6 +6,9 @@ pub mod layout;
 pub mod style;
 pub mod widget;
 
+// Declarative UI macro
+pub mod ui_macro;
+
 // Convenience re-exports
 pub mod prelude;
 
