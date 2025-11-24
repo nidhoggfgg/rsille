@@ -3,7 +3,7 @@ use crate::{
     DrawErr,
 };
 
-#[derive(Debug, Clone, Hash, Copy, Default)]
+#[derive(Debug, Clone, Hash, Copy, Default, PartialEq, Eq)]
 pub struct Area {
     pos: Position,
     size: Size,
@@ -89,6 +89,58 @@ impl Area {
     pub fn real_size(&self) -> Size {
         (self.size.width + self.pos.x, self.size.height + self.pos.y).into()
     }
+
+    /// Check if this area completely contains another area
+    pub fn contains_area(&self, other: &Area) -> bool {
+        let self_right = self.pos.x.saturating_add(self.size.width);
+        let self_bottom = self.pos.y.saturating_add(self.size.height);
+        let other_right = other.pos.x.saturating_add(other.size.width);
+        let other_bottom = other.pos.y.saturating_add(other.size.height);
+
+        other.pos.x >= self.pos.x
+            && other.pos.y >= self.pos.y
+            && other_right <= self_right
+            && other_bottom <= self_bottom
+    }
+
+    /// Check if this area intersects with another area
+    pub fn intersects(&self, other: &Area) -> bool {
+        let self_right = self.pos.x.saturating_add(self.size.width);
+        let self_bottom = self.pos.y.saturating_add(self.size.height);
+        let other_right = other.pos.x.saturating_add(other.size.width);
+        let other_bottom = other.pos.y.saturating_add(other.size.height);
+
+        !(self_right <= other.pos.x
+            || other_right <= self.pos.x
+            || self_bottom <= other.pos.y
+            || other_bottom <= self.pos.y)
+    }
+
+    /// Clamp this area to fit within bounds, returning None if there's no overlap
+    pub fn clamp_to(&self, bounds: &Area) -> Option<Area> {
+        if !self.intersects(bounds) {
+            return None;
+        }
+
+        let bounds_right = bounds.pos.x.saturating_add(bounds.size.width);
+        let bounds_bottom = bounds.pos.y.saturating_add(bounds.size.height);
+        let self_right = self.pos.x.saturating_add(self.size.width);
+        let self_bottom = self.pos.y.saturating_add(self.size.height);
+
+        let new_x = self.pos.x.max(bounds.pos.x);
+        let new_y = self.pos.y.max(bounds.pos.y);
+        let new_right = self_right.min(bounds_right);
+        let new_bottom = self_bottom.min(bounds_bottom);
+
+        let new_width = new_right.saturating_sub(new_x);
+        let new_height = new_bottom.saturating_sub(new_y);
+
+        if new_width == 0 || new_height == 0 {
+            return None;
+        }
+
+        Some(Area::new((new_x, new_y).into(), (new_width, new_height).into()))
+    }
 }
 
 impl From<Size> for Area {
@@ -100,5 +152,57 @@ impl From<Size> for Area {
 impl From<Position> for Area {
     fn from(pos: Position) -> Self {
         Self::new(pos, Size::default())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_contains_area() {
+        let outer = Area::new((10, 10).into(), (20, 20).into());
+        let inner = Area::new((15, 15).into(), (5, 5).into());
+        let partial = Area::new((25, 25).into(), (10, 10).into());
+        let outside = Area::new((50, 50).into(), (5, 5).into());
+
+        assert!(outer.contains_area(&inner), "Inner area should be contained");
+        assert!(!outer.contains_area(&partial), "Partially overlapping area should not be contained");
+        assert!(!outer.contains_area(&outside), "Outside area should not be contained");
+    }
+
+    #[test]
+    fn test_intersects() {
+        let area1 = Area::new((10, 10).into(), (20, 20).into());
+        let area2 = Area::new((20, 20).into(), (20, 20).into());
+        let area3 = Area::new((50, 50).into(), (10, 10).into());
+
+        assert!(area1.intersects(&area2), "Overlapping areas should intersect");
+        assert!(!area1.intersects(&area3), "Non-overlapping areas should not intersect");
+    }
+
+    #[test]
+    fn test_clamp_to() {
+        let bounds = Area::new((10, 10).into(), (20, 20).into());
+
+        // Area completely inside bounds
+        let inside = Area::new((15, 15).into(), (5, 5).into());
+        let clamped = inside.clamp_to(&bounds);
+        assert_eq!(clamped, Some(inside), "Area inside bounds should remain unchanged");
+
+        // Area partially outside bounds
+        let partial = Area::new((25, 25).into(), (10, 10).into());
+        let clamped = partial.clamp_to(&bounds);
+        assert!(clamped.is_some(), "Partially overlapping area should be clamped");
+        let clamped_area = clamped.unwrap();
+        assert_eq!(clamped_area.x(), 25);
+        assert_eq!(clamped_area.y(), 25);
+        assert_eq!(clamped_area.width(), 5); // Clamped from 10 to 5
+        assert_eq!(clamped_area.height(), 5); // Clamped from 10 to 5
+
+        // Area completely outside bounds
+        let outside = Area::new((50, 50).into(), (10, 10).into());
+        let clamped = outside.clamp_to(&bounds);
+        assert_eq!(clamped, None, "Area outside bounds should return None");
     }
 }

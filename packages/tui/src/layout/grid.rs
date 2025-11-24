@@ -6,6 +6,7 @@ use super::border_renderer::{render_background, render_border};
 use super::grid_placement::GridPlacement;
 use super::grid_track::GridTrack;
 use super::taffy_bridge::TaffyBridge;
+use super::Overflow;
 use crate::event::{Event, EventResult};
 use crate::focus::FocusPath;
 use crate::layout::Constraints;
@@ -77,6 +78,7 @@ pub struct Grid<M = ()> {
     style: Style,
     align_items: Option<AlignItems>,
     justify_items: Option<JustifyItems>,
+    overflow: Overflow,
     /// Cached layout areas from last render (for mouse event handling)
     cached_child_areas: RwLock<Vec<Area>>,
     /// Track if layout needs recalculation
@@ -93,6 +95,7 @@ impl<M> std::fmt::Debug for Grid<M> {
             .field("padding", &self.padding)
             .field("border", &self.border)
             .field("style", &self.style)
+            .field("overflow", &self.overflow)
             .finish()
     }
 }
@@ -112,6 +115,7 @@ impl<M> Grid<M> {
             style: Style::default(),
             align_items: None,
             justify_items: None,
+            overflow: Overflow::default(),
             cached_child_areas: RwLock::new(Vec::new()),
             layout_dirty: RwLock::new(true),
         }
@@ -256,6 +260,12 @@ impl<M> Grid<M> {
     /// Set the alignment of items along the inline axis
     pub fn justify_items(mut self, justify: JustifyItems) -> Self {
         self.justify_items = Some(justify);
+        self
+    }
+
+    /// Set the overflow behavior for children that exceed the grid bounds
+    pub fn overflow(mut self, overflow: Overflow) -> Self {
+        self.overflow = overflow;
         self
     }
 
@@ -616,6 +626,24 @@ impl<M: Clone> Widget<M> for Grid<M> {
 
         // Render children
         for (item, child_area) in self.children.iter().zip(child_areas.iter()) {
+            // Skip rendering if the child has zero dimensions
+            if child_area.width() == 0 || child_area.height() == 0 {
+                continue;
+            }
+
+            // Apply overflow handling
+            match self.overflow {
+                Overflow::Hidden => {
+                    // Skip child if it's completely outside the padded bounds
+                    if !child_area.intersects(&padded_area) {
+                        continue;
+                    }
+                }
+                Overflow::Visible => {
+                    // Allow rendering outside bounds
+                }
+            }
+
             if let Ok(mut child_chunk) = chunk.from_area(*child_area) {
                 item.widget().render(&mut child_chunk);
             }
