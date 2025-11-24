@@ -1,5 +1,6 @@
 //! Bridge to Taffy layout engine
 
+use crate::layout::grid_track::GridTrack;
 use crate::layout::Constraints;
 use crate::widget::Widget;
 use render::area::Area;
@@ -97,6 +98,149 @@ impl TaffyBridge {
 
             results
         })
+    }
+
+    /// Compute grid layout for a list of widgets
+    pub fn compute_grid_layout<M: Clone>(
+        &mut self,
+        widgets: &[Box<dyn Widget<M>>],
+        available: Area,
+        template_columns: &[GridTrack],
+        template_rows: &[GridTrack],
+        gap_row: u16,
+        gap_column: u16,
+        align_items: Option<AlignItems>,
+        justify_items: Option<JustifyItems>,
+    ) -> Vec<Area> {
+        if widgets.is_empty() {
+            return vec![];
+        }
+
+        TAFFY.with(|t| {
+            let mut tree = t.borrow_mut();
+            // Reset tree for new layout calculation
+            *tree = TaffyTree::new();
+
+            // Create Taffy nodes for each widget
+            let mut nodes = Vec::with_capacity(widgets.len());
+            for widget in widgets {
+                let constraints = widget.constraints();
+                let style = self.constraints_to_grid_style(constraints);
+                let node = tree.new_leaf(style).unwrap();
+                nodes.push(node);
+            }
+
+            // Convert GridTrack to Taffy track sizing
+            let columns: Vec<TrackSizingFunction> = template_columns
+                .iter()
+                .map(|track| self.grid_track_to_taffy(*track))
+                .collect();
+
+            let rows: Vec<TrackSizingFunction> = template_rows
+                .iter()
+                .map(|track| self.grid_track_to_taffy(*track))
+                .collect();
+
+            // Create container node with grid layout
+            let container_style = taffy::Style {
+                display: Display::Grid,
+                grid_template_columns: columns.iter().map(|&tsf| tsf.into()).collect(),
+                grid_template_rows: rows.iter().map(|&tsf| tsf.into()).collect(),
+                gap: taffy::Size {
+                    width: length(gap_column as f32),
+                    height: length(gap_row as f32),
+                },
+                align_items,
+                justify_items,
+                // IMPORTANT: Set the container size to match available space
+                size: taffy::Size {
+                    width: length(available.width() as f32),
+                    height: length(available.height() as f32),
+                },
+                ..Default::default()
+            };
+
+            let container = tree.new_with_children(container_style, &nodes).unwrap();
+
+            // Compute layout
+            let available_size = Size {
+                width: AvailableSpace::Definite(available.width() as f32),
+                height: AvailableSpace::Definite(available.height() as f32),
+            };
+
+            tree.compute_layout(container, available_size).unwrap();
+
+            // Extract computed positions
+            let mut results = Vec::with_capacity(nodes.len());
+            for node in nodes.iter() {
+                let layout = tree.layout(*node).unwrap();
+                results.push(Area::new(
+                    (
+                        available.x() + layout.location.x as u16,
+                        available.y() + layout.location.y as u16,
+                    )
+                        .into(),
+                    (layout.size.width as u16, layout.size.height as u16).into(),
+                ));
+            }
+
+            results
+        })
+    }
+
+    /// Convert GridTrack to Taffy TrackSizingFunction
+    fn grid_track_to_taffy(&self, track: GridTrack) -> TrackSizingFunction {
+        match track {
+            GridTrack::Fixed(size) => length(size as f32),
+            GridTrack::Fr(fraction) => flex(fraction),
+            GridTrack::Auto => auto(),
+        }
+    }
+
+    /// Convert widget constraints to grid item style
+    fn constraints_to_grid_style(&self, constraints: Constraints) -> Style {
+        let width = if let Some(max) = constraints.max_width {
+            if max == constraints.min_width {
+                Dimension::length(max as f32)
+            } else {
+                Dimension::auto()
+            }
+        } else {
+            Dimension::auto()
+        };
+
+        let height = if let Some(max) = constraints.max_height {
+            if max == constraints.min_height {
+                Dimension::length(max as f32)
+            } else {
+                Dimension::auto()
+            }
+        } else {
+            Dimension::auto()
+        };
+
+        let min_size = Size {
+            width: Dimension::length(constraints.min_width as f32),
+            height: Dimension::length(constraints.min_height as f32),
+        };
+
+        let max_size = Size {
+            width: constraints
+                .max_width
+                .map(|w| Dimension::length(w as f32))
+                .unwrap_or(Dimension::auto()),
+            height: constraints
+                .max_height
+                .map(|h| Dimension::length(h as f32))
+                .unwrap_or(Dimension::auto()),
+        };
+
+        Style {
+            size: Size { width, height },
+            min_size,
+            max_size,
+            ..Default::default()
+        }
     }
 
     fn constraints_to_style(
