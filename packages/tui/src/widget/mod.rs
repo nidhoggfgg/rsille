@@ -9,6 +9,7 @@ mod checkbox_group;
 mod interactive;
 mod keyboard_controller;
 mod label;
+mod list;
 mod radio;
 mod text_input;
 
@@ -19,6 +20,7 @@ pub use interactive::{interactive, Interactive};
 pub use into_widget::IntoWidget;
 pub use keyboard_controller::{keyboard_controller, KeyboardController};
 pub use label::{label, Label};
+pub use list::{list, List, ListItem, SelectionEvent, SelectionMode};
 pub use radio::{radio_group, RadioDirection, RadioGroup};
 pub use text_input::{text_input, TextInput, TextInputVariant};
 

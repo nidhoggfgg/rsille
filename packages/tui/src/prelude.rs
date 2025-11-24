@@ -38,8 +38,8 @@ pub use crate::event::{
 pub use crate::layout::{col, grid, row, Constraints, Container, Direction, Grid, GridLine, GridPlacement, GridTrack};
 pub use crate::style::{BorderStyle, Color, CssError, Padding, Style, TextModifiers};
 pub use crate::widget::{
-    button, checkbox, checkbox_group, interactive, keyboard_controller, label, radio_group,
+    button, checkbox, checkbox_group, interactive, keyboard_controller, label, list, radio_group,
     text_input, Button, ButtonVariant, Checkbox, CheckboxDirection, CheckboxGroup, Interactive,
-    IntoWidget, KeyboardController, Label, RadioDirection, RadioGroup, TextInput, TextInputVariant,
-    Widget,
+    IntoWidget, KeyboardController, Label, List, ListItem, RadioDirection, RadioGroup,
+    SelectionEvent, SelectionMode, TextInput, TextInputVariant, Widget,
 };
