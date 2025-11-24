@@ -1,4 +1,4 @@
-//! RadioGroup widget - interactive radio button group component
+//! CheckboxGroup widget - interactive checkbox group component
 
 use super::*;
 use crate::event::{Event, KeyCode, MouseButton, MouseEventKind};
@@ -6,66 +6,67 @@ use crate::focus::FocusPath;
 use crate::style::{Style, ThemeManager};
 use std::sync::Arc;
 
-/// Radio group layout direction
+/// Checkbox group layout direction
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RadioDirection {
+pub enum CheckboxDirection {
     /// Vertical layout (options stacked vertically)
     Vertical,
     /// Horizontal layout (options arranged horizontally)
     Horizontal,
 }
 
-impl Default for RadioDirection {
+impl Default for CheckboxDirection {
     fn default() -> Self {
-        RadioDirection::Vertical
+        CheckboxDirection::Vertical
     }
 }
 
-/// Interactive radio button group widget
+/// Interactive checkbox group widget
 ///
-/// A radio group allows users to select one option from a list of mutually exclusive choices.
+/// A checkbox group allows users to select multiple options from a list.
 /// Supports both keyboard and mouse interaction, and can be laid out vertically or horizontally.
+/// Within the group, use arrow keys to navigate. Between groups, use Tab/Shift+Tab.
 ///
 /// # Examples
 /// ```
-/// use tui::widget::{RadioGroup, RadioDirection};
+/// use tui::widget::{CheckboxGroup, CheckboxDirection};
 ///
 /// #[derive(Clone, Debug)]
 /// enum Message {
-///     SizeSelected(usize),
+///     FeaturesChanged(usize, bool, Vec<bool>),
 /// }
 ///
 /// // Vertical layout (default)
-/// let options = vec!["Small", "Medium", "Large"];
-/// let radio_vertical = RadioGroup::new(options)
-///     .selected(1) // Select "Medium" by default
-///     .on_change(|index| Message::SizeSelected(index));
+/// let features = vec!["Dark Mode", "Notifications", "Auto Save"];
+/// let checkbox_group = CheckboxGroup::new(features)
+///     .checked(vec![true, false, true])
+///     .on_change(|index, checked, states| Message::FeaturesChanged(index, checked, states));
 ///
-/// // Horizontal layout
-/// let options = vec!["S", "M", "L", "XL"];
-/// let radio_horizontal = RadioGroup::new(options)
-///     .direction(RadioDirection::Horizontal)
-///     .selected(1)
-///     .on_change(|index| Message::SizeSelected(index));
+/// // Horizontal layout with focused_index to preserve focus position
+/// let options = vec!["A", "B", "C"];
+/// let checkbox_horizontal = CheckboxGroup::new(options)
+///     .direction(CheckboxDirection::Horizontal)
+///     .focused_index(1)  // Focus on "B"
+///     .on_change(|index, checked, states| Message::FeaturesChanged(index, checked, states));
 /// ```
 #[derive(Clone)]
-pub struct RadioGroup<M = ()> {
+pub struct CheckboxGroup<M = ()> {
     options: Vec<String>,
-    selected_index: Option<usize>,
+    checked: Vec<bool>,
     focused_option: usize,
-    direction: RadioDirection,
+    direction: CheckboxDirection,
     custom_style: Option<Style>,
     custom_focus_style: Option<Style>,
     disabled: bool,
     focused: bool,
-    on_change: Option<Arc<dyn Fn(usize) -> M + Send + Sync>>,
+    on_change: Option<Arc<dyn Fn(usize, bool, Vec<bool>) -> M + Send + Sync>>,
 }
 
-impl<M> std::fmt::Debug for RadioGroup<M> {
+impl<M> std::fmt::Debug for CheckboxGroup<M> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("RadioGroup")
+        f.debug_struct("CheckboxGroup")
             .field("options", &self.options)
-            .field("selected_index", &self.selected_index)
+            .field("checked", &self.checked)
             .field("focused_option", &self.focused_option)
             .field("direction", &self.direction)
             .field("custom_style", &self.custom_style)
@@ -77,23 +78,24 @@ impl<M> std::fmt::Debug for RadioGroup<M> {
     }
 }
 
-impl<M> RadioGroup<M> {
-    /// Create a new radio group with the specified options
+impl<M> CheckboxGroup<M> {
+    /// Create a new checkbox group with the specified options
     ///
     /// # Examples
     /// ```
-    /// use tui::widget::RadioGroup;
+    /// use tui::widget::CheckboxGroup;
     ///
     /// let options = vec!["Option A", "Option B", "Option C"];
-    /// let radio = RadioGroup::<()>::new(options);
+    /// let group = CheckboxGroup::<()>::new(options);
     /// ```
     pub fn new<S: Into<String>>(options: impl IntoIterator<Item = S>) -> Self {
         let options: Vec<String> = options.into_iter().map(|s| s.into()).collect();
+        let checked = vec![false; options.len()];
         Self {
             options,
-            selected_index: None,
+            checked,
             focused_option: 0,
-            direction: RadioDirection::default(),
+            direction: CheckboxDirection::default(),
             custom_style: None,
             custom_focus_style: None,
             disabled: false,
@@ -102,18 +104,35 @@ impl<M> RadioGroup<M> {
         }
     }
 
-    /// Set the selected option by index
+    /// Set the checked states for all options
     ///
     /// # Examples
     /// ```
-    /// use tui::widget::RadioGroup;
+    /// use tui::widget::CheckboxGroup;
     ///
-    /// let radio = RadioGroup::<()>::new(vec!["A", "B", "C"])
-    ///     .selected(1); // Select "B"
+    /// let group = CheckboxGroup::<()>::new(vec!["A", "B", "C"])
+    ///     .checked(vec![true, false, true]);
     /// ```
-    pub fn selected(mut self, index: usize) -> Self {
+    pub fn checked(mut self, checked: Vec<bool>) -> Self {
+        if checked.len() == self.options.len() {
+            self.checked = checked;
+        }
+        self
+    }
+
+    /// Set the focused option index
+    ///
+    /// This is useful to preserve the focus position across re-renders.
+    ///
+    /// # Examples
+    /// ```
+    /// use tui::widget::CheckboxGroup;
+    ///
+    /// let group = CheckboxGroup::<()>::new(vec!["A", "B", "C"])
+    ///     .focused_index(1); // Focus on "B"
+    /// ```
+    pub fn focused_index(mut self, index: usize) -> Self {
         if index < self.options.len() {
-            self.selected_index = Some(index);
             self.focused_option = index;
         }
         self
@@ -121,22 +140,22 @@ impl<M> RadioGroup<M> {
 
     /// Set a custom change handler
     ///
-    /// The handler will be called when a different option is selected.
-    /// The handler receives the index of the newly selected option.
+    /// The handler will be called when any checkbox state changes.
+    /// The handler receives: (index of toggled option, new checked state, all states).
     ///
     /// # Examples
     /// ```
-    /// use tui::widget::RadioGroup;
+    /// use tui::widget::CheckboxGroup;
     ///
     /// #[derive(Clone)]
-    /// enum Message { OptionSelected(usize) }
+    /// enum Message { OptionToggled(usize, bool, Vec<bool>) }
     ///
-    /// let radio = RadioGroup::new(vec!["A", "B", "C"])
-    ///     .on_change(|index| Message::OptionSelected(index));
+    /// let group = CheckboxGroup::new(vec!["A", "B", "C"])
+    ///     .on_change(|index, checked, states| Message::OptionToggled(index, checked, states));
     /// ```
     pub fn on_change<F>(mut self, handler: F) -> Self
     where
-        F: Fn(usize) -> M + Send + Sync + 'static,
+        F: Fn(usize, bool, Vec<bool>) -> M + Send + Sync + 'static,
     {
         self.on_change = Some(Arc::new(handler));
         self
@@ -144,13 +163,13 @@ impl<M> RadioGroup<M> {
 
     /// Set the disabled state
     ///
-    /// Disabled radio groups cannot be interacted with and use muted styling.
+    /// Disabled checkbox groups cannot be interacted with and use muted styling.
     ///
     /// # Examples
     /// ```
-    /// use tui::widget::RadioGroup;
+    /// use tui::widget::CheckboxGroup;
     ///
-    /// let radio = RadioGroup::<()>::new(vec!["A", "B"])
+    /// let group = CheckboxGroup::<()>::new(vec!["A", "B"])
     ///     .disabled(true);
     /// ```
     pub fn disabled(mut self, disabled: bool) -> Self {
@@ -162,12 +181,12 @@ impl<M> RadioGroup<M> {
     ///
     /// # Examples
     /// ```
-    /// use tui::widget::{RadioGroup, RadioDirection};
+    /// use tui::widget::{CheckboxGroup, CheckboxDirection};
     ///
-    /// let radio = RadioGroup::<()>::new(vec!["S", "M", "L"])
-    ///     .direction(RadioDirection::Horizontal);
+    /// let group = CheckboxGroup::<()>::new(vec!["A", "B", "C"])
+    ///     .direction(CheckboxDirection::Horizontal);
     /// ```
-    pub fn direction(mut self, direction: RadioDirection) -> Self {
+    pub fn direction(mut self, direction: CheckboxDirection) -> Self {
         self.direction = direction;
         self
     }
@@ -176,10 +195,10 @@ impl<M> RadioGroup<M> {
     ///
     /// # Examples
     /// ```
-    /// use tui::widget::RadioGroup;
+    /// use tui::widget::CheckboxGroup;
     /// use tui::style::{Style, Color};
     ///
-    /// let radio = RadioGroup::<()>::new(vec!["A", "B"])
+    /// let group = CheckboxGroup::<()>::new(vec!["A", "B"])
     ///     .style(Style::default().fg(Color::Cyan));
     /// ```
     pub fn style(mut self, style: Style) -> Self {
@@ -191,10 +210,10 @@ impl<M> RadioGroup<M> {
     ///
     /// # Examples
     /// ```
-    /// use tui::widget::RadioGroup;
+    /// use tui::widget::CheckboxGroup;
     /// use tui::style::{Style, Color};
     ///
-    /// let radio = RadioGroup::<()>::new(vec!["A", "B"])
+    /// let group = CheckboxGroup::<()>::new(vec!["A", "B"])
     ///     .focus_style(Style::default().fg(Color::Cyan).bold());
     /// ```
     pub fn focus_style(mut self, style: Style) -> Self {
@@ -236,17 +255,17 @@ impl<M> RadioGroup<M> {
             .unwrap_or(base_style)
     }
 
-    /// Select an option by index and emit change event
-    fn select_option(&mut self, index: usize) -> Vec<M> {
-        // Don't emit change event if the same option is selected
-        if self.selected_index == Some(index) {
-            return vec![];
-        }
-
-        self.selected_index = Some(index);
-        if let Some(ref handler) = self.on_change {
-            let message = handler(index);
-            vec![message]
+    /// Toggle an option by index and emit change event
+    fn toggle_option(&mut self, index: usize) -> Vec<M> {
+        if index < self.checked.len() {
+            self.checked[index] = !self.checked[index];
+            let new_checked = self.checked[index];
+            if let Some(ref handler) = self.on_change {
+                let message = handler(index, new_checked, self.checked.clone());
+                vec![message]
+            } else {
+                vec![]
+            }
         } else {
             vec![]
         }
@@ -278,12 +297,12 @@ impl<M> RadioGroup<M> {
             let style = self.get_option_style(index);
             let render_style = style.to_render_style();
 
-            // Render radio symbol
-            let is_selected = self.selected_index == Some(index);
-            let radio_symbol = if is_selected { "(●)" } else { "( )" };
+            // Render checkbox symbol
+            let is_checked = self.checked.get(index).copied().unwrap_or(false);
+            let checkbox_symbol = if is_checked { "[✓]" } else { "[ ]" };
 
-            // Use success color (green) for selected radio button to make it stand out
-            let radio_style = if is_selected && !self.disabled {
+            // Use success color (green) for checked checkbox to make it stand out
+            let checkbox_style = if is_checked && !self.disabled {
                 ThemeManager::global().with_theme(|theme| {
                     Style::default()
                         .fg(theme.colors.success)
@@ -294,13 +313,13 @@ impl<M> RadioGroup<M> {
                 render_style
             };
 
-            // Render radio symbol with highlight when selected
-            let _ = chunk.set_string(0, index as u16, radio_symbol, radio_style);
+            // Render checkbox symbol with highlight when checked
+            let _ = chunk.set_string(0, index as u16, checkbox_symbol, checkbox_style);
 
-            // Render option label with a space after the radio button
+            // Render option label with a space after the checkbox
             // When this option is focused, make the label text more prominent with color
             if !option.is_empty() {
-                let label_x = 4; // Position after "(X) "
+                let label_x = 4; // Position after "[X] "
                 let is_focused_option = self.focused && index == self.focused_option;
                 let label_style = if is_focused_option && !self.disabled {
                     // Use info color (blue/cyan) and bold when focused to make it stand out
@@ -328,24 +347,24 @@ impl<M> RadioGroup<M> {
             let style = self.get_option_style(index);
             let render_style = style.to_render_style();
 
-            // Render radio symbol
-            let is_selected = self.selected_index == Some(index);
-            let radio_symbol = if is_selected { "(●)" } else { "( )" };
+            // Render checkbox symbol
+            let is_checked = self.checked.get(index).copied().unwrap_or(false);
+            let checkbox_symbol = if is_checked { "[✓]" } else { "[ ]" };
 
             // Calculate the width needed for this option
-            let radio_width = 3; // "(X)" is 3 chars wide
+            let checkbox_width = 3; // "[X]" is 3 chars wide
             let space_width = 1;
             let label_width = option.width() as u16;
             let gap_width = 2; // Space between options
-            let option_total_width = radio_width + space_width + label_width;
+            let option_total_width = checkbox_width + space_width + label_width;
 
             // Check if we have enough space
             if current_x + option_total_width > area.width() {
                 break; // No more space to render
             }
 
-            // Use success color (green) for selected radio button to make it stand out
-            let radio_style = if is_selected && !self.disabled {
+            // Use success color (green) for checked checkbox to make it stand out
+            let checkbox_style = if is_checked && !self.disabled {
                 ThemeManager::global().with_theme(|theme| {
                     Style::default()
                         .fg(theme.colors.success)
@@ -356,13 +375,13 @@ impl<M> RadioGroup<M> {
                 render_style
             };
 
-            // Render radio symbol with highlight when selected
-            let _ = chunk.set_string(current_x, 0, radio_symbol, radio_style);
+            // Render checkbox symbol with highlight when checked
+            let _ = chunk.set_string(current_x, 0, checkbox_symbol, checkbox_style);
 
-            // Render option label with a space after the radio button
+            // Render option label with a space after the checkbox
             // When this option is focused, make the label text more prominent with color
             if !option.is_empty() {
-                let label_x = current_x + 4; // Position after "(X) "
+                let label_x = current_x + 4; // Position after "[X] "
                 let is_focused_option = self.focused && index == self.focused_option;
                 let label_style = if is_focused_option && !self.disabled {
                     // Use info color (blue/cyan) and bold when focused to make it stand out
@@ -384,7 +403,7 @@ impl<M> RadioGroup<M> {
     }
 }
 
-impl<M: Send + Sync> Widget<M> for RadioGroup<M> {
+impl<M: Send + Sync> Widget<M> for CheckboxGroup<M> {
     fn render(&self, chunk: &mut render::chunk::Chunk) {
         let area = chunk.area();
         if area.width() == 0 || area.height() == 0 {
@@ -392,13 +411,13 @@ impl<M: Send + Sync> Widget<M> for RadioGroup<M> {
         }
 
         match self.direction {
-            RadioDirection::Vertical => self.render_vertical(chunk),
-            RadioDirection::Horizontal => self.render_horizontal(chunk),
+            CheckboxDirection::Vertical => self.render_vertical(chunk),
+            CheckboxDirection::Horizontal => self.render_horizontal(chunk),
         }
     }
 
     fn handle_event(&mut self, event: &Event) -> EventResult<M> {
-        // Disabled radio groups don't handle events
+        // Disabled checkbox groups don't handle events
         if self.disabled {
             return EventResult::Ignored;
         }
@@ -409,33 +428,33 @@ impl<M: Send + Sync> Widget<M> for RadioGroup<M> {
                 match key_event.code {
                     // Up/Left arrow moves focus to previous option
                     KeyCode::Up => {
-                        if self.direction == RadioDirection::Vertical {
+                        if self.direction == CheckboxDirection::Vertical {
                             self.focus_previous();
                             return EventResult::consumed();
                         }
                     }
                     KeyCode::Left => {
-                        if self.direction == RadioDirection::Horizontal {
+                        if self.direction == CheckboxDirection::Horizontal {
                             self.focus_previous();
                             return EventResult::consumed();
                         }
                     }
                     // Down/Right arrow moves focus to next option
                     KeyCode::Down => {
-                        if self.direction == RadioDirection::Vertical {
+                        if self.direction == CheckboxDirection::Vertical {
                             self.focus_next();
                             return EventResult::consumed();
                         }
                     }
                     KeyCode::Right => {
-                        if self.direction == RadioDirection::Horizontal {
+                        if self.direction == CheckboxDirection::Horizontal {
                             self.focus_next();
                             return EventResult::consumed();
                         }
                     }
-                    // Enter or Space selects the focused option
+                    // Enter or Space toggles the focused option
                     KeyCode::Enter | KeyCode::Char(' ') => {
-                        let messages = self.select_option(self.focused_option);
+                        let messages = self.toggle_option(self.focused_option);
                         return EventResult::Consumed(messages);
                     }
                     _ => {}
@@ -447,32 +466,31 @@ impl<M: Send + Sync> Widget<M> for RadioGroup<M> {
                 match mouse_event.kind {
                     MouseEventKind::Down(MouseButton::Left) => {
                         match self.direction {
-                            RadioDirection::Vertical => {
+                            CheckboxDirection::Vertical => {
                                 // Click based on row position
                                 let clicked_row = mouse_event.row;
                                 if (clicked_row as usize) < self.options.len() {
-                                    let messages = self.select_option(clicked_row as usize);
+                                    let messages = self.toggle_option(clicked_row as usize);
                                     return EventResult::Consumed(messages);
                                 }
                             }
-                            RadioDirection::Horizontal => {
-                                // Click based on column position (approximate)
-                                // This is a simplified implementation
+                            CheckboxDirection::Horizontal => {
+                                // Click based on column position
                                 use unicode_width::UnicodeWidthStr;
                                 let mut current_x = 0u16;
                                 let clicked_col = mouse_event.column;
 
                                 for (index, option) in self.options.iter().enumerate() {
-                                    let radio_width = 3;
+                                    let checkbox_width = 3;
                                     let space_width = 1;
                                     let label_width = option.width() as u16;
                                     let gap_width = 2;
-                                    let option_total_width = radio_width + space_width + label_width;
+                                    let option_total_width = checkbox_width + space_width + label_width;
 
                                     if clicked_col >= current_x
                                         && clicked_col < current_x + option_total_width
                                     {
-                                        let messages = self.select_option(index);
+                                        let messages = self.toggle_option(index);
                                         return EventResult::Consumed(messages);
                                     }
 
@@ -495,7 +513,7 @@ impl<M: Send + Sync> Widget<M> for RadioGroup<M> {
         use unicode_width::UnicodeWidthStr;
 
         match self.direction {
-            RadioDirection::Vertical => {
+            CheckboxDirection::Vertical => {
                 // Find the widest option
                 let max_label_width = self
                     .options
@@ -504,10 +522,10 @@ impl<M: Send + Sync> Widget<M> for RadioGroup<M> {
                     .max()
                     .unwrap_or(0);
 
-                // Radio symbol "(X)" is 3 characters wide, plus 1 space, plus label width
-                let radio_width = 3;
+                // Checkbox symbol "[X]" is 3 characters wide, plus 1 space, plus label width
+                let checkbox_width = 3;
                 let space_width = 1;
-                let total_width = radio_width + space_width + max_label_width;
+                let total_width = checkbox_width + space_width + max_label_width;
 
                 // Height is the number of options
                 let height = self.options.len() as u16;
@@ -520,9 +538,9 @@ impl<M: Send + Sync> Widget<M> for RadioGroup<M> {
                     flex: None,
                 }
             }
-            RadioDirection::Horizontal => {
+            CheckboxDirection::Horizontal => {
                 // Calculate total width needed for all options side by side
-                let radio_width = 3;
+                let checkbox_width = 3;
                 let space_width = 1;
                 let gap_width = 2;
 
@@ -532,7 +550,7 @@ impl<M: Send + Sync> Widget<M> for RadioGroup<M> {
                     .enumerate()
                     .map(|(i, opt)| {
                         let label_width = opt.width() as u16;
-                        let option_width = radio_width + space_width + label_width;
+                        let option_width = checkbox_width + space_width + label_width;
                         if i < self.options.len() - 1 {
                             option_width + gap_width
                         } else {
@@ -556,7 +574,7 @@ impl<M: Send + Sync> Widget<M> for RadioGroup<M> {
     }
 
     fn focusable(&self) -> bool {
-        // RadioGroup itself is not focusable - individual options are
+        // CheckboxGroup itself is not focusable - individual options are
         // Each option will be added to focus chain via build_focus_chain_recursive
         false
     }
@@ -568,11 +586,9 @@ impl<M: Send + Sync> Widget<M> for RadioGroup<M> {
     fn set_focused(&mut self, focused: bool) {
         self.focused = focused;
 
-        // When gaining focus, set focused_option to the selected item if there is one
-        if focused {
-            if let Some(selected) = self.selected_index {
-                self.focused_option = selected;
-            }
+        // When gaining focus, ensure focused_option is valid
+        if focused && self.focused_option >= self.options.len() {
+            self.focused_option = 0;
         }
     }
 
@@ -600,7 +616,7 @@ impl<M: Send + Sync> Widget<M> for RadioGroup<M> {
         current_path: &[usize],
         focus_path: Option<&FocusPath>,
     ) {
-        // Check if focus is within this RadioGroup
+        // Check if focus is within this CheckboxGroup
         if let Some(focus) = focus_path {
             if focus.starts_with(current_path) && focus.len() == current_path.len() + 1 {
                 // Focus is on one of our options
@@ -618,19 +634,19 @@ impl<M: Send + Sync> Widget<M> for RadioGroup<M> {
     }
 }
 
-/// Create a new radio group widget (convenience function)
+/// Create a new checkbox group widget (convenience function)
 ///
 /// # Examples
 /// ```
 /// use tui::prelude::*;
 ///
 /// #[derive(Clone)]
-/// enum Message { Selected(usize) }
+/// enum Message { StatesChanged(Vec<bool>) }
 ///
-/// let rg = radio_group(vec!["Small", "Medium", "Large"])
-///     .selected(1)
-///     .on_change(|index| Message::Selected(index));
+/// let group = checkbox_group(vec!["Dark Mode", "Notifications", "Auto Save"])
+///     .checked(vec![true, false, true])
+///     .on_change(|states| Message::StatesChanged(states));
 /// ```
-pub fn radio_group<M, S: Into<String>>(options: impl IntoIterator<Item = S>) -> RadioGroup<M> {
-    RadioGroup::new(options)
+pub fn checkbox_group<M, S: Into<String>>(options: impl IntoIterator<Item = S>) -> CheckboxGroup<M> {
+    CheckboxGroup::new(options)
 }
