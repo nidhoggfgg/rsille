@@ -194,10 +194,10 @@ pub use crate::layout::{
 pub use crate::style::{BorderStyle, Color, CssError, Padding, Style, TextModifiers};
 pub use crate::widget::{
     button, checkbox, checkbox_group, code_block, interactive, keyboard_controller, label, list,
-    radio_group, spacer, text_input, Button, ButtonVariant, Checkbox, CheckboxDirection,
-    CheckboxGroup, CodeBlock, Interactive, IntoWidget, KeyboardController, Label, LineMarker, List,
-    ListItem, RadioDirection, RadioGroup, SelectionEvent, SelectionMode, Spacer, TextInput,
-    TextInputVariant, Widget,
+    radio_group, spacer, table, text_input, Button, ButtonVariant, Checkbox, CheckboxDirection,
+    CheckboxGroup, CodeBlock, Column, ColumnWidth, Interactive, IntoWidget, KeyboardController,
+    Label, LineMarker, List, ListItem, RadioDirection, RadioGroup, SelectionEvent, SelectionMode,
+    Spacer, Table, TableSelectionEvent, TableVariant, TextInput, TextInputVariant, Widget,
 };
 
 // The ui! macro is automatically available due to #[macro_export]
