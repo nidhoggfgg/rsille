@@ -53,7 +53,11 @@ fn view(state: &State) -> Container<Message> {
         .padding(Padding::new(3, 3, 2, 2))
         .gap(1)
         // Header
-        .child(label("Button Variants & Focus Navigation").fg(Color::Cyan).bold())
+        .child(
+            label("Button Variants & Focus Navigation")
+                .fg(Color::Cyan)
+                .bold(),
+        )
         .child(label(""))
         // Status display
         .child(
@@ -137,11 +141,17 @@ fn view(state: &State) -> Container<Message> {
             row()
                 .gap(2)
                 .child(label("Disabled:").fg(Color::Indexed(8)))
-                .child(button("Disabled").variant(ButtonVariant::Primary).disabled(true)),
+                .child(
+                    button("Disabled")
+                        .variant(ButtonVariant::Primary)
+                        .disabled(true),
+                ),
         )
         // Footer with instructions
         .child(label(""))
-        .child(label("Tab/Shift+Tab: Navigate | Enter/Space: Click | Esc: Quit").fg(Color::Indexed(8)))
+        .child(
+            label("Tab/Shift+Tab: Navigate | Enter/Space: Click | Esc: Quit").fg(Color::Indexed(8)),
+        )
         // Keyboard controller for global shortcuts
         .child(keyboard_controller().on('q', || Message::Quit))
 }

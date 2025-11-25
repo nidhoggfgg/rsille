@@ -36,7 +36,11 @@ fn view(state: &State) -> Container<Message> {
     col()
         .padding(Padding::new(2, 2, 1, 1))
         .gap(1)
-        .child(label("Mouse Event Test (Fullscreen Mode)").fg(Color::Cyan).bold())
+        .child(
+            label("Mouse Event Test (Fullscreen Mode)")
+                .fg(Color::Cyan)
+                .bold(),
+        )
         .child(label(""))
         .child(label(&state.last_event).fg(Color::Green))
         .child(label(""))
@@ -44,9 +48,9 @@ fn view(state: &State) -> Container<Message> {
             interactive(
                 label(">>> CLICK ME <<<")
                     .fg(Color::Yellow)
-                    .style(Style::default().bg(Color::Blue))
+                    .style(Style::default().bg(Color::Blue)),
             )
-            .on_click(|| Message::Clicked)
+            .on_click(|| Message::Clicked),
         )
         .child(label(""))
         .child(label("Press 'q' or Esc to quit").fg(Color::Indexed(8)))

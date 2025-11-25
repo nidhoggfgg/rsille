@@ -134,7 +134,14 @@ pub fn render_dropdown<T: Clone>(
 
     // Fill background
     if config.border_offset > 0 {
-        let _ = chunk.fill(1, 1, width.saturating_sub(2), height.saturating_sub(2), ' ', styles.background);
+        let _ = chunk.fill(
+            1,
+            1,
+            width.saturating_sub(2),
+            height.saturating_sub(2),
+            ' ',
+            styles.background,
+        );
         // Render border
         use crate::style::BorderStyle;
         crate::layout::border_renderer::render_border(chunk, BorderStyle::Single, styles.border);
@@ -160,7 +167,16 @@ pub fn render_dropdown<T: Clone>(
         let is_focused = Some(idx) == focused_index && !item.disabled;
         let is_selected = Some(idx) == selected_index;
 
-        render_item(chunk, item, y, content_width, config, styles, is_focused, is_selected);
+        render_item(
+            chunk,
+            item,
+            y,
+            content_width,
+            config,
+            styles,
+            is_focused,
+            is_selected,
+        );
 
         y += 1;
     }
@@ -199,7 +215,14 @@ pub fn render_trigger(
 
     // Fill background
     if config.border_offset > 0 {
-        let _ = chunk.fill(1, 1, width.saturating_sub(2), height.saturating_sub(2), ' ', style);
+        let _ = chunk.fill(
+            1,
+            1,
+            width.saturating_sub(2),
+            height.saturating_sub(2),
+            ' ',
+            style,
+        );
         // Render border
         use crate::style::BorderStyle;
         crate::layout::border_renderer::render_border(chunk, BorderStyle::Single, style);

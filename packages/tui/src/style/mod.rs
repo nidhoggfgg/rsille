@@ -87,9 +87,7 @@ impl Style {
 
     /// Check if this style has any values set
     pub fn is_empty(&self) -> bool {
-        self.fg_color.is_none()
-            && self.bg_color.is_none()
-            && self.modifiers.is_empty()
+        self.fg_color.is_none() && self.bg_color.is_none() && self.modifiers.is_empty()
     }
 
     /// Convert to render style

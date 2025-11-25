@@ -1,10 +1,10 @@
 use std::io;
 
-use render::style::Stylized;
 use crossterm::{
     queue,
     style::{Color, Colors, Print, ResetColor, SetColors},
 };
+use render::style::Stylized;
 
 use crate::braille::{Pixel, PixelOp};
 

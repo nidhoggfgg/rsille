@@ -53,28 +53,20 @@ fn view(state: &State) -> Container<Message> {
         .child(label("Grid Layout Demo").fg(Color::Cyan).bold())
         .child(label(""))
         // Example 1: Basic 3-column grid
-        .child(label("Example 1: Equal columns (1fr each)").fg(Color::Green).bold())
+        .child(
+            label("Example 1: Equal columns (1fr each)")
+                .fg(Color::Green)
+                .bold(),
+        )
         .child(
             grid()
                 .columns("1fr 1fr 1fr") // 3 equal columns
                 .rows("auto") // Single row, auto height
                 .gap(1)
                 .border(BorderStyle::Rounded)
-                .child(
-                    label("Column 1")
-                        .fg(Color::Yellow)
-                        .bg(Color::Indexed(235)),
-                )
-                .child(
-                    label("Column 2")
-                        .fg(Color::Yellow)
-                        .bg(Color::Indexed(235)),
-                )
-                .child(
-                    label("Column 3")
-                        .fg(Color::Yellow)
-                        .bg(Color::Indexed(235)),
-                ),
+                .child(label("Column 1").fg(Color::Yellow).bg(Color::Indexed(235)))
+                .child(label("Column 2").fg(Color::Yellow).bg(Color::Indexed(235)))
+                .child(label("Column 3").fg(Color::Yellow).bg(Color::Indexed(235))),
         )
         .child(label(""))
         // Example 2: Different column widths
@@ -89,21 +81,13 @@ fn view(state: &State) -> Container<Message> {
                 .rows("auto")
                 .gap(1)
                 .border(BorderStyle::Rounded)
-                .child(
-                    label("Narrow")
-                        .fg(Color::Magenta)
-                        .bg(Color::Indexed(235)),
-                )
+                .child(label("Narrow").fg(Color::Magenta).bg(Color::Indexed(235)))
                 .child(
                     label("Wide (2x)")
                         .fg(Color::Magenta)
                         .bg(Color::Indexed(235)),
                 )
-                .child(
-                    label("Narrow")
-                        .fg(Color::Magenta)
-                        .bg(Color::Indexed(235)),
-                ),
+                .child(label("Narrow").fg(Color::Magenta).bg(Color::Indexed(235))),
         )
         .child(label(""))
         // Example 3: Fixed and flexible columns
@@ -118,21 +102,13 @@ fn view(state: &State) -> Container<Message> {
                 .rows("auto")
                 .gap(1)
                 .border(BorderStyle::Rounded)
-                .child(
-                    label("Left 20")
-                        .fg(Color::Blue)
-                        .bg(Color::Indexed(235)),
-                )
+                .child(label("Left 20").fg(Color::Blue).bg(Color::Indexed(235)))
                 .child(
                     label("Flexible middle")
                         .fg(Color::Blue)
                         .bg(Color::Indexed(235)),
                 )
-                .child(
-                    label("Right 20")
-                        .fg(Color::Blue)
-                        .bg(Color::Indexed(235)),
-                ),
+                .child(label("Right 20").fg(Color::Blue).bg(Color::Indexed(235))),
         )
         .child(label(""))
         // Example 4: Multiple rows
@@ -143,34 +119,14 @@ fn view(state: &State) -> Container<Message> {
                 .rows("auto auto")
                 .gap(1)
                 .border(BorderStyle::Rounded)
-                .child(
-                    label("Cell (1,1)")
-                        .fg(Color::Cyan)
-                        .bg(Color::Indexed(235)),
-                )
-                .child(
-                    label("Cell (1,2)")
-                        .fg(Color::Cyan)
-                        .bg(Color::Indexed(235)),
-                )
-                .child(
-                    label("Cell (2,1)")
-                        .fg(Color::Cyan)
-                        .bg(Color::Indexed(235)),
-                )
-                .child(
-                    label("Cell (2,2)")
-                        .fg(Color::Cyan)
-                        .bg(Color::Indexed(235)),
-                ),
+                .child(label("Cell (1,1)").fg(Color::Cyan).bg(Color::Indexed(235)))
+                .child(label("Cell (1,2)").fg(Color::Cyan).bg(Color::Indexed(235)))
+                .child(label("Cell (2,1)").fg(Color::Cyan).bg(Color::Indexed(235)))
+                .child(label("Cell (2,2)").fg(Color::Cyan).bg(Color::Indexed(235))),
         )
         .child(label(""))
         // Example 5: Interactive grid with buttons
-        .child(
-            label("Example 5: Interactive Grid")
-                .fg(Color::Green)
-                .bold(),
-        )
+        .child(label("Example 5: Interactive Grid").fg(Color::Green).bold())
         .child(
             grid()
                 .columns("1fr 1fr 1fr")

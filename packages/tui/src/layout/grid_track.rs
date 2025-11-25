@@ -114,7 +114,7 @@ impl GridTrack {
         // Normal parsing
         template
             .split_whitespace()
-            .filter_map(|s| Self::parse(s))
+            .filter_map(Self::parse)
             .collect()
     }
 

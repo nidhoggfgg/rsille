@@ -65,7 +65,11 @@ fn view(state: &State) -> Container<Message> {
         .child(label("Advanced Grid Layouts").fg(Color::Cyan).bold())
         .child(label(""))
         // Example 1: repeat() function
-        .child(label("Example 1: repeat(4, 1fr) - 4 equal columns").fg(Color::Green).bold())
+        .child(
+            label("Example 1: repeat(4, 1fr) - 4 equal columns")
+                .fg(Color::Green)
+                .bold(),
+        )
         .child(
             grid()
                 .columns("repeat(4, 1fr)")
@@ -79,7 +83,11 @@ fn view(state: &State) -> Container<Message> {
         )
         .child(label(""))
         // Example 2: Dashboard layout
-        .child(label("Example 2: Dashboard (sidebar-content-sidebar)").fg(Color::Green).bold())
+        .child(
+            label("Example 2: Dashboard (sidebar-content-sidebar)")
+                .fg(Color::Green)
+                .bold(),
+        )
         .child(
             grid()
                 .columns("15 1fr 15")
@@ -160,7 +168,10 @@ fn view(state: &State) -> Container<Message> {
         .child(
             label(format!(
                 "Selected card: {}",
-                state.selected_card.map(|i| i.to_string()).unwrap_or_else(|| "None".to_string())
+                state
+                    .selected_card
+                    .map(|i| i.to_string())
+                    .unwrap_or_else(|| "None".to_string())
             ))
             .fg(Color::Yellow),
         )

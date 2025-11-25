@@ -19,8 +19,10 @@
 //!     .on_hover(|| Message::Hovered);
 //! ```
 
-use super::Widget;
-use crate::event::{Event, EventResult, MouseButton, MouseEvent, MouseEventKind};
+use crate::{
+    event::{Event, EventResult, MouseButton, MouseEvent, MouseEventKind},
+    widget::Widget,
+};
 use render::area::Area;
 use std::sync::{Arc, RwLock};
 
@@ -464,8 +466,7 @@ where
         current_path: &mut Vec<usize>,
         chain: &mut Vec<crate::focus::FocusPath>,
     ) {
-        self.inner
-            .build_focus_chain_recursive(current_path, chain);
+        self.inner.build_focus_chain_recursive(current_path, chain);
     }
 
     fn update_focus_states_recursive(

@@ -8,18 +8,15 @@ use std::sync::Arc;
 
 /// Radio group layout direction
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 pub enum RadioDirection {
     /// Vertical layout (options stacked vertically)
+    #[default]
     Vertical,
     /// Horizontal layout (options arranged horizontally)
     Horizontal,
 }
 
-impl Default for RadioDirection {
-    fn default() -> Self {
-        RadioDirection::Vertical
-    }
-}
 
 /// Interactive radio button group widget
 ///
@@ -444,44 +441,42 @@ impl<M: Send + Sync> Widget<M> for RadioGroup<M> {
 
             // Mouse events
             Event::Mouse(mouse_event) => {
-                match mouse_event.kind {
-                    MouseEventKind::Down(MouseButton::Left) => {
-                        match self.direction {
-                            RadioDirection::Vertical => {
-                                // Click based on row position
-                                let clicked_row = mouse_event.row;
-                                if (clicked_row as usize) < self.options.len() {
-                                    let messages = self.select_option(clicked_row as usize);
+                if let MouseEventKind::Down(MouseButton::Left) = mouse_event.kind {
+                    match self.direction {
+                        RadioDirection::Vertical => {
+                            // Click based on row position
+                            let clicked_row = mouse_event.row;
+                            if (clicked_row as usize) < self.options.len() {
+                                let messages = self.select_option(clicked_row as usize);
+                                return EventResult::Consumed(messages);
+                            }
+                        }
+                        RadioDirection::Horizontal => {
+                            // Click based on column position (approximate)
+                            // This is a simplified implementation
+                            use unicode_width::UnicodeWidthStr;
+                            let mut current_x = 0u16;
+                            let clicked_col = mouse_event.column;
+
+                            for (index, option) in self.options.iter().enumerate() {
+                                let radio_width = 3;
+                                let space_width = 1;
+                                let label_width = option.width() as u16;
+                                let gap_width = 2;
+                                let option_total_width =
+                                    radio_width + space_width + label_width;
+
+                                if clicked_col >= current_x
+                                    && clicked_col < current_x + option_total_width
+                                {
+                                    let messages = self.select_option(index);
                                     return EventResult::Consumed(messages);
                                 }
-                            }
-                            RadioDirection::Horizontal => {
-                                // Click based on column position (approximate)
-                                // This is a simplified implementation
-                                use unicode_width::UnicodeWidthStr;
-                                let mut current_x = 0u16;
-                                let clicked_col = mouse_event.column;
 
-                                for (index, option) in self.options.iter().enumerate() {
-                                    let radio_width = 3;
-                                    let space_width = 1;
-                                    let label_width = option.width() as u16;
-                                    let gap_width = 2;
-                                    let option_total_width = radio_width + space_width + label_width;
-
-                                    if clicked_col >= current_x
-                                        && clicked_col < current_x + option_total_width
-                                    {
-                                        let messages = self.select_option(index);
-                                        return EventResult::Consumed(messages);
-                                    }
-
-                                    current_x += option_total_width + gap_width;
-                                }
+                                current_x += option_total_width + gap_width;
                             }
                         }
                     }
-                    _ => {}
                 }
             }
 

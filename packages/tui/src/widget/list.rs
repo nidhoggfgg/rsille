@@ -24,20 +24,17 @@ pub struct SelectionEvent<T: Clone> {
 
 /// Selection mode for the list
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 pub enum SelectionMode {
     /// No selection allowed - display only
     None,
     /// Single item selection
+    #[default]
     Single,
     /// Multiple item selection
     Multiple,
 }
 
-impl Default for SelectionMode {
-    fn default() -> Self {
-        SelectionMode::Single
-    }
-}
 
 /// A single item in the list
 #[derive(Debug, Clone)]
@@ -414,9 +411,7 @@ impl<T: Clone, M> List<T, M> {
         // Filter out invalid indices and disabled items
         self.selected_indices = indices
             .into_iter()
-            .filter(|&idx| {
-                idx < self.items.len() && !self.items[idx].disabled
-            })
+            .filter(|&idx| idx < self.items.len() && !self.items[idx].disabled)
             .collect();
         self
     }
@@ -748,7 +743,10 @@ impl<T: Clone, M> List<T, M> {
             }
             SelectionMode::Multiple => {
                 // Toggle: add or remove from selection
-                if let Some(pos) = self.selected_indices.iter().position(|&idx| idx == focused_idx)
+                if let Some(pos) = self
+                    .selected_indices
+                    .iter()
+                    .position(|&idx| idx == focused_idx)
                 {
                     self.selected_indices.remove(pos);
                 } else {
@@ -846,12 +844,8 @@ impl<T: Clone + Send + Sync, M: Send + Sync> Widget<M> for List<T, M> {
             let is_selected = self.selected_indices.contains(&list_idx);
 
             // Get the appropriate style for this item
-            let render_style = self.select_item_style(
-                &item_styles,
-                item.disabled,
-                is_item_focused,
-                is_selected,
-            );
+            let render_style =
+                self.select_item_style(&item_styles, item.disabled, is_item_focused, is_selected);
 
             // Render selection/focus indicator
             let indicator = match self.selection_mode {
@@ -1009,8 +1003,7 @@ impl<T: Clone + Send + Sync, M: Send + Sync> Widget<M> for List<T, M> {
         };
 
         // Scrollbar width - only reserve space if content exceeds viewport
-        let needs_scrollbar =
-            self.show_scrollbar && content_height > self.viewport_height as usize;
+        let needs_scrollbar = self.show_scrollbar && content_height > self.viewport_height as usize;
         let scrollbar_width = if needs_scrollbar { 2 } else { 0 };
 
         let total_width = max_label_width + indicator_width + scrollbar_width;

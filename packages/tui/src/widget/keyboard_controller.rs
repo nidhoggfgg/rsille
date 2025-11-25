@@ -41,6 +41,12 @@ impl<M> std::fmt::Debug for KeyboardController<M> {
     }
 }
 
+impl<M> Default for KeyboardController<M> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<M> KeyboardController<M> {
     /// Create a new keyboard controller
     ///
@@ -115,7 +121,8 @@ impl<M> KeyboardController<M> {
     where
         F: Fn() -> M + Send + Sync + 'static,
     {
-        self.key_handlers.insert(key_code, std::sync::Arc::new(handler));
+        self.key_handlers
+            .insert(key_code, std::sync::Arc::new(handler));
         self
     }
 
@@ -144,7 +151,8 @@ impl<M> KeyboardController<M> {
     {
         for (key_code, message) in mappings {
             let msg = message.clone();
-            self.key_handlers.insert(*key_code, std::sync::Arc::new(move || msg.clone()));
+            self.key_handlers
+                .insert(*key_code, std::sync::Arc::new(move || msg.clone()));
         }
         self
     }
@@ -187,7 +195,6 @@ impl<M> KeyboardController<M> {
 }
 
 impl<M: Send + Sync> Widget<M> for KeyboardController<M> {
-
     fn render(&self, _chunk: &mut render::chunk::Chunk) {
         // KeyboardController doesn't render anything - it's invisible
     }

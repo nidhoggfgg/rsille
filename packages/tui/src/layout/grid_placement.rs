@@ -2,18 +2,15 @@
 
 /// Grid line position
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 pub enum GridLine {
     /// Start at a specific line number (1-indexed)
     Line(i16),
     /// Auto placement
+    #[default]
     Auto,
 }
 
-impl Default for GridLine {
-    fn default() -> Self {
-        GridLine::Auto
-    }
-}
 
 impl GridLine {
     /// Parse a grid line from a string
@@ -156,7 +153,13 @@ impl GridPlacement {
     /// // Starts at column 1, row 1, spans 2 columns and 2 rows
     /// let placement = GridPlacement::new().area_span(1, 1, 2, 2);
     /// ```
-    pub fn area_span(mut self, column_start: i16, row_start: i16, column_span: u16, row_span: u16) -> Self {
+    pub fn area_span(
+        mut self,
+        column_start: i16,
+        row_start: i16,
+        column_span: u16,
+        row_span: u16,
+    ) -> Self {
         self.column_start = GridLine::Line(column_start);
         self.column_end = GridLine::Line(column_start + column_span as i16);
         self.row_start = GridLine::Line(row_start);

@@ -49,14 +49,14 @@ impl FocusManager {
 
     /// Check if the given path is focused
     pub fn is_focused(&self, path: &[usize]) -> bool {
-        self.focus_path.as_ref().map(|p| p.as_slice()) == Some(path)
+        self.focus_path.as_deref() == Some(path)
     }
 
     /// Check if focus is within the given path (for containers)
     pub fn is_focus_within(&self, path: &[usize]) -> bool {
-        self.focus_path.as_ref().map_or(false, |focus| {
-            focus.starts_with(path)
-        })
+        self.focus_path
+            .as_ref()
+            .is_some_and(|focus| focus.starts_with(path))
     }
 
     /// Get current focus path
@@ -90,10 +90,9 @@ impl FocusManager {
     }
 
     fn current_index(&self) -> usize {
-        self.focus_path.as_ref()
-            .and_then(|path| {
-                self.focus_chain.iter().position(|p| p == path)
-            })
+        self.focus_path
+            .as_ref()
+            .and_then(|path| self.focus_chain.iter().position(|p| p == path))
             .unwrap_or(0)
     }
 }
@@ -113,11 +112,7 @@ mod tests {
         let mut manager = FocusManager::new();
 
         // Set focus chain
-        manager.set_focus_chain(vec![
-            vec![0],
-            vec![1],
-            vec![2],
-        ]);
+        manager.set_focus_chain(vec![vec![0], vec![1], vec![2]]);
 
         // Should auto-focus first widget
         assert_eq!(manager.focus_path(), Some(&vec![0]));

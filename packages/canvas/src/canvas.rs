@@ -7,12 +7,12 @@ use crate::braille::{Pixel, PixelOp};
 use crate::tile::Tile;
 use crate::utils::round;
 
-use render::area::Size;
-use render::chunk::Chunk;
-use render::{Draw, DrawErr};
 use crossterm::cursor::MoveToNextLine;
 use crossterm::queue;
 use crossterm::style::Print;
+use render::area::Size;
+use render::chunk::Chunk;
+use render::{Draw, DrawErr};
 
 use crate::color::Colored;
 use crossterm::style::Colors;
