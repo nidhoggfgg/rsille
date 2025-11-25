@@ -94,6 +94,7 @@ impl<State> App<State> {
             builder
                 .inline_mode(true)
                 .inline_max_height(buffer_height)
+                .frame_limit(60)
                 // Note: Mouse events are NOT enabled in inline mode because:
                 // 1. User can scroll the terminal, invalidating our coordinate tracking
                 // 2. The rendered content position changes with scrolling
@@ -104,6 +105,7 @@ impl<State> App<State> {
             // Full-screen mode: use alternate screen
             builder
                 .enable_all() // Enable raw mode, alt screen, mouse capture, hide cursor
+                .frame_limit(60)
                 .size((width, height));
         }
 
