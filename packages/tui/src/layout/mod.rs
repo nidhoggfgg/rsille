@@ -6,6 +6,7 @@ pub mod container;
 pub mod grid;
 pub mod grid_placement;
 pub mod grid_track;
+pub mod overlay;
 pub mod taffy_bridge;
 
 pub use constraints::Constraints;
@@ -13,6 +14,7 @@ pub use container::{col, row, Container, Direction};
 pub use grid::{grid, Grid};
 pub use grid_placement::{GridLine, GridPlacement};
 pub use grid_track::GridTrack;
+pub use overlay::{OverlayInfo, OverlayManager};
 pub use taffy::style::{AlignItems, JustifyContent, JustifyItems};
 
 /// Defines how a container handles content that overflows its bounds

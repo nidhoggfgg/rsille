@@ -11,6 +11,7 @@ mod keyboard_controller;
 mod label;
 mod list;
 mod radio;
+mod select;
 mod text_input;
 
 pub use button::{button, Button, ButtonVariant};
@@ -22,6 +23,7 @@ pub use keyboard_controller::{keyboard_controller, KeyboardController};
 pub use label::{label, Label};
 pub use list::{list, List, ListItem, SelectionEvent, SelectionMode};
 pub use radio::{radio_group, RadioDirection, RadioGroup};
+pub use select::{select, Select, SelectEvent, SelectItem};
 pub use text_input::{text_input, TextInput, TextInputVariant};
 
 use crate::event::{Event, EventResult};
