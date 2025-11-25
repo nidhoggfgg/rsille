@@ -50,9 +50,9 @@ fn card(title: &str, content: &str, index: usize, is_selected: bool) -> Containe
         .border(BorderStyle::Rounded)
         .padding(Padding::new(1, 1, 1, 1))
         .child(label(title).fg(color).bold())
-        .child(label(""))
+        .child(spacer().height(1))
         .child(label(content).fg(Color::Indexed(250)))
-        .child(label(""))
+        .child(spacer().height(1))
         .child(button("Select").on_click(move || Message::SelectCard(index)))
 }
 
@@ -63,7 +63,7 @@ fn view(state: &State) -> Container<Message> {
         .gap(1)
         // Header
         .child(label("Advanced Grid Layouts").fg(Color::Cyan).bold())
-        .child(label(""))
+        .child(spacer().height(1))
         // Example 1: repeat() function
         .child(
             label("Example 1: repeat(4, 1fr) - 4 equal columns")
@@ -81,7 +81,7 @@ fn view(state: &State) -> Container<Message> {
                 .child(label("Col 3").fg(Color::Yellow).bg(Color::Indexed(235)))
                 .child(label("Col 4").fg(Color::Yellow).bg(Color::Indexed(235))),
         )
-        .child(label(""))
+        .child(spacer().height(1))
         // Example 2: Dashboard layout
         .child(
             label("Example 2: Dashboard (sidebar-content-sidebar)")
@@ -114,7 +114,7 @@ fn view(state: &State) -> Container<Message> {
                         .child(label("Panel").fg(Color::Blue)),
                 ),
         )
-        .child(label(""))
+        .child(spacer().height(1))
         // Example 3: Card grid
         .child(
             label("Example 3: Card Grid - repeat(3, 1fr)")
@@ -163,7 +163,7 @@ fn view(state: &State) -> Container<Message> {
                     state.selected_card == Some(5),
                 )),
         )
-        .child(label(""))
+        .child(spacer().height(1))
         // Status
         .child(
             label(format!(
@@ -175,7 +175,7 @@ fn view(state: &State) -> Container<Message> {
             ))
             .fg(Color::Yellow),
         )
-        .child(label(""))
+        .child(spacer().height(1))
         // Footer
         .child(label("Press 'q' or Esc to quit").fg(Color::Indexed(8)))
         // Keyboard controller for global shortcuts

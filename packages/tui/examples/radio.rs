@@ -79,7 +79,7 @@ fn view(state: &State) -> Container<Message> {
         .gap(1)
         // Header
         .child(label("RadioGroup Component Demo").fg(Color::Cyan).bold())
-        .child(label(""))
+        .child(spacer().height(1))
         // Horizontal layout example
         .child(label("Size (Horizontal - use Left/Right):").fg(Color::Green).bold())
         .child({
@@ -91,7 +91,7 @@ fn view(state: &State) -> Container<Message> {
             }
             rg
         })
-        .child(label(""))
+        .child(spacer().height(1))
         // Another horizontal layout example
         .child(label("Priority (Horizontal - use Left/Right):").fg(Color::Green).bold())
         .child({
@@ -103,7 +103,7 @@ fn view(state: &State) -> Container<Message> {
             }
             rg
         })
-        .child(label(""))
+        .child(spacer().height(1))
         // Vertical layout example
         .child(label("Color (Vertical - use Up/Down):").fg(Color::Green).bold())
         .child({
@@ -113,7 +113,7 @@ fn view(state: &State) -> Container<Message> {
             }
             rg
         })
-        .child(label(""))
+        .child(spacer().height(1))
         // Another vertical layout example
         .child(label("Delivery (Vertical - use Up/Down):").fg(Color::Green).bold())
         .child({
@@ -124,11 +124,11 @@ fn view(state: &State) -> Container<Message> {
             }
             rg
         })
-        .child(label(""))
+        .child(spacer().height(1))
         // Disabled example
         .child(label("Disabled:").fg(Color::Indexed(8)))
         .child(radio_group(["Option 1", "Option 2"]).disabled(true))
-        .child(label(""))
+        .child(spacer().height(1))
         // Status display
         .child(
             label(format!(
@@ -147,7 +147,7 @@ fn view(state: &State) -> Container<Message> {
             .fg(Color::Yellow),
         )
         // Footer with instructions
-        .child(label(""))
+        .child(spacer().height(1))
         .child(
             label("Tab: Next option | Up/Down or Left/Right: Navigate | Enter/Space: Select | Esc: Quit")
                 .fg(Color::Indexed(8)),

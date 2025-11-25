@@ -85,7 +85,7 @@ fn view(state: &State) -> Container<Message> {
         .gap(1)
         // Header
         .child(label("Text Input Variants Demo").fg(Color::Cyan).bold())
-        .child(label(""))
+        .child(spacer().height(1))
         // Default variant
         .child(label("Default Variant:").fg(Color::Indexed(8)))
         .child(
@@ -123,7 +123,7 @@ fn view(state: &State) -> Container<Message> {
                 .on_change(|text| Message::MessageChanged(text))
                 .on_submit(|_| Message::Submit),
         )
-        .child(label(""))
+        .child(spacer().height(1))
         // Submit button
         .child(
             button("Submit")

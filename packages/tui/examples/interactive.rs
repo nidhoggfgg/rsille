@@ -94,7 +94,7 @@ fn view(state: &State) -> Container<Message> {
         .gap(1)
         // Header
         .child(label("Interactive Widget Example").fg(Color::Cyan).bold())
-        .child(label(""))
+        .child(spacer().height(1))
         // Status display
         .child(
             label(format!(
@@ -103,9 +103,9 @@ fn view(state: &State) -> Container<Message> {
             ))
             .fg(Color::Green),
         )
-        .child(label(""))
+        .child(spacer().height(1))
         .child(label("Examples:").fg(Color::Yellow).bold())
-        .child(label(""))
+        .child(spacer().height(1))
         // Example 1: Clickable label with hover
         .child(
             row().gap(2).child(label("1.").fg(Color::Indexed(8))).child(
@@ -114,7 +114,7 @@ fn view(state: &State) -> Container<Message> {
                     .on_hover(|| Message::LabelHovered),
             ),
         )
-        .child(label(""))
+        .child(spacer().height(1))
         // Example 2: Clickable box with border
         .child(
             row().gap(2).child(label("2.").fg(Color::Indexed(8))).child(
@@ -129,7 +129,7 @@ fn view(state: &State) -> Container<Message> {
                 .on_click(|| Message::BoxClicked),
             ),
         )
-        .child(label(""))
+        .child(spacer().height(1))
         // Example 3: Press and release events
         .child(
             row().gap(2).child(label("3.").fg(Color::Indexed(8))).child(
@@ -142,7 +142,7 @@ fn view(state: &State) -> Container<Message> {
                 .on_release(|| Message::ButtonReleased),
             ),
         )
-        .child(label(""))
+        .child(spacer().height(1))
         // Example 4: Multiple clickable cards in a row
         .child(label("4. Click on cards:").fg(Color::Indexed(8)))
         .child(
@@ -182,7 +182,7 @@ fn view(state: &State) -> Container<Message> {
                     .on_click(|| Message::Card3Clicked),
                 ),
         )
-        .child(label(""))
+        .child(spacer().height(1))
         // Footer with instructions
         .child(label("Click or hover on any element above to trigger events").fg(Color::Indexed(8)))
         .child(label("Esc or 'q': Quit").fg(Color::Indexed(8)))

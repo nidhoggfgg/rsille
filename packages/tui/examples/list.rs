@@ -173,13 +173,13 @@ fn view_single(state: &State) -> Container<Message> {
                 .bold(),
         )
         .child(label("Press 'M' to switch to Multiple Selection mode").fg(Color::Indexed(8)))
-        .child(label(""))
+        .child(spacer().height(1))
         // Instructions
         .child(
             label("Navigation: ↑/↓ arrows, Home/End, PgUp/PgDn | Select: Enter/Space")
                 .fg(Color::Yellow),
         )
-        .child(label(""))
+        .child(spacer().height(1))
         // List
         .child(
             list()
@@ -192,7 +192,7 @@ fn view_single(state: &State) -> Container<Message> {
                 .selected(state.single_selected.clone())
                 .on_select(|event| Message::SingleSelected(event)),
         )
-        .child(label(""))
+        .child(spacer().height(1))
         // Selection display
         .child(
             label(format!(
@@ -201,7 +201,7 @@ fn view_single(state: &State) -> Container<Message> {
             ))
             .fg(Color::Green),
         )
-        .child(label(""))
+        .child(spacer().height(1))
         // Footer
         .child(label("Q or Esc: Quit | M: Toggle mode").fg(Color::Indexed(8)))
         // Keyboard controller
@@ -226,7 +226,7 @@ fn view_multiple(state: &State) -> Container<Message> {
                 .bold(),
         )
         .child(label("Press 'M' to switch to Single Selection mode").fg(Color::Indexed(8)))
-        .child(label(""))
+        .child(spacer().height(1))
         // Instructions
         .child(
             label(
@@ -234,7 +234,7 @@ fn view_multiple(state: &State) -> Container<Message> {
             )
             .fg(Color::Yellow),
         )
-        .child(label(""))
+        .child(spacer().height(1))
         // List with more items (scrollable)
         .child(
             list()
@@ -246,7 +246,7 @@ fn view_multiple(state: &State) -> Container<Message> {
                 .selected(state.multi_selected.clone())
                 .on_select(|event| Message::MultipleSelected(event)),
         )
-        .child(label(""))
+        .child(spacer().height(1))
         // Selection display
         .child(
             label(format!(
@@ -255,7 +255,7 @@ fn view_multiple(state: &State) -> Container<Message> {
             ))
             .fg(Color::Green),
         )
-        .child(label(""))
+        .child(spacer().height(1))
         // Footer
         .child(label("Q or Esc: Quit | M: Toggle mode").fg(Color::Indexed(8)))
         // Keyboard controller

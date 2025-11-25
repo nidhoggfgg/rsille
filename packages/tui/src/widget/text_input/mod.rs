@@ -10,8 +10,7 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 /// Text input style variants
 ///
 /// Different visual styles for text inputs based on their purpose and context.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TextInputVariant {
     /// Default bordered input (single line border)
     #[default]
@@ -21,7 +20,6 @@ pub enum TextInputVariant {
     /// Password input (masks characters as dots)
     Password,
 }
-
 
 /// Text input widget
 ///
@@ -516,8 +514,9 @@ impl<M: Send + Sync> Widget<M> for TextInput<M> {
         }
 
         if let Event::Key(KeyEvent {
-                code, modifiers, ..
-            }) = event {
+            code, modifiers, ..
+        }) = event
+        {
             match code {
                 // Character input
                 KeyCode::Char(c) => {

@@ -51,7 +51,7 @@ fn view(state: &State) -> Container<Message> {
         .gap(1)
         // Header
         .child(label("Grid Layout Demo").fg(Color::Cyan).bold())
-        .child(label(""))
+        .child(spacer().height(1))
         // Example 1: Basic 3-column grid
         .child(
             label("Example 1: Equal columns (1fr each)")
@@ -68,7 +68,7 @@ fn view(state: &State) -> Container<Message> {
                 .child(label("Column 2").fg(Color::Yellow).bg(Color::Indexed(235)))
                 .child(label("Column 3").fg(Color::Yellow).bg(Color::Indexed(235))),
         )
-        .child(label(""))
+        .child(spacer().height(1))
         // Example 2: Different column widths
         .child(
             label("Example 2: Different widths (1fr 2fr 1fr)")
@@ -89,7 +89,7 @@ fn view(state: &State) -> Container<Message> {
                 )
                 .child(label("Narrow").fg(Color::Magenta).bg(Color::Indexed(235))),
         )
-        .child(label(""))
+        .child(spacer().height(1))
         // Example 3: Fixed and flexible columns
         .child(
             label("Example 3: Fixed + flexible (20 1fr 20)")
@@ -110,7 +110,7 @@ fn view(state: &State) -> Container<Message> {
                 )
                 .child(label("Right 20").fg(Color::Blue).bg(Color::Indexed(235))),
         )
-        .child(label(""))
+        .child(spacer().height(1))
         // Example 4: Multiple rows
         .child(label("Example 4: 2x2 Grid").fg(Color::Green).bold())
         .child(
@@ -124,7 +124,7 @@ fn view(state: &State) -> Container<Message> {
                 .child(label("Cell (2,1)").fg(Color::Cyan).bg(Color::Indexed(235)))
                 .child(label("Cell (2,2)").fg(Color::Cyan).bg(Color::Indexed(235))),
         )
-        .child(label(""))
+        .child(spacer().height(1))
         // Example 5: Interactive grid with buttons
         .child(label("Example 5: Interactive Grid").fg(Color::Green).bold())
         .child(
@@ -137,10 +137,10 @@ fn view(state: &State) -> Container<Message> {
                 .child(label(format!("Count: {}", state.counter)).fg(Color::Yellow))
                 .child(button("+").on_click(|| Message::Increment))
                 .child(label("Counter controls"))
-                .child(label(""))
-                .child(label("")),
+                .child(spacer().height(1))
+                .child(spacer().height(1)),
         )
-        .child(label(""))
+        .child(spacer().height(1))
         // Footer
         .child(label("Press 'q' or Esc to quit").fg(Color::Indexed(8)))
         // Keyboard controller for global shortcuts

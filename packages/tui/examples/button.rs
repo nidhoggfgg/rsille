@@ -58,7 +58,7 @@ fn view(state: &State) -> Container<Message> {
                 .fg(Color::Cyan)
                 .bold(),
         )
-        .child(label(""))
+        .child(spacer().height(1))
         // Status display
         .child(
             label(format!(
@@ -68,7 +68,7 @@ fn view(state: &State) -> Container<Message> {
             ))
             .fg(Color::Green),
         )
-        .child(label(""))
+        .child(spacer().height(1))
         // Primary Button
         .child(
             row()
@@ -148,7 +148,7 @@ fn view(state: &State) -> Container<Message> {
                 ),
         )
         // Footer with instructions
-        .child(label(""))
+        .child(spacer().height(1))
         .child(
             label("Tab/Shift+Tab: Navigate | Enter/Space: Click | Esc: Quit").fg(Color::Indexed(8)),
         )

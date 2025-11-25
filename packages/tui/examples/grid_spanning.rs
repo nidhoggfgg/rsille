@@ -169,13 +169,13 @@ fn view(state: &State) -> Container<Message> {
         .child(label(
             "Demonstrates child_span(), child_at(), and child_area()",
         ))
-        .child(label(""))
+        .child(spacer().height(1))
         // Current layout
         .child(layout)
-        .child(label(""))
+        .child(spacer().height(1))
         // Controls
         .child(button("Next Layout (Space)").on_click(|| Message::NextLayout))
-        .child(label(""))
+        .child(spacer().height(1))
         .child(label("Press 'q' or Esc to quit").fg(Color::Indexed(8)))
         // Keyboard controller for global shortcuts
         .child(
