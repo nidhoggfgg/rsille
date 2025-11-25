@@ -3,7 +3,7 @@ use render::{area::Size, chunk::Chunk, Draw, DrawErr, Update};
 use crate::{
     event::{Event, KeyCode, KeyModifiers},
     focus::FocusManager,
-    layout::Container,
+    layout::{Container, OverlayManager},
     widget::Widget,
 };
 
@@ -69,6 +69,9 @@ where
     M: Clone + std::fmt::Debug,
 {
     fn draw(&mut self, mut chunk: Chunk) -> std::result::Result<Size, DrawErr> {
+        // Clear any previous overlays
+        OverlayManager::global().clear();
+
         // Rebuild widget tree only when state has changed
         // This preserves internal widget state (like Interactive's pressed state)
         // between events while still rebuilding when app state changes
@@ -95,6 +98,15 @@ where
 
         // Render the widget tree directly to chunk
         container.render(&mut chunk);
+
+        // Render all overlays on top
+        let overlays = OverlayManager::global().take_overlays();
+        for overlay in overlays {
+            // Try to create a sub-chunk for the overlay area
+            if let Ok(mut overlay_chunk) = chunk.from_area(overlay.area) {
+                (overlay.renderer)(&mut overlay_chunk);
+            }
+        }
 
         Ok(size)
     }
