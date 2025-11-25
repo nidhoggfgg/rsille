@@ -289,7 +289,8 @@ impl<M> Grid<M> {
 
     /// Add a child widget with specific placement
     pub fn add_child_at(&mut self, child: Box<dyn Widget<M>>, placement: GridPlacement) {
-        self.children.push(GridItem::with_placement(child, placement));
+        self.children
+            .push(GridItem::with_placement(child, placement));
         self.mark_dirty();
     }
 
@@ -342,7 +343,8 @@ impl<M: Send + Sync> Grid<M> {
     ///     );
     /// ```
     pub fn child_at(mut self, widget: impl IntoWidget<M>, placement: GridPlacement) -> Self {
-        self.children.push(GridItem::with_placement(widget.into_widget(), placement));
+        self.children
+            .push(GridItem::with_placement(widget.into_widget(), placement));
         self.mark_dirty();
         self
     }
@@ -442,7 +444,8 @@ impl<M: Clone> Grid<M> {
             }
 
             // Recursively build focus chain for nested containers
-            item.widget().build_focus_chain_recursive(current_path, chain);
+            item.widget()
+                .build_focus_chain_recursive(current_path, chain);
 
             current_path.pop();
         }
@@ -454,11 +457,12 @@ impl<M: Clone> Grid<M> {
             let mut child_path = current_path.to_vec();
             child_path.push(idx);
 
-            let is_focused = focus_path.map_or(false, |fp| fp == &child_path);
+            let is_focused = focus_path == Some(&child_path);
             item.widget_mut().set_focused(is_focused);
 
             // Recursively update focus states for nested containers
-            item.widget_mut().update_focus_states_recursive(&child_path, focus_path);
+            item.widget_mut()
+                .update_focus_states_recursive(&child_path, focus_path);
         }
     }
 
@@ -598,7 +602,9 @@ impl<M: Clone> Widget<M> for Grid<M> {
             let mut bridge = TaffyBridge::new();
 
             // Build items list: (widget ref, placement ref) pairs
-            let items: Vec<(&dyn Widget<M>, &GridPlacement)> = self.children.iter()
+            let items: Vec<(&dyn Widget<M>, &GridPlacement)> = self
+                .children
+                .iter()
                 .map(|item| (item.widget(), item.placement()))
                 .collect();
 
@@ -687,7 +693,8 @@ impl<M: Clone> Widget<M> for Grid<M> {
             }
 
             // Recursively build focus chain for nested containers
-            item.widget().build_focus_chain_recursive(current_path, chain);
+            item.widget()
+                .build_focus_chain_recursive(current_path, chain);
 
             current_path.pop();
         }
@@ -703,11 +710,12 @@ impl<M: Clone> Widget<M> for Grid<M> {
             let mut child_path = current_path.to_vec();
             child_path.push(idx);
 
-            let is_focused = focus_path.map_or(false, |fp| fp == &child_path);
+            let is_focused = focus_path == Some(&child_path);
             item.widget_mut().set_focused(is_focused);
 
             // Recursively update focus states for nested containers
-            item.widget_mut().update_focus_states_recursive(&child_path, focus_path);
+            item.widget_mut()
+                .update_focus_states_recursive(&child_path, focus_path);
         }
     }
 }

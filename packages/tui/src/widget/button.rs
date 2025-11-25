@@ -4,14 +4,17 @@ use super::*;
 use crate::event::{Event, KeyCode, MouseButton, MouseEventKind};
 use crate::layout::border_renderer;
 use crate::style::{Color, Style, ThemeManager};
+use crate::widget::common::{StyleManager, WidgetState};
 use std::sync::Arc;
 
 /// Button style variants
 ///
 /// Different visual styles for buttons based on their semantic purpose.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 pub enum ButtonVariant {
     /// Primary action button (solid background with primary color)
+    #[default]
     Primary,
     /// Secondary action button (solid background with secondary color)
     Secondary,
@@ -23,16 +26,13 @@ pub enum ButtonVariant {
     Destructive,
 }
 
-impl Default for ButtonVariant {
-    fn default() -> Self {
-        ButtonVariant::Primary
-    }
-}
 
 /// Internal button state for interaction
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 enum ButtonState {
     /// Normal state
+    #[default]
     Normal,
     /// Mouse hover state
     Hover,
@@ -40,11 +40,6 @@ enum ButtonState {
     Focused,
 }
 
-impl Default for ButtonState {
-    fn default() -> Self {
-        ButtonState::Normal
-    }
-}
 
 /// Interactive button widget
 ///
@@ -72,10 +67,8 @@ impl Default for ButtonState {
 pub struct Button<M = ()> {
     label: String,
     variant: ButtonVariant,
-    custom_style: Option<Style>,
-    custom_focus_style: Option<Style>,
-    disabled: bool,
-    state: ButtonState,
+    button_state: ButtonState,
+    state: WidgetState,
     on_click: Option<Arc<dyn Fn() -> M + Send + Sync>>,
 }
 
@@ -84,9 +77,7 @@ impl<M> std::fmt::Debug for Button<M> {
         f.debug_struct("Button")
             .field("label", &self.label)
             .field("variant", &self.variant)
-            .field("custom_style", &self.custom_style)
-            .field("custom_focus_style", &self.custom_focus_style)
-            .field("disabled", &self.disabled)
+            .field("button_state", &self.button_state)
             .field("state", &self.state)
             .field("on_click", &self.on_click.is_some())
             .finish()
@@ -106,10 +97,8 @@ impl<M> Button<M> {
         Self {
             label: label.into(),
             variant: ButtonVariant::default(),
-            custom_style: None,
-            custom_focus_style: None,
-            disabled: false,
-            state: ButtonState::default(),
+            button_state: ButtonState::default(),
+            state: WidgetState::new(),
             on_click: None,
         }
     }
@@ -162,7 +151,7 @@ impl<M> Button<M> {
     ///     .disabled(true);
     /// ```
     pub fn disabled(mut self, disabled: bool) -> Self {
-        self.disabled = disabled;
+        self.state.set_disabled(disabled);
         self
     }
 
@@ -177,7 +166,7 @@ impl<M> Button<M> {
     ///     .style(Style::default().fg(Color::Cyan).bg(Color::Black));
     /// ```
     pub fn style(mut self, style: Style) -> Self {
-        self.custom_style = Some(style);
+        self.state = self.state.with_style(style);
         self
     }
 
@@ -195,69 +184,78 @@ impl<M> Button<M> {
     ///     .focus_style(Style::default().fg(Color::Cyan).bold());
     /// ```
     pub fn focus_style(mut self, style: Style) -> Self {
-        self.custom_focus_style = Some(style);
+        self.state = self.state.with_focus_style(style);
         self
     }
 
     /// Get the effective style based on current state and variant
     fn get_style(&self) -> Style {
-        // Get base theme style based on state and variant
-        let base_style = ThemeManager::global().with_theme(|theme| {
+        // Determine if we're in hover state
+        let is_hover = self.button_state == ButtonState::Hover;
+
+        // Get base style based on variant
+        StyleManager::compute_style(&self.state, |theme, state| {
             // Disabled state takes priority
-            if self.disabled {
+            if state.is_disabled() {
                 return theme.styles.disabled;
             }
 
-            // Match variant and state
+            // Get variant-specific styles
             match self.variant {
-                ButtonVariant::Primary => match self.state {
-                    ButtonState::Focused => theme.styles.primary_action_focused,
-                    ButtonState::Hover => theme.styles.primary_action_hover,
-                    ButtonState::Normal => theme.styles.primary_action,
-                },
-                ButtonVariant::Secondary => match self.state {
-                    ButtonState::Focused => theme.styles.secondary_action_focused,
-                    ButtonState::Hover => theme.styles.secondary_action_hover,
-                    ButtonState::Normal => theme.styles.secondary_action,
-                },
-                ButtonVariant::Ghost => match self.state {
-                    ButtonState::Focused => theme.styles.interactive_focused,
-                    ButtonState::Hover => theme.styles.hover,
-                    ButtonState::Normal => Style::default().fg(theme.colors.text),
-                },
-                ButtonVariant::Link => match self.state {
-                    ButtonState::Focused => theme.styles.interactive_focused.underlined(),
-                    ButtonState::Hover => theme.styles.hover.underlined(),
-                    ButtonState::Normal => theme.styles.text.underlined(),
-                },
-                ButtonVariant::Destructive => match self.state {
-                    ButtonState::Focused => Style::default()
-                        .fg(Color::White)
-                        .bg(theme.colors.danger)
-                        .bold(),
-                    ButtonState::Hover => Style::default()
-                        .fg(Color::White)
-                        .bg(theme.colors.danger)
-                        .bold(),
-                    ButtonState::Normal => {
+                ButtonVariant::Primary => {
+                    if state.is_focused() || self.button_state == ButtonState::Focused {
+                        theme.styles.primary_action_focused
+                    } else if is_hover {
+                        theme.styles.primary_action_hover
+                    } else {
+                        theme.styles.primary_action
+                    }
+                }
+                ButtonVariant::Secondary => {
+                    if state.is_focused() || self.button_state == ButtonState::Focused {
+                        theme.styles.secondary_action_focused
+                    } else if is_hover {
+                        theme.styles.secondary_action_hover
+                    } else {
+                        theme.styles.secondary_action
+                    }
+                }
+                ButtonVariant::Ghost => {
+                    if state.is_focused() || self.button_state == ButtonState::Focused {
+                        theme.styles.interactive_focused
+                    } else if is_hover {
+                        theme.styles.hover
+                    } else {
+                        Style::default().fg(theme.colors.text)
+                    }
+                }
+                ButtonVariant::Link => {
+                    let base = if state.is_focused() || self.button_state == ButtonState::Focused {
+                        theme.styles.interactive_focused
+                    } else if is_hover {
+                        theme.styles.hover
+                    } else {
+                        theme.styles.text
+                    };
+                    base.underlined()
+                }
+                ButtonVariant::Destructive => {
+                    if state.is_focused() || self.button_state == ButtonState::Focused {
+                        Style::default()
+                            .fg(Color::White)
+                            .bg(theme.colors.danger)
+                            .bold()
+                    } else if is_hover {
+                        Style::default()
+                            .fg(Color::White)
+                            .bg(theme.colors.danger)
+                            .bold()
+                    } else {
                         Style::default().fg(Color::White).bg(theme.colors.danger)
                     }
-                },
+                }
             }
-        });
-
-        // If custom focus style is provided and button is focused, use it
-        if self.state == ButtonState::Focused {
-            if let Some(ref focus_style) = self.custom_focus_style {
-                return focus_style.merge(base_style);
-            }
-        }
-
-        // Merge custom style if provided (custom style takes precedence)
-        self.custom_style
-            .as_ref()
-            .map(|s| s.merge(base_style))
-            .unwrap_or(base_style)
+        })
     }
 }
 
@@ -273,7 +271,7 @@ impl<M: Send + Sync> Widget<M> for Button<M> {
 
         let width = area.width();
         let height = area.height();
-        let is_focused = self.state == ButtonState::Focused;
+        let is_focused = self.button_state == ButtonState::Focused || self.state.is_focused();
 
         // Render background for solid variants
         if matches!(
@@ -328,7 +326,7 @@ impl<M: Send + Sync> Widget<M> for Button<M> {
 
     fn handle_event(&mut self, event: &Event) -> EventResult<M> {
         // Disabled buttons don't handle events
-        if self.disabled {
+        if self.state.is_disabled() {
             return EventResult::Ignored;
         }
 
@@ -361,7 +359,7 @@ impl<M: Send + Sync> Widget<M> for Button<M> {
                     MouseEventKind::Moved => {
                         // Update hover state
                         // Note: This is simplified - proper implementation needs area bounds checking
-                        self.state = ButtonState::Hover;
+                        self.button_state = ButtonState::Hover;
                     }
                     _ => {}
                 }
@@ -398,22 +396,23 @@ impl<M: Send + Sync> Widget<M> for Button<M> {
 
     fn focusable(&self) -> bool {
         // Buttons are focusable unless disabled
-        !self.disabled
+        self.state.is_focusable()
     }
 
     fn is_focused(&self) -> bool {
         // Check if current state is focused
-        self.state == ButtonState::Focused
+        self.button_state == ButtonState::Focused || self.state.is_focused()
     }
 
     fn set_focused(&mut self, focused: bool) {
         // Update state based on focus
+        self.state.set_focused(focused);
         if focused {
-            self.state = ButtonState::Focused;
-        } else if self.state == ButtonState::Focused {
+            self.button_state = ButtonState::Focused;
+        } else if self.button_state == ButtonState::Focused {
             // Only reset to Normal if we were focused
             // (preserve Hover state if mouse is over button)
-            self.state = ButtonState::Normal;
+            self.button_state = ButtonState::Normal;
         }
     }
 }

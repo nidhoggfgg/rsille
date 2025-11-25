@@ -339,7 +339,9 @@ impl<T: Clone + 'static, M> Select<T, M> {
         let styles = style::DropdownStyles::from_theme();
 
         let area = chunk.area();
-        let visible_height = area.height().saturating_sub(config.dropdown_border_offset()) as usize;
+        let visible_height = area
+            .height()
+            .saturating_sub(config.dropdown_border_offset()) as usize;
         let show_scrollbar = self.items.len() > visible_height;
 
         let scrollbar_x = if self.borderless {
@@ -369,8 +371,8 @@ impl<T: Clone + 'static, M> Select<T, M> {
         use crate::layout::{OverlayInfo, OverlayManager};
 
         let config = self.style_config();
-        let dropdown_height = (self.items.len() as u16).min(self.dropdown_height)
-            + config.dropdown_border_offset();
+        let dropdown_height =
+            (self.items.len() as u16).min(self.dropdown_height) + config.dropdown_border_offset();
         let dropdown_area = Area::new(
             (trigger_area.x(), trigger_area.y() + trigger_area.height()).into(),
             (trigger_area.width(), dropdown_height).into(),
@@ -388,9 +390,9 @@ impl<T: Clone + 'static, M> Select<T, M> {
             let styles = style::DropdownStyles::from_theme();
 
             let area = chunk.area();
-            let visible_height = area
-                .height()
-                .saturating_sub(config.dropdown_border_offset()) as usize;
+            let visible_height =
+                area.height()
+                    .saturating_sub(config.dropdown_border_offset()) as usize;
             let show_scrollbar = items.len() > visible_height;
 
             let scrollbar_x = if borderless {
@@ -542,8 +544,8 @@ impl<T: Clone + Send + Sync + 'static, M: Send + Sync> Widget<M> for Select<T, M
         let height = if self.overlay_mode {
             config.trigger_height()
         } else if self.opened {
-            let dropdown_height =
-                (self.items.len() as u16).min(self.dropdown_height) + config.dropdown_border_offset();
+            let dropdown_height = (self.items.len() as u16).min(self.dropdown_height)
+                + config.dropdown_border_offset();
             config.trigger_height() + dropdown_height
         } else {
             config.trigger_height()

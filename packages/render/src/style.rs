@@ -1,8 +1,6 @@
 use std::{borrow::Cow, io};
 
-use crossterm::{
-    style::{Attributes, Colors, Print, SetAttributes, SetColors},
-};
+use crossterm::style::{Attributes, Colors, Print, SetAttributes, SetColors};
 use log::trace;
 use unicode_width::UnicodeWidthChar;
 

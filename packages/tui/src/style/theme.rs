@@ -37,18 +37,18 @@ impl ThemeColors {
     /// Create a dark theme color palette
     pub fn dark() -> Self {
         Self {
-            primary: Color::Rgb(99, 102, 241),      // Indigo
-            secondary: Color::Rgb(139, 92, 246),    // Purple
-            success: Color::Rgb(34, 197, 94),       // Green
-            danger: Color::Rgb(239, 68, 68),        // Red
-            warning: Color::Rgb(251, 146, 60),      // Orange
-            info: Color::Rgb(59, 130, 246),         // Blue
-            text: Color::Rgb(229, 229, 231),        // Zinc-200
-            text_muted: Color::Rgb(161, 161, 170),  // Zinc-400
-            background: Color::Rgb(24, 24, 27),     // Zinc-900
-            surface: Color::Rgb(39, 39, 42),        // Zinc-800
-            border: Color::Rgb(63, 63, 70),         // Zinc-700
-            focus_ring: Color::Rgb(129, 140, 248),  // Lighter indigo for focus (Indigo-400)
+            primary: Color::Rgb(99, 102, 241),         // Indigo
+            secondary: Color::Rgb(139, 92, 246),       // Purple
+            success: Color::Rgb(34, 197, 94),          // Green
+            danger: Color::Rgb(239, 68, 68),           // Red
+            warning: Color::Rgb(251, 146, 60),         // Orange
+            info: Color::Rgb(59, 130, 246),            // Blue
+            text: Color::Rgb(229, 229, 231),           // Zinc-200
+            text_muted: Color::Rgb(161, 161, 170),     // Zinc-400
+            background: Color::Rgb(24, 24, 27),        // Zinc-900
+            surface: Color::Rgb(39, 39, 42),           // Zinc-800
+            border: Color::Rgb(63, 63, 70),            // Zinc-700
+            focus_ring: Color::Rgb(129, 140, 248),     // Lighter indigo for focus (Indigo-400)
             focus_background: Color::Rgb(49, 46, 129), // Dark indigo background (Indigo-950)
         }
     }
@@ -56,18 +56,18 @@ impl ThemeColors {
     /// Create a light theme color palette
     pub fn light() -> Self {
         Self {
-            primary: Color::Rgb(79, 70, 229),       // Indigo
-            secondary: Color::Rgb(124, 58, 237),    // Purple
-            success: Color::Rgb(22, 163, 74),       // Green
-            danger: Color::Rgb(220, 38, 38),        // Red
-            warning: Color::Rgb(234, 88, 12),       // Orange
-            info: Color::Rgb(37, 99, 235),          // Blue
-            text: Color::Rgb(24, 24, 27),           // Zinc-900
-            text_muted: Color::Rgb(113, 113, 122),  // Zinc-500
-            background: Color::Rgb(250, 250, 250),  // Zinc-50
-            surface: Color::Rgb(255, 255, 255),     // White
-            border: Color::Rgb(212, 212, 216),      // Zinc-300
-            focus_ring: Color::Rgb(67, 56, 202),    // Darker indigo for focus (Indigo-700)
+            primary: Color::Rgb(79, 70, 229),            // Indigo
+            secondary: Color::Rgb(124, 58, 237),         // Purple
+            success: Color::Rgb(22, 163, 74),            // Green
+            danger: Color::Rgb(220, 38, 38),             // Red
+            warning: Color::Rgb(234, 88, 12),            // Orange
+            info: Color::Rgb(37, 99, 235),               // Blue
+            text: Color::Rgb(24, 24, 27),                // Zinc-900
+            text_muted: Color::Rgb(113, 113, 122),       // Zinc-500
+            background: Color::Rgb(250, 250, 250),       // Zinc-50
+            surface: Color::Rgb(255, 255, 255),          // White
+            border: Color::Rgb(212, 212, 216),           // Zinc-300
+            focus_ring: Color::Rgb(67, 56, 202),         // Darker indigo for focus (Indigo-700)
             focus_background: Color::Rgb(224, 231, 255), // Light indigo background (Indigo-100)
         }
     }
@@ -131,40 +131,17 @@ impl ThemeStyles {
     pub fn dark(colors: &ThemeColors) -> Self {
         Self {
             // Action styles
-            primary_action: Style::default()
-                .fg(colors.text)
-                .bg(colors.primary),
-            primary_action_hover: Style::default()
-                .fg(colors.text)
-                .bg(colors.primary)
-                .bold(),
-            primary_action_focused: Style::default()
-                .fg(colors.text)
-                .bg(colors.primary)
-                .bold(), // Make focused state visually distinct
-            secondary_action: Style::default()
-                .fg(colors.text)
-                .bg(colors.secondary),
-            secondary_action_hover: Style::default()
-                .fg(colors.text)
-                .bg(colors.secondary)
-                .bold(),
-            secondary_action_focused: Style::default()
-                .fg(colors.text)
-                .bg(colors.secondary)
-                .bold(), // Make focused state visually distinct
+            primary_action: Style::default().fg(colors.text).bg(colors.primary),
+            primary_action_hover: Style::default().fg(colors.text).bg(colors.primary).bold(),
+            primary_action_focused: Style::default().fg(colors.text).bg(colors.primary).bold(), // Make focused state visually distinct
+            secondary_action: Style::default().fg(colors.text).bg(colors.secondary),
+            secondary_action_hover: Style::default().fg(colors.text).bg(colors.secondary).bold(),
+            secondary_action_focused: Style::default().fg(colors.text).bg(colors.secondary).bold(), // Make focused state visually distinct
 
             // Interactive element styles
-            interactive: Style::default()
-                .fg(colors.text)
-                .bg(colors.surface),
-            interactive_focused: Style::default()
-                .fg(colors.text)
-                .bg(colors.surface)
-                .bold(), // Make focused state visually distinct
-            interactive_disabled: Style::default()
-                .fg(colors.text_muted)
-                .bg(colors.surface),
+            interactive: Style::default().fg(colors.text).bg(colors.surface),
+            interactive_focused: Style::default().fg(colors.text).bg(colors.surface).bold(), // Make focused state visually distinct
+            interactive_disabled: Style::default().fg(colors.text_muted).bg(colors.surface),
 
             // Text styles
             text: Style::default().fg(colors.text),
@@ -172,23 +149,13 @@ impl ThemeStyles {
             text_heading: Style::default().fg(colors.text).bold(),
 
             // Container styles
-            surface: Style::default()
-                .bg(colors.background)
-                .fg(colors.text),
-            surface_elevated: Style::default()
-                .bg(colors.surface)
-                .fg(colors.text),
+            surface: Style::default().bg(colors.background).fg(colors.text),
+            surface_elevated: Style::default().bg(colors.surface).fg(colors.text),
 
             // State styles
-            selected: Style::default()
-                .fg(colors.text)
-                .bg(colors.primary),
-            hover: Style::default()
-                .fg(colors.text)
-                .bg(colors.primary)
-                .bold(),
-            disabled: Style::default()
-                .fg(colors.text_muted),
+            selected: Style::default().fg(colors.text).bg(colors.primary),
+            hover: Style::default().fg(colors.text).bg(colors.primary).bold(),
+            disabled: Style::default().fg(colors.text_muted),
         }
     }
 
@@ -196,20 +163,10 @@ impl ThemeStyles {
     pub fn light(colors: &ThemeColors) -> Self {
         Self {
             // Action styles
-            primary_action: Style::default()
-                .fg(Color::White)
-                .bg(colors.primary),
-            primary_action_hover: Style::default()
-                .fg(Color::White)
-                .bg(colors.primary)
-                .bold(),
-            primary_action_focused: Style::default()
-                .fg(Color::White)
-                .bg(colors.primary)
-                .bold(), // Make focused state visually distinct
-            secondary_action: Style::default()
-                .fg(Color::White)
-                .bg(colors.secondary),
+            primary_action: Style::default().fg(Color::White).bg(colors.primary),
+            primary_action_hover: Style::default().fg(Color::White).bg(colors.primary).bold(),
+            primary_action_focused: Style::default().fg(Color::White).bg(colors.primary).bold(), // Make focused state visually distinct
+            secondary_action: Style::default().fg(Color::White).bg(colors.secondary),
             secondary_action_hover: Style::default()
                 .fg(Color::White)
                 .bg(colors.secondary)
@@ -220,16 +177,9 @@ impl ThemeStyles {
                 .bold(), // Make focused state visually distinct
 
             // Interactive element styles
-            interactive: Style::default()
-                .fg(colors.text)
-                .bg(colors.surface),
-            interactive_focused: Style::default()
-                .fg(colors.text)
-                .bg(colors.surface)
-                .bold(), // Make focused state visually distinct
-            interactive_disabled: Style::default()
-                .fg(colors.text_muted)
-                .bg(colors.surface),
+            interactive: Style::default().fg(colors.text).bg(colors.surface),
+            interactive_focused: Style::default().fg(colors.text).bg(colors.surface).bold(), // Make focused state visually distinct
+            interactive_disabled: Style::default().fg(colors.text_muted).bg(colors.surface),
 
             // Text styles
             text: Style::default().fg(colors.text),
@@ -237,23 +187,13 @@ impl ThemeStyles {
             text_heading: Style::default().fg(colors.text).bold(),
 
             // Container styles
-            surface: Style::default()
-                .bg(colors.background)
-                .fg(colors.text),
-            surface_elevated: Style::default()
-                .bg(colors.surface)
-                .fg(colors.text),
+            surface: Style::default().bg(colors.background).fg(colors.text),
+            surface_elevated: Style::default().bg(colors.surface).fg(colors.text),
 
             // State styles
-            selected: Style::default()
-                .fg(Color::White)
-                .bg(colors.primary),
-            hover: Style::default()
-                .fg(Color::White)
-                .bg(colors.primary)
-                .bold(),
-            disabled: Style::default()
-                .fg(colors.text_muted),
+            selected: Style::default().fg(Color::White).bg(colors.primary),
+            hover: Style::default().fg(Color::White).bg(colors.primary).bold(),
+            disabled: Style::default().fg(colors.text_muted),
         }
     }
 }

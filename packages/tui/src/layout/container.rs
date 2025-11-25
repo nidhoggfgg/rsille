@@ -283,7 +283,7 @@ impl<M: Clone> Container<M> {
             let mut child_path = current_path.to_vec();
             child_path.push(idx);
 
-            let is_focused = focus_path.map_or(false, |fp| fp == &child_path);
+            let is_focused = focus_path == Some(&child_path);
             child.set_focused(is_focused);
 
             // Recursively update focus states for nested containers
@@ -586,7 +586,7 @@ impl<M: Clone> Widget<M> for Container<M> {
             let mut child_path = current_path.to_vec();
             child_path.push(idx);
 
-            let is_focused = focus_path.map_or(false, |fp| fp == &child_path);
+            let is_focused = focus_path == Some(&child_path);
             child.set_focused(is_focused);
 
             // Recursively update focus states for nested containers

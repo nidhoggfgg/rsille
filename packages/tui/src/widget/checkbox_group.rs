@@ -4,22 +4,20 @@ use super::*;
 use crate::event::{Event, KeyCode, MouseButton, MouseEventKind};
 use crate::focus::FocusPath;
 use crate::style::{Style, ThemeManager};
+use crate::widget::common::{SelectableNavigation, StyleManager, WidgetState};
 use std::sync::Arc;
 
 /// Checkbox group layout direction
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 pub enum CheckboxDirection {
     /// Vertical layout (options stacked vertically)
+    #[default]
     Vertical,
     /// Horizontal layout (options arranged horizontally)
     Horizontal,
 }
 
-impl Default for CheckboxDirection {
-    fn default() -> Self {
-        CheckboxDirection::Vertical
-    }
-}
 
 /// Interactive checkbox group widget
 ///
@@ -53,12 +51,9 @@ impl Default for CheckboxDirection {
 pub struct CheckboxGroup<M = ()> {
     options: Vec<String>,
     checked: Vec<bool>,
-    focused_option: usize,
     direction: CheckboxDirection,
-    custom_style: Option<Style>,
-    custom_focus_style: Option<Style>,
-    disabled: bool,
-    focused: bool,
+    state: WidgetState,
+    navigation: SelectableNavigation,
     on_change: Option<Arc<dyn Fn(usize, bool, Vec<bool>) -> M + Send + Sync>>,
 }
 
@@ -67,12 +62,9 @@ impl<M> std::fmt::Debug for CheckboxGroup<M> {
         f.debug_struct("CheckboxGroup")
             .field("options", &self.options)
             .field("checked", &self.checked)
-            .field("focused_option", &self.focused_option)
             .field("direction", &self.direction)
-            .field("custom_style", &self.custom_style)
-            .field("custom_focus_style", &self.custom_focus_style)
-            .field("disabled", &self.disabled)
-            .field("focused", &self.focused)
+            .field("state", &self.state)
+            .field("navigation", &self.navigation)
             .field("on_change", &self.on_change.is_some())
             .finish()
     }
@@ -91,15 +83,13 @@ impl<M> CheckboxGroup<M> {
     pub fn new<S: Into<String>>(options: impl IntoIterator<Item = S>) -> Self {
         let options: Vec<String> = options.into_iter().map(|s| s.into()).collect();
         let checked = vec![false; options.len()];
+        let navigation = SelectableNavigation::new(options.len(), options.len());
         Self {
             options,
             checked,
-            focused_option: 0,
             direction: CheckboxDirection::default(),
-            custom_style: None,
-            custom_focus_style: None,
-            disabled: false,
-            focused: false,
+            state: WidgetState::new(),
+            navigation,
             on_change: None,
         }
     }
@@ -133,7 +123,7 @@ impl<M> CheckboxGroup<M> {
     /// ```
     pub fn focused_index(mut self, index: usize) -> Self {
         if index < self.options.len() {
-            self.focused_option = index;
+            self.navigation.set_focused_index(Some(index));
         }
         self
     }
@@ -173,7 +163,7 @@ impl<M> CheckboxGroup<M> {
     ///     .disabled(true);
     /// ```
     pub fn disabled(mut self, disabled: bool) -> Self {
-        self.disabled = disabled;
+        self.state.set_disabled(disabled);
         self
     }
 
@@ -202,7 +192,7 @@ impl<M> CheckboxGroup<M> {
     ///     .style(Style::default().fg(Color::Cyan));
     /// ```
     pub fn style(mut self, style: Style) -> Self {
-        self.custom_style = Some(style);
+        self.state = self.state.with_style(style);
         self
     }
 
@@ -217,42 +207,20 @@ impl<M> CheckboxGroup<M> {
     ///     .focus_style(Style::default().fg(Color::Cyan).bold());
     /// ```
     pub fn focus_style(mut self, style: Style) -> Self {
-        self.custom_focus_style = Some(style);
+        self.state = self.state.with_focus_style(style);
         self
     }
 
     /// Get the effective style for a specific option
     fn get_option_style(&self, option_index: usize) -> Style {
-        let is_focused_option = self.focused && option_index == self.focused_option;
+        let focused_idx = self.navigation.focused_index();
+        let is_focused_option = self.state.is_focused() && focused_idx == Some(option_index);
 
-        // Get base theme style based on state
-        let base_style = ThemeManager::global().with_theme(|theme| {
-            // Disabled state takes priority
-            if self.disabled {
-                return theme.styles.disabled;
-            }
+        // Temporarily create a state for this specific option
+        let mut option_state = self.state.clone();
+        option_state.set_focused(is_focused_option);
 
-            // Focused option gets focus styling
-            if is_focused_option {
-                return theme.styles.interactive_focused;
-            }
-
-            // Normal state
-            theme.styles.interactive
-        });
-
-        // If custom focus style is provided and this option is focused, use it
-        if is_focused_option {
-            if let Some(ref focus_style) = self.custom_focus_style {
-                return focus_style.merge(base_style);
-            }
-        }
-
-        // Merge custom style if provided (custom style takes precedence)
-        self.custom_style
-            .as_ref()
-            .map(|s| s.merge(base_style))
-            .unwrap_or(base_style)
+        StyleManager::interactive_style(&option_state)
     }
 
     /// Toggle an option by index and emit change event
@@ -268,20 +236,6 @@ impl<M> CheckboxGroup<M> {
             }
         } else {
             vec![]
-        }
-    }
-
-    /// Move the keyboard focus to the previous option
-    fn focus_previous(&mut self) {
-        if self.focused_option > 0 {
-            self.focused_option -= 1;
-        }
-    }
-
-    /// Move the keyboard focus to the next option
-    fn focus_next(&mut self) {
-        if self.focused_option < self.options.len().saturating_sub(1) {
-            self.focused_option += 1;
         }
     }
 
@@ -302,7 +256,7 @@ impl<M> CheckboxGroup<M> {
             let checkbox_symbol = if is_checked { "[✓]" } else { "[ ]" };
 
             // Use success color (green) for checked checkbox to make it stand out
-            let checkbox_style = if is_checked && !self.disabled {
+            let checkbox_style = if is_checked && !self.state.is_disabled() {
                 ThemeManager::global().with_theme(|theme| {
                     Style::default()
                         .fg(theme.colors.success)
@@ -320,8 +274,9 @@ impl<M> CheckboxGroup<M> {
             // When this option is focused, make the label text more prominent with color
             if !option.is_empty() {
                 let label_x = 4; // Position after "[X] "
-                let is_focused_option = self.focused && index == self.focused_option;
-                let label_style = if is_focused_option && !self.disabled {
+                let focused_idx = self.navigation.focused_index();
+                let is_focused_option = self.state.is_focused() && focused_idx == Some(index);
+                let label_style = if is_focused_option && !self.state.is_disabled() {
                     // Use info color (blue/cyan) and bold when focused to make it stand out
                     ThemeManager::global().with_theme(|theme| {
                         Style::default()
@@ -364,7 +319,7 @@ impl<M> CheckboxGroup<M> {
             }
 
             // Use success color (green) for checked checkbox to make it stand out
-            let checkbox_style = if is_checked && !self.disabled {
+            let checkbox_style = if is_checked && !self.state.is_disabled() {
                 ThemeManager::global().with_theme(|theme| {
                     Style::default()
                         .fg(theme.colors.success)
@@ -382,8 +337,9 @@ impl<M> CheckboxGroup<M> {
             // When this option is focused, make the label text more prominent with color
             if !option.is_empty() {
                 let label_x = current_x + 4; // Position after "[X] "
-                let is_focused_option = self.focused && index == self.focused_option;
-                let label_style = if is_focused_option && !self.disabled {
+                let focused_idx = self.navigation.focused_index();
+                let is_focused_option = self.state.is_focused() && focused_idx == Some(index);
+                let label_style = if is_focused_option && !self.state.is_disabled() {
                     // Use info color (blue/cyan) and bold when focused to make it stand out
                     ThemeManager::global().with_theme(|theme| {
                         Style::default()
@@ -418,7 +374,7 @@ impl<M: Send + Sync> Widget<M> for CheckboxGroup<M> {
 
     fn handle_event(&mut self, event: &Event) -> EventResult<M> {
         // Disabled checkbox groups don't handle events
-        if self.disabled {
+        if self.state.is_disabled() {
             return EventResult::Ignored;
         }
 
@@ -429,33 +385,37 @@ impl<M: Send + Sync> Widget<M> for CheckboxGroup<M> {
                     // Up/Left arrow moves focus to previous option
                     KeyCode::Up => {
                         if self.direction == CheckboxDirection::Vertical {
-                            self.focus_previous();
+                            self.navigation
+                                .focus_previous(|_| false, self.options.len());
                             return EventResult::consumed();
                         }
                     }
                     KeyCode::Left => {
                         if self.direction == CheckboxDirection::Horizontal {
-                            self.focus_previous();
+                            self.navigation
+                                .focus_previous(|_| false, self.options.len());
                             return EventResult::consumed();
                         }
                     }
                     // Down/Right arrow moves focus to next option
                     KeyCode::Down => {
                         if self.direction == CheckboxDirection::Vertical {
-                            self.focus_next();
+                            self.navigation.focus_next(|_| false, self.options.len());
                             return EventResult::consumed();
                         }
                     }
                     KeyCode::Right => {
                         if self.direction == CheckboxDirection::Horizontal {
-                            self.focus_next();
+                            self.navigation.focus_next(|_| false, self.options.len());
                             return EventResult::consumed();
                         }
                     }
                     // Enter or Space toggles the focused option
                     KeyCode::Enter | KeyCode::Char(' ') => {
-                        let messages = self.toggle_option(self.focused_option);
-                        return EventResult::Consumed(messages);
+                        if let Some(focused_idx) = self.navigation.focused_index() {
+                            let messages = self.toggle_option(focused_idx);
+                            return EventResult::Consumed(messages);
+                        }
                     }
                     _ => {}
                 }
@@ -463,43 +423,41 @@ impl<M: Send + Sync> Widget<M> for CheckboxGroup<M> {
 
             // Mouse events
             Event::Mouse(mouse_event) => {
-                match mouse_event.kind {
-                    MouseEventKind::Down(MouseButton::Left) => {
-                        match self.direction {
-                            CheckboxDirection::Vertical => {
-                                // Click based on row position
-                                let clicked_row = mouse_event.row;
-                                if (clicked_row as usize) < self.options.len() {
-                                    let messages = self.toggle_option(clicked_row as usize);
+                if let MouseEventKind::Down(MouseButton::Left) = mouse_event.kind {
+                    match self.direction {
+                        CheckboxDirection::Vertical => {
+                            // Click based on row position
+                            let clicked_row = mouse_event.row;
+                            if (clicked_row as usize) < self.options.len() {
+                                let messages = self.toggle_option(clicked_row as usize);
+                                return EventResult::Consumed(messages);
+                            }
+                        }
+                        CheckboxDirection::Horizontal => {
+                            // Click based on column position
+                            use unicode_width::UnicodeWidthStr;
+                            let mut current_x = 0u16;
+                            let clicked_col = mouse_event.column;
+
+                            for (index, option) in self.options.iter().enumerate() {
+                                let checkbox_width = 3;
+                                let space_width = 1;
+                                let label_width = option.width() as u16;
+                                let gap_width = 2;
+                                let option_total_width =
+                                    checkbox_width + space_width + label_width;
+
+                                if clicked_col >= current_x
+                                    && clicked_col < current_x + option_total_width
+                                {
+                                    let messages = self.toggle_option(index);
                                     return EventResult::Consumed(messages);
                                 }
-                            }
-                            CheckboxDirection::Horizontal => {
-                                // Click based on column position
-                                use unicode_width::UnicodeWidthStr;
-                                let mut current_x = 0u16;
-                                let clicked_col = mouse_event.column;
 
-                                for (index, option) in self.options.iter().enumerate() {
-                                    let checkbox_width = 3;
-                                    let space_width = 1;
-                                    let label_width = option.width() as u16;
-                                    let gap_width = 2;
-                                    let option_total_width = checkbox_width + space_width + label_width;
-
-                                    if clicked_col >= current_x
-                                        && clicked_col < current_x + option_total_width
-                                    {
-                                        let messages = self.toggle_option(index);
-                                        return EventResult::Consumed(messages);
-                                    }
-
-                                    current_x += option_total_width + gap_width;
-                                }
+                                current_x += option_total_width + gap_width;
                             }
                         }
                     }
-                    _ => {}
                 }
             }
 
@@ -580,15 +538,21 @@ impl<M: Send + Sync> Widget<M> for CheckboxGroup<M> {
     }
 
     fn is_focused(&self) -> bool {
-        self.focused
+        self.state.is_focused()
     }
 
     fn set_focused(&mut self, focused: bool) {
-        self.focused = focused;
+        self.state.set_focused(focused);
 
         // When gaining focus, ensure focused_option is valid
-        if focused && self.focused_option >= self.options.len() {
-            self.focused_option = 0;
+        if focused {
+            if let Some(idx) = self.navigation.focused_index() {
+                if idx >= self.options.len() {
+                    self.navigation.set_focused_index(Some(0));
+                }
+            } else {
+                self.navigation.set_focused_index(Some(0));
+            }
         }
     }
 
@@ -598,7 +562,7 @@ impl<M: Send + Sync> Widget<M> for CheckboxGroup<M> {
         chain: &mut Vec<FocusPath>,
     ) {
         // Skip if disabled or empty
-        if self.disabled || self.options.is_empty() {
+        if self.state.is_disabled() || self.options.is_empty() {
             return;
         }
 
@@ -622,15 +586,15 @@ impl<M: Send + Sync> Widget<M> for CheckboxGroup<M> {
                 // Focus is on one of our options
                 let option_idx = focus[current_path.len()];
                 if option_idx < self.options.len() {
-                    self.focused = true;
-                    self.focused_option = option_idx;
+                    self.state.set_focused(true);
+                    self.navigation.set_focused_index(Some(option_idx));
                     return;
                 }
             }
         }
 
         // Not focused
-        self.focused = false;
+        self.state.set_focused(false);
     }
 }
 
@@ -647,6 +611,8 @@ impl<M: Send + Sync> Widget<M> for CheckboxGroup<M> {
 ///     .checked(vec![true, false, true])
 ///     .on_change(|states| Message::StatesChanged(states));
 /// ```
-pub fn checkbox_group<M, S: Into<String>>(options: impl IntoIterator<Item = S>) -> CheckboxGroup<M> {
+pub fn checkbox_group<M, S: Into<String>>(
+    options: impl IntoIterator<Item = S>,
+) -> CheckboxGroup<M> {
     CheckboxGroup::new(options)
 }

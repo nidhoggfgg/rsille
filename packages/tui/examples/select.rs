@@ -117,10 +117,7 @@ fn view(state: &State) -> Container<Message> {
         .gap(1)
         .padding(Padding::new(1, 2, 1, 2)) // top, right, bottom, left
         // Title
-        .child(
-            label("Select Widget Example")
-                .style(Style::default().bold())
-        )
+        .child(label("Select Widget Example").style(Style::default().bold()))
         .child(label(""))
         // Fruit selector (Overlay mode - default)
         .child(label("Select your favorite fruit (Overlay Mode):"))
@@ -128,8 +125,8 @@ fn view(state: &State) -> Container<Message> {
             Select::new(fruit_items.clone())
                 .placeholder("Choose a fruit...")
                 .dropdown_height(6)
-                .overlay_mode(true)  // Explicit overlay mode (default)
-                .on_select(|event| Message::FruitSelected(event))
+                .overlay_mode(true) // Explicit overlay mode (default)
+                .on_select(|event| Message::FruitSelected(event)),
         )
         .child(label(if let Some(ref fruit) = state.selected_fruit {
             format!("Selected: {}", fruit.label())
@@ -142,7 +139,7 @@ fn view(state: &State) -> Container<Message> {
         .child(
             Select::new(country_items)
                 .placeholder("Choose a country...")
-                .on_select(|event| Message::CountrySelected(event))
+                .on_select(|event| Message::CountrySelected(event)),
         )
         .child(label(if let Some(ref country) = state.selected_country {
             format!("Selected: {}", country.label())
@@ -161,8 +158,8 @@ fn view(state: &State) -> Container<Message> {
                 .item("xl".to_string(), "Extra Large")
                 .item_disabled("xxl".to_string(), "XXL (Out of stock)")
                 .placeholder("Choose size...")
-                .overlay_mode(false)  // Inline mode: dropdown pushes content down
-                .on_select(|event| Message::SizeSelected(event))
+                .overlay_mode(false) // Inline mode: dropdown pushes content down
+                .on_select(|event| Message::SizeSelected(event)),
         )
         .child(label(if let Some(ref size) = state.selected_size {
             format!("Selected size: {}", size)
@@ -180,8 +177,8 @@ fn view(state: &State) -> Container<Message> {
                 .item("yellow".to_string(), "Yellow")
                 .item("purple".to_string(), "Purple")
                 .placeholder("Choose color...")
-                .borderless(true)  // NEW: Borderless variant
-                .on_select(|event| Message::ColorSelected(event))
+                .borderless(true) // NEW: Borderless variant
+                .on_select(|event| Message::ColorSelected(event)),
         )
         .child(label(if let Some(ref color) = state.selected_color {
             format!("Selected color: {}", color)

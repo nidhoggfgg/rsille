@@ -11,8 +11,10 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 ///
 /// Different visual styles for text inputs based on their purpose and context.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 pub enum TextInputVariant {
     /// Default bordered input (single line border)
+    #[default]
     Default,
     /// Borderless input (bottom border only)
     Borderless,
@@ -20,11 +22,6 @@ pub enum TextInputVariant {
     Password,
 }
 
-impl Default for TextInputVariant {
-    fn default() -> Self {
-        TextInputVariant::Default
-    }
-}
 
 /// Text input widget
 ///
@@ -518,72 +515,69 @@ impl<M: Send + Sync> Widget<M> for TextInput<M> {
             return EventResult::Ignored;
         }
 
-        match event {
-            Event::Key(KeyEvent {
+        if let Event::Key(KeyEvent {
                 code, modifiers, ..
-            }) => {
-                match code {
-                    // Character input
-                    KeyCode::Char(c) => {
-                        // Check for Ctrl combinations
-                        if modifiers.contains(KeyModifiers::CONTROL) {
-                            match c {
-                                'a' => {
-                                    // Select all (not implemented in MVP, just move to end)
-                                    self.move_cursor_end();
-                                    return EventResult::Consumed(Vec::new());
-                                }
-                                _ => return EventResult::Ignored,
+            }) = event {
+            match code {
+                // Character input
+                KeyCode::Char(c) => {
+                    // Check for Ctrl combinations
+                    if modifiers.contains(KeyModifiers::CONTROL) {
+                        match c {
+                            'a' => {
+                                // Select all (not implemented in MVP, just move to end)
+                                self.move_cursor_end();
+                                return EventResult::Consumed(Vec::new());
                             }
-                        } else {
-                            // Regular character input
-                            let messages = self.insert_char(*c);
-                            return EventResult::Consumed(messages);
+                            _ => return EventResult::Ignored,
                         }
-                    }
-
-                    // Backspace
-                    KeyCode::Backspace => {
-                        let messages = self.delete_before_cursor();
+                    } else {
+                        // Regular character input
+                        let messages = self.insert_char(*c);
                         return EventResult::Consumed(messages);
                     }
-
-                    // Delete
-                    KeyCode::Delete => {
-                        let messages = self.delete_at_cursor();
-                        return EventResult::Consumed(messages);
-                    }
-
-                    // Arrow keys
-                    KeyCode::Left => {
-                        self.move_cursor_left();
-                        return EventResult::Consumed(Vec::new());
-                    }
-                    KeyCode::Right => {
-                        self.move_cursor_right();
-                        return EventResult::Consumed(Vec::new());
-                    }
-
-                    // Home/End
-                    KeyCode::Home => {
-                        self.move_cursor_home();
-                        return EventResult::Consumed(Vec::new());
-                    }
-                    KeyCode::End => {
-                        self.move_cursor_end();
-                        return EventResult::Consumed(Vec::new());
-                    }
-
-                    // Enter - submit
-                    KeyCode::Enter => {
-                        let messages = self.emit_submit();
-                        return EventResult::Consumed(messages);
-                    }
-
-                    _ => {}
                 }
+
+                // Backspace
+                KeyCode::Backspace => {
+                    let messages = self.delete_before_cursor();
+                    return EventResult::Consumed(messages);
+                }
+
+                // Delete
+                KeyCode::Delete => {
+                    let messages = self.delete_at_cursor();
+                    return EventResult::Consumed(messages);
+                }
+
+                // Arrow keys
+                KeyCode::Left => {
+                    self.move_cursor_left();
+                    return EventResult::Consumed(Vec::new());
+                }
+                KeyCode::Right => {
+                    self.move_cursor_right();
+                    return EventResult::Consumed(Vec::new());
+                }
+
+                // Home/End
+                KeyCode::Home => {
+                    self.move_cursor_home();
+                    return EventResult::Consumed(Vec::new());
+                }
+                KeyCode::End => {
+                    self.move_cursor_end();
+                    return EventResult::Consumed(Vec::new());
+                }
+
+                // Enter - submit
+                KeyCode::Enter => {
+                    let messages = self.emit_submit();
+                    return EventResult::Consumed(messages);
+                }
+
+                _ => {}
             }
-            _ => {}
         }
 
         EventResult::Ignored

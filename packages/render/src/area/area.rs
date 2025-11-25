@@ -139,7 +139,10 @@ impl Area {
             return None;
         }
 
-        Some(Area::new((new_x, new_y).into(), (new_width, new_height).into()))
+        Some(Area::new(
+            (new_x, new_y).into(),
+            (new_width, new_height).into(),
+        ))
     }
 }
 
@@ -166,9 +169,18 @@ mod tests {
         let partial = Area::new((25, 25).into(), (10, 10).into());
         let outside = Area::new((50, 50).into(), (5, 5).into());
 
-        assert!(outer.contains_area(&inner), "Inner area should be contained");
-        assert!(!outer.contains_area(&partial), "Partially overlapping area should not be contained");
-        assert!(!outer.contains_area(&outside), "Outside area should not be contained");
+        assert!(
+            outer.contains_area(&inner),
+            "Inner area should be contained"
+        );
+        assert!(
+            !outer.contains_area(&partial),
+            "Partially overlapping area should not be contained"
+        );
+        assert!(
+            !outer.contains_area(&outside),
+            "Outside area should not be contained"
+        );
     }
 
     #[test]
@@ -177,8 +189,14 @@ mod tests {
         let area2 = Area::new((20, 20).into(), (20, 20).into());
         let area3 = Area::new((50, 50).into(), (10, 10).into());
 
-        assert!(area1.intersects(&area2), "Overlapping areas should intersect");
-        assert!(!area1.intersects(&area3), "Non-overlapping areas should not intersect");
+        assert!(
+            area1.intersects(&area2),
+            "Overlapping areas should intersect"
+        );
+        assert!(
+            !area1.intersects(&area3),
+            "Non-overlapping areas should not intersect"
+        );
     }
 
     #[test]
@@ -188,12 +206,19 @@ mod tests {
         // Area completely inside bounds
         let inside = Area::new((15, 15).into(), (5, 5).into());
         let clamped = inside.clamp_to(&bounds);
-        assert_eq!(clamped, Some(inside), "Area inside bounds should remain unchanged");
+        assert_eq!(
+            clamped,
+            Some(inside),
+            "Area inside bounds should remain unchanged"
+        );
 
         // Area partially outside bounds
         let partial = Area::new((25, 25).into(), (10, 10).into());
         let clamped = partial.clamp_to(&bounds);
-        assert!(clamped.is_some(), "Partially overlapping area should be clamped");
+        assert!(
+            clamped.is_some(),
+            "Partially overlapping area should be clamped"
+        );
         let clamped_area = clamped.unwrap();
         assert_eq!(clamped_area.x(), 25);
         assert_eq!(clamped_area.y(), 25);

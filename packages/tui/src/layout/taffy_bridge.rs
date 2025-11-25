@@ -14,6 +14,12 @@ thread_local! {
 /// Layout manager using Taffy for flexbox layout
 pub struct TaffyBridge;
 
+impl Default for TaffyBridge {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TaffyBridge {
     pub fn new() -> Self {
         Self

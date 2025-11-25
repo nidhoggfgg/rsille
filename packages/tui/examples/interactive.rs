@@ -108,48 +108,39 @@ fn view(state: &State) -> Container<Message> {
         .child(label(""))
         // Example 1: Clickable label with hover
         .child(
-            row()
-                .gap(2)
-                .child(label("1.").fg(Color::Indexed(8)))
-                .child(
-                    interactive(label("Clickable Label (hover to see)").fg(Color::Blue))
-                        .on_click(|| Message::LabelClicked)
-                        .on_hover(|| Message::LabelHovered),
-                ),
+            row().gap(2).child(label("1.").fg(Color::Indexed(8))).child(
+                interactive(label("Clickable Label (hover to see)").fg(Color::Blue))
+                    .on_click(|| Message::LabelClicked)
+                    .on_hover(|| Message::LabelHovered),
+            ),
         )
         .child(label(""))
         // Example 2: Clickable box with border
         .child(
-            row()
-                .gap(2)
-                .child(label("2.").fg(Color::Indexed(8)))
-                .child(
-                    interactive(
-                        col()
-                            .border(BorderStyle::Single)
-                            .padding(Padding::uniform(1))
-                            .child(label("Entire box is clickable"))
-                            .child(label("Click anywhere inside"))
-                            .style(Style::default().bg(Color::Indexed(236))),
-                    )
-                    .on_click(|| Message::BoxClicked),
-                ),
+            row().gap(2).child(label("2.").fg(Color::Indexed(8))).child(
+                interactive(
+                    col()
+                        .border(BorderStyle::Single)
+                        .padding(Padding::uniform(1))
+                        .child(label("Entire box is clickable"))
+                        .child(label("Click anywhere inside"))
+                        .style(Style::default().bg(Color::Indexed(236))),
+                )
+                .on_click(|| Message::BoxClicked),
+            ),
         )
         .child(label(""))
         // Example 3: Press and release events
         .child(
-            row()
-                .gap(2)
-                .child(label("3.").fg(Color::Indexed(8)))
-                .child(
-                    interactive(
-                        label("Press and Release Demo")
-                            .fg(Color::Magenta)
-                            .style(Style::default().bg(Color::Indexed(237))),
-                    )
-                    .on_press(|| Message::ButtonPressed)
-                    .on_release(|| Message::ButtonReleased),
-                ),
+            row().gap(2).child(label("3.").fg(Color::Indexed(8))).child(
+                interactive(
+                    label("Press and Release Demo")
+                        .fg(Color::Magenta)
+                        .style(Style::default().bg(Color::Indexed(237))),
+                )
+                .on_press(|| Message::ButtonPressed)
+                .on_release(|| Message::ButtonReleased),
+            ),
         )
         .child(label(""))
         // Example 4: Multiple clickable cards in a row

@@ -3,6 +3,7 @@
 use super::*;
 use crate::event::{Event, KeyCode, MouseButton, MouseEventKind};
 use crate::style::{Style, ThemeManager};
+use crate::widget::common::{StyleManager, WidgetState};
 use std::sync::Arc;
 
 /// Interactive checkbox widget
@@ -26,10 +27,7 @@ use std::sync::Arc;
 pub struct Checkbox<M = ()> {
     label: String,
     checked: bool,
-    custom_style: Option<Style>,
-    custom_focus_style: Option<Style>,
-    disabled: bool,
-    focused: bool,
+    state: WidgetState,
     on_change: Option<Arc<dyn Fn(bool) -> M + Send + Sync>>,
 }
 
@@ -38,10 +36,7 @@ impl<M> std::fmt::Debug for Checkbox<M> {
         f.debug_struct("Checkbox")
             .field("label", &self.label)
             .field("checked", &self.checked)
-            .field("custom_style", &self.custom_style)
-            .field("custom_focus_style", &self.custom_focus_style)
-            .field("disabled", &self.disabled)
-            .field("focused", &self.focused)
+            .field("state", &self.state)
             .field("on_change", &self.on_change.is_some())
             .finish()
     }
@@ -60,10 +55,7 @@ impl<M> Checkbox<M> {
         Self {
             label: label.into(),
             checked: false,
-            custom_style: None,
-            custom_focus_style: None,
-            disabled: false,
-            focused: false,
+            state: WidgetState::new(),
             on_change: None,
         }
     }
@@ -117,7 +109,7 @@ impl<M> Checkbox<M> {
     ///     .disabled(true);
     /// ```
     pub fn disabled(mut self, disabled: bool) -> Self {
-        self.disabled = disabled;
+        self.state.set_disabled(disabled);
         self
     }
 
@@ -132,7 +124,7 @@ impl<M> Checkbox<M> {
     ///     .style(Style::default().fg(Color::Cyan));
     /// ```
     pub fn style(mut self, style: Style) -> Self {
-        self.custom_style = Some(style);
+        self.state = self.state.with_style(style);
         self
     }
 
@@ -147,40 +139,13 @@ impl<M> Checkbox<M> {
     ///     .focus_style(Style::default().fg(Color::Cyan).bold());
     /// ```
     pub fn focus_style(mut self, style: Style) -> Self {
-        self.custom_focus_style = Some(style);
+        self.state = self.state.with_focus_style(style);
         self
     }
 
     /// Get the effective style based on current state
     fn get_style(&self) -> Style {
-        // Get base theme style based on state
-        let base_style = ThemeManager::global().with_theme(|theme| {
-            // Disabled state takes priority
-            if self.disabled {
-                return theme.styles.disabled;
-            }
-
-            // Focused state
-            if self.focused {
-                return theme.styles.interactive_focused;
-            }
-
-            // Normal state
-            theme.styles.interactive
-        });
-
-        // If custom focus style is provided and checkbox is focused, use it
-        if self.focused {
-            if let Some(ref focus_style) = self.custom_focus_style {
-                return focus_style.merge(base_style);
-            }
-        }
-
-        // Merge custom style if provided (custom style takes precedence)
-        self.custom_style
-            .as_ref()
-            .map(|s| s.merge(base_style))
-            .unwrap_or(base_style)
+        StyleManager::interactive_style(&self.state)
     }
 
     /// Toggle the checked state and emit change event
@@ -209,7 +174,7 @@ impl<M: Send + Sync> Widget<M> for Checkbox<M> {
         let checkbox_symbol = if self.checked { "[✓]" } else { "[ ]" };
 
         // Use success color (green) for checked checkbox to make it stand out
-        let checkbox_style = if self.checked && !self.disabled {
+        let checkbox_style = if self.checked && !self.state.is_disabled() {
             ThemeManager::global().with_theme(|theme| {
                 Style::default()
                     .fg(theme.colors.success)
@@ -227,7 +192,7 @@ impl<M: Send + Sync> Widget<M> for Checkbox<M> {
         // When focused, make the label text more prominent with color
         if !self.label.is_empty() {
             let label_x = 4; // Position after "[X] "
-            let label_style = if self.focused && !self.disabled {
+            let label_style = if self.state.is_focused() && !self.state.is_disabled() {
                 // Use info color (blue/cyan) and bold when focused to make it stand out
                 ThemeManager::global().with_theme(|theme| {
                     Style::default()
@@ -244,7 +209,7 @@ impl<M: Send + Sync> Widget<M> for Checkbox<M> {
 
     fn handle_event(&mut self, event: &Event) -> EventResult<M> {
         // Disabled checkboxes don't handle events
-        if self.disabled {
+        if self.state.is_disabled() {
             return EventResult::Ignored;
         }
 
@@ -262,15 +227,10 @@ impl<M: Send + Sync> Widget<M> for Checkbox<M> {
             }
 
             // Mouse events
-            Event::Mouse(mouse_event) => {
-                match mouse_event.kind {
-                    MouseEventKind::Down(MouseButton::Left) => {
-                        let messages = self.toggle();
-                        return EventResult::Consumed(messages);
-                    }
-                    _ => {}
-                }
-            }
+            Event::Mouse(mouse_event) => if let MouseEventKind::Down(MouseButton::Left) = mouse_event.kind {
+                let messages = self.toggle();
+                return EventResult::Consumed(messages);
+            },
 
             _ => {}
         }
@@ -298,15 +258,15 @@ impl<M: Send + Sync> Widget<M> for Checkbox<M> {
 
     fn focusable(&self) -> bool {
         // Checkboxes are focusable unless disabled
-        !self.disabled
+        self.state.is_focusable()
     }
 
     fn is_focused(&self) -> bool {
-        self.focused
+        self.state.is_focused()
     }
 
     fn set_focused(&mut self, focused: bool) {
-        self.focused = focused;
+        self.state.set_focused(focused);
     }
 }
 

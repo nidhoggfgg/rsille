@@ -2,22 +2,24 @@
 
 mod into_widget;
 
+// Common widget utilities
+pub mod common;
+
 // Widget implementations
 mod button;
 mod checkbox;
 mod checkbox_group;
-mod interactive;
 mod keyboard_controller;
 mod label;
 mod list;
 mod radio;
 mod select;
 mod text_input;
+mod wrapper;
 
 pub use button::{button, Button, ButtonVariant};
 pub use checkbox::{checkbox, Checkbox};
 pub use checkbox_group::{checkbox_group, CheckboxDirection, CheckboxGroup};
-pub use interactive::{interactive, Interactive};
 pub use into_widget::IntoWidget;
 pub use keyboard_controller::{keyboard_controller, KeyboardController};
 pub use label::{label, Label};
@@ -25,6 +27,7 @@ pub use list::{list, List, ListItem, SelectionEvent, SelectionMode};
 pub use radio::{radio_group, RadioDirection, RadioGroup};
 pub use select::{select, Select, SelectEvent, SelectItem};
 pub use text_input::{text_input, TextInput, TextInputVariant};
+pub use wrapper::{interactive, Interactive};
 
 use crate::event::{Event, EventResult};
 use crate::layout::Constraints;
