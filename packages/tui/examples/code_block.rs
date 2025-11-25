@@ -1,7 +1,7 @@
 //! CodeBlock Example
 //!
 //! Demonstrates syntax highlighting for various programming languages,
-//! line highlighting, and git diff-style markers.
+//! line highlighting, git diff-style markers, and border styles.
 //!
 //! Run with: cargo run --example code_block
 
@@ -13,6 +13,8 @@ struct State {
     rust_code: String,
     javascript_code: String,
     snippet_code: String,
+    no_border_code: String,
+    theme_bg_code: String,
 }
 
 /// No messages needed for this static example
@@ -29,47 +31,89 @@ fn view(state: &State) -> Container<Message> {
         .padding(Padding::new(0, 2, 1, 1))
         .child(label("Code Highlighting Demo").fg(Color::Cyan).bold())
         .child(label("Press Esc to quit").fg(Color::Indexed(8)))
-        // Rust code example with line numbers and highlighted lines
         .child(
-            label("Rust Example (with line highlighting on lines 3-5):")
-                .fg(Color::Green)
-                .bold(),
-        )
-        .child(
-            code_block(&state.rust_code)
-                .language("rust")
-                .show_line_numbers(true)
-                .highlight_lines(vec![3, 4, 5])
-                .theme("Solarized (dark)"),
-        )
-        // JavaScript code example with git diff markers
-        .child(
-            label("JavaScript Example (with git diff markers):")
-                .fg(Color::Magenta)
-                .bold(),
-        )
-        .child(
-            code_block(&state.javascript_code)
-                .language("javascript")
-                .show_line_numbers(true)
-                .line_added(2)
-                .line_added(6)
-                .line_deleted(4)
-                .theme("Solarized (dark)"),
-        )
-        // Code snippet example (starting from line 48)
-        .child(
-            label("Code Snippet Example (lines 48-52 with highlight):")
-                .fg(Color::Blue)
-                .bold(),
-        )
-        .child(
-            code_block(&state.snippet_code)
-                .language("rust")
-                .show_line_numbers(true)
-                .start_line(48)
-                .highlight_line(49)
-                .theme("Solarized (dark)"),
+            row()
+                .gap(2)
+                .child(
+                    // Left column
+                    col()
+                        .gap(1)
+                        // Rust code example with line numbers and highlighted lines
+                        .child(
+                            label("Rust Example (Rounded border):")
+                                .fg(Color::Green)
+                                .bold(),
+                        )
+                        .child(
+                            code_block(&state.rust_code)
+                                .language("rust")
+                                .show_line_numbers(true)
+                                .highlight_lines(vec![3, 4, 5])
+                                .theme("Solarized (dark)"),
+                        )
+                        // JavaScript code example with git diff markers
+                        .child(
+                            label("JavaScript (Single border, git diff):")
+                                .fg(Color::Magenta)
+                                .bold(),
+                        )
+                        .child(
+                            code_block(&state.javascript_code)
+                                .language("javascript")
+                                .show_line_numbers(true)
+                                .line_added(2)
+                                .line_added(6)
+                                .line_deleted(4)
+                                .border(BorderStyle::Single)
+                                .theme("Solarized (dark)"),
+                        )
+                )
+                .child(
+                    // Right column
+                    col()
+                        .gap(1)
+                        // Code snippet example
+                        .child(
+                            label("Code Snippet (Double border):")
+                                .fg(Color::Blue)
+                                .bold(),
+                        )
+                        .child(
+                            code_block(&state.snippet_code)
+                                .language("rust")
+                                .show_line_numbers(true)
+                                .start_line(48)
+                                .highlight_line(49)
+                                .border(BorderStyle::Double)
+                                .theme("Solarized (dark)"),
+                        )
+                        // No border example
+                        .child(
+                            label("No Border Example:")
+                                .fg(Color::Yellow)
+                                .bold(),
+                        )
+                        .child(
+                            code_block(&state.no_border_code)
+                                .language("rust")
+                                .show_line_numbers(true)
+                                .border(BorderStyle::None)
+                                .theme("Solarized (dark)"),
+                        )
+                        // TUI theme background example
+                        .child(
+                            label("TUI Theme Background:")
+                                .fg(Color::Cyan)
+                                .bold(),
+                        )
+                        .child(
+                            code_block(&state.theme_bg_code)
+                                .language("rust")
+                                .show_line_numbers(true)
+                                .use_theme_background(true)
+                                .theme("Solarized (dark)"),
+                        )
+                )
         )
 }
 
@@ -101,10 +145,22 @@ console.log("Squared:", squared);"#;
     Ok(result)
 }"#;
 
+    let no_border_code = r#"fn add(a: i32, b: i32) -> i32 {
+    a + b
+}"#;
+
+    let theme_bg_code = r#"struct User {
+    name: String,
+    email: String,
+    active: bool,
+}"#;
+
     let app = App::new(State {
         rust_code: rust_code.to_string(),
         javascript_code: javascript_code.to_string(),
         snippet_code: snippet_code.to_string(),
+        no_border_code: no_border_code.to_string(),
+        theme_bg_code: theme_bg_code.to_string(),
     });
 
     app.run_inline(update, view)?;

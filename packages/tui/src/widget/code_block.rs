@@ -1,7 +1,8 @@
 //! CodeBlock widget - syntax highlighted code display
 
 use super::*;
-use crate::style::{Color, Style};
+use crate::layout::border_renderer;
+use crate::style::{BorderStyle, Color, Style, ThemeManager};
 use once_cell::sync::Lazy;
 use std::collections::{HashMap, HashSet};
 use syntect::easy::HighlightLines;
@@ -36,6 +37,8 @@ pub struct CodeBlock<M = ()> {
     highlighted_lines: HashSet<usize>,
     line_markers: HashMap<usize, LineMarker>,
     start_line: usize,
+    border: Option<BorderStyle>,
+    use_theme_background: bool,
     _phantom: std::marker::PhantomData<M>,
 }
 
@@ -57,6 +60,8 @@ impl<M> CodeBlock<M> {
             highlighted_lines: HashSet::new(),
             line_markers: HashMap::new(),
             start_line: 1,
+            border: Some(BorderStyle::Rounded),
+            use_theme_background: false,
             _phantom: std::marker::PhantomData,
         }
     }
@@ -82,6 +87,46 @@ impl<M> CodeBlock<M> {
     /// "base16-mocha.dark", "base16-ocean.light", "InspiredGitHub", etc.
     pub fn theme(mut self, theme_name: impl Into<String>) -> Self {
         self.theme_name = theme_name.into();
+        self
+    }
+
+    /// Set the border style
+    ///
+    /// # Examples
+    /// ```
+    /// use tui::widget::CodeBlock;
+    /// use tui::style::BorderStyle;
+    ///
+    /// let code = CodeBlock::new("fn main() {}")
+    ///     .border(BorderStyle::Single);  // Use single line border
+    ///
+    /// let no_border = CodeBlock::new("fn main() {}")
+    ///     .border(BorderStyle::None);    // Disable border
+    /// ```
+    pub fn border(mut self, border: BorderStyle) -> Self {
+        self.border = match border {
+            BorderStyle::None => None,
+            other => Some(other),
+        };
+        self
+    }
+
+    /// Use TUI theme background instead of syntect theme background
+    ///
+    /// By default, code blocks use the background color from the syntect theme.
+    /// When set to true, code blocks will use the TUI framework's theme background
+    /// color instead, making them blend better with the overall UI.
+    ///
+    /// # Examples
+    /// ```
+    /// use tui::widget::CodeBlock;
+    ///
+    /// let code = CodeBlock::new("fn main() {}")
+    ///     .language("rust")
+    ///     .use_theme_background(true);  // Use TUI theme background
+    /// ```
+    pub fn use_theme_background(mut self, use_theme: bool) -> Self {
+        self.use_theme_background = use_theme;
         self
     }
 
@@ -316,6 +361,17 @@ impl<M: Send + Sync> Widget<M> for CodeBlock<M> {
             return;
         }
 
+        // Calculate offset and available size (account for border if present)
+        let (x_offset, y_offset, available_width, available_height) = if self.border.is_some() {
+            // Border takes 1 cell on each side
+            if area.width() < 2 || area.height() < 2 {
+                return; // Not enough space for border
+            }
+            (1u16, 1u16, area.width() - 2, area.height() - 2)
+        } else {
+            (0u16, 0u16, area.width(), area.height())
+        };
+
         let syntax = self.find_syntax();
         let theme = self.get_theme();
         let mut highlighter = HighlightLines::new(syntax, theme);
@@ -323,10 +379,20 @@ impl<M: Send + Sync> Widget<M> for CodeBlock<M> {
         let line_num_width = self.line_number_width();
         // Check if we need to show diff markers at all
         let has_diff_markers = !self.line_markers.is_empty();
+        // Get background color for normal lines
+        let theme_bg = if self.use_theme_background {
+            // Use TUI theme background
+            ThemeManager::global().with_theme(|theme| theme.colors.background)
+        } else {
+            // Use syntect theme background
+            Self::syntect_to_color(theme.settings.background.unwrap_or(
+                syntect::highlighting::Color { r: 0, g: 0, b: 0, a: 255 }
+            ))
+        };
         let mut y = 0u16;
 
         for (line_idx, line) in LinesWithEndings::from(&self.content).enumerate() {
-            if y >= area.height() {
+            if y >= available_height {
                 break;
             }
 
@@ -344,19 +410,20 @@ impl<M: Send + Sync> Widget<M> for CodeBlock<M> {
                     if is_highlighted {
                         (Some(Color::Rgb(40, 40, 40)), " ")
                     } else {
-                        (None, " ")
+                        // Use theme background color for normal lines
+                        (Some(theme_bg), " ")
                     }
                 }
             };
 
             // Render line number if enabled
             if self.show_line_numbers {
-                let line_num = format!("{:>width$} │", line_number, width = line_num_width - 3);
+                let line_num = format!("{:>width$} │ ", line_number, width = line_num_width - 3);
                 let mut line_num_style = Style::default().fg(Color::Rgb(100, 100, 100));
                 if let Some(bg) = bg_color {
                     line_num_style = line_num_style.bg(bg);
                 }
-                let _ = chunk.set_string(x, y, &line_num, line_num_style.to_render_style());
+                let _ = chunk.set_string(x_offset + x, y_offset + y, &line_num, line_num_style.to_render_style());
                 x += line_num_width as u16;
             }
 
@@ -371,10 +438,10 @@ impl<M: Send + Sync> Widget<M> for CodeBlock<M> {
                 } else if let Some(LineMarker::Deleted) = line_marker {
                     prefix_style = prefix_style.fg(Color::Red);
                 }
-                let _ = chunk.set_string(x, y, diff_prefix, prefix_style.to_render_style());
+                let _ = chunk.set_string(x_offset + x, y_offset + y, diff_prefix, prefix_style.to_render_style());
                 x += 1;
                 // Add a space after the marker
-                let _ = chunk.set_string(x, y, " ", prefix_style.to_render_style());
+                let _ = chunk.set_string(x_offset + x, y_offset + y, " ", prefix_style.to_render_style());
                 x += 1;
             }
 
@@ -391,19 +458,28 @@ impl<M: Send + Sync> Widget<M> for CodeBlock<M> {
 
                         // Remove trailing newline for rendering
                         let text_to_render = text.trim_end_matches('\n').trim_end_matches('\r');
-                        if !text_to_render.is_empty() {
-                            let _ = chunk.set_string(x, y, text_to_render, render_style);
-                            x += text_to_render.len() as u16;
+                        if !text_to_render.is_empty() && x < available_width {
+                            // Limit text to not exceed available width
+                            let max_chars = (available_width - x) as usize;
+                            let text_slice = if text_to_render.len() > max_chars {
+                                &text_to_render[..max_chars]
+                            } else {
+                                text_to_render
+                            };
+                            let _ = chunk.set_string(x_offset + x, y_offset + y, text_slice, render_style);
+                            x += text_slice.len() as u16;
                         }
                     }
 
                     // Fill rest of line with background color if needed
                     if let Some(bg) = bg_color {
-                        let remaining_width = area.width().saturating_sub(x);
-                        if remaining_width > 0 {
-                            let fill = " ".repeat(remaining_width as usize);
-                            let fill_style = Style::default().bg(bg).to_render_style();
-                            let _ = chunk.set_string(x, y, &fill, fill_style);
+                        if x < available_width {
+                            let fill_width = available_width - x;
+                            if fill_width > 0 {
+                                let fill = " ".repeat(fill_width as usize);
+                                let fill_style = Style::default().bg(bg).to_render_style();
+                                let _ = chunk.set_string(x_offset + x, y_offset + y, &fill, fill_style);
+                            }
                         }
                     }
                 }
@@ -414,22 +490,46 @@ impl<M: Send + Sync> Widget<M> for CodeBlock<M> {
                     if let Some(bg) = bg_color {
                         fallback_style = fallback_style.bg(bg);
                     }
-                    let _ = chunk.set_string(x, y, text, fallback_style.to_render_style());
 
-                    // Fill rest of line with background color if needed
-                    if let Some(bg) = bg_color {
-                        let text_width = text.len() as u16;
-                        let remaining_width = area.width().saturating_sub(x + text_width);
-                        if remaining_width > 0 {
-                            let fill = " ".repeat(remaining_width as usize);
-                            let fill_style = Style::default().bg(bg).to_render_style();
-                            let _ = chunk.set_string(x + text_width, y, &fill, fill_style);
+                    if x < available_width {
+                        // Limit text to not exceed available width
+                        let max_chars = (available_width - x) as usize;
+                        let text_slice = if text.len() > max_chars {
+                            &text[..max_chars]
+                        } else {
+                            text
+                        };
+                        let _ = chunk.set_string(x_offset + x, y_offset + y, text_slice, fallback_style.to_render_style());
+                        let text_width = text_slice.len() as u16;
+
+                        // Fill rest of line with background color if needed
+                        if let Some(bg) = bg_color {
+                            let new_x = x + text_width;
+                            if new_x < available_width {
+                                let fill_width = available_width - new_x;
+                                if fill_width > 0 {
+                                    let fill = " ".repeat(fill_width as usize);
+                                    let fill_style = Style::default().bg(bg).to_render_style();
+                                    let _ = chunk.set_string(x_offset + new_x, y_offset + y, &fill, fill_style);
+                                }
+                            }
                         }
                     }
                 }
             }
 
             y += 1;
+        }
+
+        // Render border last with theme background to cover any overflow
+        if let Some(border_style) = self.border {
+            let border_color = ThemeManager::global()
+                .with_theme(|theme| theme.colors.border);
+            // Use theme surface background for border to avoid code background bleeding through
+            let border_bg = ThemeManager::global()
+                .with_theme(|theme| theme.colors.background);
+            let border_style_obj = Style::default().fg(border_color).bg(border_bg);
+            border_renderer::render_border(chunk, border_style, border_style_obj.to_render_style());
         }
     }
 
@@ -452,14 +552,23 @@ impl<M: Send + Sync> Widget<M> for CodeBlock<M> {
             .max()
             .unwrap_or(0);
 
-        let total_width = (line_num_width + max_width) as u16;
-        let height = line_count as u16;
+        // Account for diff markers if any
+        let diff_marker_width = if !self.line_markers.is_empty() { 2 } else { 0 };
+
+        let content_width = (line_num_width + diff_marker_width + max_width) as u16;
+        let content_height = line_count as u16;
+
+        // Add border space if border is present (2 cells total: 1 on each side)
+        let border_offset = if self.border.is_some() { 2 } else { 0 };
+
+        let total_width = content_width + border_offset;
+        let total_height = content_height + border_offset;
 
         Constraints {
             min_width: total_width,
             max_width: Some(total_width),
-            min_height: height,
-            max_height: Some(height),
+            min_height: total_height,
+            max_height: Some(total_height),
             flex: None,
         }
     }
