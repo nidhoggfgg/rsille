@@ -7,8 +7,7 @@ use crate::style::{Style, ThemeManager};
 use std::sync::Arc;
 
 /// Radio group layout direction
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum RadioDirection {
     /// Vertical layout (options stacked vertically)
     #[default]
@@ -16,7 +15,6 @@ pub enum RadioDirection {
     /// Horizontal layout (options arranged horizontally)
     Horizontal,
 }
-
 
 /// Interactive radio button group widget
 ///
@@ -463,8 +461,7 @@ impl<M: Send + Sync> Widget<M> for RadioGroup<M> {
                                 let space_width = 1;
                                 let label_width = option.width() as u16;
                                 let gap_width = 2;
-                                let option_total_width =
-                                    radio_width + space_width + label_width;
+                                let option_total_width = radio_width + space_width + label_width;
 
                                 if clicked_col >= current_x
                                     && clicked_col < current_x + option_total_width

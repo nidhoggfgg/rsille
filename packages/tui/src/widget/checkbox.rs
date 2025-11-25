@@ -227,10 +227,12 @@ impl<M: Send + Sync> Widget<M> for Checkbox<M> {
             }
 
             // Mouse events
-            Event::Mouse(mouse_event) => if let MouseEventKind::Down(MouseButton::Left) = mouse_event.kind {
-                let messages = self.toggle();
-                return EventResult::Consumed(messages);
-            },
+            Event::Mouse(mouse_event) => {
+                if let MouseEventKind::Down(MouseButton::Left) = mouse_event.kind {
+                    let messages = self.toggle();
+                    return EventResult::Consumed(messages);
+                }
+            }
 
             _ => {}
         }

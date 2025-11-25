@@ -10,8 +10,7 @@ use std::sync::Arc;
 /// Button style variants
 ///
 /// Different visual styles for buttons based on their semantic purpose.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ButtonVariant {
     /// Primary action button (solid background with primary color)
     #[default]
@@ -26,10 +25,8 @@ pub enum ButtonVariant {
     Destructive,
 }
 
-
 /// Internal button state for interaction
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 enum ButtonState {
     /// Normal state
     #[default]
@@ -39,7 +36,6 @@ enum ButtonState {
     /// Keyboard focus state
     Focused,
 }
-
 
 /// Interactive button widget
 ///

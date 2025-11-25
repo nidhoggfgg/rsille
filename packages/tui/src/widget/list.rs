@@ -23,8 +23,7 @@ pub struct SelectionEvent<T: Clone> {
 }
 
 /// Selection mode for the list
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SelectionMode {
     /// No selection allowed - display only
     None,
@@ -34,7 +33,6 @@ pub enum SelectionMode {
     /// Multiple item selection
     Multiple,
 }
-
 
 /// A single item in the list
 #[derive(Debug, Clone)]

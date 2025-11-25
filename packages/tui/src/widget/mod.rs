@@ -14,6 +14,7 @@ mod label;
 mod list;
 mod radio;
 mod select;
+mod spacer;
 mod text_input;
 mod wrapper;
 
@@ -26,6 +27,7 @@ pub use label::{label, Label};
 pub use list::{list, List, ListItem, SelectionEvent, SelectionMode};
 pub use radio::{radio_group, RadioDirection, RadioGroup};
 pub use select::{select, Select, SelectEvent, SelectItem};
+pub use spacer::{spacer, Spacer};
 pub use text_input::{text_input, TextInput, TextInputVariant};
 pub use wrapper::{interactive, Interactive};
 

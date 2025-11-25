@@ -41,9 +41,9 @@ fn view(state: &State) -> Container<Message> {
                 .fg(Color::Cyan)
                 .bold(),
         )
-        .child(label(""))
+        .child(spacer().height(1))
         .child(label(&state.last_event).fg(Color::Green))
-        .child(label(""))
+        .child(spacer().height(1))
         .child(
             interactive(
                 label(">>> CLICK ME <<<")
@@ -52,7 +52,7 @@ fn view(state: &State) -> Container<Message> {
             )
             .on_click(|| Message::Clicked),
         )
-        .child(label(""))
+        .child(spacer().height(1))
         .child(label("Press 'q' or Esc to quit").fg(Color::Indexed(8)))
         .child(keyboard_controller().on('q', || Message::Quit))
 }

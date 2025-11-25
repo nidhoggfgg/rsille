@@ -118,7 +118,7 @@ fn view(state: &State) -> Container<Message> {
         .padding(Padding::new(1, 2, 1, 2)) // top, right, bottom, left
         // Title
         .child(label("Select Widget Example").style(Style::default().bold()))
-        .child(label(""))
+        .child(spacer().height(1))
         // Fruit selector (Overlay mode - default)
         .child(label("Select your favorite fruit (Overlay Mode):"))
         .child(
@@ -133,7 +133,7 @@ fn view(state: &State) -> Container<Message> {
         } else {
             "No fruit selected yet".to_string()
         }))
-        .child(label(""))
+        .child(spacer().height(1))
         // Country selector (Overlay mode)
         .child(label("Select your country (Overlay Mode):"))
         .child(
@@ -146,7 +146,7 @@ fn view(state: &State) -> Container<Message> {
         } else {
             "No country selected yet".to_string()
         }))
-        .child(label(""))
+        .child(spacer().height(1))
         // Size selector (Inline mode for comparison)
         .child(label("Select a size (Inline Mode):"))
         .child(
@@ -166,7 +166,7 @@ fn view(state: &State) -> Container<Message> {
         } else {
             "No size selected yet".to_string()
         }))
-        .child(label(""))
+        .child(spacer().height(1))
         // Borderless select (NEW feature)
         .child(label("Select a color (Borderless Mode):"))
         .child(
@@ -185,12 +185,12 @@ fn view(state: &State) -> Container<Message> {
         } else {
             "No color selected yet".to_string()
         }))
-        .child(label(""))
+        .child(spacer().height(1))
         .child(label("--- Instructions ---"))
         .child(label("Overlay mode: Dropdown floats above (like web UI)"))
         .child(label("Inline mode: Dropdown pushes content down"))
         .child(label("Borderless mode: Minimal styling without borders"))
-        .child(label(""))
+        .child(spacer().height(1))
         .child(label("Use Tab to navigate between selects"))
         .child(label("Use Enter/Space to open dropdown"))
         .child(label("Use Arrow keys to navigate options"))

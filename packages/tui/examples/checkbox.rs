@@ -80,7 +80,7 @@ fn view(state: &State) -> Container<Message> {
         .gap(1)
         // Header
         .child(label("Checkbox Component Demo").fg(Color::Cyan).bold())
-        .child(label(""))
+        .child(spacer().height(1))
         // Individual checkboxes
         .child(label("Individual Checkboxes:").fg(Color::Green).bold())
         .child(
@@ -93,7 +93,7 @@ fn view(state: &State) -> Container<Message> {
                 .checked(state.subscribe)
                 .on_change(|checked| Message::SubscribeToggled(checked)),
         )
-        .child(label(""))
+        .child(spacer().height(1))
         // Vertical checkbox group
         .child(label("Feature Toggles (Vertical - use Up/Down):").fg(Color::Green).bold())
         .child(
@@ -102,7 +102,7 @@ fn view(state: &State) -> Container<Message> {
                 .focused_index(state.features_focus)
                 .on_change(|index, checked, states| Message::FeaturesChanged(index, checked, states)),
         )
-        .child(label(""))
+        .child(spacer().height(1))
         // Horizontal checkbox group
         .child(label("Quick Options (Horizontal - use Left/Right):").fg(Color::Green).bold())
         .child(
@@ -112,11 +112,11 @@ fn view(state: &State) -> Container<Message> {
                 .focused_index(state.quick_options_focus)
                 .on_change(|index, checked, states| Message::QuickOptionsChanged(index, checked, states)),
         )
-        .child(label(""))
+        .child(spacer().height(1))
         // Disabled example
         .child(label("Disabled:").fg(Color::Indexed(8)))
         .child(checkbox("Disabled option").checked(false).disabled(true))
-        .child(label(""))
+        .child(spacer().height(1))
         // Status display
         .child(
             label(format!(
@@ -143,7 +143,7 @@ fn view(state: &State) -> Container<Message> {
             .fg(Color::Yellow),
         )
         // Footer with instructions
-        .child(label(""))
+        .child(spacer().height(1))
         .child(
             label("Tab: Next option | Up/Down or Left/Right: Navigate group | Enter/Space: Toggle | Esc: Quit")
                 .fg(Color::Indexed(8)),

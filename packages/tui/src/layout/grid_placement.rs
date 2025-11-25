@@ -1,8 +1,7 @@
 //! Grid item placement types
 
 /// Grid line position
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum GridLine {
     /// Start at a specific line number (1-indexed)
     Line(i16),
@@ -10,7 +9,6 @@ pub enum GridLine {
     #[default]
     Auto,
 }
-
 
 impl GridLine {
     /// Parse a grid line from a string

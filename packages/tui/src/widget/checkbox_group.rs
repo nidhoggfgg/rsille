@@ -8,8 +8,7 @@ use crate::widget::common::{SelectableNavigation, StyleManager, WidgetState};
 use std::sync::Arc;
 
 /// Checkbox group layout direction
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CheckboxDirection {
     /// Vertical layout (options stacked vertically)
     #[default]
@@ -17,7 +16,6 @@ pub enum CheckboxDirection {
     /// Horizontal layout (options arranged horizontally)
     Horizontal,
 }
-
 
 /// Interactive checkbox group widget
 ///
@@ -444,8 +442,7 @@ impl<M: Send + Sync> Widget<M> for CheckboxGroup<M> {
                                 let space_width = 1;
                                 let label_width = option.width() as u16;
                                 let gap_width = 2;
-                                let option_total_width =
-                                    checkbox_width + space_width + label_width;
+                                let option_total_width = checkbox_width + space_width + label_width;
 
                                 if clicked_col >= current_x
                                     && clicked_col < current_x + option_total_width
