@@ -301,26 +301,23 @@ impl<M: Clone> Flex<M> {
         self.handle_event_with_focus(event, &[], None)
     }
 
-    /// Handle event with focus information
+    /// Internal helper for event handling with focus routing
     ///
-    /// Routes events based on focus state for keyboard events.
-    ///
-    /// # Arguments
-    /// * `event` - The event to handle
-    /// * `current_path` - Current path in widget tree
-    /// * `focus_path` - Path to the focused widget (if any)
-    pub fn handle_event_with_focus(
+    /// This method contains the core event routing logic used by both
+    /// the public handle_event_with_focus and Layout trait implementation.
+    fn handle_event_internal(
         &mut self,
         event: &Event,
         current_path: &[usize],
         focus_path: Option<&FocusPath>,
+        include_fallback: bool,
     ) -> (EventResult<M>, Vec<M>)
     where
         M: Clone,
     {
         let mut all_messages = Vec::new();
 
-        // For mouse events, use spatial routing (unchanged)
+        // For mouse events, use spatial routing
         if let Event::Mouse(mouse_event) = event {
             let cached_areas = self.cached_child_areas.read().unwrap();
             if !cached_areas.is_empty() {
@@ -370,17 +367,39 @@ impl<M: Clone> Flex<M> {
         }
 
         // Fallback: try each child sequentially (for events not routed by focus)
-        for child in &mut self.children {
-            let result = child.handle_event(event);
-            let messages = result.messages_ref().to_vec();
-            all_messages.extend(messages);
+        if include_fallback {
+            for child in &mut self.children {
+                let result = child.handle_event(event);
+                let messages = result.messages_ref().to_vec();
+                all_messages.extend(messages);
 
-            if result.is_consumed() {
-                return (EventResult::consumed(), all_messages);
+                if result.is_consumed() {
+                    return (EventResult::consumed(), all_messages);
+                }
             }
         }
 
         (EventResult::Ignored, all_messages)
+    }
+
+    /// Handle event with focus information
+    ///
+    /// Routes events based on focus state for keyboard events.
+    ///
+    /// # Arguments
+    /// * `event` - The event to handle
+    /// * `current_path` - Current path in widget tree
+    /// * `focus_path` - Path to the focused widget (if any)
+    pub fn handle_event_with_focus(
+        &mut self,
+        event: &Event,
+        current_path: &[usize],
+        focus_path: Option<&FocusPath>,
+    ) -> (EventResult<M>, Vec<M>)
+    where
+        M: Clone,
+    {
+        self.handle_event_internal(event, current_path, focus_path, true)
     }
 }
 
@@ -678,53 +697,8 @@ impl<M: Clone> Layout<M> for Flex<M> {
         current_path: &[usize],
         focus_path: Option<&FocusPath>,
     ) -> (EventResult<M>, Vec<M>) {
-        let mut all_messages = Vec::new();
-
-        // For mouse events, use spatial routing
-        if let Event::Mouse(mouse_event) = event {
-            let cached_areas = self.cached_child_areas.read().unwrap();
-            if !cached_areas.is_empty() {
-                for (idx, child_area) in cached_areas.iter().enumerate() {
-                    let is_hit = mouse_event.column >= child_area.x()
-                        && mouse_event.column < child_area.x() + child_area.width()
-                        && mouse_event.row >= child_area.y()
-                        && mouse_event.row < child_area.y() + child_area.height();
-
-                    if is_hit {
-                        if let Some(child) = self.children.get_mut(idx) {
-                            let result = child.handle_event(event);
-                            let messages = result.messages_ref().to_vec();
-                            all_messages.extend(messages);
-
-                            if result.is_consumed() {
-                                return (EventResult::consumed(), all_messages);
-                            }
-                        }
-                    }
-                }
-            }
-            return (EventResult::Ignored, all_messages);
-        }
-
-        // For keyboard events, use focus-based routing
-        if let Event::Key(_) = event {
-            if let Some(focus) = focus_path {
-                if focus.starts_with(current_path) && focus.len() > current_path.len() {
-                    let child_idx = focus[current_path.len()];
-
-                    if let Some(child) = self.children.get_mut(child_idx) {
-                        let result = child.handle_event(event);
-                        let messages = result.messages_ref().to_vec();
-                        all_messages.extend(messages);
-
-                        if result.is_consumed() {
-                            return (EventResult::consumed(), all_messages);
-                        }
-                    }
-                }
-            }
-        }
-
-        (EventResult::Ignored, all_messages)
+        // Delegate to internal helper without fallback
+        // Layout trait doesn't need the sequential fallback behavior
+        self.handle_event_internal(event, current_path, focus_path, false)
     }
 }
