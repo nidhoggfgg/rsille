@@ -610,7 +610,7 @@ impl<M: Clone> Widget<M> for Grid<M> {
                 .collect();
 
             // Compute layout using TaffyBridge
-            let areas = bridge.compute_grid_layout_with_placement(
+            let areas = match bridge.compute_grid_layout_with_placement(
                 &items,
                 padded_area,
                 &self.template_columns,
@@ -619,7 +619,13 @@ impl<M: Clone> Widget<M> for Grid<M> {
                 gap_column,
                 self.align_items,
                 self.justify_items,
-            );
+            ) {
+                Ok(areas) => areas,
+                Err(_) => {
+                    // Layout computation failed, cannot render children
+                    return;
+                }
+            };
 
             // Cache the result
             *self.cached_child_areas.write().unwrap() = areas.clone();

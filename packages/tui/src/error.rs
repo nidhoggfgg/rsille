@@ -45,3 +45,9 @@ impl From<std::io::Error> for WidgetError {
         WidgetError::Io(err)
     }
 }
+
+impl From<taffy::TaffyError> for WidgetError {
+    fn from(err: taffy::TaffyError) -> Self {
+        WidgetError::LayoutError(err.to_string())
+    }
+}

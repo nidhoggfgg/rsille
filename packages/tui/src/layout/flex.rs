@@ -436,14 +436,20 @@ impl<M: Clone> Widget<M> for Flex<M> {
 
         // Compute layout using Taffy
         let mut bridge = TaffyBridge::new();
-        let child_areas = bridge.compute_layout(
+        let child_areas = match bridge.compute_layout(
             &self.children,
             inner,
             self.direction,
             self.gap,
             self.align_items,
             self.justify_content,
-        );
+        ) {
+            Ok(areas) => areas,
+            Err(_) => {
+                // Layout computation failed, cannot render children
+                return;
+            }
+        };
 
         // Cache layout info for mouse event handling
         *self.cached_child_areas.write().unwrap() = child_areas.clone();

@@ -4,15 +4,12 @@ use crate::layout::grid_track::GridTrack;
 use crate::layout::Constraints;
 use crate::widget::Widget;
 use render::area::Area;
-use std::cell::RefCell;
 use taffy::prelude::*;
 
-thread_local! {
-    static TAFFY: RefCell<TaffyTree<()>> = RefCell::new(TaffyTree::new());
-}
-
 /// Layout manager using Taffy for flexbox layout
-pub struct TaffyBridge;
+pub struct TaffyBridge {
+    tree: TaffyTree<()>,
+}
 
 impl Default for TaffyBridge {
     fn default() -> Self {
@@ -22,7 +19,9 @@ impl Default for TaffyBridge {
 
 impl TaffyBridge {
     pub fn new() -> Self {
-        Self
+        Self {
+            tree: TaffyTree::new(),
+        }
     }
 
     /// Compute layout for a list of widgets
@@ -34,76 +33,75 @@ impl TaffyBridge {
         gap: u16,
         align_items: Option<AlignItems>,
         justify_content: Option<JustifyContent>,
-    ) -> Vec<Area> {
+    ) -> Result<Vec<Area>, crate::WidgetError> {
         if widgets.is_empty() {
-            return vec![];
+            return Ok(vec![]);
         }
 
-        TAFFY.with(|t| {
-            let mut tree = t.borrow_mut();
-            // Reset tree for new layout calculation
-            // We create a new tree as clearing is not exposed/efficient in this version
-            *tree = TaffyTree::new();
+        // Reset tree for new layout calculation
+        // We create a new tree as clearing is not exposed/efficient in this version
+        self.tree = TaffyTree::new();
 
-            // Create Taffy nodes for each widget
-            let mut nodes = Vec::with_capacity(widgets.len());
-            for widget in widgets {
-                let constraints = widget.constraints();
-                let style = self.constraints_to_style(constraints, direction, align_items);
-                let node = tree.new_leaf(style).unwrap();
-                nodes.push(node);
-            }
+        // Create Taffy nodes for each widget
+        let mut nodes = Vec::with_capacity(widgets.len());
+        for widget in widgets {
+            let constraints = widget.constraints();
+            let style = self.constraints_to_style(constraints, direction, align_items);
+            let node = self.tree.new_leaf(style)?;
+            nodes.push(node);
+        }
 
-            // Create container node
-            let flex_direction = match direction {
-                super::flex::Direction::Vertical => FlexDirection::Column,
-                super::flex::Direction::Horizontal => FlexDirection::Row,
-            };
+        // Create container node
+        let flex_direction = match direction {
+            super::flex::Direction::Vertical => FlexDirection::Column,
+            super::flex::Direction::Horizontal => FlexDirection::Row,
+        };
 
-            let gap_size = gap as f32;
-            let container_style = taffy::Style {
-                display: Display::Flex,
-                flex_direction,
-                align_items,
-                justify_content,
-                gap: taffy::Size {
-                    width: length(gap_size),
-                    height: length(gap_size),
-                },
-                // IMPORTANT: Set the container size to match available space
-                size: taffy::Size {
-                    width: length(available.width() as f32),
-                    height: length(available.height() as f32),
-                },
-                ..Default::default()
-            };
+        let gap_size = gap as f32;
+        let container_style = taffy::Style {
+            display: Display::Flex,
+            flex_direction,
+            align_items,
+            justify_content,
+            gap: taffy::Size {
+                width: length(gap_size),
+                height: length(gap_size),
+            },
+            // IMPORTANT: Set the container size to match available space
+            size: taffy::Size {
+                width: length(available.width() as f32),
+                height: length(available.height() as f32),
+            },
+            ..Default::default()
+        };
 
-            let container = tree.new_with_children(container_style, &nodes).unwrap();
+        let container = self
+            .tree
+            .new_with_children(container_style, &nodes)?;
 
-            // Compute layout
-            let available_size = Size {
-                width: AvailableSpace::Definite(available.width() as f32),
-                height: AvailableSpace::Definite(available.height() as f32),
-            };
+        // Compute layout
+        let available_size = Size {
+            width: AvailableSpace::Definite(available.width() as f32),
+            height: AvailableSpace::Definite(available.height() as f32),
+        };
 
-            tree.compute_layout(container, available_size).unwrap();
+        self.tree.compute_layout(container, available_size)?;
 
-            // Extract computed positions
-            let mut results = Vec::with_capacity(nodes.len());
-            for node in nodes.iter() {
-                let layout = tree.layout(*node).unwrap();
-                results.push(Area::new(
-                    (
-                        available.x() + layout.location.x as u16,
-                        available.y() + layout.location.y as u16,
-                    )
-                        .into(),
-                    (layout.size.width as u16, layout.size.height as u16).into(),
-                ));
-            }
+        // Extract computed positions
+        let mut results = Vec::with_capacity(nodes.len());
+        for node in nodes.iter() {
+            let layout = self.tree.layout(*node)?;
+            results.push(Area::new(
+                (
+                    available.x() + layout.location.x as u16,
+                    available.y() + layout.location.y as u16,
+                )
+                    .into(),
+                (layout.size.width as u16, layout.size.height as u16).into(),
+            ));
+        }
 
-            results
-        })
+        Ok(results)
     }
 
     /// Compute grid layout for a list of widgets with placement information
@@ -117,81 +115,80 @@ impl TaffyBridge {
         gap_column: u16,
         align_items: Option<AlignItems>,
         justify_items: Option<JustifyItems>,
-    ) -> Vec<Area> {
+    ) -> Result<Vec<Area>, crate::WidgetError> {
         if items.is_empty() {
-            return vec![];
+            return Ok(vec![]);
         }
 
-        TAFFY.with(|t| {
-            let mut tree = t.borrow_mut();
-            // Reset tree for new layout calculation
-            *tree = TaffyTree::new();
+        // Reset tree for new layout calculation
+        self.tree = TaffyTree::new();
 
-            // Create Taffy nodes for each widget with placement
-            let mut nodes = Vec::with_capacity(items.len());
-            for (widget, placement) in items {
-                let constraints = widget.constraints();
-                let style = self.constraints_to_grid_style_with_placement(constraints, placement);
-                let node = tree.new_leaf(style).unwrap();
-                nodes.push(node);
-            }
+        // Create Taffy nodes for each widget with placement
+        let mut nodes = Vec::with_capacity(items.len());
+        for (widget, placement) in items {
+            let constraints = widget.constraints();
+            let style = self.constraints_to_grid_style_with_placement(constraints, placement);
+            let node = self.tree.new_leaf(style)?;
+            nodes.push(node);
+        }
 
-            // Convert GridTrack to Taffy track sizing
-            let columns: Vec<TrackSizingFunction> = template_columns
-                .iter()
-                .map(|track| self.grid_track_to_taffy(*track))
-                .collect();
+        // Convert GridTrack to Taffy track sizing
+        let columns: Vec<TrackSizingFunction> = template_columns
+            .iter()
+            .map(|track| self.grid_track_to_taffy(*track))
+            .collect();
 
-            let rows: Vec<TrackSizingFunction> = template_rows
-                .iter()
-                .map(|track| self.grid_track_to_taffy(*track))
-                .collect();
+        let rows: Vec<TrackSizingFunction> = template_rows
+            .iter()
+            .map(|track| self.grid_track_to_taffy(*track))
+            .collect();
 
-            // Create container node with grid layout
-            let container_style = taffy::Style {
-                display: Display::Grid,
-                grid_template_columns: columns.iter().map(|&tsf| tsf.into()).collect(),
-                grid_template_rows: rows.iter().map(|&tsf| tsf.into()).collect(),
-                gap: taffy::Size {
-                    width: length(gap_column as f32),
-                    height: length(gap_row as f32),
-                },
-                align_items,
-                justify_items,
-                // IMPORTANT: Set the container size to match available space
-                size: taffy::Size {
-                    width: length(available.width() as f32),
-                    height: length(available.height() as f32),
-                },
-                ..Default::default()
-            };
+        // Create container node with grid layout
+        let container_style = taffy::Style {
+            display: Display::Grid,
+            grid_template_columns: columns.iter().map(|&tsf| tsf.into()).collect(),
+            grid_template_rows: rows.iter().map(|&tsf| tsf.into()).collect(),
+            gap: taffy::Size {
+                width: length(gap_column as f32),
+                height: length(gap_row as f32),
+            },
+            align_items,
+            justify_items,
+            // IMPORTANT: Set the container size to match available space
+            size: taffy::Size {
+                width: length(available.width() as f32),
+                height: length(available.height() as f32),
+            },
+            ..Default::default()
+        };
 
-            let container = tree.new_with_children(container_style, &nodes).unwrap();
+        let container = self
+            .tree
+            .new_with_children(container_style, &nodes)?;
 
-            // Compute layout
-            let available_size = Size {
-                width: AvailableSpace::Definite(available.width() as f32),
-                height: AvailableSpace::Definite(available.height() as f32),
-            };
+        // Compute layout
+        let available_size = Size {
+            width: AvailableSpace::Definite(available.width() as f32),
+            height: AvailableSpace::Definite(available.height() as f32),
+        };
 
-            tree.compute_layout(container, available_size).unwrap();
+        self.tree.compute_layout(container, available_size)?;
 
-            // Extract computed positions
-            let mut results = Vec::with_capacity(nodes.len());
-            for node in nodes.iter() {
-                let layout = tree.layout(*node).unwrap();
-                results.push(Area::new(
-                    (
-                        available.x() + layout.location.x as u16,
-                        available.y() + layout.location.y as u16,
-                    )
-                        .into(),
-                    (layout.size.width as u16, layout.size.height as u16).into(),
-                ));
-            }
+        // Extract computed positions
+        let mut results = Vec::with_capacity(nodes.len());
+        for node in nodes.iter() {
+            let layout = self.tree.layout(*node)?;
+            results.push(Area::new(
+                (
+                    available.x() + layout.location.x as u16,
+                    available.y() + layout.location.y as u16,
+                )
+                    .into(),
+                (layout.size.width as u16, layout.size.height as u16).into(),
+            ));
+        }
 
-            results
-        })
+        Ok(results)
     }
 
     /// Convert GridTrack to Taffy TrackSizingFunction
@@ -462,8 +459,9 @@ mod tests {
         let widgets: Vec<Box<dyn Widget<()>>> = vec![Box::new(label1), Box::new(label2)];
 
         // Compute layout
-        let results =
-            bridge.compute_layout(&widgets, available, Direction::Vertical, 1, None, None);
+        let results = bridge
+            .compute_layout(&widgets, available, Direction::Vertical, 1, None, None)
+            .expect("Layout computation should succeed");
 
         // Assert reasonable values
         assert!(
@@ -492,14 +490,16 @@ mod tests {
         let available = Area::new((0, 0).into(), (80, 24).into());
 
         // Vertical layout with AlignItems::Center (should not stretch width)
-        let results = bridge.compute_layout(
-            &widgets,
-            available,
-            Direction::Vertical,
-            0,
-            Some(AlignItems::Center),
-            None,
-        );
+        let results = bridge
+            .compute_layout(
+                &widgets,
+                available,
+                Direction::Vertical,
+                0,
+                Some(AlignItems::Center),
+                None,
+            )
+            .expect("Layout computation should succeed");
 
         // Width should be content size (5), not full width (80)
         assert_eq!(
@@ -533,14 +533,16 @@ mod tests {
         let available = Area::new((0, 0).into(), (80, 24).into());
 
         // Vertical layout with AlignItems::Stretch (default)
-        let results = bridge.compute_layout(
-            &widgets,
-            available,
-            Direction::Vertical,
-            0,
-            Some(AlignItems::Stretch),
-            None,
-        );
+        let results = bridge
+            .compute_layout(
+                &widgets,
+                available,
+                Direction::Vertical,
+                0,
+                Some(AlignItems::Stretch),
+                None,
+            )
+            .expect("Layout computation should succeed");
 
         // Width should be full width (80)
         assert_eq!(results[0].width(), 80, "Width should stretch");
@@ -554,14 +556,16 @@ mod tests {
         let available = Area::new((0, 0).into(), (80, 24).into());
 
         // Vertical layout with JustifyContent::Center
-        let results = bridge.compute_layout(
-            &widgets,
-            available,
-            Direction::Vertical,
-            0,
-            None,
-            Some(JustifyContent::Center),
-        );
+        let results = bridge
+            .compute_layout(
+                &widgets,
+                available,
+                Direction::Vertical,
+                0,
+                None,
+                Some(JustifyContent::Center),
+            )
+            .expect("Layout computation should succeed");
 
         // Should be centered vertically
         // Available height 24. Item height 1. Center is around 11/12.
