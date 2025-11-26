@@ -68,7 +68,7 @@ fn update(state: &mut State, msg: Message) {
 }
 
 /// View function - builds the UI
-fn view(state: &State) -> Container<Message> {
+fn view(state: &State) -> impl Layout<Message> {
     let sizes = ["S", "M", "L", "XL"];
     let colors = ["Red", "Green", "Blue", "Yellow"];
     let priorities = ["Low", "Medium", "High"];

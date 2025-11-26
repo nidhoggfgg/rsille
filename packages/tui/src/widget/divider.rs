@@ -255,9 +255,8 @@ impl<M: Send + Sync> Widget<M> for Divider<M> {
         }
 
         // Apply theme: merge explicit style with theme border color
-        let theme_style = ThemeManager::global().with_theme(|theme| {
-            Style::default().fg(theme.colors.border)
-        });
+        let theme_style =
+            ThemeManager::global().with_theme(|theme| Style::default().fg(theme.colors.border));
         let final_style = self.style.merge(theme_style);
 
         // Convert TUI style to render style

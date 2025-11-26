@@ -386,7 +386,12 @@ impl<M: Send + Sync> Widget<M> for CodeBlock<M> {
         } else {
             // Use syntect theme background
             Self::syntect_to_color(theme.settings.background.unwrap_or(
-                syntect::highlighting::Color { r: 0, g: 0, b: 0, a: 255 }
+                syntect::highlighting::Color {
+                    r: 0,
+                    g: 0,
+                    b: 0,
+                    a: 255,
+                },
             ))
         };
         let mut y = 0u16;
@@ -423,7 +428,12 @@ impl<M: Send + Sync> Widget<M> for CodeBlock<M> {
                 if let Some(bg) = bg_color {
                     line_num_style = line_num_style.bg(bg);
                 }
-                let _ = chunk.set_string(x_offset + x, y_offset + y, &line_num, line_num_style.to_render_style());
+                let _ = chunk.set_string(
+                    x_offset + x,
+                    y_offset + y,
+                    &line_num,
+                    line_num_style.to_render_style(),
+                );
                 x += line_num_width as u16;
             }
 
@@ -438,10 +448,20 @@ impl<M: Send + Sync> Widget<M> for CodeBlock<M> {
                 } else if let Some(LineMarker::Deleted) = line_marker {
                     prefix_style = prefix_style.fg(Color::Red);
                 }
-                let _ = chunk.set_string(x_offset + x, y_offset + y, diff_prefix, prefix_style.to_render_style());
+                let _ = chunk.set_string(
+                    x_offset + x,
+                    y_offset + y,
+                    diff_prefix,
+                    prefix_style.to_render_style(),
+                );
                 x += 1;
                 // Add a space after the marker
-                let _ = chunk.set_string(x_offset + x, y_offset + y, " ", prefix_style.to_render_style());
+                let _ = chunk.set_string(
+                    x_offset + x,
+                    y_offset + y,
+                    " ",
+                    prefix_style.to_render_style(),
+                );
                 x += 1;
             }
 
@@ -466,7 +486,12 @@ impl<M: Send + Sync> Widget<M> for CodeBlock<M> {
                             } else {
                                 text_to_render
                             };
-                            let _ = chunk.set_string(x_offset + x, y_offset + y, text_slice, render_style);
+                            let _ = chunk.set_string(
+                                x_offset + x,
+                                y_offset + y,
+                                text_slice,
+                                render_style,
+                            );
                             x += text_slice.len() as u16;
                         }
                     }
@@ -478,7 +503,8 @@ impl<M: Send + Sync> Widget<M> for CodeBlock<M> {
                             if fill_width > 0 {
                                 let fill = " ".repeat(fill_width as usize);
                                 let fill_style = Style::default().bg(bg).to_render_style();
-                                let _ = chunk.set_string(x_offset + x, y_offset + y, &fill, fill_style);
+                                let _ =
+                                    chunk.set_string(x_offset + x, y_offset + y, &fill, fill_style);
                             }
                         }
                     }
@@ -499,7 +525,12 @@ impl<M: Send + Sync> Widget<M> for CodeBlock<M> {
                         } else {
                             text
                         };
-                        let _ = chunk.set_string(x_offset + x, y_offset + y, text_slice, fallback_style.to_render_style());
+                        let _ = chunk.set_string(
+                            x_offset + x,
+                            y_offset + y,
+                            text_slice,
+                            fallback_style.to_render_style(),
+                        );
                         let text_width = text_slice.len() as u16;
 
                         // Fill rest of line with background color if needed
@@ -510,7 +541,12 @@ impl<M: Send + Sync> Widget<M> for CodeBlock<M> {
                                 if fill_width > 0 {
                                     let fill = " ".repeat(fill_width as usize);
                                     let fill_style = Style::default().bg(bg).to_render_style();
-                                    let _ = chunk.set_string(x_offset + new_x, y_offset + y, &fill, fill_style);
+                                    let _ = chunk.set_string(
+                                        x_offset + new_x,
+                                        y_offset + y,
+                                        &fill,
+                                        fill_style,
+                                    );
                                 }
                             }
                         }
@@ -523,11 +559,9 @@ impl<M: Send + Sync> Widget<M> for CodeBlock<M> {
 
         // Render border last with theme background to cover any overflow
         if let Some(border_style) = self.border {
-            let border_color = ThemeManager::global()
-                .with_theme(|theme| theme.colors.border);
+            let border_color = ThemeManager::global().with_theme(|theme| theme.colors.border);
             // Use theme surface background for border to avoid code background bleeding through
-            let border_bg = ThemeManager::global()
-                .with_theme(|theme| theme.colors.background);
+            let border_bg = ThemeManager::global().with_theme(|theme| theme.colors.background);
             let border_style_obj = Style::default().fg(border_color).bg(border_bg);
             border_renderer::render_border(chunk, border_style, border_style_obj.to_render_style());
         }

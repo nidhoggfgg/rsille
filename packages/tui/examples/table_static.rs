@@ -40,10 +40,8 @@ fn main() -> Result<()> {
     ];
 
     let columns = vec![
-        Column::new("Property", |info: &SystemInfo| info.key.clone())
-            .width(ColumnWidth::Flex(1)),
-        Column::new("Value", |info: &SystemInfo| info.value.clone())
-            .width(ColumnWidth::Flex(2)),
+        Column::new("Property", |info: &SystemInfo| info.key.clone()).width(ColumnWidth::Flex(1)),
+        Column::new("Value", |info: &SystemInfo| info.value.clone()).width(ColumnWidth::Flex(2)),
     ];
 
     let app = App::new(());

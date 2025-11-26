@@ -1,10 +1,11 @@
-//! Grid container widget for 2D grid layout
+//! Grid layout widget for 2D grid layout
 
 use render::area::Area;
 
 use super::border_renderer::{render_background, render_border};
 use super::grid_placement::GridPlacement;
 use super::grid_track::GridTrack;
+use super::layout::Layout;
 use super::taffy_bridge::TaffyBridge;
 use super::Overflow;
 use crate::event::{Event, EventResult};
@@ -51,7 +52,7 @@ impl<M> GridItem<M> {
     }
 }
 
-/// Grid container widget that arranges children in a 2D grid
+/// Grid layout widget that arranges children in a 2D grid
 ///
 /// # Examples
 /// ```
@@ -443,7 +444,7 @@ impl<M: Clone> Grid<M> {
                 chain.push(current_path.clone());
             }
 
-            // Recursively build focus chain for nested containers
+            // Recursively build focus chain for nested layouts
             item.widget()
                 .build_focus_chain_recursive(current_path, chain);
 
@@ -460,7 +461,7 @@ impl<M: Clone> Grid<M> {
             let is_focused = focus_path == Some(&child_path);
             item.widget_mut().set_focused(is_focused);
 
-            // Recursively update focus states for nested containers
+            // Recursively update focus states for nested layouts
             item.widget_mut()
                 .update_focus_states_recursive(&child_path, focus_path);
         }
@@ -692,7 +693,7 @@ impl<M: Clone> Widget<M> for Grid<M> {
                 chain.push(current_path.clone());
             }
 
-            // Recursively build focus chain for nested containers
+            // Recursively build focus chain for nested layouts
             item.widget()
                 .build_focus_chain_recursive(current_path, chain);
 
@@ -713,7 +714,7 @@ impl<M: Clone> Widget<M> for Grid<M> {
             let is_focused = focus_path == Some(&child_path);
             item.widget_mut().set_focused(is_focused);
 
-            // Recursively update focus states for nested containers
+            // Recursively update focus states for nested layouts
             item.widget_mut()
                 .update_focus_states_recursive(&child_path, focus_path);
         }
@@ -726,7 +727,98 @@ impl<M> Default for Grid<M> {
     }
 }
 
-/// Create a new grid container (convenience function)
+// Implement Layout trait for Grid
+impl<M: Clone> Layout<M> for Grid<M> {
+    fn build_focus_chain(&self, current_path: &mut Vec<usize>, chain: &mut Vec<FocusPath>) {
+        // Grid itself is not focusable
+        // Recursively traverse children
+        for (idx, item) in self.children.iter().enumerate() {
+            current_path.push(idx);
+
+            if item.widget().focusable() {
+                chain.push(current_path.clone());
+            }
+
+            item.widget()
+                .build_focus_chain_recursive(current_path, chain);
+
+            current_path.pop();
+        }
+    }
+
+    fn update_focus_states(&mut self, current_path: &[usize], focus_path: Option<&FocusPath>) {
+        for (idx, item) in self.children.iter_mut().enumerate() {
+            let mut child_path = current_path.to_vec();
+            child_path.push(idx);
+
+            let is_focused = focus_path == Some(&child_path);
+            item.widget_mut().set_focused(is_focused);
+
+            item.widget_mut()
+                .update_focus_states_recursive(&child_path, focus_path);
+        }
+    }
+
+    fn handle_event_with_focus(
+        &mut self,
+        event: &Event,
+        current_path: &[usize],
+        focus_path: Option<&FocusPath>,
+    ) -> (EventResult<M>, Vec<M>) {
+        let mut all_messages = Vec::new();
+
+        // For mouse events, use spatial routing
+        if let Event::Mouse(mouse_event) = event {
+            let cached_areas = self.cached_child_areas.read().unwrap();
+            if !cached_areas.is_empty() {
+                for (idx, child_area) in cached_areas.iter().enumerate() {
+                    let is_hit = mouse_event.column >= child_area.x()
+                        && mouse_event.column < child_area.x() + child_area.width()
+                        && mouse_event.row >= child_area.y()
+                        && mouse_event.row < child_area.y() + child_area.height();
+
+                    if is_hit {
+                        if let Some(item) = self.children.get_mut(idx) {
+                            let result = item.widget_mut().handle_event(event);
+                            let messages = result.messages_ref().to_vec();
+                            all_messages.extend(messages);
+
+                            if result.is_consumed() {
+                                return (EventResult::consumed(), all_messages);
+                            }
+                        }
+                    }
+                }
+            }
+            return (EventResult::Ignored, all_messages);
+        }
+
+        // For keyboard events, use focus-based routing
+        if let Event::Key(_) = event {
+            if let Some(focus) = focus_path {
+                if focus.starts_with(current_path) && focus.len() > current_path.len() {
+                    let child_idx = focus[current_path.len()];
+
+                    if let Some(item) = self.children.get_mut(child_idx) {
+                        let result = item.widget_mut().handle_event(event);
+                        let messages = result.messages_ref().to_vec();
+                        all_messages.extend(messages);
+
+                        if result.is_consumed() {
+                            return (EventResult::consumed(), all_messages);
+                        }
+                    }
+                }
+            }
+        }
+
+        (EventResult::Ignored, all_messages)
+    }
+}
+
+/// Create a new grid layout
+///
+/// Shorthand for `Grid::new()`.
 ///
 /// # Examples
 /// ```
@@ -737,9 +829,7 @@ impl<M> Default for Grid<M> {
 ///     .rows("auto auto")
 ///     .gap(1)
 ///     .child(label("Top Left"))
-///     .child(label("Top Right"))
-///     .child(label("Bottom Left"))
-///     .child(label("Bottom Right"));
+///     .child(label("Top Right"));
 /// ```
 pub fn grid<M>() -> Grid<M> {
     Grid::new()

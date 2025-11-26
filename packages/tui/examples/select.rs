@@ -89,7 +89,7 @@ fn update(state: &mut State, msg: Message) {
     }
 }
 
-fn view(state: &State) -> Container<Message> {
+fn view(state: &State) -> impl Layout<Message> {
     // Create fruit select items
     let fruit_items = vec![
         SelectItem::new(Fruit::Apple, Fruit::Apple.label()),

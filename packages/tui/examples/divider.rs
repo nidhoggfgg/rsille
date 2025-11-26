@@ -18,7 +18,7 @@ enum Message {}
 fn update(_state: &mut State, _msg: Message) {}
 
 /// View function - demonstrates divider usage
-fn view(_state: &State) -> Container<Message> {
+fn view(_state: &State) -> impl Layout<Message> {
     col()
         .gap(1)
         // Title

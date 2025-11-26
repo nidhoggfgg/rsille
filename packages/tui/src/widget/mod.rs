@@ -142,3 +142,47 @@ pub trait Widget<M>: Send + Sync {
         // Default: no-op (leaf widgets don't have children)
     }
 }
+
+// Blanket implementation for Box<dyn Widget<M>>
+// This allows widgets to be stored and used as boxed trait objects
+impl<M> Widget<M> for Box<dyn Widget<M>> {
+    fn render(&self, chunk: &mut render::chunk::Chunk) {
+        (**self).render(chunk)
+    }
+
+    fn handle_event(&mut self, event: &Event) -> EventResult<M> {
+        (**self).handle_event(event)
+    }
+
+    fn constraints(&self) -> Constraints {
+        (**self).constraints()
+    }
+
+    fn focusable(&self) -> bool {
+        (**self).focusable()
+    }
+
+    fn is_focused(&self) -> bool {
+        (**self).is_focused()
+    }
+
+    fn set_focused(&mut self, focused: bool) {
+        (**self).set_focused(focused)
+    }
+
+    fn build_focus_chain_recursive(
+        &self,
+        current_path: &mut Vec<usize>,
+        chain: &mut Vec<crate::focus::FocusPath>,
+    ) {
+        (**self).build_focus_chain_recursive(current_path, chain)
+    }
+
+    fn update_focus_states_recursive(
+        &mut self,
+        current_path: &[usize],
+        focus_path: Option<&crate::focus::FocusPath>,
+    ) {
+        (**self).update_focus_states_recursive(current_path, focus_path)
+    }
+}

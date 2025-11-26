@@ -161,7 +161,7 @@ fn get_multi_items() -> Vec<ListItem<Fruit>> {
     ]
 }
 
-fn view_single(state: &State) -> Container<Message> {
+fn view_single(state: &State) -> impl Layout<Message> {
     // Single selection mode
     col()
         .padding(Padding::new(2, 2, 1, 1))
@@ -214,7 +214,7 @@ fn view_single(state: &State) -> Container<Message> {
         )
 }
 
-fn view_multiple(state: &State) -> Container<Message> {
+fn view_multiple(state: &State) -> impl Layout<Message> {
     // Multiple selection mode
     col()
         .padding(Padding::new(2, 2, 1, 1))
@@ -268,11 +268,11 @@ fn view_multiple(state: &State) -> Container<Message> {
         )
 }
 
-fn view(state: &State) -> Container<Message> {
+fn view(state: &State) -> Box<dyn Layout<Message>> {
     if state.show_single {
-        view_single(state)
+        Box::new(view_single(state))
     } else {
-        view_multiple(state)
+        Box::new(view_multiple(state))
     }
 }
 

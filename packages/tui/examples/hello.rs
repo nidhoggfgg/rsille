@@ -21,7 +21,7 @@ enum Message {}
 fn update(_state: &mut State, _msg: Message) {}
 
 /// View function - displays a simple greeting
-fn view(state: &State) -> Container<Message> {
+fn view(state: &State) -> impl Layout<Message> {
     col()
         .gap(1)
         .padding(Padding::new(4, 4, 2, 2))

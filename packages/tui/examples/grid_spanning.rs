@@ -39,7 +39,7 @@ fn update(state: &mut State, msg: Message) {
 }
 
 /// Create a colored panel with text
-fn panel(text: &str, color: Color) -> Container<Message> {
+fn panel(text: &str, color: Color) -> impl Layout<Message> {
     col()
         .border(BorderStyle::Rounded)
         .padding(Padding::new(1, 1, 0, 0))
@@ -48,7 +48,7 @@ fn panel(text: &str, color: Color) -> Container<Message> {
 }
 
 /// Layout 1: Dashboard with header spanning all columns
-fn layout_dashboard() -> Container<Message> {
+fn layout_dashboard() -> impl Layout<Message> {
     col()
         .gap(1)
         .child(
@@ -78,7 +78,7 @@ fn layout_dashboard() -> Container<Message> {
 }
 
 /// Layout 2: Magazine style with featured article
-fn layout_magazine() -> Container<Message> {
+fn layout_magazine() -> impl Layout<Message> {
     col()
         .gap(1)
         .child(
@@ -111,7 +111,7 @@ fn layout_magazine() -> Container<Message> {
 }
 
 /// Layout 3: Complex app layout
-fn layout_complex() -> Container<Message> {
+fn layout_complex() -> impl Layout<Message> {
     col()
         .gap(1)
         .child(label("Layout 3: Complex App Layout").fg(Color::Cyan).bold())
@@ -153,11 +153,11 @@ fn layout_complex() -> Container<Message> {
 }
 
 /// View function - builds the UI
-fn view(state: &State) -> Container<Message> {
-    let layout = match state.layout_type {
-        0 => layout_dashboard(),
-        1 => layout_magazine(),
-        2 => layout_complex(),
+fn view(state: &State) -> impl Layout<Message> {
+    let layout: Box<dyn Widget<Message>> = match state.layout_type {
+        0 => Box::new(layout_dashboard()),
+        1 => Box::new(layout_magazine()),
+        2 => Box::new(layout_complex()),
         _ => unreachable!(),
     };
 

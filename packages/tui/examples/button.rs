@@ -48,7 +48,7 @@ fn update(state: &mut State, msg: Message) {
 }
 
 /// View function - builds the UI
-fn view(state: &State) -> Container<Message> {
+fn view(state: &State) -> impl Layout<Message> {
     col()
         .padding(Padding::new(3, 3, 2, 2))
         .gap(1)

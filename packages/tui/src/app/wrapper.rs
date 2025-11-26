@@ -3,8 +3,7 @@ use render::{area::Size, chunk::Chunk, Draw, DrawErr, Update};
 use crate::{
     event::{Event, KeyCode, KeyModifiers},
     focus::FocusManager,
-    layout::{Container, OverlayManager},
-    widget::Widget,
+    layout::{Layout, OverlayManager},
 };
 
 use super::runtime::App;
@@ -17,7 +16,7 @@ pub struct AppWrapper<State, F, V, M> {
     messages: Vec<M>,
     needs_redraw: bool,
     // Performance optimization: cache widget tree to avoid rebuilding every frame
-    cached_container: Option<Box<Container<M>>>,
+    cached_layout: Option<Box<dyn Layout<M>>>,
     state_changed: bool,
     // Inline mode configuration
     pub(crate) inline_mode: bool,
@@ -30,7 +29,7 @@ pub struct AppWrapper<State, F, V, M> {
 impl<State, F, V, M> AppWrapper<State, F, V, M>
 where
     F: Fn(&mut State, M),
-    V: Fn(&State) -> Container<M>,
+    V: Fn(&State) -> Box<dyn Layout<M>>,
     M: Clone + std::fmt::Debug,
 {
     pub fn new(app: App<State>, update_fn: F, view_fn: V) -> Self {
@@ -40,7 +39,7 @@ where
             view_fn,
             messages: Vec::new(),
             needs_redraw: true,
-            cached_container: None,
+            cached_layout: None,
             state_changed: true, // Start with state_changed=true to build initial tree
             inline_mode: false,
             inline_max_height: 50,
@@ -65,7 +64,7 @@ where
 impl<State, F, V, M> Draw for AppWrapper<State, F, V, M>
 where
     F: Fn(&mut State, M),
-    V: Fn(&State) -> Container<M>,
+    V: Fn(&State) -> Box<dyn Layout<M>>,
     M: Clone + std::fmt::Debug,
 {
     fn draw(&mut self, mut chunk: Chunk) -> std::result::Result<Size, DrawErr> {
@@ -75,9 +74,9 @@ where
         // Rebuild widget tree only when state has changed
         // This preserves internal widget state (like Interactive's pressed state)
         // between events while still rebuilding when app state changes
-        if self.state_changed || self.cached_container.is_none() {
-            let container = (self.view_fn)(&self.app.state);
-            self.cached_container = Some(Box::new(container));
+        if self.state_changed || self.cached_layout.is_none() {
+            let layout = (self.view_fn)(&self.app.state);
+            self.cached_layout = Some(layout);
             self.state_changed = false;
 
             // Build focus chain from widget tree
@@ -91,13 +90,13 @@ where
         let size = chunk.area().size();
 
         // Get reference to cached container for rendering
-        let container = self
-            .cached_container
+        let layout = self
+            .cached_layout
             .as_mut()
-            .expect("Container should be cached after rebuild");
+            .expect("Layout should be cached after rebuild");
 
         // Render the widget tree directly to chunk
-        container.render(&mut chunk);
+        layout.render(&mut chunk);
 
         // Render all overlays on top
         let overlays = OverlayManager::global().take_overlays();
@@ -115,17 +114,17 @@ where
 impl<State, F, V, M> Update for AppWrapper<State, F, V, M>
 where
     F: Fn(&mut State, M),
-    V: Fn(&State) -> Container<M>,
+    V: Fn(&State) -> Box<dyn Layout<M>>,
     M: Clone + std::fmt::Debug,
 {
     fn on_events(
         &mut self,
         events: &[crossterm::event::Event],
     ) -> std::result::Result<(), DrawErr> {
-        // Ensure we have a container (should be cached from draw, but check anyway)
-        if self.cached_container.is_none() {
-            let container = (self.view_fn)(&self.app.state);
-            self.cached_container = Some(Box::new(container));
+        // Ensure we have a layout (should be cached from draw, but check anyway)
+        if self.cached_layout.is_none() {
+            let layout = (self.view_fn)(&self.app.state);
+            self.cached_layout = Some(layout);
             self.rebuild_focus_chain();
         }
 
@@ -135,7 +134,7 @@ where
                 self.state_changed = true;
                 self.needs_redraw = true;
                 // Clear cache to force rebuild with new size
-                self.cached_container = None;
+                self.cached_layout = None;
                 continue;
             }
 
@@ -161,13 +160,13 @@ where
             }
 
             // Route event to widgets with focus information
-            let container = self
-                .cached_container
+            let layout = self
+                .cached_layout
                 .as_mut()
-                .expect("Container should be cached");
+                .expect("Layout should be cached");
 
             let focus_path = self.focus_manager.focus_path();
-            let (_result, messages) = container.handle_event_with_focus(event, &[], focus_path);
+            let (_result, messages) = layout.handle_event_with_focus(event, &[], focus_path);
 
             // Store messages for processing in update()
             let has_messages = !messages.is_empty();
@@ -192,10 +191,10 @@ where
         // If we processed any messages, state has changed
         if had_messages {
             self.state_changed = true;
-            // Rebuild container now so required_size() will see updated tree
-            // This is crucial for inline mode where height is calculated from container constraints
-            let container = (self.view_fn)(&self.app.state);
-            self.cached_container = Some(Box::new(container));
+            // Rebuild layout now so required_size() will see updated tree
+            // This is crucial for inline mode where height is calculated from layout constraints
+            let layout = (self.view_fn)(&self.app.state);
+            self.cached_layout = Some(layout);
             // Rebuild focus chain after state change
             self.rebuild_focus_chain();
             self.update_focus_states();
@@ -210,11 +209,11 @@ where
             return None;
         }
 
-        // Use cached container to calculate required height
-        // At this point, cached_container should reflect current state
+        // Use cached layout to calculate required height
+        // At this point, cached_layout should reflect current state
         // (built during previous draw or initial setup)
-        if let Some(container) = &self.cached_container {
-            let constraints = container.constraints();
+        if let Some(layout) = &self.cached_layout {
+            let constraints = layout.constraints();
             let required_height = constraints.min_height;
             let height = required_height.min(self.inline_max_height);
 
@@ -235,24 +234,24 @@ where
 impl<State, F, V, M> AppWrapper<State, F, V, M>
 where
     F: Fn(&mut State, M),
-    V: Fn(&State) -> Container<M>,
+    V: Fn(&State) -> Box<dyn Layout<M>>,
     M: Clone + std::fmt::Debug,
 {
     /// Rebuild focus chain from current widget tree
     fn rebuild_focus_chain(&mut self) {
-        if let Some(container) = &self.cached_container {
+        if let Some(layout) = &self.cached_layout {
             let mut chain = Vec::new();
             let mut path = Vec::new();
-            container.build_focus_chain(&mut path, &mut chain);
+            layout.build_focus_chain(&mut path, &mut chain);
             self.focus_manager.set_focus_chain(chain);
         }
     }
 
     /// Update focus states in widget tree based on current focus
     fn update_focus_states(&mut self) {
-        if let Some(container) = &mut self.cached_container {
+        if let Some(layout) = &mut self.cached_layout {
             let focus_path = self.focus_manager.focus_path();
-            container.update_focus_states(&[], focus_path);
+            layout.update_focus_states(&[], focus_path);
         }
     }
 }

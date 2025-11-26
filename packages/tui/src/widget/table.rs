@@ -453,7 +453,10 @@ impl<T: Clone, M> Table<T, M> {
         if self.rows.is_empty() {
             return;
         }
-        let next = self.focused_index.map(|i| (i + 1).min(self.rows.len() - 1)).unwrap_or(0);
+        let next = self
+            .focused_index
+            .map(|i| (i + 1).min(self.rows.len() - 1))
+            .unwrap_or(0);
         self.focused_index = Some(next);
         self.ensure_focused_visible();
     }
@@ -543,7 +546,11 @@ impl<T: Clone, M> Table<T, M> {
             }
             SelectionMode::Multiple => {
                 // Toggle: add or remove from selection
-                if let Some(pos) = self.selected_indices.iter().position(|&idx| idx == focused_idx) {
+                if let Some(pos) = self
+                    .selected_indices
+                    .iter()
+                    .position(|&idx| idx == focused_idx)
+                {
                     self.selected_indices.remove(pos);
                 } else {
                     self.selected_indices.push(focused_idx);
@@ -587,31 +594,35 @@ impl<T: Clone, M> Table<T, M> {
 
             let header = self
                 .custom_header_style
-                .unwrap_or(Style::default()
-                    .fg(theme.colors.text)
-                    .bold())
+                .unwrap_or(Style::default().fg(theme.colors.text).bold())
                 .to_render_style();
 
             let focused = self
                 .custom_focus_style
-                .unwrap_or(Style::default()
-                    .fg(theme.colors.text)
-                    .bg(theme.colors.focus_background))
+                .unwrap_or(
+                    Style::default()
+                        .fg(theme.colors.text)
+                        .bg(theme.colors.focus_background),
+                )
                 .to_render_style();
 
             let selected = self
                 .custom_selected_style
-                .unwrap_or(Style::default()
-                    .fg(theme.colors.text)
-                    .bg(theme.colors.primary))
+                .unwrap_or(
+                    Style::default()
+                        .fg(theme.colors.text)
+                        .bg(theme.colors.primary),
+                )
                 .to_render_style();
 
             // Striped style for alternating rows
             let striped = self
                 .custom_striped_style
-                .unwrap_or(Style::default()
-                    .fg(theme.colors.text)
-                    .bg(theme.colors.surface))
+                .unwrap_or(
+                    Style::default()
+                        .fg(theme.colors.text)
+                        .bg(theme.colors.surface),
+                )
                 .to_render_style();
 
             let border = Style::default()
@@ -620,9 +631,7 @@ impl<T: Clone, M> Table<T, M> {
                 .to_render_style();
 
             // Column separator only has foreground color, allowing it to inherit row background
-            let column_separator = Style::default()
-                .fg(theme.colors.border)
-                .to_render_style();
+            let column_separator = Style::default().fg(theme.colors.border).to_render_style();
 
             // Header border uses same style as normal border
             let header_border = border;
@@ -704,7 +713,11 @@ impl<T: Clone + Send + Sync, M: Send + Sync> Widget<M> for Table<T, M> {
             let styles = self.get_styles();
             use unicode_width::UnicodeWidthStr;
             let msg_width = self.empty_message.width() as u16;
-            let x = if width > msg_width { (width - msg_width) / 2 } else { 0 };
+            let x = if width > msg_width {
+                (width - msg_width) / 2
+            } else {
+                0
+            };
             let y = height / 2;
             let _ = chunk.set_string(x, y, &self.empty_message, styles.normal);
             return;
@@ -713,32 +726,51 @@ impl<T: Clone + Send + Sync, M: Send + Sync> Widget<M> for Table<T, M> {
         let styles = self.get_styles();
 
         // For bordered variant, render outer border
-        let (content_x, content_y, content_width, content_height) = if self.variant == TableVariant::Bordered {
-            self.render_border(chunk, width, height, &styles);
-            // Reserve space for borders
-            (1, 1, width.saturating_sub(2), height.saturating_sub(2))
-        } else {
-            (0, 0, width, height)
-        };
+        let (content_x, content_y, content_width, content_height) =
+            if self.variant == TableVariant::Bordered {
+                self.render_border(chunk, width, height, &styles);
+                // Reserve space for borders
+                (1, 1, width.saturating_sub(2), height.saturating_sub(2))
+            } else {
+                (0, 0, width, height)
+            };
 
         // Calculate column widths
-        let scrollbar_width = if self.show_scrollbar && self.rows.len() > self.viewport_height as usize {
-            2
-        } else {
-            0
-        };
-        let computed_widths = self.compute_column_widths(content_width.saturating_sub(scrollbar_width));
+        let scrollbar_width =
+            if self.show_scrollbar && self.rows.len() > self.viewport_height as usize {
+                2
+            } else {
+                0
+            };
+        let computed_widths =
+            self.compute_column_widths(content_width.saturating_sub(scrollbar_width));
 
         let mut y = content_y;
 
         // Render header
         if self.show_header && y < content_y + content_height {
-            self.render_header(chunk, content_x, y, content_width, scrollbar_width, &computed_widths, &styles);
+            self.render_header(
+                chunk,
+                content_x,
+                y,
+                content_width,
+                scrollbar_width,
+                &computed_widths,
+                &styles,
+            );
             y += 1;
 
             // Render header separator (except for Compact variant)
             if self.variant != TableVariant::Compact && y < content_y + content_height {
-                self.render_header_separator(chunk, content_x, y, content_width, scrollbar_width, &computed_widths, &styles);
+                self.render_header_separator(
+                    chunk,
+                    content_x,
+                    y,
+                    content_width,
+                    scrollbar_width,
+                    &computed_widths,
+                    &styles,
+                );
                 y += 1;
             }
         }
@@ -775,7 +807,12 @@ impl<T: Clone + Send + Sync, M: Send + Sync> Widget<M> for Table<T, M> {
                 width.saturating_sub(2)
             };
             let scrollbar_y_start = if self.show_header {
-                content_y + if self.variant != TableVariant::Compact { 2 } else { 1 }
+                content_y
+                    + if self.variant != TableVariant::Compact {
+                        2
+                    } else {
+                        1
+                    }
             } else {
                 content_y
             };
@@ -872,11 +909,12 @@ impl<T: Clone + Send + Sync, M: Send + Sync> Widget<M> for Table<T, M> {
             total_width += 1; // Separator
         }
 
-        let scrollbar_width = if self.show_scrollbar && self.rows.len() > self.viewport_height as usize {
-            2
-        } else {
-            0
-        };
+        let scrollbar_width =
+            if self.show_scrollbar && self.rows.len() > self.viewport_height as usize {
+                2
+            } else {
+                0
+            };
 
         total_width += scrollbar_width;
 
@@ -931,18 +969,38 @@ impl<T: Clone, M> Table<T, M> {
         for x in 1..width.saturating_sub(1) {
             let _ = chunk.set_char(x, 0, border_chars.horizontal, styles.border);
         }
-        let _ = chunk.set_char(width.saturating_sub(1), 0, border_chars.top_right, styles.border);
+        let _ = chunk.set_char(
+            width.saturating_sub(1),
+            0,
+            border_chars.top_right,
+            styles.border,
+        );
 
         // Side borders
         for y in 1..height.saturating_sub(1) {
             let _ = chunk.set_char(0, y, border_chars.vertical, styles.border);
-            let _ = chunk.set_char(width.saturating_sub(1), y, border_chars.vertical, styles.border);
+            let _ = chunk.set_char(
+                width.saturating_sub(1),
+                y,
+                border_chars.vertical,
+                styles.border,
+            );
         }
 
         // Bottom border
-        let _ = chunk.set_char(0, height.saturating_sub(1), border_chars.bottom_left, styles.border);
+        let _ = chunk.set_char(
+            0,
+            height.saturating_sub(1),
+            border_chars.bottom_left,
+            styles.border,
+        );
         for x in 1..width.saturating_sub(1) {
-            let _ = chunk.set_char(x, height.saturating_sub(1), border_chars.horizontal, styles.border);
+            let _ = chunk.set_char(
+                x,
+                height.saturating_sub(1),
+                border_chars.horizontal,
+                styles.border,
+            );
         }
         let _ = chunk.set_char(
             width.saturating_sub(1),
@@ -970,7 +1028,11 @@ impl<T: Clone, M> Table<T, M> {
 
             // Check if we have enough space for this column (and separator if not last)
             let is_last_col = i == self.columns.len() - 1;
-            let needed_width = if is_last_col { col_width } else { col_width + 1 };
+            let needed_width = if is_last_col {
+                col_width
+            } else {
+                col_width + 1
+            };
             if x + needed_width > x_offset + header_width {
                 break;
             }
@@ -1034,7 +1096,9 @@ impl<T: Clone, M> Table<T, M> {
                     }
                 }
 
-                if i < self.columns.len() - 1 && x < x_offset + width.saturating_sub(scrollbar_width) {
+                if i < self.columns.len() - 1
+                    && x < x_offset + width.saturating_sub(scrollbar_width)
+                {
                     let _ = chunk.set_char(x, y, border_chars.cross, styles.border);
                     x += 1;
                 }
@@ -1093,7 +1157,11 @@ impl<T: Clone, M> Table<T, M> {
 
             // Check if we have enough space for this column (and separator if not last)
             let is_last_col = i == self.columns.len() - 1;
-            let needed_width = if is_last_col { col_width } else { col_width + 1 };
+            let needed_width = if is_last_col {
+                col_width
+            } else {
+                col_width + 1
+            };
             if x + needed_width > x_offset + width.saturating_sub(scrollbar_width) {
                 break;
             }
@@ -1159,7 +1227,8 @@ impl<T: Clone, M> Table<T, M> {
             .round() as usize;
 
         let scroll_ratio = self.scroll_offset as f64 / (total_rows - viewport_size).max(1) as f64;
-        let thumb_position = (scroll_ratio * (scrollbar_height - thumb_size) as f64).round() as usize;
+        let thumb_position =
+            (scroll_ratio * (scrollbar_height - thumb_size) as f64).round() as usize;
 
         // Draw scrollbar track
         for y in y_start..y_end {

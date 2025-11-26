@@ -1,5 +1,5 @@
 use crate::style::{Theme, ThemeManager};
-use crate::{layout::Container, widget::Widget, Result, WidgetError};
+use crate::{layout::Layout, Result, WidgetError};
 
 /// Application runtime for managing TUI lifecycle
 #[derive(Debug)]
@@ -26,31 +26,37 @@ impl<State> App<State> {
         self
     }
 
-    pub fn run<M, F, V>(self, update: F, view: V) -> Result<()>
+    pub fn run<M, F, V, L>(self, update: F, view: V) -> Result<()>
     where
         F: Fn(&mut State, M) + Send + Sync + 'static,
-        V: Fn(&State) -> Container<M> + Send + Sync + 'static,
+        V: Fn(&State) -> L + Send + Sync + 'static,
+        L: Layout<M> + 'static,
         M: Clone + std::fmt::Debug + Send + Sync + 'static,
         State: Send + Sync + 'static,
     {
-        self.run_with_options(update, view, false)
+        // Wrap the view function to box the layout trait object
+        let view_wrapper = move |state: &State| -> Box<dyn Layout<M>> { Box::new(view(state)) };
+        self.run_with_options(update, view_wrapper, false)
     }
 
-    pub fn run_inline<M, F, V>(self, update: F, view: V) -> Result<()>
+    pub fn run_inline<M, F, V, L>(self, update: F, view: V) -> Result<()>
     where
         F: Fn(&mut State, M) + Send + Sync + 'static,
-        V: Fn(&State) -> Container<M> + Send + Sync + 'static,
+        V: Fn(&State) -> L + Send + Sync + 'static,
+        L: Layout<M> + 'static,
         M: Clone + std::fmt::Debug + Send + Sync + 'static,
         State: Send + Sync + 'static,
     {
-        self.run_with_options(update, view, true)
+        // Wrap the view function to box the layout trait object
+        let view_wrapper = move |state: &State| -> Box<dyn Layout<M>> { Box::new(view(state)) };
+        self.run_with_options(update, view_wrapper, true)
     }
 
     /// Internal method to run the application with options
     fn run_with_options<M, F, V>(self, update: F, view: V, inline_mode: bool) -> Result<()>
     where
         F: Fn(&mut State, M) + Send + Sync + 'static,
-        V: Fn(&State) -> Container<M> + Send + Sync + 'static,
+        V: Fn(&State) -> Box<dyn Layout<M>> + Send + Sync + 'static,
         M: Clone + std::fmt::Debug + Send + Sync + 'static,
         State: Send + Sync + 'static,
     {
@@ -64,8 +70,8 @@ impl<State> App<State> {
         // This prevents the first frame from occupying excessive space
         let (buffer_height, initial_used_height) = if inline_mode {
             // Call view to get initial widget tree before moving self
-            let container = view(&self.state);
-            let required_height = container.constraints().min_height;
+            let layout = view(&self.state);
+            let required_height = layout.constraints().min_height;
             // Apply the same formula as dynamic resizing
             let used_height = required_height.min(inline_max_height).min(height);
             // Buffer is allocated at max capacity to avoid reallocation
