@@ -697,8 +697,8 @@ impl<M: Clone> Layout<M> for Flex<M> {
         current_path: &[usize],
         focus_path: Option<&FocusPath>,
     ) -> (EventResult<M>, Vec<M>) {
-        // Delegate to internal helper without fallback
-        // Layout trait doesn't need the sequential fallback behavior
-        self.handle_event_internal(event, current_path, focus_path, false)
+        // Delegate to internal helper with fallback enabled
+        // This ensures unfocused widgets like keyboard_controller can still receive events
+        self.handle_event_internal(event, current_path, focus_path, true)
     }
 }

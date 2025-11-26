@@ -818,6 +818,17 @@ impl<M: Clone> Layout<M> for Grid<M> {
             }
         }
 
+        // Fallback: try each child sequentially (for unfocused widgets like keyboard_controller)
+        for item in &mut self.children {
+            let result = item.widget_mut().handle_event(event);
+            let messages = result.messages_ref().to_vec();
+            all_messages.extend(messages);
+
+            if result.is_consumed() {
+                return (EventResult::consumed(), all_messages);
+            }
+        }
+
         (EventResult::Ignored, all_messages)
     }
 }
