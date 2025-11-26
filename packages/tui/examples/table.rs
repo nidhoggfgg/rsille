@@ -105,19 +105,61 @@ fn get_users() -> Vec<User> {
     vec![
         User::new(1, "Alice Johnson", "alice@example.com", "Admin", "Active"),
         User::new(2, "Bob Smith", "bob@example.com", "Developer", "Active"),
-        User::new(3, "Charlie Brown", "charlie@example.com", "Designer", "Away"),
+        User::new(
+            3,
+            "Charlie Brown",
+            "charlie@example.com",
+            "Designer",
+            "Away",
+        ),
         User::new(4, "Diana Prince", "diana@example.com", "Manager", "Active"),
         User::new(5, "Eve Martinez", "eve@example.com", "Developer", "Active"),
-        User::new(6, "Frank Wilson", "frank@example.com", "Developer", "Inactive"),
+        User::new(
+            6,
+            "Frank Wilson",
+            "frank@example.com",
+            "Developer",
+            "Inactive",
+        ),
         User::new(7, "Grace Lee", "grace@example.com", "QA Engineer", "Active"),
         User::new(8, "Henry Davis", "henry@example.com", "DevOps", "Active"),
         User::new(9, "Iris Chen", "iris@example.com", "Data Scientist", "Away"),
-        User::new(10, "Jack Thompson", "jack@example.com", "Developer", "Active"),
-        User::new(11, "Karen White", "karen@example.com", "Product Manager", "Active"),
+        User::new(
+            10,
+            "Jack Thompson",
+            "jack@example.com",
+            "Developer",
+            "Active",
+        ),
+        User::new(
+            11,
+            "Karen White",
+            "karen@example.com",
+            "Product Manager",
+            "Active",
+        ),
         User::new(12, "Leo Garcia", "leo@example.com", "Developer", "Active"),
-        User::new(13, "Mia Robinson", "mia@example.com", "UX Designer", "Active"),
-        User::new(14, "Noah Taylor", "noah@example.com", "Backend Engineer", "Inactive"),
-        User::new(15, "Olivia Anderson", "olivia@example.com", "Frontend Engineer", "Active"),
+        User::new(
+            13,
+            "Mia Robinson",
+            "mia@example.com",
+            "UX Designer",
+            "Active",
+        ),
+        User::new(
+            14,
+            "Noah Taylor",
+            "noah@example.com",
+            "Backend Engineer",
+            "Inactive",
+        ),
+        User::new(
+            15,
+            "Olivia Anderson",
+            "olivia@example.com",
+            "Frontend Engineer",
+            "Active",
+        ),
     ]
 }
 
@@ -127,19 +169,17 @@ fn get_columns() -> Vec<Column<User>> {
         Column::new("Name", |user: &User| user.name.clone()).width(ColumnWidth::Flex(2)),
         Column::new("Email", |user: &User| user.email.clone()).width(ColumnWidth::Flex(3)),
         Column::new("Role", |user: &User| user.role.clone()).width(ColumnWidth::Flex(2)),
-        Column::new("Status", |user: &User| {
-            match user.status.as_str() {
-                "Active" => format!("✓ {}", user.status),
-                "Away" => format!("○ {}", user.status),
-                "Inactive" => format!("✗ {}", user.status),
-                _ => user.status.clone(),
-            }
+        Column::new("Status", |user: &User| match user.status.as_str() {
+            "Active" => format!("✓ {}", user.status),
+            "Away" => format!("○ {}", user.status),
+            "Inactive" => format!("✗ {}", user.status),
+            _ => user.status.clone(),
         })
         .width(ColumnWidth::Fixed(12)),
     ]
 }
 
-fn view(state: &State) -> Container<Message> {
+fn view(state: &State) -> impl Layout<Message> {
     let selection_mode = if state.use_multiple_selection {
         SelectionMode::Multiple
     } else {
@@ -161,15 +201,14 @@ fn view(state: &State) -> Container<Message> {
                 .fg(Color::Cyan)
                 .bold(),
         )
-        .child(
-            label("Press 'M' to toggle selection mode")
-                .fg(Color::Indexed(8)),
-        )
+        .child(label("Press 'M' to toggle selection mode").fg(Color::Indexed(8)))
         .child(spacer().height(1))
         // Instructions
         .child(
-            label("Navigation: ↑/↓, Home/End, PgUp/PgDn | Select: Enter/Space | Scroll: Mouse wheel")
-                .fg(Color::Yellow),
+            label(
+                "Navigation: ↑/↓, Home/End, PgUp/PgDn | Select: Enter/Space | Scroll: Mouse wheel",
+            )
+            .fg(Color::Yellow),
         )
         .child(spacer().height(1))
         // Table
@@ -187,10 +226,7 @@ fn view(state: &State) -> Container<Message> {
         )
         .child(spacer().height(1))
         // Selection display
-        .child(
-            label(&state.selection_text)
-                .fg(Color::Green),
-        )
+        .child(label(&state.selection_text).fg(Color::Green))
         .child(spacer().height(1))
         // Footer
         .child(label("Q or Esc: Quit | M: Toggle mode").fg(Color::Indexed(8)))

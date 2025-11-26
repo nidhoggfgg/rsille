@@ -8,7 +8,7 @@
 //! ```rust
 //! use tui::prelude::*;
 //!
-//! fn view() -> Container<Message> {
+//! fn view() -> impl Layout<Message> {
 //!     ui! {
 //!         col [gap: 1, padding: (2, 2, 1, 1)] {
 //!             label("Title") [fg: Cyan, bold: true],
@@ -29,10 +29,10 @@
 ///
 /// ## Containers
 ///
-/// - `col { ... }` - Vertical container
-/// - `col [attr: value, ...] { ... }` - Container with attributes
-/// - `row { ... }` - Horizontal container
-/// - `grid [columns: "...", rows: "..."] { ... }` - Grid container
+/// - `col { ... }` - Vertical flex layout
+/// - `col [attr: value, ...] { ... }` - Flex layout with attributes
+/// - `row { ... }` - Horizontal flex layout
+/// - `grid [columns: "...", rows: "..."] { ... }` - Grid layout
 ///
 /// ## Widgets
 ///
@@ -42,7 +42,7 @@
 ///
 /// ## Attributes
 ///
-/// ### Container attributes:
+/// ### Flex layout attributes:
 /// - `gap: u16` - Gap between children
 /// - `padding: (u16, u16, u16, u16)` - Padding (top, right, bottom, left)
 /// - `border: BorderStyle` - Border style
@@ -96,26 +96,26 @@ macro_rules! ui {
 
     // ==================== Container: col ====================
     (@element col [$($attrs:tt)*] { $($children:tt)* }) => {{
-        let container = $crate::layout::col();
-        let container = ui!(@apply_container_attrs container, $($attrs)*);
-        ui!(@add_children container; $($children)*)
+        let layout = $crate::layout::col();
+        let layout = ui!(@apply_layout_attrs layout, $($attrs)*);
+        ui!(@add_children layout; $($children)*)
     }};
 
     (@element col { $($children:tt)* }) => {{
-        let container = $crate::layout::col();
-        ui!(@add_children container; $($children)*)
+        let layout = $crate::layout::col();
+        ui!(@add_children layout; $($children)*)
     }};
 
     // ==================== Container: row ====================
     (@element row [$($attrs:tt)*] { $($children:tt)* }) => {{
-        let container = $crate::layout::row();
-        let container = ui!(@apply_container_attrs container, $($attrs)*);
-        ui!(@add_children container; $($children)*)
+        let layout = $crate::layout::row();
+        let layout = ui!(@apply_layout_attrs layout, $($attrs)*);
+        ui!(@add_children layout; $($children)*)
     }};
 
     (@element row { $($children:tt)* }) => {{
-        let container = $crate::layout::row();
-        ui!(@add_children container; $($children)*)
+        let layout = $crate::layout::row();
+        ui!(@add_children layout; $($children)*)
     }};
 
     // ==================== Container: grid ====================
@@ -172,61 +172,61 @@ macro_rules! ui {
 
     // ==================== Add Children (Comma-separated) ====================
     // Base case: no children
-    (@add_children $container:expr;) => {
-        $container
+    (@add_children $layout:expr;) => {
+        $layout
     };
 
     // Trailing comma case
-    (@add_children $container:expr; ,) => {
-        $container
+    (@add_children $layout:expr; ,) => {
+        $layout
     };
 
     // ===== Container elements =====
 
     // col with attributes and children, followed by comma
-    (@add_children $container:expr; col [$($attrs:tt)*] { $($children:tt)* }, $($rest:tt)*) => {
+    (@add_children $layout:expr; col [$($attrs:tt)*] { $($children:tt)* }, $($rest:tt)*) => {
         ui!(@add_children
-            $container.child(ui!(@element col [$($attrs)*] { $($children)* }));
+            $layout.child(ui!(@element col [$($attrs)*] { $($children)* }));
             $($rest)*
         )
     };
 
     // col without attributes, followed by comma
-    (@add_children $container:expr; col { $($children:tt)* }, $($rest:tt)*) => {
+    (@add_children $layout:expr; col { $($children:tt)* }, $($rest:tt)*) => {
         ui!(@add_children
-            $container.child(ui!(@element col { $($children)* }));
+            $layout.child(ui!(@element col { $($children)* }));
             $($rest)*
         )
     };
 
     // row with attributes and children, followed by comma
-    (@add_children $container:expr; row [$($attrs:tt)*] { $($children:tt)* }, $($rest:tt)*) => {
+    (@add_children $layout:expr; row [$($attrs:tt)*] { $($children:tt)* }, $($rest:tt)*) => {
         ui!(@add_children
-            $container.child(ui!(@element row [$($attrs)*] { $($children)* }));
+            $layout.child(ui!(@element row [$($attrs)*] { $($children)* }));
             $($rest)*
         )
     };
 
     // row without attributes, followed by comma
-    (@add_children $container:expr; row { $($children:tt)* }, $($rest:tt)*) => {
+    (@add_children $layout:expr; row { $($children:tt)* }, $($rest:tt)*) => {
         ui!(@add_children
-            $container.child(ui!(@element row { $($children)* }));
+            $layout.child(ui!(@element row { $($children)* }));
             $($rest)*
         )
     };
 
     // grid with attributes and children, followed by comma
-    (@add_children $container:expr; grid [$($attrs:tt)*] { $($children:tt)* }, $($rest:tt)*) => {
+    (@add_children $layout:expr; grid [$($attrs:tt)*] { $($children:tt)* }, $($rest:tt)*) => {
         ui!(@add_children
-            $container.child(ui!(@element grid [$($attrs)*] { $($children)* }));
+            $layout.child(ui!(@element grid [$($attrs)*] { $($children)* }));
             $($rest)*
         )
     };
 
     // grid without attributes, followed by comma
-    (@add_children $container:expr; grid { $($children:tt)* }, $($rest:tt)*) => {
+    (@add_children $layout:expr; grid { $($children:tt)* }, $($rest:tt)*) => {
         ui!(@add_children
-            $container.child(ui!(@element grid { $($children)* }));
+            $layout.child(ui!(@element grid { $($children)* }));
             $($rest)*
         )
     };
@@ -234,73 +234,73 @@ macro_rules! ui {
     // ===== Widget elements =====
 
     // label with attributes, followed by comma
-    (@add_children $container:expr; label($text:expr) [$($attrs:tt)*], $($rest:tt)*) => {
+    (@add_children $layout:expr; label($text:expr) [$($attrs:tt)*], $($rest:tt)*) => {
         ui!(@add_children
-            $container.child(ui!(@element label($text) [$($attrs)*]));
+            $layout.child(ui!(@element label($text) [$($attrs)*]));
             $($rest)*
         )
     };
 
     // label without attributes, followed by comma
-    (@add_children $container:expr; label($text:expr), $($rest:tt)*) => {
+    (@add_children $layout:expr; label($text:expr), $($rest:tt)*) => {
         ui!(@add_children
-            $container.child(ui!(@element label($text)));
+            $layout.child(ui!(@element label($text)));
             $($rest)*
         )
     };
 
     // button with attributes, followed by comma
-    (@add_children $container:expr; button($text:expr) [$($attrs:tt)*], $($rest:tt)*) => {
+    (@add_children $layout:expr; button($text:expr) [$($attrs:tt)*], $($rest:tt)*) => {
         ui!(@add_children
-            $container.child(ui!(@element button($text) [$($attrs)*]));
+            $layout.child(ui!(@element button($text) [$($attrs)*]));
             $($rest)*
         )
     };
 
     // button without attributes, followed by comma
-    (@add_children $container:expr; button($text:expr), $($rest:tt)*) => {
+    (@add_children $layout:expr; button($text:expr), $($rest:tt)*) => {
         ui!(@add_children
-            $container.child(ui!(@element button($text)));
+            $layout.child(ui!(@element button($text)));
             $($rest)*
         )
     };
 
     // checkbox with attributes, followed by comma
-    (@add_children $container:expr; checkbox($label:expr, $checked:expr) [$($attrs:tt)*], $($rest:tt)*) => {
+    (@add_children $layout:expr; checkbox($label:expr, $checked:expr) [$($attrs:tt)*], $($rest:tt)*) => {
         ui!(@add_children
-            $container.child(ui!(@element checkbox($label, $checked) [$($attrs)*]));
+            $layout.child(ui!(@element checkbox($label, $checked) [$($attrs)*]));
             $($rest)*
         )
     };
 
     // checkbox without attributes, followed by comma
-    (@add_children $container:expr; checkbox($label:expr, $checked:expr), $($rest:tt)*) => {
+    (@add_children $layout:expr; checkbox($label:expr, $checked:expr), $($rest:tt)*) => {
         ui!(@add_children
-            $container.child(ui!(@element checkbox($label, $checked)));
+            $layout.child(ui!(@element checkbox($label, $checked)));
             $($rest)*
         )
     };
 
     // text_input with attributes, followed by comma
-    (@add_children $container:expr; text_input($value:expr) [$($attrs:tt)*], $($rest:tt)*) => {
+    (@add_children $layout:expr; text_input($value:expr) [$($attrs:tt)*], $($rest:tt)*) => {
         ui!(@add_children
-            $container.child(ui!(@element text_input($value) [$($attrs)*]));
+            $layout.child(ui!(@element text_input($value) [$($attrs)*]));
             $($rest)*
         )
     };
 
     // text_input without attributes, followed by comma
-    (@add_children $container:expr; text_input($value:expr), $($rest:tt)*) => {
+    (@add_children $layout:expr; text_input($value:expr), $($rest:tt)*) => {
         ui!(@add_children
-            $container.child(ui!(@element text_input($value)));
+            $layout.child(ui!(@element text_input($value)));
             $($rest)*
         )
     };
 
     // Fallback: any expression (for things like keyboard_controller().on(...)), followed by comma
-    (@add_children $container:expr; $expr:expr, $($rest:tt)*) => {
+    (@add_children $layout:expr; $expr:expr, $($rest:tt)*) => {
         ui!(@add_children
-            $container.child($expr);
+            $layout.child($expr);
             $($rest)*
         )
     };
@@ -308,148 +308,148 @@ macro_rules! ui {
     // ===== Last child without trailing comma =====
 
     // col with attributes (last child)
-    (@add_children $container:expr; col [$($attrs:tt)*] { $($children:tt)* }) => {
-        $container.child(ui!(@element col [$($attrs)*] { $($children)* }))
+    (@add_children $layout:expr; col [$($attrs:tt)*] { $($children:tt)* }) => {
+        $layout.child(ui!(@element col [$($attrs)*] { $($children)* }))
     };
 
     // col without attributes (last child)
-    (@add_children $container:expr; col { $($children:tt)* }) => {
-        $container.child(ui!(@element col { $($children)* }))
+    (@add_children $layout:expr; col { $($children:tt)* }) => {
+        $layout.child(ui!(@element col { $($children)* }))
     };
 
     // row with attributes (last child)
-    (@add_children $container:expr; row [$($attrs:tt)*] { $($children:tt)* }) => {
-        $container.child(ui!(@element row [$($attrs)*] { $($children)* }))
+    (@add_children $layout:expr; row [$($attrs:tt)*] { $($children:tt)* }) => {
+        $layout.child(ui!(@element row [$($attrs)*] { $($children)* }))
     };
 
     // row without attributes (last child)
-    (@add_children $container:expr; row { $($children:tt)* }) => {
-        $container.child(ui!(@element row { $($children)* }))
+    (@add_children $layout:expr; row { $($children:tt)* }) => {
+        $layout.child(ui!(@element row { $($children)* }))
     };
 
     // grid with attributes (last child)
-    (@add_children $container:expr; grid [$($attrs:tt)*] { $($children:tt)* }) => {
-        $container.child(ui!(@element grid [$($attrs)*] { $($children)* }))
+    (@add_children $layout:expr; grid [$($attrs:tt)*] { $($children:tt)* }) => {
+        $layout.child(ui!(@element grid [$($attrs)*] { $($children)* }))
     };
 
     // grid without attributes (last child)
-    (@add_children $container:expr; grid { $($children:tt)* }) => {
-        $container.child(ui!(@element grid { $($children)* }))
+    (@add_children $layout:expr; grid { $($children:tt)* }) => {
+        $layout.child(ui!(@element grid { $($children)* }))
     };
 
     // label with attributes (last child)
-    (@add_children $container:expr; label($text:expr) [$($attrs:tt)*]) => {
-        $container.child(ui!(@element label($text) [$($attrs)*]))
+    (@add_children $layout:expr; label($text:expr) [$($attrs:tt)*]) => {
+        $layout.child(ui!(@element label($text) [$($attrs)*]))
     };
 
     // label without attributes (last child)
-    (@add_children $container:expr; label($text:expr)) => {
-        $container.child(ui!(@element label($text)))
+    (@add_children $layout:expr; label($text:expr)) => {
+        $layout.child(ui!(@element label($text)))
     };
 
     // button with attributes (last child)
-    (@add_children $container:expr; button($text:expr) [$($attrs:tt)*]) => {
-        $container.child(ui!(@element button($text) [$($attrs)*]))
+    (@add_children $layout:expr; button($text:expr) [$($attrs:tt)*]) => {
+        $layout.child(ui!(@element button($text) [$($attrs)*]))
     };
 
     // button without attributes (last child)
-    (@add_children $container:expr; button($text:expr)) => {
-        $container.child(ui!(@element button($text)))
+    (@add_children $layout:expr; button($text:expr)) => {
+        $layout.child(ui!(@element button($text)))
     };
 
     // checkbox with attributes (last child)
-    (@add_children $container:expr; checkbox($label:expr, $checked:expr) [$($attrs:tt)*]) => {
-        $container.child(ui!(@element checkbox($label, $checked) [$($attrs)*]))
+    (@add_children $layout:expr; checkbox($label:expr, $checked:expr) [$($attrs:tt)*]) => {
+        $layout.child(ui!(@element checkbox($label, $checked) [$($attrs)*]))
     };
 
     // checkbox without attributes (last child)
-    (@add_children $container:expr; checkbox($label:expr, $checked:expr)) => {
-        $container.child(ui!(@element checkbox($label, $checked)))
+    (@add_children $layout:expr; checkbox($label:expr, $checked:expr)) => {
+        $layout.child(ui!(@element checkbox($label, $checked)))
     };
 
     // text_input with attributes (last child)
-    (@add_children $container:expr; text_input($value:expr) [$($attrs:tt)*]) => {
-        $container.child(ui!(@element text_input($value) [$($attrs)*]))
+    (@add_children $layout:expr; text_input($value:expr) [$($attrs:tt)*]) => {
+        $layout.child(ui!(@element text_input($value) [$($attrs)*]))
     };
 
     // text_input without attributes (last child)
-    (@add_children $container:expr; text_input($value:expr)) => {
-        $container.child(ui!(@element text_input($value)))
+    (@add_children $layout:expr; text_input($value:expr)) => {
+        $layout.child(ui!(@element text_input($value)))
     };
 
     // Fallback: any expression (last child)
-    (@add_children $container:expr; $expr:expr) => {
-        $container.child($expr)
+    (@add_children $layout:expr; $expr:expr) => {
+        $layout.child($expr)
     };
 
     // ==================== Container Attributes ====================
     // gap
-    (@apply_container_attrs $container:expr, gap: $gap:expr) => {
-        $container.gap($gap)
+    (@apply_layout_attrs $layout:expr, gap: $gap:expr) => {
+        $layout.gap($gap)
     };
-    (@apply_container_attrs $container:expr, gap: $gap:expr, $($rest:tt)*) => {
-        ui!(@apply_container_attrs $container.gap($gap), $($rest)*)
+    (@apply_layout_attrs $layout:expr, gap: $gap:expr, $($rest:tt)*) => {
+        ui!(@apply_layout_attrs $layout.gap($gap), $($rest)*)
     };
 
     // padding - tuple syntax
-    (@apply_container_attrs $container:expr, padding: ($top:expr, $right:expr, $bottom:expr, $left:expr)) => {
-        $container.padding($crate::style::Padding::new($top, $right, $bottom, $left))
+    (@apply_layout_attrs $layout:expr, padding: ($top:expr, $right:expr, $bottom:expr, $left:expr)) => {
+        $layout.padding($crate::style::Padding::new($top, $right, $bottom, $left))
     };
-    (@apply_container_attrs $container:expr, padding: ($top:expr, $right:expr, $bottom:expr, $left:expr), $($rest:tt)*) => {
-        ui!(@apply_container_attrs $container.padding($crate::style::Padding::new($top, $right, $bottom, $left)), $($rest)*)
+    (@apply_layout_attrs $layout:expr, padding: ($top:expr, $right:expr, $bottom:expr, $left:expr), $($rest:tt)*) => {
+        ui!(@apply_layout_attrs $layout.padding($crate::style::Padding::new($top, $right, $bottom, $left)), $($rest)*)
     };
 
     // padding - Padding value
-    (@apply_container_attrs $container:expr, padding: $padding:expr) => {
-        $container.padding($padding)
+    (@apply_layout_attrs $layout:expr, padding: $padding:expr) => {
+        $layout.padding($padding)
     };
-    (@apply_container_attrs $container:expr, padding: $padding:expr, $($rest:tt)*) => {
-        ui!(@apply_container_attrs $container.padding($padding), $($rest)*)
+    (@apply_layout_attrs $layout:expr, padding: $padding:expr, $($rest:tt)*) => {
+        ui!(@apply_layout_attrs $layout.padding($padding), $($rest)*)
     };
 
     // border
-    (@apply_container_attrs $container:expr, border: $border:expr) => {
-        $container.border($border)
+    (@apply_layout_attrs $layout:expr, border: $border:expr) => {
+        $layout.border($border)
     };
-    (@apply_container_attrs $container:expr, border: $border:expr, $($rest:tt)*) => {
-        ui!(@apply_container_attrs $container.border($border), $($rest)*)
+    (@apply_layout_attrs $layout:expr, border: $border:expr, $($rest:tt)*) => {
+        ui!(@apply_layout_attrs $layout.border($border), $($rest)*)
     };
 
     // align_items
-    (@apply_container_attrs $container:expr, align_items: $align:expr) => {
-        $container.align_items($align)
+    (@apply_layout_attrs $layout:expr, align_items: $align:expr) => {
+        $layout.align_items($align)
     };
-    (@apply_container_attrs $container:expr, align_items: $align:expr, $($rest:tt)*) => {
-        ui!(@apply_container_attrs $container.align_items($align), $($rest)*)
+    (@apply_layout_attrs $layout:expr, align_items: $align:expr, $($rest:tt)*) => {
+        ui!(@apply_layout_attrs $layout.align_items($align), $($rest)*)
     };
 
     // justify_content
-    (@apply_container_attrs $container:expr, justify_content: $justify:expr) => {
-        $container.justify_content($justify)
+    (@apply_layout_attrs $layout:expr, justify_content: $justify:expr) => {
+        $layout.justify_content($justify)
     };
-    (@apply_container_attrs $container:expr, justify_content: $justify:expr, $($rest:tt)*) => {
-        ui!(@apply_container_attrs $container.justify_content($justify), $($rest)*)
+    (@apply_layout_attrs $layout:expr, justify_content: $justify:expr, $($rest:tt)*) => {
+        ui!(@apply_layout_attrs $layout.justify_content($justify), $($rest)*)
     };
 
     // style
-    (@apply_container_attrs $container:expr, style: $style:expr) => {
-        $container.style($style)
+    (@apply_layout_attrs $layout:expr, style: $style:expr) => {
+        $layout.style($style)
     };
-    (@apply_container_attrs $container:expr, style: $style:expr, $($rest:tt)*) => {
-        ui!(@apply_container_attrs $container.style($style), $($rest)*)
+    (@apply_layout_attrs $layout:expr, style: $style:expr, $($rest:tt)*) => {
+        ui!(@apply_layout_attrs $layout.style($style), $($rest)*)
     };
 
     // overflow
-    (@apply_container_attrs $container:expr, overflow: $overflow:expr) => {
-        $container.overflow($overflow)
+    (@apply_layout_attrs $layout:expr, overflow: $overflow:expr) => {
+        $layout.overflow($overflow)
     };
-    (@apply_container_attrs $container:expr, overflow: $overflow:expr, $($rest:tt)*) => {
-        ui!(@apply_container_attrs $container.overflow($overflow), $($rest)*)
+    (@apply_layout_attrs $layout:expr, overflow: $overflow:expr, $($rest:tt)*) => {
+        ui!(@apply_layout_attrs $layout.overflow($overflow), $($rest)*)
     };
 
     // No more attributes
-    (@apply_container_attrs $container:expr,) => {
-        $container
+    (@apply_layout_attrs $layout:expr,) => {
+        $layout
     };
 
     // ==================== Grid Attributes ====================

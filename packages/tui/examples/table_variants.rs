@@ -109,7 +109,7 @@ fn get_border(index: usize) -> (BorderStyle, &'static str) {
     }
 }
 
-fn view(state: &State) -> Container<Message> {
+fn view(state: &State) -> impl Layout<Message> {
     let (variant, variant_name) = get_variant(state.variant_index);
     let (border, border_name) = get_border(state.border_index);
     let is_static = state.variant_index == 4;
@@ -143,25 +143,15 @@ fn view(state: &State) -> Container<Message> {
         .padding(Padding::new(2, 2, 1, 1))
         .gap(1)
         // Title
-        .child(
-            label("Table Variants Demo")
-                .fg(Color::Cyan)
-                .bold(),
-        )
+        .child(label("Table Variants Demo").fg(Color::Cyan).bold())
         .child(spacer().height(1))
         // Info
-        .child(
-            label(format!("Current Variant: {}", variant_name))
-                .fg(Color::Yellow),
-        )
-        .child(
-            if variant == TableVariant::Bordered {
-                label(format!("Border Style: {}", border_name))
-                    .fg(Color::Green)
-            } else {
-                label("")
-            },
-        )
+        .child(label(format!("Current Variant: {}", variant_name)).fg(Color::Yellow))
+        .child(if variant == TableVariant::Bordered {
+            label(format!("Border Style: {}", border_name)).fg(Color::Green)
+        } else {
+            label("")
+        })
         .child(spacer().height(1))
         // Table
         .child(table_widget)
@@ -173,8 +163,7 @@ fn view(state: &State) -> Container<Message> {
                 .child(label("Controls:").fg(Color::Indexed(8)))
                 .child(label("  V: Cycle table variant").fg(Color::Indexed(8)))
                 .child(
-                    label("  B: Cycle border style (Bordered variant only)")
-                        .fg(Color::Indexed(8)),
+                    label("  B: Cycle border style (Bordered variant only)").fg(Color::Indexed(8)),
                 )
                 .child(label("  Q or Esc: Quit").fg(Color::Indexed(8))),
         )
@@ -189,8 +178,7 @@ fn view(state: &State) -> Container<Message> {
                 .child(label("  • Compact: No horizontal dividers").fg(Color::Indexed(8)))
                 .child(label("  • Striped: Alternating row backgrounds").fg(Color::Indexed(8)))
                 .child(
-                    label("  • Static: Display-only, no selection/scrollbar")
-                        .fg(Color::Indexed(8)),
+                    label("  • Static: Display-only, no selection/scrollbar").fg(Color::Indexed(8)),
                 ),
         )
         // Keyboard controller

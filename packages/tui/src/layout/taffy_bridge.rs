@@ -30,7 +30,7 @@ impl TaffyBridge {
         &mut self,
         widgets: &[Box<dyn Widget<M>>],
         available: Area,
-        direction: super::container::Direction,
+        direction: super::flex::Direction,
         gap: u16,
         align_items: Option<AlignItems>,
         justify_content: Option<JustifyContent>,
@@ -56,8 +56,8 @@ impl TaffyBridge {
 
             // Create container node
             let flex_direction = match direction {
-                super::container::Direction::Vertical => FlexDirection::Column,
-                super::container::Direction::Horizontal => FlexDirection::Row,
+                super::flex::Direction::Vertical => FlexDirection::Column,
+                super::flex::Direction::Horizontal => FlexDirection::Row,
             };
 
             let gap_size = gap as f32;
@@ -315,13 +315,13 @@ impl TaffyBridge {
     fn constraints_to_style(
         &self,
         constraints: Constraints,
-        direction: super::container::Direction,
+        direction: super::flex::Direction,
         align_items: Option<AlignItems>,
     ) -> Style {
         let is_stretch = align_items.unwrap_or(AlignItems::Stretch) == AlignItems::Stretch;
 
         let (width, height) = match direction {
-            super::container::Direction::Vertical => {
+            super::flex::Direction::Vertical => {
                 // Vertical layout (Column)
                 // Cross axis is Width.
                 let width = if let Some(max) = constraints.max_width {
@@ -355,7 +355,7 @@ impl TaffyBridge {
 
                 (width, height)
             }
-            super::container::Direction::Horizontal => {
+            super::flex::Direction::Horizontal => {
                 // Horizontal layout (Row)
                 // Main axis is Width
                 let width = if let Some(max) = constraints.max_width {
@@ -424,7 +424,7 @@ impl TaffyBridge {
 mod tests {
     use super::*;
     use crate::event::{Event, EventResult};
-    use crate::layout::container::Direction;
+    use crate::layout::Direction;
     use crate::widget::Label;
 
     struct TestWidget {

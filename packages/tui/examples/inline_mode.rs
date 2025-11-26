@@ -45,7 +45,7 @@ fn update(state: &mut AppState, msg: Message) {
 }
 
 /// View function - renders the UI from current state
-fn view(state: &AppState) -> Container<Message> {
+fn view(state: &AppState) -> impl Layout<Message> {
     let spinner_chars = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
     let spinner = spinner_chars[state.spinner_frame % spinner_chars.len()];
 

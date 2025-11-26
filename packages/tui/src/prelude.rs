@@ -190,16 +190,69 @@ pub use crate::event::{
     Event, EventResult, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
 pub use crate::layout::{
-    col, grid, row, Constraints, Container, Direction, Grid, GridLine, GridPlacement, GridTrack,
+    // fns
+    col,
+    grid,
+    row,
+
+    // types
+    Constraints,
+    Direction,
+    Flex,
+    Grid,
+    GridLine,
+    GridPlacement,
+    GridTrack,
+    Layout,
 };
 pub use crate::style::{BorderStyle, Color, CssError, Padding, Style, TextModifiers};
 pub use crate::widget::{
-    button, checkbox, checkbox_group, code_block, divider, interactive, keyboard_controller, label,
-    list, radio_group, spacer, table, text_input, Button, ButtonVariant, Checkbox,
-    CheckboxDirection, CheckboxGroup, CodeBlock, Column, ColumnWidth, Divider, DividerDirection,
-    DividerTextPosition, DividerVariant, Interactive, IntoWidget, KeyboardController, Label,
-    LineMarker, List, ListItem, RadioDirection, RadioGroup, SelectionEvent, SelectionMode, Spacer,
-    Table, TableSelectionEvent, TableVariant, TextInput, TextInputVariant, Widget,
+    // fns
+    button,
+    checkbox,
+    checkbox_group,
+    code_block,
+    divider,
+    interactive,
+    keyboard_controller,
+    label,
+    list,
+    radio_group,
+    spacer,
+    table,
+    text_input,
+
+    // types
+    Button,
+    ButtonVariant,
+    Checkbox,
+    CheckboxDirection,
+    CheckboxGroup,
+    CodeBlock,
+    Column,
+    ColumnWidth,
+    Divider,
+    DividerDirection,
+    DividerTextPosition,
+    DividerVariant,
+    Interactive,
+    IntoWidget,
+    KeyboardController,
+    Label,
+    LineMarker,
+    List,
+    ListItem,
+    RadioDirection,
+    RadioGroup,
+    SelectionEvent,
+    SelectionMode,
+    Spacer,
+    Table,
+    TableSelectionEvent,
+    TableVariant,
+    TextInput,
+    TextInputVariant,
+    Widget,
 };
 
 // The ui! macro is automatically available due to #[macro_export]

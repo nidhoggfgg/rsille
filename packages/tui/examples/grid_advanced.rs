@@ -39,7 +39,7 @@ fn update(state: &mut State, msg: Message) {
 }
 
 /// Create a card widget
-fn card(title: &str, content: &str, index: usize, is_selected: bool) -> Container<Message> {
+fn card(title: &str, content: &str, index: usize, is_selected: bool) -> impl Layout<Message> {
     let color = if is_selected {
         Color::Yellow
     } else {
@@ -57,7 +57,7 @@ fn card(title: &str, content: &str, index: usize, is_selected: bool) -> Containe
 }
 
 /// View function - builds the UI
-fn view(state: &State) -> Container<Message> {
+fn view(state: &State) -> impl Layout<Message> {
     col()
         .padding(Padding::new(2, 2, 1, 1))
         .gap(1)

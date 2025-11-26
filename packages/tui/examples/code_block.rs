@@ -25,7 +25,7 @@ enum Message {}
 fn update(_state: &mut State, _msg: Message) {}
 
 /// View function - displays code blocks with syntax highlighting
-fn view(state: &State) -> Container<Message> {
+fn view(state: &State) -> impl Layout<Message> {
     col()
         .gap(1)
         .padding(Padding::new(0, 2, 1, 1))
@@ -66,7 +66,7 @@ fn view(state: &State) -> Container<Message> {
                                 .line_deleted(4)
                                 .border(BorderStyle::Single)
                                 .theme("Solarized (dark)"),
-                        )
+                        ),
                 )
                 .child(
                     // Right column
@@ -88,11 +88,7 @@ fn view(state: &State) -> Container<Message> {
                                 .theme("Solarized (dark)"),
                         )
                         // No border example
-                        .child(
-                            label("No Border Example:")
-                                .fg(Color::Yellow)
-                                .bold(),
-                        )
+                        .child(label("No Border Example:").fg(Color::Yellow).bold())
                         .child(
                             code_block(&state.no_border_code)
                                 .language("rust")
@@ -101,19 +97,15 @@ fn view(state: &State) -> Container<Message> {
                                 .theme("Solarized (dark)"),
                         )
                         // TUI theme background example
-                        .child(
-                            label("TUI Theme Background:")
-                                .fg(Color::Cyan)
-                                .bold(),
-                        )
+                        .child(label("TUI Theme Background:").fg(Color::Cyan).bold())
                         .child(
                             code_block(&state.theme_bg_code)
                                 .language("rust")
                                 .show_line_numbers(true)
                                 .use_theme_background(true)
                                 .theme("Solarized (dark)"),
-                        )
-                )
+                        ),
+                ),
         )
 }
 

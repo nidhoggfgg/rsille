@@ -46,7 +46,7 @@ fn update(state: &mut State, msg: Message) {
 }
 
 /// View function - builds the UI using the new ui! macro
-fn view(state: &State) -> Container<Message> {
+fn view(state: &State) -> impl Layout<Message> {
     ui! {
         col [padding: (2, 2, 1, 1), gap: 1] {
             label("Grid Layout Demo - UI Macro Version") [fg: Color::Cyan, bold: true],

@@ -16,7 +16,7 @@ pub mod style;
 /// it has zero runtime overhead as the logging is completely removed.
 ///
 /// # Example
-/// ```ignore
+/// ```no_run
 /// queue_with_log!(stdout, MoveTo(5, 10), Print("Hello"))?;
 /// ```
 #[macro_export]

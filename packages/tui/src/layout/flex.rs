@@ -1,4 +1,4 @@
-//! Container widget for layout composition
+//! Flex widget for layout composition
 
 use render::area::Area;
 
@@ -13,6 +13,8 @@ use crate::widget::{IntoWidget, Widget};
 use std::sync::RwLock;
 use taffy::style::{AlignItems, JustifyContent};
 
+use super::layout::Layout;
+
 /// Layout direction
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Direction {
@@ -20,8 +22,8 @@ pub enum Direction {
     Horizontal,
 }
 
-/// Container widget that arranges children using flexbox layout
-pub struct Container<M = ()> {
+/// Flex widget that arranges children using flexbox layout
+pub struct Flex<M = ()> {
     children: Vec<Box<dyn Widget<M>>>,
     direction: Direction,
     gap: u16,
@@ -35,9 +37,9 @@ pub struct Container<M = ()> {
     cached_child_areas: RwLock<Vec<Area>>,
 }
 
-impl<M> std::fmt::Debug for Container<M> {
+impl<M> std::fmt::Debug for Flex<M> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Container")
+        f.debug_struct("Flex")
             .field("children", &self.children.len())
             .field("direction", &self.direction)
             .field("gap", &self.gap)
@@ -51,8 +53,8 @@ impl<M> std::fmt::Debug for Container<M> {
     }
 }
 
-impl<M> Container<M> {
-    /// Create a new container with the specified direction
+impl<M> Flex<M> {
+    /// Create a new flex layout with the specified direction
     fn with_direction(children: Vec<Box<dyn Widget<M>>>, direction: Direction) -> Self {
         Self {
             children,
@@ -68,13 +70,13 @@ impl<M> Container<M> {
         }
     }
 
-    /// Create a new container with vertical layout
+    /// Create a new flex layout with vertical layout
     ///
     /// # Examples
     /// ```
     /// use tui::prelude::*;
     ///
-    /// let container: Container<()> = Container::vertical(vec![
+    /// let flex_layout: Flex<()> = Flex::vertical(vec![
     ///     Box::new(Label::new("Line 1")),
     ///     Box::new(Label::new("Line 2")),
     /// ]);
@@ -83,13 +85,13 @@ impl<M> Container<M> {
         Self::with_direction(children, Direction::Vertical)
     }
 
-    /// Create a new container with horizontal layout
+    /// Create a new flex layout with horizontal layout
     ///
     /// # Examples
     /// ```
     /// use tui::prelude::*;
     ///
-    /// let container: Container<()> = Container::horizontal(vec![
+    /// let flex_layout: Flex<()> = Flex::horizontal(vec![
     ///     Box::new(Button::new("OK")),
     ///     Box::new(Button::new("Cancel")),
     /// ]);
@@ -98,7 +100,7 @@ impl<M> Container<M> {
         Self::with_direction(children, Direction::Horizontal)
     }
 
-    /// Create a new empty container
+    /// Create a new empty flex layout
     pub fn new() -> Self {
         Self::vertical(Vec::new())
     }
@@ -115,13 +117,13 @@ impl<M> Container<M> {
         self
     }
 
-    /// Set the container style
+    /// Set the flex layout style
     pub fn style(mut self, style: Style) -> Self {
         self.style = style;
         self
     }
 
-    /// Set the container border
+    /// Set the flex layout border
     pub fn border(mut self, border: BorderStyle) -> Self {
         self.border = Some(border);
         self
@@ -139,23 +141,23 @@ impl<M> Container<M> {
         self
     }
 
-    /// Set the overflow behavior for children that exceed the container bounds
+    /// Set the overflow behavior for children that exceed the flex layout bounds
     pub fn overflow(mut self, overflow: Overflow) -> Self {
         self.overflow = overflow;
         self
     }
 
-    /// Conditionally modify the container
+    /// Conditionally modify the flex layout
     ///
-    /// If the condition is true, applies the given function to the container.
-    /// Otherwise, returns the container unchanged.
+    /// If the condition is true, applies the given function to the flex layout.
+    /// Otherwise, returns the flex layout unchanged.
     ///
     /// # Examples
     /// ```
     /// use tui::prelude::*;
     ///
     /// let show_footer = true;
-    /// let container = col()
+    /// let flex_layout = col()
     ///     .child(label("Header"))
     ///     .when(show_footer, |c| c.child(label("Footer")));
     /// ```
@@ -177,14 +179,14 @@ impl<M> Container<M> {
 }
 
 // Methods that require Send + Sync bounds
-impl<M: Send + Sync> Container<M> {
+impl<M: Send + Sync> Flex<M> {
     /// Add a single child widget using fluent API
     ///
     /// # Examples
     /// ```
     /// use tui::prelude::*;
     ///
-    /// let container = col()
+    /// let flex_layout = col()
     ///     .child(label("Hello"))
     ///     .child(label("World"));
     /// ```
@@ -202,7 +204,7 @@ impl<M: Send + Sync> Container<M> {
     /// use tui::prelude::*;
     ///
     /// let items = vec!["Item 1", "Item 2", "Item 3"];
-    /// let container = col()
+    /// let flex_layout = col()
     ///     .children(items.iter().map(|text| label(text)));
     /// ```
     pub fn children<I>(mut self, widgets: I) -> Self
@@ -216,7 +218,7 @@ impl<M: Send + Sync> Container<M> {
     }
 }
 
-impl<M> Container<M> {
+impl<M> Flex<M> {
     /// Remove a child at the specified index
     pub fn remove_child(&mut self, index: usize) -> Box<dyn Widget<M>> {
         self.children.remove(index)
@@ -227,7 +229,7 @@ impl<M> Container<M> {
         self.children.len()
     }
 
-    /// Check if container is empty
+    /// Check if flex layout is empty
     pub fn is_empty(&self) -> bool {
         self.children.is_empty()
     }
@@ -239,7 +241,7 @@ impl<M> Container<M> {
 }
 
 // Methods that require Clone bound
-impl<M: Clone> Container<M> {
+impl<M: Clone> Flex<M> {
     /// Build focus chain by recursively collecting focusable widgets
     ///
     /// This method traverses the widget tree and collects paths to all focusable widgets.
@@ -249,7 +251,7 @@ impl<M: Clone> Container<M> {
     /// * `current_path` - Current path in the widget tree (modified during traversal)
     /// * `chain` - Accumulated focus chain (paths to focusable widgets)
     pub fn build_focus_chain(&self, current_path: &mut Vec<usize>, chain: &mut Vec<FocusPath>) {
-        // Container itself is not focusable by default
+        // Flex itself is not focusable by default
         // Subclasses like ScrollView can override focusable() to return true
         if self.focusable() {
             chain.push(current_path.clone());
@@ -264,7 +266,7 @@ impl<M: Clone> Container<M> {
                 chain.push(current_path.clone());
             }
 
-            // Recursively build focus chain for nested containers
+            // Recursively build focus chain for nested layouts
             child.build_focus_chain_recursive(current_path, chain);
 
             current_path.pop();
@@ -286,7 +288,7 @@ impl<M: Clone> Container<M> {
             let is_focused = focus_path == Some(&child_path);
             child.set_focused(is_focused);
 
-            // Recursively update focus states for nested containers
+            // Recursively update focus states for nested layouts
             child.update_focus_states_recursive(&child_path, focus_path);
         }
     }
@@ -382,7 +384,7 @@ impl<M: Clone> Container<M> {
     }
 }
 
-impl<M: Clone> Widget<M> for Container<M> {
+impl<M: Clone> Widget<M> for Flex<M> {
     fn render(&self, chunk: &mut render::chunk::Chunk) {
         let area = chunk.area();
         if area.width() == 0 || area.height() == 0 {
@@ -410,7 +412,7 @@ impl<M: Clone> Widget<M> for Container<M> {
             area
         };
 
-        // Apply container background if specified (only inside border)
+        // Apply flex layout background if specified (only inside border)
         if final_style.bg_color.is_some() {
             render_background(chunk, render_style);
         }
@@ -559,7 +561,7 @@ impl<M: Clone> Widget<M> for Container<M> {
         current_path: &mut Vec<usize>,
         chain: &mut Vec<FocusPath>,
     ) {
-        // For nested containers, traverse children without adding self again
+        // For nested layouts, traverse children without adding self again
         // (self was already added by parent's traversal)
         for (idx, child) in self.children.iter().enumerate() {
             current_path.push(idx);
@@ -569,7 +571,7 @@ impl<M: Clone> Widget<M> for Container<M> {
                 chain.push(current_path.clone());
             }
 
-            // Recursively build focus chain for nested containers
+            // Recursively build focus chain for nested layouts
             child.build_focus_chain_recursive(current_path, chain);
 
             current_path.pop();
@@ -581,7 +583,7 @@ impl<M: Clone> Widget<M> for Container<M> {
         current_path: &[usize],
         focus_path: Option<&FocusPath>,
     ) {
-        // For nested containers, traverse children and update their focus states
+        // For nested layouts, traverse children and update their focus states
         for (idx, child) in self.children.iter_mut().enumerate() {
             let mut child_path = current_path.to_vec();
             child_path.push(idx);
@@ -589,48 +591,134 @@ impl<M: Clone> Widget<M> for Container<M> {
             let is_focused = focus_path == Some(&child_path);
             child.set_focused(is_focused);
 
-            // Recursively update focus states for nested containers
+            // Recursively update focus states for nested layouts
             child.update_focus_states_recursive(&child_path, focus_path);
         }
     }
 }
 
-impl<M> Default for Container<M> {
+impl<M> Default for Flex<M> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-/// Create a new empty vertical container
+/// Create a new empty vertical flex layout
 ///
-/// Shorthand for `Container::new()` (which defaults to vertical).
+/// Shorthand for `Flex::new()` (which defaults to vertical).
 ///
 /// # Examples
 /// ```
 /// use tui::prelude::*;
 ///
-/// let container = col()
+/// let flex_layout = col()
 ///     .gap(1)
 ///     .child(label("Line 1"))
 ///     .child(label("Line 2"));
 /// ```
-pub fn col<M>() -> Container<M> {
-    Container::new()
+pub fn col<M>() -> Flex<M> {
+    Flex::new()
 }
 
-/// Create a new empty horizontal container
+/// Create a new empty horizontal flex layout
 ///
-/// Shorthand for `Container::horizontal(Vec::new())`.
+/// Shorthand for `Flex::horizontal(Vec::new())`.
 ///
 /// # Examples
 /// ```
 /// use tui::prelude::*;
 ///
-/// let container = row()
+/// let flex_layout = row()
 ///     .gap(2)
 ///     .child(button("OK"))
 ///     .child(button("Cancel"));
 /// ```
-pub fn row<M>() -> Container<M> {
-    Container::horizontal(Vec::new())
+pub fn row<M>() -> Flex<M> {
+    Flex::horizontal(Vec::new())
+}
+
+// Implement Layout trait for Flex
+impl<M: Clone> Layout<M> for Flex<M> {
+    fn build_focus_chain(&self, current_path: &mut Vec<usize>, chain: &mut Vec<FocusPath>) {
+        // Flex itself is not focusable
+        // Recursively traverse children
+        for (idx, child) in self.children.iter().enumerate() {
+            current_path.push(idx);
+
+            if child.focusable() {
+                chain.push(current_path.clone());
+            }
+
+            child.build_focus_chain_recursive(current_path, chain);
+            current_path.pop();
+        }
+    }
+
+    fn update_focus_states(&mut self, current_path: &[usize], focus_path: Option<&FocusPath>) {
+        for (idx, child) in self.children.iter_mut().enumerate() {
+            let mut child_path = current_path.to_vec();
+            child_path.push(idx);
+
+            let is_focused = focus_path == Some(&child_path);
+            child.set_focused(is_focused);
+
+            child.update_focus_states_recursive(&child_path, focus_path);
+        }
+    }
+
+    fn handle_event_with_focus(
+        &mut self,
+        event: &Event,
+        current_path: &[usize],
+        focus_path: Option<&FocusPath>,
+    ) -> (EventResult<M>, Vec<M>) {
+        let mut all_messages = Vec::new();
+
+        // For mouse events, use spatial routing
+        if let Event::Mouse(mouse_event) = event {
+            let cached_areas = self.cached_child_areas.read().unwrap();
+            if !cached_areas.is_empty() {
+                for (idx, child_area) in cached_areas.iter().enumerate() {
+                    let is_hit = mouse_event.column >= child_area.x()
+                        && mouse_event.column < child_area.x() + child_area.width()
+                        && mouse_event.row >= child_area.y()
+                        && mouse_event.row < child_area.y() + child_area.height();
+
+                    if is_hit {
+                        if let Some(child) = self.children.get_mut(idx) {
+                            let result = child.handle_event(event);
+                            let messages = result.messages_ref().to_vec();
+                            all_messages.extend(messages);
+
+                            if result.is_consumed() {
+                                return (EventResult::consumed(), all_messages);
+                            }
+                        }
+                    }
+                }
+            }
+            return (EventResult::Ignored, all_messages);
+        }
+
+        // For keyboard events, use focus-based routing
+        if let Event::Key(_) = event {
+            if let Some(focus) = focus_path {
+                if focus.starts_with(current_path) && focus.len() > current_path.len() {
+                    let child_idx = focus[current_path.len()];
+
+                    if let Some(child) = self.children.get_mut(child_idx) {
+                        let result = child.handle_event(event);
+                        let messages = result.messages_ref().to_vec();
+                        all_messages.extend(messages);
+
+                        if result.is_consumed() {
+                            return (EventResult::consumed(), all_messages);
+                        }
+                    }
+                }
+            }
+        }
+
+        (EventResult::Ignored, all_messages)
+    }
 }

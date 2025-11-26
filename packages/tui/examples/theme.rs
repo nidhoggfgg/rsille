@@ -42,7 +42,7 @@ fn update(state: &mut State, msg: Message) {
 }
 
 /// View function - displays theme showcase
-fn view(state: &State) -> Container<Message> {
+fn view(state: &State) -> impl Layout<Message> {
     col()
         .gap(1)
         .padding(Padding::uniform(2))

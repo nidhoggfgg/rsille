@@ -71,7 +71,7 @@ fn update(state: &mut State, msg: Message) {
 }
 
 /// View function - builds the UI
-fn view(state: &State) -> Container<Message> {
+fn view(state: &State) -> impl Layout<Message> {
     let feature_names = ["Experimental", "Debug Mode", "Telemetry"];
     let quick_option_names = ["A", "B", "C", "D"];
 
