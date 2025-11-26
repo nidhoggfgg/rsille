@@ -15,6 +15,7 @@
 //! - `radio_group()` - Create radio group widgets
 //! - `text_input()` - Create text input widgets
 //! - `spacer()` - Create spacer widgets
+//! - `divider()` - Create divider widgets (horizontal/vertical separators)
 //! - `keyboard_controller()` - Create keyboard controller widgets
 //! - `interactive()` - Wrap widgets with mouse event handling
 //!
@@ -193,11 +194,12 @@ pub use crate::layout::{
 };
 pub use crate::style::{BorderStyle, Color, CssError, Padding, Style, TextModifiers};
 pub use crate::widget::{
-    button, checkbox, checkbox_group, code_block, interactive, keyboard_controller, label, list,
-    radio_group, spacer, table, text_input, Button, ButtonVariant, Checkbox, CheckboxDirection,
-    CheckboxGroup, CodeBlock, Column, ColumnWidth, Interactive, IntoWidget, KeyboardController,
-    Label, LineMarker, List, ListItem, RadioDirection, RadioGroup, SelectionEvent, SelectionMode,
-    Spacer, Table, TableSelectionEvent, TableVariant, TextInput, TextInputVariant, Widget,
+    button, checkbox, checkbox_group, code_block, divider, interactive, keyboard_controller, label,
+    list, radio_group, spacer, table, text_input, Button, ButtonVariant, Checkbox,
+    CheckboxDirection, CheckboxGroup, CodeBlock, Column, ColumnWidth, Divider, DividerDirection,
+    DividerTextPosition, DividerVariant, Interactive, IntoWidget, KeyboardController, Label,
+    LineMarker, List, ListItem, RadioDirection, RadioGroup, SelectionEvent, SelectionMode, Spacer,
+    Table, TableSelectionEvent, TableVariant, TextInput, TextInputVariant, Widget,
 };
 
 // The ui! macro is automatically available due to #[macro_export]
