@@ -17,15 +17,11 @@ struct State {
     theme_bg_code: String,
 }
 
-/// No messages needed for this static example
-#[derive(Clone, Debug)]
-enum Message {}
-
 /// Update function - no changes for this example
-fn update(_state: &mut State, _msg: Message) {}
+fn update(_state: &mut State, _msg: ()) {}
 
 /// View function - displays code blocks with syntax highlighting
-fn view(state: &State) -> impl Layout<Message> {
+fn view(state: &State) -> impl Layout<()> {
     col()
         .gap(1)
         .padding(Padding::new(0, 2, 1, 1))

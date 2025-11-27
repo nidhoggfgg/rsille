@@ -45,7 +45,8 @@ fn main() -> Result<()> {
     ];
 
     let app = App::new(());
-    app.run_inline(
+    app.on_key(KeyCode::Char('q'), || ())
+        .run_inline(
         |_state, _msg| {},
         move |_state| {
             col()
@@ -78,8 +79,6 @@ fn main() -> Result<()> {
                 )
                 .child(spacer().height(1))
                 .child(label("Press Ctrl+C or Q to exit").fg(Color::Indexed(8)))
-                // Keyboard controller
-                .child(keyboard_controller().on('q', || ()))
         },
     )?;
     Ok(())

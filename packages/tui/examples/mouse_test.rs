@@ -54,7 +54,6 @@ fn view(state: &State) -> impl Layout<Message> {
         )
         .child(spacer().height(1))
         .child(label("Press 'q' or Esc to quit").fg(Color::Indexed(8)))
-        .child(keyboard_controller().on('q', || Message::Quit))
 }
 
 fn main() -> Result<()> {
@@ -64,6 +63,7 @@ fn main() -> Result<()> {
     });
     // Use run() for fullscreen mode with mouse support
     // (run_inline() does NOT support mouse events)
-    app.run(update, view)?;
+    app.on_key(KeyCode::Char('q'), || Message::Quit)
+        .run(update, view)?;
     Ok(())
 }

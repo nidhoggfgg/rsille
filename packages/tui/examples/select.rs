@@ -63,6 +63,7 @@ enum Message {
     CountrySelected(SelectEvent<Country>),
     SizeSelected(SelectEvent<String>),
     ColorSelected(SelectEvent<String>),
+    Quit,
 }
 
 struct State {
@@ -85,6 +86,9 @@ fn update(state: &mut State, msg: Message) {
         }
         Message::ColorSelected(event) => {
             state.selected_color = Some(event.value);
+        }
+        Message::Quit => {
+            std::process::exit(0);
         }
     }
 }
@@ -207,7 +211,9 @@ fn main() -> tui::Result<()> {
         selected_color: None,
     };
 
-    App::new(state).run(update, view)?;
+    App::new(state)
+        .on_key(KeyCode::Char('q'), || Message::Quit)
+        .run(update, view)?;
 
     Ok(())
 }

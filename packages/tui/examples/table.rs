@@ -230,14 +230,6 @@ fn view(state: &State) -> impl Layout<Message> {
         .child(spacer().height(1))
         // Footer
         .child(label("Q or Esc: Quit | M: Toggle mode").fg(Color::Indexed(8)))
-        // Keyboard controller
-        .child(
-            keyboard_controller()
-                .on('q', || Message::Quit)
-                .on('m', || Message::ToggleMode)
-                .on('M', || Message::ToggleMode)
-                .on_key(KeyCode::Esc, || Message::Quit),
-        )
 }
 
 fn main() -> Result<()> {
@@ -249,6 +241,10 @@ fn main() -> Result<()> {
         selection_text: "No selection".to_string(),
     });
 
-    app.run_inline(update, view)?;
+    app.on_key(KeyCode::Char('q'), || Message::Quit)
+        .on_key(KeyCode::Char('m'), || Message::ToggleMode)
+        .on_key(KeyCode::Char('M'), || Message::ToggleMode)
+        .on_key(KeyCode::Esc, || Message::Quit)
+        .run_inline(update, view)?;
     Ok(())
 }

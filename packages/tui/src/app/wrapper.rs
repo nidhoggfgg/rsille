@@ -10,7 +10,7 @@ use super::runtime::App;
 
 /// Wrapper to adapt App to DrawUpdate trait for use with event_loop
 pub struct AppWrapper<State, F, V, M> {
-    pub(super) app: App<State>,
+    pub(super) app: App<State, M>,
     update_fn: F,
     view_fn: V,
     messages: Vec<M>,
@@ -32,7 +32,7 @@ where
     V: Fn(&State) -> Box<dyn Layout<M>>,
     M: Clone + std::fmt::Debug,
 {
-    pub fn new(app: App<State>, update_fn: F, view_fn: V) -> Self {
+    pub fn new(app: App<State, M>, update_fn: F, view_fn: V) -> Self {
         Self {
             app,
             update_fn,
@@ -156,6 +156,14 @@ where
                         continue; // Consume event
                     }
                     _ => {}
+                }
+
+                // Check global key handlers before routing to widgets
+                if let Some(handler) = self.app.global_key_handlers.get(&key_event.code) {
+                    let message = handler();
+                    self.messages.push(message);
+                    self.needs_redraw = true;
+                    continue; // Consume event
                 }
             }
 

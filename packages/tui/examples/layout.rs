@@ -3,12 +3,9 @@ use tui::prelude::*;
 #[derive(Debug)]
 struct State {}
 
-#[derive(Clone, Debug)]
-enum Message {}
+fn update(_state: &mut State, _msg: ()) {}
 
-fn update(_state: &mut State, _msg: Message) {}
-
-fn view(_state: &State) -> impl Layout<Message> {
+fn view(_state: &State) -> impl Layout<()> {
     col()
         .gap(1)
         .child(

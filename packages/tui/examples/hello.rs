@@ -13,15 +13,11 @@ struct State {
     greeting: String,
 }
 
-/// No messages needed for a static view
-#[derive(Clone, Debug)]
-enum Message {}
-
 /// Update function - no changes for this example
-fn update(_state: &mut State, _msg: Message) {}
+fn update(_state: &mut State, _msg: ()) {}
 
 /// View function - displays a simple greeting
-fn view(state: &State) -> impl Layout<Message> {
+fn view(state: &State) -> impl Layout<()> {
     col()
         .gap(1)
         .padding(Padding::new(4, 4, 2, 2))

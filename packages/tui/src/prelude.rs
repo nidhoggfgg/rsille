@@ -16,7 +16,6 @@
 //! - `text_input()` - Create text input widgets
 //! - `spacer()` - Create spacer widgets
 //! - `divider()` - Create divider widgets (horizontal/vertical separators)
-//! - `keyboard_controller()` - Create keyboard controller widgets
 //! - `interactive()` - Wrap widgets with mouse event handling
 //!
 //! # Available Macros (Legacy)
@@ -29,7 +28,6 @@
 //! - `checkbox!()` - Create checkbox widgets (macro)
 //! - `text_input!()` - Create text input widgets (macro)
 //! - `spacer!()` - Create spacer widgets (macro)
-//! - `keyboard_controller!()` - Create keyboard controller widgets (macro)
 //!
 //! # New Declarative UI Macro (`ui!`)
 //!
@@ -214,7 +212,6 @@ pub use crate::widget::{
     code_block,
     divider,
     interactive,
-    keyboard_controller,
     label,
     list,
     radio_group,
@@ -237,7 +234,6 @@ pub use crate::widget::{
     DividerVariant,
     Interactive,
     IntoWidget,
-    KeyboardController,
     Label,
     LineMarker,
     List,
