@@ -33,10 +33,110 @@ pub use select::{select, Select, SelectEvent, SelectItem};
 pub use spacer::{spacer, Spacer};
 pub use table::{table, Column, ColumnWidth, Table, TableSelectionEvent, TableVariant};
 pub use text_input::{text_input, TextInput, TextInputVariant};
-pub use wrapper::{interactive, Interactive};
+pub use wrapper::{enhanced, interactive, Enhanced, Interactive};
 
 use crate::event::{Event, EventResult};
 use crate::layout::Constraints;
+
+/// Simplified widget trait for leaf components that only need rendering
+///
+/// SimpleWidget provides a pattern for implementing simple widgets with minimal boilerplate.
+/// While it doesn't automatically implement Widget, it serves as a guide for what methods
+/// are truly essential for non-interactive widgets.
+///
+/// # When to use SimpleWidget
+///
+/// SimpleWidget is useful as a pattern for:
+/// - Pure display components (Label, Divider, Spacer)
+/// - Components with no user interaction
+/// - Custom widgets that don't need event handling
+///
+/// # Usage Pattern
+///
+/// 1. Implement SimpleWidget for your type
+/// 2. Either:
+///    - Manually implement the full Widget trait (copy from the example below)
+///    - Or wrap your widget with `enhanced()` to add interactivity
+///
+/// # Examples
+///
+/// ## Pattern 1: Manual Widget implementation
+///
+/// ```
+/// use tui::widget::{SimpleWidget, Widget};
+/// use tui::event::{Event, EventResult};
+/// use tui::layout::Constraints;
+/// use render::chunk::Chunk;
+///
+/// struct MyWidget {
+///     text: String,
+/// }
+///
+/// impl<M: Send + Sync> SimpleWidget<M> for MyWidget {
+///     fn render(&self, chunk: &mut Chunk) {
+///         let _ = chunk.set_string(0, 0, &self.text, Default::default());
+///     }
+///
+///     fn constraints(&self) -> Constraints {
+///         Constraints {
+///             min_width: self.text.len() as u16,
+///             max_width: Some(self.text.len() as u16),
+///             min_height: 1,
+///             max_height: Some(1),
+///             flex: None,
+///         }
+///     }
+/// }
+///
+/// // Manual Widget implementation (boilerplate)
+/// impl<M: Send + Sync> Widget<M> for MyWidget {
+///     fn render(&self, chunk: &mut Chunk) {
+///         SimpleWidget::render(self, chunk)
+///     }
+///
+///     fn handle_event(&mut self, _event: &Event) -> EventResult<M> {
+///         EventResult::Ignored
+///     }
+///
+///     fn constraints(&self) -> Constraints {
+///         SimpleWidget::constraints(self)
+///     }
+/// }
+/// ```
+///
+/// ## Pattern 2: Use Enhanced wrapper for interactivity
+///
+/// ```
+/// use tui::prelude::*;
+///
+/// struct MyWidget {
+///     text: String,
+/// }
+///
+/// impl<M: Send + Sync> SimpleWidget<M> for MyWidget {
+///     // ... same as above
+/// }
+///
+/// impl<M: Send + Sync> Widget<M> for MyWidget {
+///     // ... same boilerplate as above
+/// }
+///
+/// // Add interactivity with enhanced()
+/// let interactive_widget = enhanced(MyWidget { text: "Click me".into() })
+///     .focusable()
+///     .on_click(|| Message::Clicked);
+/// ```
+pub trait SimpleWidget<M>: Send + Sync {
+    /// Render the widget into the provided chunk.
+    ///
+    /// The widget should draw at relative coordinates (0, 0) within the chunk.
+    fn render(&self, chunk: &mut render::chunk::Chunk);
+
+    /// Return the size constraints for this widget.
+    ///
+    /// Used by layout manager to calculate widget positions.
+    fn constraints(&self) -> Constraints;
+}
 
 /// Core widget trait that all TUI widgets implement
 ///
