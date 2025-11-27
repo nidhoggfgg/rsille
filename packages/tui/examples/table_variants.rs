@@ -181,17 +181,6 @@ fn view(state: &State) -> impl Layout<Message> {
                     label("  • Static: Display-only, no selection/scrollbar").fg(Color::Indexed(8)),
                 ),
         )
-        // Keyboard controller
-        .child(
-            keyboard_controller()
-                .on('q', || Message::Quit)
-                .on('Q', || Message::Quit)
-                .on('v', || Message::CycleVariant)
-                .on('V', || Message::CycleVariant)
-                .on('b', || Message::CycleBorder)
-                .on('B', || Message::CycleBorder)
-                .on_key(KeyCode::Esc, || Message::Quit),
-        )
 }
 
 fn main() -> Result<()> {
@@ -200,6 +189,13 @@ fn main() -> Result<()> {
         border_index: 0,
     });
 
-    app.run_inline(update, view)?;
+    app.on_key(KeyCode::Char('q'), || Message::Quit)
+        .on_key(KeyCode::Char('Q'), || Message::Quit)
+        .on_key(KeyCode::Char('v'), || Message::CycleVariant)
+        .on_key(KeyCode::Char('V'), || Message::CycleVariant)
+        .on_key(KeyCode::Char('b'), || Message::CycleBorder)
+        .on_key(KeyCode::Char('B'), || Message::CycleBorder)
+        .on_key(KeyCode::Esc, || Message::Quit)
+        .run_inline(update, view)?;
     Ok(())
 }

@@ -1,15 +1,72 @@
+use crate::event::KeyCode;
 use crate::style::{Theme, ThemeManager};
 use crate::{layout::Layout, Result, WidgetError};
+use std::collections::HashMap;
+use std::sync::Arc;
+
+pub type EventHandler<M> = Arc<dyn Fn() -> M + Send + Sync>;
 
 /// Application runtime for managing TUI lifecycle
-#[derive(Debug)]
-pub struct App<State> {
+pub struct App<State, M = ()> {
     pub(super) state: State,
+    pub(super) global_key_handlers: HashMap<KeyCode, EventHandler<M>>,
 }
 
-impl<State> App<State> {
+// Manual Debug implementation because EventHandler contains Fn
+impl<State: std::fmt::Debug, M> std::fmt::Debug for App<State, M> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("App")
+            .field("state", &self.state)
+            .field("global_key_handlers", &self.global_key_handlers.keys())
+            .finish()
+    }
+}
+
+impl<State, M: Clone + std::fmt::Debug + Send + Sync + 'static> App<State, M> {
+    /// Create a new application with the given state
+    ///
+    /// The message type M is automatically inferred from subsequent method calls
+    /// like .on_key() or .run().
+    ///
+    /// # Example
+    /// ```no_run
+    /// use tui::prelude::*;
+    /// use tui::event::KeyCode;
+    ///
+    /// App::new(state)
+    ///     .on_key(KeyCode::Char('q'), || Message::Quit)
+    ///     .on_key(KeyCode::Esc, || Message::Cancel)
+    ///     .run(update, view);
+    /// ```
     pub fn new(state: State) -> Self {
-        Self { state }
+        Self {
+            state,
+            global_key_handlers: HashMap::new(),
+        }
+    }
+
+    /// Register global keyboard shortcuts
+    ///
+    /// This method can be called multiple times to register different key handlers.
+    /// The message type M is automatically inferred from the handler's return type.
+    ///
+    /// # Example
+    /// ```no_run
+    /// use tui::prelude::*;
+    /// use tui::event::KeyCode;
+    ///
+    /// App::new(state)
+    ///     .on_key(KeyCode::Char('q'), || Message::Quit)
+    ///     .on_key(KeyCode::Char('h'), || Message::ShowHelp)
+    ///     .on_key(KeyCode::Esc, || Message::Cancel)
+    ///     .run(update, view);
+    /// ```
+    pub fn on_key<F>(mut self, key: KeyCode, handler: F) -> Self
+    where
+        F: Fn() -> M + Send + Sync + 'static,
+    {
+        self.global_key_handlers.insert(key, Arc::new(handler));
+        self
     }
 
     /// Set the initial theme for the application
@@ -26,7 +83,7 @@ impl<State> App<State> {
         self
     }
 
-    pub fn run<M, F, V, L>(self, update: F, view: V) -> Result<()>
+    pub fn run<F, V, L>(self, update: F, view: V) -> Result<()>
     where
         F: Fn(&mut State, M) + Send + Sync + 'static,
         V: Fn(&State) -> L + Send + Sync + 'static,
@@ -39,7 +96,7 @@ impl<State> App<State> {
         self.run_with_options(update, view_wrapper, false)
     }
 
-    pub fn run_inline<M, F, V, L>(self, update: F, view: V) -> Result<()>
+    pub fn run_inline<F, V, L>(self, update: F, view: V) -> Result<()>
     where
         F: Fn(&mut State, M) + Send + Sync + 'static,
         V: Fn(&State) -> L + Send + Sync + 'static,
@@ -53,7 +110,7 @@ impl<State> App<State> {
     }
 
     /// Internal method to run the application with options
-    fn run_with_options<M, F, V>(self, update: F, view: V, inline_mode: bool) -> Result<()>
+    fn run_with_options<F, V>(self, update: F, view: V, inline_mode: bool) -> Result<()>
     where
         F: Fn(&mut State, M) + Send + Sync + 'static,
         V: Fn(&State) -> Box<dyn Layout<M>> + Send + Sync + 'static,

@@ -77,12 +77,6 @@ fn view(state: &AppState) -> impl Layout<Message> {
             label("  r - remove item (watch height shrink!)").fg(Color::Indexed(8)),
             label("  Esc - quit").fg(Color::Indexed(8)),
         ])
-        .child(
-            keyboard_controller()
-                .on('t', || Message::Tick)
-                .on('a', || Message::AddItem)
-                .on('r', || Message::RemoveItem),
-        )
 }
 
 fn main() -> Result<()> {
@@ -95,7 +89,10 @@ fn main() -> Result<()> {
 
     // Use run_inline() - height adjusts automatically based on content!
     // Max height is limited to 50 lines by default (configurable in runtime.rs)
-    app.run_inline(update, view)?;
+    app.on_key(KeyCode::Char('t'), || Message::Tick)
+        .on_key(KeyCode::Char('a'), || Message::AddItem)
+        .on_key(KeyCode::Char('r'), || Message::RemoveItem)
+        .run_inline(update, view)?;
 
     Ok(())
 }

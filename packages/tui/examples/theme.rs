@@ -60,11 +60,6 @@ fn view(state: &State) -> impl Layout<Message> {
                 .child(label("Dark (d)"))
                 .child(label("Light (l)")),
         )
-        .child(
-            keyboard_controller()
-                .on_key(KeyCode::Char('d'), || Message::SwitchToDark)
-                .on_key(KeyCode::Char('l'), || Message::SwitchToLight),
-        )
         .child(label("Press Esc to quit"))
 }
 
@@ -74,6 +69,8 @@ fn main() -> Result<()> {
     })
     .with_theme(Theme::dark());
 
-    app.run_inline(update, view)?;
+    app.on_key(KeyCode::Char('d'), || Message::SwitchToDark)
+        .on_key(KeyCode::Char('l'), || Message::SwitchToLight)
+        .run_inline(update, view)?;
     Ok(())
 }

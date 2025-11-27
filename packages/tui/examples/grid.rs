@@ -143,12 +143,11 @@ fn view(state: &State) -> impl Layout<Message> {
         .child(spacer().height(1))
         // Footer
         .child(label("Press 'q' or Esc to quit").fg(Color::Indexed(8)))
-        // Keyboard controller for global shortcuts
-        .child(keyboard_controller().on('q', || Message::Quit))
 }
 
 fn main() -> Result<()> {
     let app = App::new(State { counter: 0 });
-    app.run(update, view)?;
+    app.on_key(KeyCode::Char('q'), || Message::Quit)
+        .run(update, view)?;
     Ok(())
 }

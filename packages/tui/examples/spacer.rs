@@ -6,15 +6,11 @@ use tui::prelude::*;
 #[derive(Debug)]
 struct State;
 
-/// No messages needed
-#[derive(Clone, Debug)]
-enum Message {}
-
 /// Update function - no changes needed
-fn update(_state: &mut State, _msg: Message) {}
+fn update(_state: &mut State, _msg: ()) {}
 
 /// View function - demonstrates spacer usage
-fn view(_state: &State) -> impl Layout<Message> {
+fn view(_state: &State) -> impl Layout<()> {
     col()
         .gap(0)
         // Title

@@ -152,8 +152,6 @@ fn view(state: &State) -> impl Layout<Message> {
         .child(
             label("Tab/Shift+Tab: Navigate | Enter/Space: Click | Esc: Quit").fg(Color::Indexed(8)),
         )
-        // Keyboard controller for global shortcuts
-        .child(keyboard_controller().on('q', || Message::Quit))
 }
 
 fn main() -> Result<()> {
@@ -161,6 +159,7 @@ fn main() -> Result<()> {
         last_clicked: None,
         click_count: 0,
     });
-    app.run_inline(update, view)?;
+    app.on_key(KeyCode::Char('q'), || Message::Quit)
+        .run_inline(update, view)?;
     Ok(())
 }

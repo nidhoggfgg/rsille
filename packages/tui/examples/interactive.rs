@@ -186,8 +186,6 @@ fn view(state: &State) -> impl Layout<Message> {
         // Footer with instructions
         .child(label("Click or hover on any element above to trigger events").fg(Color::Indexed(8)))
         .child(label("Esc or 'q': Quit").fg(Color::Indexed(8)))
-        // Keyboard controller for global shortcuts
-        .child(keyboard_controller().on('q', || Message::Quit))
 }
 
 fn main() -> Result<()> {
@@ -198,6 +196,7 @@ fn main() -> Result<()> {
         press_count: 0,
     });
     // Use run() for fullscreen mode with mouse support
-    app.run(update, view)?;
+    app.on_key(KeyCode::Char('q'), || Message::Quit)
+        .run(update, view)?;
     Ok(())
 }
