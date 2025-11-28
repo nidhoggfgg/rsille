@@ -82,7 +82,7 @@ struct EnhancedState {
 ///     .focusable()
 ///     .hoverable()
 ///     .on_click(|| Message::Clicked)
-///     .on_hover(|| Message::Hovered)
+///     .on_mouse_enter(|| Message::MouseEntered)
 ///     .on_focus(|| Message::Focused);
 /// ```
 pub struct Enhanced<M, W> {
@@ -116,8 +116,10 @@ pub struct Enhanced<M, W> {
     // === Event handlers ===
     /// Click handler (mouse down + up in same location)
     on_click: Option<Arc<dyn Fn() -> M + Send + Sync>>,
-    /// Hover handler (mouse enters widget)
-    on_hover: Option<Arc<dyn Fn() -> M + Send + Sync>>,
+    /// Mouse enter handler (mouse enters widget area)
+    on_mouse_enter: Option<Arc<dyn Fn() -> M + Send + Sync>>,
+    /// Mouse leave handler (mouse leaves widget area)
+    on_mouse_leave: Option<Arc<dyn Fn() -> M + Send + Sync>>,
     /// Focus handler (widget gains focus)
     on_focus: Option<Arc<dyn Fn() -> M + Send + Sync>>,
     /// Blur handler (widget loses focus)
@@ -126,6 +128,8 @@ pub struct Enhanced<M, W> {
     // === Internal state ===
     /// Cached area from last render (for hit testing)
     cached_area: RwLock<Option<Area>>,
+    /// Cached widget path from last render (for hover tracking)
+    cached_path: RwLock<Option<Vec<usize>>>,
     /// Interaction state (focus, hover, pressed, etc.)
     state: RwLock<EnhancedState>,
 }
@@ -159,10 +163,12 @@ impl<M, W> Enhanced<M, W> {
             border_color: None,
             focus_border_color: None,
             on_click: None,
-            on_hover: None,
+            on_mouse_enter: None,
+            on_mouse_leave: None,
             on_focus: None,
             on_blur: None,
             cached_area: RwLock::new(None),
+            cached_path: RwLock::new(None),
             state: RwLock::new(EnhancedState::default()),
         }
     }
@@ -320,19 +326,42 @@ impl<M, W> Enhanced<M, W> {
         self
     }
 
-    /// Set hover handler (fires when mouse enters widget)
+    /// Set mouse enter handler (fires when mouse enters widget area)
+    ///
+    /// This event fires only once when the mouse crosses the boundary into the widget.
+    /// It will not fire again until the mouse leaves and re-enters.
     ///
     /// # Examples
     ///
     /// ```
     /// enhanced(label("Hover me"))
-    ///     .on_hover(|| Message::Hovered)
+    ///     .hoverable()
+    ///     .on_mouse_enter(|| Message::MouseEntered)
     /// ```
-    pub fn on_hover<F>(mut self, handler: F) -> Self
+    pub fn on_mouse_enter<F>(mut self, handler: F) -> Self
     where
         F: Fn() -> M + Send + Sync + 'static,
     {
-        self.on_hover = Some(Arc::new(handler));
+        self.on_mouse_enter = Some(Arc::new(handler));
+        self
+    }
+
+    /// Set mouse leave handler (fires when mouse leaves widget area)
+    ///
+    /// This event fires only once when the mouse crosses the boundary out of the widget.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// enhanced(label("Hover me"))
+    ///     .hoverable()
+    ///     .on_mouse_leave(|| Message::MouseLeft)
+    /// ```
+    pub fn on_mouse_leave<F>(mut self, handler: F) -> Self
+    where
+        F: Fn() -> M + Send + Sync + 'static,
+    {
+        self.on_mouse_leave = Some(Arc::new(handler));
         self
     }
 
@@ -419,6 +448,13 @@ where
         // Cache area for hit testing
         *self.cached_area.write().unwrap() = Some(area);
 
+        // Register with HoverManager if we have mouse enter/leave handlers
+        if self.on_mouse_enter.is_some() || self.on_mouse_leave.is_some() {
+            let path = crate::hover::RenderContext::current_path();
+            *self.cached_path.write().unwrap() = Some(path.clone());
+            crate::hover::HoverManager::global().register_widget(path, area);
+        }
+
         let state = self.state.read().unwrap();
 
         // Step 1: Compute effective style and fill background
@@ -495,6 +531,25 @@ where
 
         match event {
             Event::Mouse(mouse_event) => {
+                // Check for hover enter/leave events ONLY on mouse movement
+                use crate::event::MouseEventKind;
+                if matches!(mouse_event.kind, MouseEventKind::Moved) {
+                    if let Some(ref path) = *self.cached_path.read().unwrap() {
+                        if let Some(ref handler) = self.on_mouse_enter {
+                            if crate::hover::HoverManager::global().should_fire_enter(path) {
+                                messages.push(handler());
+                            }
+                        }
+
+                        if let Some(ref handler) = self.on_mouse_leave {
+                            if crate::hover::HoverManager::global().should_fire_leave(path) {
+                                messages.push(handler());
+                            }
+                        }
+                    }
+                }
+
+                // Handle other mouse events (click, etc.)
                 messages.extend(self.handle_mouse_event(mouse_event));
             }
             Event::Key(key_event) => {
@@ -653,18 +708,8 @@ impl<M, W> Enhanced<M, W> {
         let mut messages = Vec::new();
 
         match mouse_event.kind {
-            MouseEventKind::Moved => {
-                if is_inside && !state.hovering && self.is_hoverable {
-                    // Mouse entered
-                    state.hovering = true;
-                    if let Some(ref handler) = self.on_hover {
-                        messages.push(handler());
-                    }
-                } else if !is_inside && state.hovering {
-                    // Mouse left
-                    state.hovering = false;
-                }
-            }
+            // Note: Mouse enter/leave is now handled by HoverManager
+            // to work correctly across component tree rebuilds
 
             MouseEventKind::Down(MouseButton::Left) => {
                 if is_inside {
@@ -715,7 +760,8 @@ where
             .field("border_style", &self.border_style)
             .field("padding", &self.padding)
             .field("has_on_click", &self.on_click.is_some())
-            .field("has_on_hover", &self.on_hover.is_some())
+            .field("has_on_mouse_enter", &self.on_mouse_enter.is_some())
+            .field("has_on_mouse_leave", &self.on_mouse_leave.is_some())
             .field("has_on_focus", &self.on_focus.is_some())
             .field("has_on_blur", &self.on_blur.is_some())
             .field("state", &*self.state.read().unwrap())
@@ -743,10 +789,12 @@ where
             border_color: self.border_color,
             focus_border_color: self.focus_border_color,
             on_click: self.on_click.clone(),
-            on_hover: self.on_hover.clone(),
+            on_mouse_enter: self.on_mouse_enter.clone(),
+            on_mouse_leave: self.on_mouse_leave.clone(),
             on_focus: self.on_focus.clone(),
             on_blur: self.on_blur.clone(),
             cached_area: RwLock::new(*self.cached_area.read().unwrap()),
+            cached_path: RwLock::new(self.cached_path.read().unwrap().clone()),
             state: RwLock::new(*self.state.read().unwrap()),
         }
     }

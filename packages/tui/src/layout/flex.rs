@@ -319,6 +319,25 @@ impl<M: Clone> Flex<M> {
 
         // For mouse events, use spatial routing
         if let Event::Mouse(mouse_event) = event {
+            use crate::event::MouseEventKind;
+
+            // For MouseMoved events, broadcast to ALL children
+            // This is necessary for hover enter/leave events to work correctly
+            // (a widget needs to receive MouseMoved events even when mouse is outside)
+            if matches!(mouse_event.kind, MouseEventKind::Moved) {
+                for child in self.children.iter_mut() {
+                    let result = child.handle_event(event);
+                    let messages = result.messages_ref().to_vec();
+                    all_messages.extend(messages);
+
+                    if result.is_consumed() {
+                        return (EventResult::consumed(), all_messages);
+                    }
+                }
+                return (EventResult::Ignored, all_messages);
+            }
+
+            // For other mouse events (click, drag, etc.), use spatial routing
             let cached_areas = self.cached_child_areas.read().unwrap();
             if !cached_areas.is_empty() {
                 for (idx, child_area) in cached_areas.iter().enumerate() {
@@ -474,7 +493,7 @@ impl<M: Clone> Widget<M> for Flex<M> {
         *self.cached_child_areas.write().unwrap() = child_areas.clone();
 
         // Render each child in its allocated area using sequential sub-chunk creation
-        for (child, child_area) in self.children.iter().zip(child_areas) {
+        for (index, (child, child_area)) in self.children.iter().zip(child_areas).enumerate() {
             // Skip rendering if the child has zero dimensions
             if child_area.width() == 0 || child_area.height() == 0 {
                 continue;
@@ -495,7 +514,10 @@ impl<M: Clone> Widget<M> for Flex<M> {
 
             // Create a sub-chunk for this child
             if let Ok(mut child_chunk) = chunk.from_area(child_area) {
+                // Maintain render path for hover tracking
+                crate::hover::RenderContext::push_index(index);
                 child.render(&mut child_chunk);
+                crate::hover::RenderContext::pop_index();
             }
         }
     }

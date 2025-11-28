@@ -489,6 +489,24 @@ impl<M: Clone> Grid<M> {
 
         // For mouse events, use spatial routing
         if let Event::Mouse(mouse_event) = event {
+            use crate::event::MouseEventKind;
+
+            // For MouseMoved events, broadcast to ALL children
+            // This is necessary for hover enter/leave events to work correctly
+            if matches!(mouse_event.kind, MouseEventKind::Moved) {
+                for item in self.children.iter_mut() {
+                    let result = item.widget_mut().handle_event(event);
+                    let messages = result.messages_ref().to_vec();
+                    all_messages.extend(messages);
+
+                    if result.is_consumed() {
+                        return (EventResult::consumed(), all_messages);
+                    }
+                }
+                return (EventResult::Ignored, all_messages);
+            }
+
+            // For other mouse events, use spatial routing
             let cached_areas = self.cached_child_areas.read().unwrap();
             if !cached_areas.is_empty() {
                 for (idx, child_area) in cached_areas.iter().enumerate() {
@@ -638,7 +656,7 @@ impl<M: Clone> Widget<M> for Grid<M> {
         };
 
         // Render children
-        for (item, child_area) in self.children.iter().zip(child_areas.iter()) {
+        for (index, (item, child_area)) in self.children.iter().zip(child_areas.iter()).enumerate() {
             // Skip rendering if the child has zero dimensions
             if child_area.width() == 0 || child_area.height() == 0 {
                 continue;
@@ -658,7 +676,10 @@ impl<M: Clone> Widget<M> for Grid<M> {
             }
 
             if let Ok(mut child_chunk) = chunk.from_area(*child_area) {
+                // Maintain render path for hover tracking
+                crate::hover::RenderContext::push_index(index);
                 item.widget().render(&mut child_chunk);
+                crate::hover::RenderContext::pop_index();
             }
         }
     }
@@ -775,6 +796,24 @@ impl<M: Clone> Layout<M> for Grid<M> {
 
         // For mouse events, use spatial routing
         if let Event::Mouse(mouse_event) = event {
+            use crate::event::MouseEventKind;
+
+            // For MouseMoved events, broadcast to ALL children
+            // This is necessary for hover enter/leave events to work correctly
+            if matches!(mouse_event.kind, MouseEventKind::Moved) {
+                for item in self.children.iter_mut() {
+                    let result = item.widget_mut().handle_event(event);
+                    let messages = result.messages_ref().to_vec();
+                    all_messages.extend(messages);
+
+                    if result.is_consumed() {
+                        return (EventResult::consumed(), all_messages);
+                    }
+                }
+                return (EventResult::Ignored, all_messages);
+            }
+
+            // For other mouse events, use spatial routing
             let cached_areas = self.cached_child_areas.read().unwrap();
             if !cached_areas.is_empty() {
                 for (idx, child_area) in cached_areas.iter().enumerate() {

@@ -25,7 +25,8 @@ use tui::prelude::*;
 struct State {
     last_event: String,
     click_count: usize,
-    hover_count: usize,
+    mouse_enter_count: usize,
+    mouse_leave_count: usize,
     focus_count: usize,
 }
 
@@ -33,7 +34,8 @@ struct State {
 #[derive(Clone, Debug)]
 enum Message {
     SimpleClicked,
-    StyledHovered,
+    MouseEntered,
+    MouseLeft,
     BorderedFocused,
     Card1Clicked,
     Card2Clicked,
@@ -50,9 +52,13 @@ fn update(state: &mut State, msg: Message) {
             state.last_event = "Simple Click".into();
             state.click_count += 1;
         }
-        Message::StyledHovered => {
-            state.last_event = "Hover Effect".into();
-            state.hover_count += 1;
+        Message::MouseEntered => {
+            state.last_event = "Mouse Entered".into();
+            state.mouse_enter_count += 1;
+        }
+        Message::MouseLeft => {
+            state.last_event = "Mouse Left".into();
+            state.mouse_leave_count += 1;
         }
         Message::FocusGained(name) => {
             state.last_event = format!("{} Focused", name);
@@ -96,10 +102,11 @@ fn view(state: &State) -> Flex<Message> {
                 .child(label("=== Basic Features ===").bold())
                 .child(enhanced(label("1. Click me!")).on_click(|| Message::SimpleClicked))
                 .child(
-                    enhanced(label("2. Hover over me"))
+                    enhanced(label("2. Move mouse over me"))
                         .hoverable()
                         .hover_fg(Color::Cyan)
-                        .on_hover(|| Message::StyledHovered),
+                        .on_mouse_enter(|| Message::MouseEntered)
+                        .on_mouse_leave(|| Message::MouseLeft),
                 )
                 .child(
                     enhanced(label("3. Press Tab to focus me"))
@@ -147,7 +154,8 @@ fn view(state: &State) -> Flex<Message> {
                 .child(label("=== Event Stats ===").bold())
                 .child(label(&format!("Last Event: {}", state.last_event)))
                 .child(label(&format!("Clicks: {}", state.click_count)))
-                .child(label(&format!("Hovers: {}", state.hover_count)))
+                .child(label(&format!("Mouse Enters: {}", state.mouse_enter_count)))
+                .child(label(&format!("Mouse Leaves: {}", state.mouse_leave_count)))
                 .child(label(&format!("Focus Events: {}", state.focus_count))),
         )
         .child(label("Press 'q' or Esc to quit").fg(Color::White))
@@ -180,7 +188,8 @@ fn main() -> Result<()> {
     let initial_state = State {
         last_event: "None".to_string(),
         click_count: 0,
-        hover_count: 0,
+        mouse_enter_count: 0,
+        mouse_leave_count: 0,
         focus_count: 0,
     };
 
