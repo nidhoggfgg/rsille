@@ -68,6 +68,9 @@ where
     M: Clone + std::fmt::Debug,
 {
     fn draw(&mut self, mut chunk: Chunk) -> std::result::Result<Size, DrawErr> {
+        // Begin hover tracking frame
+        crate::hover::HoverManager::global().begin_frame();
+
         // Clear any previous overlays
         OverlayManager::global().clear();
 
@@ -107,6 +110,9 @@ where
             }
         }
 
+        // End hover tracking frame - calculate hover states
+        crate::hover::HoverManager::global().end_frame();
+
         Ok(size)
     }
 }
@@ -128,6 +134,12 @@ where
             self.rebuild_focus_chain();
         }
 
+        // Begin hover event batch - clears pending events from last batch
+        crate::hover::HoverManager::global().begin_event_batch();
+
+        // Track if we need to route MouseMoved events
+        let mut has_hover_changes = false;
+
         for event in events {
             // Handle Resize events - force rebuild of widget tree
             if let Event::Resize(_, _) = event {
@@ -136,6 +148,23 @@ where
                 // Clear cache to force rebuild with new size
                 self.cached_layout = None;
                 continue;
+            }
+
+            // Update HoverManager on mouse movement and check for changes
+            if let Event::Mouse(mouse_event) = event {
+                use crate::event::MouseEventKind;
+                if matches!(
+                    mouse_event.kind,
+                    MouseEventKind::Moved | MouseEventKind::Drag(_)
+                ) {
+                    has_hover_changes = crate::hover::HoverManager::global()
+                        .update_mouse_position(mouse_event.column, mouse_event.row);
+
+                    // Skip routing MouseMoved if no hover state changed (optimization)
+                    if !has_hover_changes && matches!(mouse_event.kind, MouseEventKind::Moved) {
+                        continue;
+                    }
+                }
             }
 
             // Intercept Tab/Shift+Tab for focus navigation
