@@ -95,6 +95,11 @@ impl SelectableNavigation {
         self.viewport_size = size;
     }
 
+    /// Get the viewport size
+    pub fn viewport_size(&self) -> usize {
+        self.viewport_size
+    }
+
     /// Move focus to the next non-disabled item
     ///
     /// # Arguments
