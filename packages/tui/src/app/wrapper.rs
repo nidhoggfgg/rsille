@@ -202,7 +202,8 @@ where
                 .expect("Layout should be cached");
 
             let focus_id = self.focus_manager.focus_id();
-            let (_result, messages) = layout.handle_event_with_focus(event, &[], focus_id);
+            let registry = &self.focus_manager.registry;
+            let (_result, messages) = layout.handle_event_with_focus(event, focus_id, registry);
 
             // Store messages for processing in update()
             let has_messages = !messages.is_empty();
@@ -276,10 +277,9 @@ where
     /// Rebuild focus chain from current widget tree
     fn rebuild_focus_chain(&mut self) {
         if let Some(layout) = &self.cached_layout {
-            let mut chain = Vec::new();
             let mut path = Vec::new();
-            layout.build_focus_chain(&mut path, &mut chain);
-            self.focus_manager.set_focus_chain(chain);
+            let (chain, registry) = layout.build_focus_chain(&mut path);
+            self.focus_manager.set_focus_chain(chain, registry);
         }
     }
 
@@ -287,7 +287,8 @@ where
     fn update_focus_states(&mut self) {
         if let Some(layout) = &mut self.cached_layout {
             let focus_id = self.focus_manager.focus_id();
-            layout.update_focus_states(&[], focus_id);
+            let registry = &self.focus_manager.registry;
+            layout.update_focus_states(focus_id, registry);
         }
     }
 }

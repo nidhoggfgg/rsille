@@ -16,8 +16,8 @@ use smallvec::SmallVec;
 use std::cell::RefCell;
 use std::sync::{Arc, RwLock};
 
-// Re-export WidgetPath from widget_id module for convenience
-pub use crate::widget_id::WidgetPath;
+// Re-export WidgetPath from focus module for convenience
+pub use crate::focus::WidgetPath;
 
 /// Render context for tracking current widget path during rendering
 ///
