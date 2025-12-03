@@ -16,7 +16,7 @@
 //!
 //! Run with: cargo run --example button
 
-use tui::prelude::*;
+use tui::{prelude::*, widget::common::StatefulWidgetBuilder};
 
 /// Application state
 #[derive(Debug)]

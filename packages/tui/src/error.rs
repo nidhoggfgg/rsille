@@ -8,25 +8,105 @@ pub type Result<T> = std::result::Result<T, WidgetError>;
 /// Errors that can occur during widget operations
 #[derive(Debug)]
 pub enum WidgetError {
+    /// Invalid widget configuration with details
     InvalidConfig(String),
+
+    /// Circular containment detected in widget tree
     CircularContainment,
+
+    /// Widget not found by name or ID
     WidgetNotFound(String),
-    RenderError(String),
-    LayoutError(String),
-    EventError(String),
+
+    /// Error during widget rendering
+    ///
+    /// Contains the error message and optional widget path for context
+    RenderError {
+        message: String,
+        widget_path: Option<Vec<usize>>,
+    },
+
+    /// Error during layout calculation
+    ///
+    /// Contains the original Taffy error and optional widget context
+    LayoutError {
+        source: taffy::TaffyError,
+        widget_path: Option<Vec<usize>>,
+    },
+
+    /// Error during event handling
+    ///
+    /// Contains the error message and optional widget context
+    EventError {
+        message: String,
+        widget_path: Option<Vec<usize>>,
+    },
+
+    /// IO error from underlying operations
     Io(std::io::Error),
+}
+
+impl WidgetError {
+    /// Create a render error with a widget path
+    pub fn render_error(message: impl Into<String>, widget_path: Option<Vec<usize>>) -> Self {
+        Self::RenderError {
+            message: message.into(),
+            widget_path,
+        }
+    }
+
+    /// Create a layout error with a widget path
+    pub fn layout_error(source: taffy::TaffyError, widget_path: Option<Vec<usize>>) -> Self {
+        Self::LayoutError {
+            source,
+            widget_path,
+        }
+    }
+
+    /// Create an event error with a widget path
+    pub fn event_error(message: impl Into<String>, widget_path: Option<Vec<usize>>) -> Self {
+        Self::EventError {
+            message: message.into(),
+            widget_path,
+        }
+    }
 }
 
 impl fmt::Display for WidgetError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            WidgetError::InvalidConfig(msg) => write!(f, "Invalid widget configuration: {}", msg),
-            WidgetError::CircularContainment => write!(f, "Circular containment detected"),
-            WidgetError::WidgetNotFound(name) => write!(f, "Widget not found: {}", name),
-            WidgetError::RenderError(msg) => write!(f, "Render error: {}", msg),
-            WidgetError::LayoutError(msg) => write!(f, "Layout error: {}", msg),
-            WidgetError::EventError(msg) => write!(f, "Event handling error: {}", msg),
-            WidgetError::Io(err) => write!(f, "IO error: {}", err),
+            WidgetError::InvalidConfig(msg) => {
+                write!(f, "Invalid widget configuration: {}", msg)
+            }
+            WidgetError::CircularContainment => {
+                write!(f, "Circular containment detected")
+            }
+            WidgetError::WidgetNotFound(name) => {
+                write!(f, "Widget not found: {}", name)
+            }
+            WidgetError::RenderError { message, widget_path } => {
+                write!(f, "Render error: {}", message)?;
+                if let Some(path) = widget_path {
+                    write!(f, " (widget path: {:?})", path)?;
+                }
+                Ok(())
+            }
+            WidgetError::LayoutError { source, widget_path } => {
+                write!(f, "Layout error: {}", source)?;
+                if let Some(path) = widget_path {
+                    write!(f, " (widget path: {:?})", path)?;
+                }
+                Ok(())
+            }
+            WidgetError::EventError { message, widget_path } => {
+                write!(f, "Event handling error: {}", message)?;
+                if let Some(path) = widget_path {
+                    write!(f, " (widget path: {:?})", path)?;
+                }
+                Ok(())
+            }
+            WidgetError::Io(err) => {
+                write!(f, "IO error: {}", err)
+            }
         }
     }
 }
@@ -35,6 +115,7 @@ impl std::error::Error for WidgetError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             WidgetError::Io(err) => Some(err),
+            WidgetError::LayoutError { source, .. } => Some(source),
             _ => None,
         }
     }
@@ -48,6 +129,6 @@ impl From<std::io::Error> for WidgetError {
 
 impl From<taffy::TaffyError> for WidgetError {
     fn from(err: taffy::TaffyError) -> Self {
-        WidgetError::LayoutError(err.to_string())
+        WidgetError::layout_error(err, None)
     }
 }
