@@ -201,8 +201,8 @@ where
                 .as_mut()
                 .expect("Layout should be cached");
 
-            let focus_path = self.focus_manager.focus_path();
-            let (_result, messages) = layout.handle_event_with_focus(event, &[], focus_path);
+            let focus_id = self.focus_manager.focus_id();
+            let (_result, messages) = layout.handle_event_with_focus(event, &[], focus_id);
 
             // Store messages for processing in update()
             let has_messages = !messages.is_empty();
@@ -286,8 +286,8 @@ where
     /// Update focus states in widget tree based on current focus
     fn update_focus_states(&mut self) {
         if let Some(layout) = &mut self.cached_layout {
-            let focus_path = self.focus_manager.focus_path();
-            layout.update_focus_states(&[], focus_path);
+            let focus_id = self.focus_manager.focus_id();
+            layout.update_focus_states(&[], focus_id);
         }
     }
 }

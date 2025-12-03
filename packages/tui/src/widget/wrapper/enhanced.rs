@@ -630,7 +630,7 @@ where
     fn build_focus_chain_recursive(
         &self,
         current_path: &mut Vec<usize>,
-        chain: &mut Vec<crate::focus::FocusPath>,
+        chain: &mut Vec<crate::widget_id::WidgetId>,
     ) {
         // Layout has already checked focusable() and added us to chain if needed
         // Just delegate to inner in case it's a container with children
@@ -640,12 +640,12 @@ where
     fn update_focus_states_recursive(
         &mut self,
         current_path: &[usize],
-        focus_path: Option<&crate::focus::FocusPath>,
+        focus_id: Option<crate::widget_id::WidgetId>,
     ) {
         // Layout has already called set_focused() on us
         // Just delegate to inner in case it's a container with children
         self.inner
-            .update_focus_states_recursive(current_path, focus_path);
+            .update_focus_states_recursive(current_path, focus_id);
     }
 }
 

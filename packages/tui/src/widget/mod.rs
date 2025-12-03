@@ -216,7 +216,7 @@ pub trait Widget<M>: Send + Sync {
     fn build_focus_chain_recursive(
         &self,
         _current_path: &mut Vec<usize>,
-        _chain: &mut Vec<crate::focus::FocusPath>,
+        _chain: &mut Vec<crate::widget_id::WidgetId>,
     ) {
         // Default: no-op (leaf widgets don't have children)
     }
@@ -228,14 +228,14 @@ pub trait Widget<M>: Send + Sync {
     ///
     /// # Arguments
     /// * `current_path` - Current path in the widget tree
-    /// * `focus_path` - The path of the focused widget (if any)
+    /// * `focus_id` - The ID of the focused widget (if any)
     ///
     /// # Default
     /// Does nothing - only containers need to implement this.
     fn update_focus_states_recursive(
         &mut self,
         _current_path: &[usize],
-        _focus_path: Option<&crate::focus::FocusPath>,
+        _focus_id: Option<crate::widget_id::WidgetId>,
     ) {
         // Default: no-op (leaf widgets don't have children)
     }
@@ -271,7 +271,7 @@ impl<M> Widget<M> for Box<dyn Widget<M>> {
     fn build_focus_chain_recursive(
         &self,
         current_path: &mut Vec<usize>,
-        chain: &mut Vec<crate::focus::FocusPath>,
+        chain: &mut Vec<crate::widget_id::WidgetId>,
     ) {
         (**self).build_focus_chain_recursive(current_path, chain)
     }
@@ -279,8 +279,8 @@ impl<M> Widget<M> for Box<dyn Widget<M>> {
     fn update_focus_states_recursive(
         &mut self,
         current_path: &[usize],
-        focus_path: Option<&crate::focus::FocusPath>,
+        focus_id: Option<crate::widget_id::WidgetId>,
     ) {
-        (**self).update_focus_states_recursive(current_path, focus_path)
+        (**self).update_focus_states_recursive(current_path, focus_id)
     }
 }
