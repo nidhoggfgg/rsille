@@ -238,6 +238,7 @@ pub use crate::widget::{
     LineMarker,
     List,
     ListItem,
+    ProfilingData,
     RadioDirection,
     RadioGroup,
     SelectionEvent,
@@ -250,6 +251,7 @@ pub use crate::widget::{
     TextInput,
     TextInputVariant,
     Widget,
+    WidgetLifecycle,
 };
 
 // The ui! macro is automatically available due to #[macro_export]

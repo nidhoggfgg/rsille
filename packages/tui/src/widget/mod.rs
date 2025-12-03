@@ -5,6 +5,9 @@ mod into_widget;
 // Common widget utilities
 pub mod common;
 
+// Widget lifecycle hooks
+pub mod lifecycle;
+
 // Widget implementations
 mod button;
 mod checkbox;
@@ -27,6 +30,7 @@ pub use code_block::{code_block, CodeBlock, LineMarker};
 pub use divider::{divider, Divider, DividerDirection, DividerTextPosition, DividerVariant};
 pub use into_widget::IntoWidget;
 pub use label::{label, Label};
+pub use lifecycle::{ProfilingData, WidgetLifecycle};
 pub use list::{list, List, ListItem, SelectionEvent, SelectionMode};
 pub use radio::{radio_group, RadioDirection, RadioGroup};
 pub use select::{select, Select, SelectEvent, SelectItem};
