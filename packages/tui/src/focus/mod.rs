@@ -276,4 +276,82 @@ mod tests {
         // Should auto-focus to id1
         assert_eq!(manager.focus_id(), Some(id1));
     }
+
+    #[test]
+    fn test_focus_preservation_across_tree_rebuilds() {
+        // This test simulates the declarative UI pattern where the widget tree
+        // is rebuilt on every state change. With stable IDs, focus should be preserved.
+
+        let mut manager = FocusManager::new();
+
+        // Simulate first render: build widget tree and focus chain
+        let build_tree = || {
+            vec![
+                make_id(&[0, 0]), // First button in first container
+                make_id(&[0, 1]), // Second button in first container
+                make_id(&[1, 0]), // Button in second container
+            ]
+        };
+
+        // First render
+        let chain1 = build_tree();
+        manager.set_focus_chain(chain1);
+
+        // Focus on second button
+        manager.focus_next(); // Move to [0, 1]
+        let focused_id_before = manager.focus_id().unwrap();
+        assert_eq!(focused_id_before.path(), &[0, 1]);
+
+        // Simulate state change and tree rebuild (declarative UI pattern)
+        // The widget tree is completely recreated, but with stable IDs,
+        // the same path produces the same ID
+        let chain2 = build_tree();
+        manager.set_focus_chain(chain2);
+
+        // Focus should be preserved! Same path = same ID = same focus
+        let focused_id_after = manager.focus_id().unwrap();
+        assert_eq!(focused_id_after.path(), &[0, 1]);
+        assert_eq!(focused_id_before, focused_id_after);
+
+        // Verify we can still navigate
+        manager.focus_next();
+        assert_eq!(manager.focus_id().unwrap().path(), &[1, 0]);
+    }
+
+    #[test]
+    fn test_focus_preservation_with_keys() {
+        // Test focus preservation with explicit widget keys (for dynamic lists)
+
+        let mut manager = FocusManager::new();
+
+        // Simulate a list with explicit keys
+        let build_list = |item_keys: &[&str]| {
+            item_keys
+                .iter()
+                .enumerate()
+                .map(|(idx, &key)| {
+                    WidgetId::from_path_and_key(SmallVec::from_slice(&[0, idx]), Some(key))
+                })
+                .collect::<Vec<_>>()
+        };
+
+        // First render with items ["user-1", "user-2", "user-3"]
+        let chain1 = build_list(&["user-1", "user-2", "user-3"]);
+        manager.set_focus_chain(chain1);
+
+        // Focus on user-2 (index 1)
+        manager.focus_next();
+        let focused_before = manager.focus_id().unwrap();
+        assert_eq!(focused_before.path(), &[0, 1]);
+
+        // Simulate list reorder: ["user-3", "user-2", "user-1"]
+        // user-2 is now at index 1, but same key should preserve focus
+        let chain2 = build_list(&["user-3", "user-2", "user-1"]);
+        manager.set_focus_chain(chain2);
+
+        // Focus should still be on user-2, even though it's at a different index
+        let focused_after = manager.focus_id().unwrap();
+        assert_eq!(focused_after.path(), &[0, 1]); // Same path as before
+        assert_eq!(focused_before, focused_after); // Same ID due to same key
+    }
 }
