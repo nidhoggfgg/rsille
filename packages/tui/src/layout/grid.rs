@@ -675,8 +675,6 @@ impl<M: Clone> Widget<M> for Grid<M> {
         current_path: &mut Vec<usize>,
         chain: &mut Vec<crate::widget_id::WidgetId>,
     ) {
-        use smallvec::SmallVec;
-
         // For nested grids, traverse children without adding self again
         for (idx, item) in self.children.iter().enumerate() {
             current_path.push(idx);
@@ -685,7 +683,7 @@ impl<M: Clone> Widget<M> for Grid<M> {
             if item.widget().focusable() {
                 let widget_key = item.widget().widget_key();
                 let widget_id = crate::widget_id::WidgetId::from_path_and_key(
-                    SmallVec::from_slice(current_path),
+                    current_path,
                     widget_key,
                 );
                 chain.push(widget_id);
@@ -709,7 +707,9 @@ impl<M: Clone> Widget<M> for Grid<M> {
             let mut child_path = current_path.to_vec();
             child_path.push(idx);
 
-            let is_focused = focus_id.as_ref().map(|id| id.path() == child_path.as_slice()).unwrap_or(false);
+            let widget_key = item.widget().widget_key();
+            let child_id = crate::widget_id::WidgetId::from_path_and_key(&child_path, widget_key);
+            let is_focused = focus_id.as_ref() == Some(&child_id);
             item.widget_mut().set_focused(is_focused);
 
             // Recursively update focus states for nested layouts
@@ -727,8 +727,11 @@ impl<M> Default for Grid<M> {
 
 // Implement Layout trait for Grid
 impl<M: Clone> Layout<M> for Grid<M> {
-    fn build_focus_chain(&self, current_path: &mut Vec<usize>, chain: &mut Vec<crate::widget_id::WidgetId>) {
+    fn build_focus_chain(&self, current_path: &mut Vec<usize>) -> (Vec<crate::widget_id::WidgetId>, crate::focus::WidgetRegistry) {
         use smallvec::SmallVec;
+
+        let mut chain = Vec::new();
+        let mut registry = crate::focus::WidgetRegistry::new();
 
         // Grid itself is not focusable
         // Recursively traverse children
@@ -739,40 +742,64 @@ impl<M: Clone> Layout<M> for Grid<M> {
                 // Create stable WidgetId from current path and optional key
                 let widget_key = item.widget().widget_key();
                 let widget_id = crate::widget_id::WidgetId::from_path_and_key(
-                    SmallVec::from_slice(current_path),
+                    current_path,
                     widget_key,
                 );
+
+                // Register in both chain and registry
                 chain.push(widget_id);
+                registry.register(widget_id, SmallVec::from_slice(current_path));
             }
 
-            item.widget()
-                .build_focus_chain_recursive(current_path, chain);
+            // Recursively build for nested containers
+            let mut temp_chain = Vec::new();
+            item.widget().build_focus_chain_recursive(current_path, &mut temp_chain);
+
+            // Register all nested focusable widgets
+            for nested_id in temp_chain {
+                if !chain.contains(&nested_id) {
+                    chain.push(nested_id);
+                    registry.register(nested_id, SmallVec::from_slice(current_path));
+                }
+            }
 
             current_path.pop();
         }
+
+        (chain, registry)
     }
 
-    fn update_focus_states(&mut self, current_path: &[usize], focus_id: Option<crate::widget_id::WidgetId>) {
+    fn update_focus_states(&mut self, focus_id: Option<crate::widget_id::WidgetId>, registry: &crate::focus::WidgetRegistry) {
+        let mut base_path = Vec::new();
+
         for (idx, item) in self.children.iter_mut().enumerate() {
-            let mut child_path = current_path.to_vec();
+            let mut child_path = base_path.clone();
             child_path.push(idx);
 
-            let is_focused = focus_id.as_ref().map(|id| id.path() == child_path.as_slice()).unwrap_or(false);
+            // Build child ID to check if it's focused
+            let widget_key = item.widget().widget_key();
+            let child_id = crate::widget_id::WidgetId::from_path_and_key(
+                &child_path,
+                widget_key,
+            );
+
+            // Check if this child is focused by comparing IDs directly (O(1))
+            let is_focused = focus_id.as_ref() == Some(&child_id);
             item.widget_mut().set_focused(is_focused);
 
-            item.widget_mut()
-                .update_focus_states_recursive(&child_path, focus_id.clone());
+            // Recursively update nested widgets
+            item.widget_mut().update_focus_states_recursive(&child_path, focus_id);
         }
     }
 
     fn handle_event_with_focus(
         &mut self,
         event: &Event,
-        current_path: &[usize],
         focus_id: Option<crate::widget_id::WidgetId>,
+        registry: &crate::focus::WidgetRegistry,
     ) -> (EventResult<M>, Vec<M>) {
-        // Convert WidgetId to path for internal handling
-        let focus_path = focus_id.as_ref().map(|id| id.path());
+        // Get focus path from registry for event routing
+        let focus_path = focus_id.and_then(|id| registry.get_path(&id));
 
         let mut all_messages = Vec::new();
 
@@ -823,8 +850,9 @@ impl<M: Clone> Layout<M> for Grid<M> {
         // For keyboard events, use focus-based routing
         if let Event::Key(_) = event {
             if let Some(focus) = focus_path {
-                if focus.starts_with(current_path) && focus.len() > current_path.len() {
-                    let child_idx = focus[current_path.len()];
+                // Route to the first child in the focus path
+                if !focus.is_empty() {
+                    let child_idx = focus[0];
 
                     if let Some(item) = self.children.get_mut(child_idx) {
                         let result = item.widget_mut().handle_event(event);
