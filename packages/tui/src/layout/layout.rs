@@ -52,6 +52,10 @@ impl<M: Clone> Widget<M> for Box<dyn Layout<M>> {
         (**self).set_focused(focused)
     }
 
+    fn widget_key(&self) -> Option<&str> {
+        (**self).widget_key()
+    }
+
     fn build_focus_chain_recursive(
         &self,
         current_path: &mut Vec<usize>,

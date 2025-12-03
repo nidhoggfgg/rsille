@@ -564,10 +564,12 @@ impl<M: Clone> Widget<M> for Flex<M> {
         for (idx, child) in self.children.iter().enumerate() {
             current_path.push(idx);
 
-            // If child is focusable, add to chain
+            // If child is focusable, add to chain with stable ID
             if child.focusable() {
-                let widget_id = crate::widget_id::WidgetId::from_path(
-                    SmallVec::from_slice(current_path)
+                let widget_key = child.widget_key();
+                let widget_id = crate::widget_id::WidgetId::from_path_and_key(
+                    SmallVec::from_slice(current_path),
+                    widget_key,
                 );
                 chain.push(widget_id);
             }
@@ -649,9 +651,11 @@ impl<M: Clone> Layout<M> for Flex<M> {
             current_path.push(idx);
 
             if child.focusable() {
-                // Create WidgetId from current path
-                let widget_id = crate::widget_id::WidgetId::from_path(
-                    SmallVec::from_slice(current_path)
+                // Create stable WidgetId from current path and optional key
+                let widget_key = child.widget_key();
+                let widget_id = crate::widget_id::WidgetId::from_path_and_key(
+                    SmallVec::from_slice(current_path),
+                    widget_key,
                 );
                 chain.push(widget_id);
             }

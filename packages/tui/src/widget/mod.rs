@@ -206,6 +206,34 @@ pub trait Widget<M>: Send + Sync {
         // Default: no-op
     }
 
+    /// Returns an optional stable key for this widget.
+    ///
+    /// Keys are used to maintain widget identity across tree rebuilds, especially
+    /// important for dynamic lists where path alone might not be stable.
+    ///
+    /// # When to use keys
+    ///
+    /// - **Static layouts**: Not needed, path is stable enough
+    /// - **Dynamic lists**: Provide unique keys (e.g., database ID, unique identifier)
+    /// - **Reorderable items**: Keys maintain identity when order changes
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// // For a list item widget
+    /// impl<M> Widget<M> for UserListItem {
+    ///     fn widget_key(&self) -> Option<&str> {
+    ///         Some(&self.user_id) // Stable across reorders
+    ///     }
+    /// }
+    /// ```
+    ///
+    /// # Default
+    /// Returns `None` - most widgets don't need explicit keys
+    fn widget_key(&self) -> Option<&str> {
+        None
+    }
+
     /// Build focus chain recursively (for containers)
     ///
     /// Allows containers to contribute their children's focus paths to the focus chain.
@@ -270,6 +298,10 @@ impl<M> Widget<M> for Box<dyn Widget<M>> {
 
     fn set_focused(&mut self, focused: bool) {
         (**self).set_focused(focused)
+    }
+
+    fn widget_key(&self) -> Option<&str> {
+        (**self).widget_key()
     }
 
     fn build_focus_chain_recursive(

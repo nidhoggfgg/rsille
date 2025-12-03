@@ -681,10 +681,12 @@ impl<M: Clone> Widget<M> for Grid<M> {
         for (idx, item) in self.children.iter().enumerate() {
             current_path.push(idx);
 
-            // If child is focusable, add to chain
+            // If child is focusable, add to chain with stable ID
             if item.widget().focusable() {
-                let widget_id = crate::widget_id::WidgetId::from_path(
-                    SmallVec::from_slice(current_path)
+                let widget_key = item.widget().widget_key();
+                let widget_id = crate::widget_id::WidgetId::from_path_and_key(
+                    SmallVec::from_slice(current_path),
+                    widget_key,
                 );
                 chain.push(widget_id);
             }
@@ -734,9 +736,11 @@ impl<M: Clone> Layout<M> for Grid<M> {
             current_path.push(idx);
 
             if item.widget().focusable() {
-                // Create WidgetId from current path
-                let widget_id = crate::widget_id::WidgetId::from_path(
-                    SmallVec::from_slice(current_path)
+                // Create stable WidgetId from current path and optional key
+                let widget_key = item.widget().widget_key();
+                let widget_id = crate::widget_id::WidgetId::from_path_and_key(
+                    SmallVec::from_slice(current_path),
+                    widget_key,
                 );
                 chain.push(widget_id);
             }
