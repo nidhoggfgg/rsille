@@ -137,16 +137,15 @@ where
         // Begin hover event batch - clears pending events from last batch
         crate::hover::HoverManager::global().begin_event_batch();
 
-        // Track if we need to route MouseMoved events
-        let mut has_hover_changes = false;
-
         for event in events {
             // Handle Resize events - force rebuild of widget tree
-            if let Event::Resize(_, _) = event {
+            if let Event::Resize(width, height) = event {
                 self.state_changed = true;
                 self.needs_redraw = true;
                 // Clear cache to force rebuild with new size
                 self.cached_layout = None;
+                // Update hover manager's spatial grid
+                crate::hover::HoverManager::global().set_terminal_size(*width, *height);
                 continue;
             }
 
@@ -157,7 +156,7 @@ where
                     mouse_event.kind,
                     MouseEventKind::Moved | MouseEventKind::Drag(_)
                 ) {
-                    has_hover_changes = crate::hover::HoverManager::global()
+                    let has_hover_changes = crate::hover::HoverManager::global()
                         .update_mouse_position(mouse_event.column, mouse_event.row);
 
                     // Skip routing MouseMoved if no hover state changed (optimization)

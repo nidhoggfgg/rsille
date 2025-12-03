@@ -129,7 +129,7 @@ pub struct Enhanced<M, W> {
     /// Cached area from last render (for hit testing)
     cached_area: RwLock<Option<Area>>,
     /// Cached widget path from last render (for hover tracking)
-    cached_path: RwLock<Option<Vec<usize>>>,
+    cached_path: RwLock<Option<crate::hover::WidgetPath>>,
     /// Interaction state (focus, hover, pressed, etc.)
     state: RwLock<EnhancedState>,
 }

@@ -11,3 +11,5 @@ crossterm = { workspace = true }
 taffy = { workspace = true }
 syntect = { workspace = true }
 once_cell = { workspace = true }
+rustc-hash = "2.0"
+smallvec = "1.13"
