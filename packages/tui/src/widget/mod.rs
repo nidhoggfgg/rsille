@@ -33,7 +33,7 @@ pub use select::{select, Select, SelectEvent, SelectItem};
 pub use spacer::{spacer, Spacer};
 pub use table::{table, Column, ColumnWidth, Table, TableSelectionEvent, TableVariant};
 pub use text_input::{text_input, TextInput, TextInputVariant};
-pub use wrapper::{enhanced, interactive, Enhanced, Interactive};
+pub use wrapper::{enhanced, Enhanced};
 
 use crate::event::{Event, EventResult};
 use crate::layout::Constraints;
