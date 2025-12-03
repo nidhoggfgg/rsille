@@ -1,7 +1,7 @@
 //! Layout trait for root-level widgets
 
 use crate::event::{Event, EventResult};
-use crate::focus::FocusPath;
+use crate::widget_id::WidgetId;
 use crate::layout::Constraints;
 use crate::widget::Widget;
 
@@ -11,17 +11,17 @@ use crate::widget::Widget;
 /// as the return type of view functions in App::run.
 pub trait Layout<M: Clone>: Widget<M> {
     /// Build focus chain by recursively collecting focusable widgets
-    fn build_focus_chain(&self, current_path: &mut Vec<usize>, chain: &mut Vec<FocusPath>);
+    fn build_focus_chain(&self, current_path: &mut Vec<usize>, chain: &mut Vec<WidgetId>);
 
-    /// Update focus state for all children based on focus path
-    fn update_focus_states(&mut self, current_path: &[usize], focus_path: Option<&FocusPath>);
+    /// Update focus state for all children based on focus ID
+    fn update_focus_states(&mut self, current_path: &[usize], focus_id: Option<WidgetId>);
 
     /// Handle event with focus information
     fn handle_event_with_focus(
         &mut self,
         event: &Event,
         current_path: &[usize],
-        focus_path: Option<&FocusPath>,
+        focus_id: Option<WidgetId>,
     ) -> (EventResult<M>, Vec<M>);
 }
 
@@ -55,7 +55,7 @@ impl<M: Clone> Widget<M> for Box<dyn Layout<M>> {
     fn build_focus_chain_recursive(
         &self,
         current_path: &mut Vec<usize>,
-        chain: &mut Vec<FocusPath>,
+        chain: &mut Vec<WidgetId>,
     ) {
         (**self).build_focus_chain_recursive(current_path, chain)
     }
@@ -63,27 +63,27 @@ impl<M: Clone> Widget<M> for Box<dyn Layout<M>> {
     fn update_focus_states_recursive(
         &mut self,
         current_path: &[usize],
-        focus_path: Option<&FocusPath>,
+        focus_id: Option<WidgetId>,
     ) {
-        (**self).update_focus_states_recursive(current_path, focus_path)
+        (**self).update_focus_states_recursive(current_path, focus_id)
     }
 }
 
 impl<M: Clone> Layout<M> for Box<dyn Layout<M>> {
-    fn build_focus_chain(&self, current_path: &mut Vec<usize>, chain: &mut Vec<FocusPath>) {
+    fn build_focus_chain(&self, current_path: &mut Vec<usize>, chain: &mut Vec<WidgetId>) {
         (**self).build_focus_chain(current_path, chain)
     }
 
-    fn update_focus_states(&mut self, current_path: &[usize], focus_path: Option<&FocusPath>) {
-        (**self).update_focus_states(current_path, focus_path)
+    fn update_focus_states(&mut self, current_path: &[usize], focus_id: Option<WidgetId>) {
+        (**self).update_focus_states(current_path, focus_id)
     }
 
     fn handle_event_with_focus(
         &mut self,
         event: &Event,
         current_path: &[usize],
-        focus_path: Option<&FocusPath>,
+        focus_id: Option<WidgetId>,
     ) -> (EventResult<M>, Vec<M>) {
-        (**self).handle_event_with_focus(event, current_path, focus_path)
+        (**self).handle_event_with_focus(event, current_path, focus_id)
     }
 }

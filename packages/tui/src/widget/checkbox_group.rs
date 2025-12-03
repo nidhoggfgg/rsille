@@ -2,9 +2,9 @@
 
 use super::*;
 use crate::event::{Event, KeyCode, MouseButton, MouseEventKind};
-use crate::focus::FocusPath;
 use crate::style::{Style, ThemeManager};
 use crate::widget::common::{SelectableNavigation, StyleManager, WidgetState};
+use smallvec::SmallVec;
 use std::sync::Arc;
 
 /// Checkbox group layout direction
@@ -556,7 +556,7 @@ impl<M: Send + Sync> Widget<M> for CheckboxGroup<M> {
     fn build_focus_chain_recursive(
         &self,
         current_path: &mut Vec<usize>,
-        chain: &mut Vec<FocusPath>,
+        chain: &mut Vec<crate::widget_id::WidgetId>,
     ) {
         // Skip if disabled or empty
         if self.state.is_disabled() || self.options.is_empty() {
@@ -567,7 +567,10 @@ impl<M: Send + Sync> Widget<M> for CheckboxGroup<M> {
         // Using virtual child indices to represent each option
         for option_idx in 0..self.options.len() {
             current_path.push(option_idx);
-            chain.push(current_path.clone());
+            let widget_id = crate::widget_id::WidgetId::from_path(
+                SmallVec::from_slice(current_path)
+            );
+            chain.push(widget_id);
             current_path.pop();
         }
     }
@@ -575,13 +578,14 @@ impl<M: Send + Sync> Widget<M> for CheckboxGroup<M> {
     fn update_focus_states_recursive(
         &mut self,
         current_path: &[usize],
-        focus_path: Option<&FocusPath>,
+        focus_id: Option<crate::widget_id::WidgetId>,
     ) {
         // Check if focus is within this CheckboxGroup
-        if let Some(focus) = focus_path {
-            if focus.starts_with(current_path) && focus.len() == current_path.len() + 1 {
+        if let Some(focus) = focus_id {
+            let focus_path = focus.path();
+            if focus_path.starts_with(current_path) && focus_path.len() == current_path.len() + 1 {
                 // Focus is on one of our options
-                let option_idx = focus[current_path.len()];
+                let option_idx = focus_path[current_path.len()];
                 if option_idx < self.options.len() {
                     self.state.set_focused(true);
                     self.navigation.set_focused_index(Some(option_idx));

@@ -9,7 +9,6 @@ use super::layout::Layout;
 use super::taffy_bridge::TaffyBridge;
 use super::Overflow;
 use crate::event::{Event, EventResult};
-use crate::focus::FocusPath;
 use crate::layout::Constraints;
 use crate::style::{BorderStyle, Padding, Style};
 use crate::widget::{IntoWidget, Widget};
@@ -432,41 +431,6 @@ impl<M: Send + Sync> Grid<M> {
 }
 
 impl<M: Clone> Grid<M> {
-    /// Build focus chain by recursively collecting focusable widgets
-    pub fn build_focus_chain(&self, current_path: &mut Vec<usize>, chain: &mut Vec<FocusPath>) {
-        // Grid itself is not focusable
-        // Recursively traverse children
-        for (idx, item) in self.children.iter().enumerate() {
-            current_path.push(idx);
-
-            // If child is focusable, add to chain
-            if item.widget().focusable() {
-                chain.push(current_path.clone());
-            }
-
-            // Recursively build focus chain for nested layouts
-            item.widget()
-                .build_focus_chain_recursive(current_path, chain);
-
-            current_path.pop();
-        }
-    }
-
-    /// Update focus state for all children based on focus path
-    pub fn update_focus_states(&mut self, current_path: &[usize], focus_path: Option<&FocusPath>) {
-        for (idx, item) in self.children.iter_mut().enumerate() {
-            let mut child_path = current_path.to_vec();
-            child_path.push(idx);
-
-            let is_focused = focus_path == Some(&child_path);
-            item.widget_mut().set_focused(is_focused);
-
-            // Recursively update focus states for nested layouts
-            item.widget_mut()
-                .update_focus_states_recursive(&child_path, focus_path);
-        }
-    }
-
     /// Handle event and collect any generated messages
     pub fn handle_event_with_messages(&mut self, event: &Event) -> (EventResult<M>, Vec<M>)
     where
@@ -480,7 +444,7 @@ impl<M: Clone> Grid<M> {
         &mut self,
         event: &Event,
         current_path: &[usize],
-        focus_path: Option<&FocusPath>,
+        focus_path: Option<&[usize]>,
     ) -> (EventResult<M>, Vec<M>)
     where
         M: Clone,
@@ -709,15 +673,20 @@ impl<M: Clone> Widget<M> for Grid<M> {
     fn build_focus_chain_recursive(
         &self,
         current_path: &mut Vec<usize>,
-        chain: &mut Vec<FocusPath>,
+        chain: &mut Vec<crate::widget_id::WidgetId>,
     ) {
+        use smallvec::SmallVec;
+
         // For nested grids, traverse children without adding self again
         for (idx, item) in self.children.iter().enumerate() {
             current_path.push(idx);
 
             // If child is focusable, add to chain
             if item.widget().focusable() {
-                chain.push(current_path.clone());
+                let widget_id = crate::widget_id::WidgetId::from_path(
+                    SmallVec::from_slice(current_path)
+                );
+                chain.push(widget_id);
             }
 
             // Recursively build focus chain for nested layouts
@@ -731,19 +700,19 @@ impl<M: Clone> Widget<M> for Grid<M> {
     fn update_focus_states_recursive(
         &mut self,
         current_path: &[usize],
-        focus_path: Option<&FocusPath>,
+        focus_id: Option<crate::widget_id::WidgetId>,
     ) {
         // For nested grids, traverse children and update their focus states
         for (idx, item) in self.children.iter_mut().enumerate() {
             let mut child_path = current_path.to_vec();
             child_path.push(idx);
 
-            let is_focused = focus_path == Some(&child_path);
+            let is_focused = focus_id.as_ref().map(|id| id.path() == child_path.as_slice()).unwrap_or(false);
             item.widget_mut().set_focused(is_focused);
 
             // Recursively update focus states for nested layouts
             item.widget_mut()
-                .update_focus_states_recursive(&child_path, focus_path);
+                .update_focus_states_recursive(&child_path, focus_id.clone());
         }
     }
 }
@@ -756,14 +725,20 @@ impl<M> Default for Grid<M> {
 
 // Implement Layout trait for Grid
 impl<M: Clone> Layout<M> for Grid<M> {
-    fn build_focus_chain(&self, current_path: &mut Vec<usize>, chain: &mut Vec<FocusPath>) {
+    fn build_focus_chain(&self, current_path: &mut Vec<usize>, chain: &mut Vec<crate::widget_id::WidgetId>) {
+        use smallvec::SmallVec;
+
         // Grid itself is not focusable
         // Recursively traverse children
         for (idx, item) in self.children.iter().enumerate() {
             current_path.push(idx);
 
             if item.widget().focusable() {
-                chain.push(current_path.clone());
+                // Create WidgetId from current path
+                let widget_id = crate::widget_id::WidgetId::from_path(
+                    SmallVec::from_slice(current_path)
+                );
+                chain.push(widget_id);
             }
 
             item.widget()
@@ -773,16 +748,16 @@ impl<M: Clone> Layout<M> for Grid<M> {
         }
     }
 
-    fn update_focus_states(&mut self, current_path: &[usize], focus_path: Option<&FocusPath>) {
+    fn update_focus_states(&mut self, current_path: &[usize], focus_id: Option<crate::widget_id::WidgetId>) {
         for (idx, item) in self.children.iter_mut().enumerate() {
             let mut child_path = current_path.to_vec();
             child_path.push(idx);
 
-            let is_focused = focus_path == Some(&child_path);
+            let is_focused = focus_id.as_ref().map(|id| id.path() == child_path.as_slice()).unwrap_or(false);
             item.widget_mut().set_focused(is_focused);
 
             item.widget_mut()
-                .update_focus_states_recursive(&child_path, focus_path);
+                .update_focus_states_recursive(&child_path, focus_id.clone());
         }
     }
 
@@ -790,8 +765,11 @@ impl<M: Clone> Layout<M> for Grid<M> {
         &mut self,
         event: &Event,
         current_path: &[usize],
-        focus_path: Option<&FocusPath>,
+        focus_id: Option<crate::widget_id::WidgetId>,
     ) -> (EventResult<M>, Vec<M>) {
+        // Convert WidgetId to path for internal handling
+        let focus_path = focus_id.as_ref().map(|id| id.path());
+
         let mut all_messages = Vec::new();
 
         // For mouse events, use spatial routing

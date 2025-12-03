@@ -6,6 +6,7 @@ pub mod hover;
 pub mod layout;
 pub mod style;
 pub mod widget;
+pub mod widget_id;
 
 // Declarative UI macro
 pub mod ui_macro;

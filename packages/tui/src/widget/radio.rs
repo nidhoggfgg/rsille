@@ -2,7 +2,6 @@
 
 use super::*;
 use crate::event::{Event, KeyCode, MouseButton, MouseEventKind};
-use crate::focus::FocusPath;
 use crate::style::{Style, ThemeManager};
 use std::sync::Arc;
 
@@ -571,8 +570,10 @@ impl<M: Send + Sync> Widget<M> for RadioGroup<M> {
     fn build_focus_chain_recursive(
         &self,
         current_path: &mut Vec<usize>,
-        chain: &mut Vec<FocusPath>,
+        chain: &mut Vec<crate::widget_id::WidgetId>,
     ) {
+        use smallvec::SmallVec;
+
         // Skip if disabled or empty
         if self.disabled || self.options.is_empty() {
             return;
@@ -582,7 +583,7 @@ impl<M: Send + Sync> Widget<M> for RadioGroup<M> {
         // Using virtual child indices to represent each option
         for option_idx in 0..self.options.len() {
             current_path.push(option_idx);
-            chain.push(current_path.clone());
+            chain.push(crate::widget_id::WidgetId::from_path(SmallVec::from_slice(current_path)));
             current_path.pop();
         }
     }
@@ -590,13 +591,14 @@ impl<M: Send + Sync> Widget<M> for RadioGroup<M> {
     fn update_focus_states_recursive(
         &mut self,
         current_path: &[usize],
-        focus_path: Option<&FocusPath>,
+        focus_id: Option<crate::widget_id::WidgetId>,
     ) {
         // Check if focus is within this RadioGroup
-        if let Some(focus) = focus_path {
-            if focus.starts_with(current_path) && focus.len() == current_path.len() + 1 {
+        if let Some(focus) = focus_id {
+            let focus_path = focus.path();
+            if focus_path.starts_with(current_path) && focus_path.len() == current_path.len() + 1 {
                 // Focus is on one of our options
-                let option_idx = focus[current_path.len()];
+                let option_idx = focus_path[current_path.len()];
                 if option_idx < self.options.len() {
                     self.focused = true;
                     self.focused_option = option_idx;

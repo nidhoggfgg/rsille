@@ -464,7 +464,7 @@ where
     fn build_focus_chain_recursive(
         &self,
         current_path: &mut Vec<usize>,
-        chain: &mut Vec<crate::focus::FocusPath>,
+        chain: &mut Vec<crate::widget_id::WidgetId>,
     ) {
         self.inner.build_focus_chain_recursive(current_path, chain);
     }
@@ -472,10 +472,10 @@ where
     fn update_focus_states_recursive(
         &mut self,
         current_path: &[usize],
-        focus_path: Option<&crate::focus::FocusPath>,
+        focus_id: Option<crate::widget_id::WidgetId>,
     ) {
         self.inner
-            .update_focus_states_recursive(current_path, focus_path);
+            .update_focus_states_recursive(current_path, focus_id);
     }
 }
 

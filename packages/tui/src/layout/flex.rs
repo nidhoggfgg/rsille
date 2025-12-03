@@ -6,7 +6,6 @@ use super::border_renderer::{render_background, render_border};
 use super::taffy_bridge::TaffyBridge;
 use super::Overflow;
 use crate::event::{Event, EventResult};
-use crate::focus::FocusPath;
 use crate::layout::Constraints;
 use crate::style::{BorderStyle, Padding, Style, ThemeManager};
 use crate::widget::{IntoWidget, Widget};
@@ -242,56 +241,6 @@ impl<M> Flex<M> {
 
 // Methods that require Clone bound
 impl<M: Clone> Flex<M> {
-    /// Build focus chain by recursively collecting focusable widgets
-    ///
-    /// This method traverses the widget tree and collects paths to all focusable widgets.
-    /// It's called before rendering to update the global focus chain.
-    ///
-    /// # Arguments
-    /// * `current_path` - Current path in the widget tree (modified during traversal)
-    /// * `chain` - Accumulated focus chain (paths to focusable widgets)
-    pub fn build_focus_chain(&self, current_path: &mut Vec<usize>, chain: &mut Vec<FocusPath>) {
-        // Flex itself is not focusable by default
-        // Subclasses like ScrollView can override focusable() to return true
-        if self.focusable() {
-            chain.push(current_path.clone());
-        }
-
-        // Recursively traverse children
-        for (idx, child) in self.children.iter().enumerate() {
-            current_path.push(idx);
-
-            // If child is focusable, add to chain
-            if child.focusable() {
-                chain.push(current_path.clone());
-            }
-
-            // Recursively build focus chain for nested layouts
-            child.build_focus_chain_recursive(current_path, chain);
-
-            current_path.pop();
-        }
-    }
-
-    /// Update focus state for all children based on focus path
-    ///
-    /// Called when focus changes to synchronize widget focus states
-    ///
-    /// # Arguments
-    /// * `current_path` - Current path in the widget tree
-    /// * `focus_path` - The path of the focused widget (if any)
-    pub fn update_focus_states(&mut self, current_path: &[usize], focus_path: Option<&FocusPath>) {
-        for (idx, child) in self.children.iter_mut().enumerate() {
-            let mut child_path = current_path.to_vec();
-            child_path.push(idx);
-
-            let is_focused = focus_path == Some(&child_path);
-            child.set_focused(is_focused);
-
-            // Recursively update focus states for nested layouts
-            child.update_focus_states_recursive(&child_path, focus_path);
-        }
-    }
 
     /// Handle event and collect any generated messages
     pub fn handle_event_with_messages(&mut self, event: &Event) -> (EventResult<M>, Vec<M>)
@@ -309,7 +258,7 @@ impl<M: Clone> Flex<M> {
         &mut self,
         event: &Event,
         current_path: &[usize],
-        focus_path: Option<&FocusPath>,
+        focus_path: Option<&[usize]>,
         include_fallback: bool,
     ) -> (EventResult<M>, Vec<M>)
     where
@@ -413,7 +362,7 @@ impl<M: Clone> Flex<M> {
         &mut self,
         event: &Event,
         current_path: &[usize],
-        focus_path: Option<&FocusPath>,
+        focus_path: Option<&[usize]>,
     ) -> (EventResult<M>, Vec<M>)
     where
         M: Clone,
@@ -606,8 +555,10 @@ impl<M: Clone> Widget<M> for Flex<M> {
     fn build_focus_chain_recursive(
         &self,
         current_path: &mut Vec<usize>,
-        chain: &mut Vec<FocusPath>,
+        chain: &mut Vec<crate::widget_id::WidgetId>,
     ) {
+        use smallvec::SmallVec;
+
         // For nested layouts, traverse children without adding self again
         // (self was already added by parent's traversal)
         for (idx, child) in self.children.iter().enumerate() {
@@ -615,7 +566,10 @@ impl<M: Clone> Widget<M> for Flex<M> {
 
             // If child is focusable, add to chain
             if child.focusable() {
-                chain.push(current_path.clone());
+                let widget_id = crate::widget_id::WidgetId::from_path(
+                    SmallVec::from_slice(current_path)
+                );
+                chain.push(widget_id);
             }
 
             // Recursively build focus chain for nested layouts
@@ -628,18 +582,18 @@ impl<M: Clone> Widget<M> for Flex<M> {
     fn update_focus_states_recursive(
         &mut self,
         current_path: &[usize],
-        focus_path: Option<&FocusPath>,
+        focus_id: Option<crate::widget_id::WidgetId>,
     ) {
         // For nested layouts, traverse children and update their focus states
         for (idx, child) in self.children.iter_mut().enumerate() {
             let mut child_path = current_path.to_vec();
             child_path.push(idx);
 
-            let is_focused = focus_path == Some(&child_path);
+            let is_focused = focus_id.as_ref().map(|id| id.path() == child_path.as_slice()).unwrap_or(false);
             child.set_focused(is_focused);
 
             // Recursively update focus states for nested layouts
-            child.update_focus_states_recursive(&child_path, focus_path);
+            child.update_focus_states_recursive(&child_path, focus_id.clone());
         }
     }
 }
@@ -686,14 +640,20 @@ pub fn row<M>() -> Flex<M> {
 
 // Implement Layout trait for Flex
 impl<M: Clone> Layout<M> for Flex<M> {
-    fn build_focus_chain(&self, current_path: &mut Vec<usize>, chain: &mut Vec<FocusPath>) {
+    fn build_focus_chain(&self, current_path: &mut Vec<usize>, chain: &mut Vec<crate::widget_id::WidgetId>) {
+        use smallvec::SmallVec;
+
         // Flex itself is not focusable
         // Recursively traverse children
         for (idx, child) in self.children.iter().enumerate() {
             current_path.push(idx);
 
             if child.focusable() {
-                chain.push(current_path.clone());
+                // Create WidgetId from current path
+                let widget_id = crate::widget_id::WidgetId::from_path(
+                    SmallVec::from_slice(current_path)
+                );
+                chain.push(widget_id);
             }
 
             child.build_focus_chain_recursive(current_path, chain);
@@ -701,15 +661,15 @@ impl<M: Clone> Layout<M> for Flex<M> {
         }
     }
 
-    fn update_focus_states(&mut self, current_path: &[usize], focus_path: Option<&FocusPath>) {
+    fn update_focus_states(&mut self, current_path: &[usize], focus_id: Option<crate::widget_id::WidgetId>) {
         for (idx, child) in self.children.iter_mut().enumerate() {
             let mut child_path = current_path.to_vec();
             child_path.push(idx);
 
-            let is_focused = focus_path == Some(&child_path);
+            let is_focused = focus_id.as_ref().map(|id| id.path() == child_path.as_slice()).unwrap_or(false);
             child.set_focused(is_focused);
 
-            child.update_focus_states_recursive(&child_path, focus_path);
+            child.update_focus_states_recursive(&child_path, focus_id.clone());
         }
     }
 
@@ -717,8 +677,10 @@ impl<M: Clone> Layout<M> for Flex<M> {
         &mut self,
         event: &Event,
         current_path: &[usize],
-        focus_path: Option<&FocusPath>,
+        focus_id: Option<crate::widget_id::WidgetId>,
     ) -> (EventResult<M>, Vec<M>) {
+        // Convert WidgetId to path for internal handling
+        let focus_path = focus_id.as_ref().map(|id| id.path());
         // Delegate to internal helper with fallback enabled
         // This ensures unfocused widgets like keyboard_controller can still receive events
         self.handle_event_internal(event, current_path, focus_path, true)
