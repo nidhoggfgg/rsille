@@ -3,6 +3,7 @@
 use super::*;
 use crate::event::{Event, KeyCode, MouseButton, MouseEventKind};
 use crate::style::{Style, ThemeManager};
+use crate::widget::common::{StatefulWidgetBuilder, StyleManager, WidgetState};
 use std::sync::Arc;
 
 /// Radio group layout direction
@@ -48,10 +49,7 @@ pub struct RadioGroup<M = ()> {
     selected_index: Option<usize>,
     focused_option: usize,
     direction: RadioDirection,
-    custom_style: Option<Style>,
-    custom_focus_style: Option<Style>,
-    disabled: bool,
-    focused: bool,
+    state: WidgetState,
     on_change: Option<Arc<dyn Fn(usize) -> M + Send + Sync>>,
 }
 
@@ -62,10 +60,7 @@ impl<M> std::fmt::Debug for RadioGroup<M> {
             .field("selected_index", &self.selected_index)
             .field("focused_option", &self.focused_option)
             .field("direction", &self.direction)
-            .field("custom_style", &self.custom_style)
-            .field("custom_focus_style", &self.custom_focus_style)
-            .field("disabled", &self.disabled)
-            .field("focused", &self.focused)
+            .field("state", &self.state)
             .field("on_change", &self.on_change.is_some())
             .finish()
     }
@@ -88,10 +83,7 @@ impl<M> RadioGroup<M> {
             selected_index: None,
             focused_option: 0,
             direction: RadioDirection::default(),
-            custom_style: None,
-            custom_focus_style: None,
-            disabled: false,
-            focused: false,
+            state: WidgetState::new(),
             on_change: None,
         }
     }
@@ -136,22 +128,6 @@ impl<M> RadioGroup<M> {
         self
     }
 
-    /// Set the disabled state
-    ///
-    /// Disabled radio groups cannot be interacted with and use muted styling.
-    ///
-    /// # Examples
-    /// ```
-    /// use tui::widget::RadioGroup;
-    ///
-    /// let radio = RadioGroup::<()>::new(vec!["A", "B"])
-    ///     .disabled(true);
-    /// ```
-    pub fn disabled(mut self, disabled: bool) -> Self {
-        self.disabled = disabled;
-        self
-    }
-
     /// Set the layout direction
     ///
     /// # Examples
@@ -166,68 +142,16 @@ impl<M> RadioGroup<M> {
         self
     }
 
-    /// Set a custom style (overrides theme styling)
-    ///
-    /// # Examples
-    /// ```
-    /// use tui::widget::RadioGroup;
-    /// use tui::style::{Style, Color};
-    ///
-    /// let radio = RadioGroup::<()>::new(vec!["A", "B"])
-    ///     .style(Style::default().fg(Color::Cyan));
-    /// ```
-    pub fn style(mut self, style: Style) -> Self {
-        self.custom_style = Some(style);
-        self
-    }
-
-    /// Set a custom focus style (overrides theme focus styling)
-    ///
-    /// # Examples
-    /// ```
-    /// use tui::widget::RadioGroup;
-    /// use tui::style::{Style, Color};
-    ///
-    /// let radio = RadioGroup::<()>::new(vec!["A", "B"])
-    ///     .focus_style(Style::default().fg(Color::Cyan).bold());
-    /// ```
-    pub fn focus_style(mut self, style: Style) -> Self {
-        self.custom_focus_style = Some(style);
-        self
-    }
-
     /// Get the effective style for a specific option
     fn get_option_style(&self, option_index: usize) -> Style {
-        let is_focused_option = self.focused && option_index == self.focused_option;
+        let is_focused_option = self.state.is_focused() && option_index == self.focused_option;
 
-        // Get base theme style based on state
-        let base_style = ThemeManager::global().with_theme(|theme| {
-            // Disabled state takes priority
-            if self.disabled {
-                return theme.styles.disabled;
-            }
+        // Create temporary state for this option
+        let mut option_state = self.state.clone();
+        option_state.set_focused(is_focused_option);
 
-            // Focused option gets focus styling
-            if is_focused_option {
-                return theme.styles.interactive_focused;
-            }
-
-            // Normal state
-            theme.styles.interactive
-        });
-
-        // If custom focus style is provided and this option is focused, use it
-        if is_focused_option {
-            if let Some(ref focus_style) = self.custom_focus_style {
-                return focus_style.merge(base_style);
-            }
-        }
-
-        // Merge custom style if provided (custom style takes precedence)
-        self.custom_style
-            .as_ref()
-            .map(|s| s.merge(base_style))
-            .unwrap_or(base_style)
+        // Use StyleManager to compute style
+        StyleManager::interactive_style(&option_state)
     }
 
     /// Select an option by index and emit change event
@@ -277,7 +201,7 @@ impl<M> RadioGroup<M> {
             let radio_symbol = if is_selected { "(●)" } else { "( )" };
 
             // Use success color (green) for selected radio button to make it stand out
-            let radio_style = if is_selected && !self.disabled {
+            let radio_style = if is_selected && !self.state.is_disabled() {
                 ThemeManager::global().with_theme(|theme| {
                     Style::default()
                         .fg(theme.colors.success)
@@ -295,8 +219,8 @@ impl<M> RadioGroup<M> {
             // When this option is focused, make the label text more prominent with color
             if !option.is_empty() {
                 let label_x = 4; // Position after "(X) "
-                let is_focused_option = self.focused && index == self.focused_option;
-                let label_style = if is_focused_option && !self.disabled {
+                let is_focused_option = self.state.is_focused() && index == self.focused_option;
+                let label_style = if is_focused_option && !self.state.is_disabled() {
                     // Use info color (blue/cyan) and bold when focused to make it stand out
                     ThemeManager::global().with_theme(|theme| {
                         Style::default()
@@ -339,7 +263,7 @@ impl<M> RadioGroup<M> {
             }
 
             // Use success color (green) for selected radio button to make it stand out
-            let radio_style = if is_selected && !self.disabled {
+            let radio_style = if is_selected && !self.state.is_disabled() {
                 ThemeManager::global().with_theme(|theme| {
                     Style::default()
                         .fg(theme.colors.success)
@@ -357,8 +281,8 @@ impl<M> RadioGroup<M> {
             // When this option is focused, make the label text more prominent with color
             if !option.is_empty() {
                 let label_x = current_x + 4; // Position after "(X) "
-                let is_focused_option = self.focused && index == self.focused_option;
-                let label_style = if is_focused_option && !self.disabled {
+                let is_focused_option = self.state.is_focused() && index == self.focused_option;
+                let label_style = if is_focused_option && !self.state.is_disabled() {
                     // Use info color (blue/cyan) and bold when focused to make it stand out
                     ThemeManager::global().with_theme(|theme| {
                         Style::default()
@@ -393,7 +317,7 @@ impl<M: Send + Sync> Widget<M> for RadioGroup<M> {
 
     fn handle_event(&mut self, event: &Event) -> EventResult<M> {
         // Disabled radio groups don't handle events
-        if self.disabled {
+        if self.state.is_disabled() {
             return EventResult::Ignored;
         }
 
@@ -547,17 +471,16 @@ impl<M: Send + Sync> Widget<M> for RadioGroup<M> {
     }
 
     fn focusable(&self) -> bool {
-        // RadioGroup itself is not focusable - individual options are
-        // Each option will be added to focus chain via build_focus_chain_recursive
-        false
+        // RadioGroup is focusable unless disabled
+        self.state.is_focusable()
     }
 
     fn is_focused(&self) -> bool {
-        self.focused
+        self.state.is_focused()
     }
 
     fn set_focused(&mut self, focused: bool) {
-        self.focused = focused;
+        self.state.set_focused(focused);
 
         // When gaining focus, set focused_option to the selected item if there is one
         if focused {
@@ -575,7 +498,7 @@ impl<M: Send + Sync> Widget<M> for RadioGroup<M> {
         use smallvec::SmallVec;
 
         // Skip if disabled or empty
-        if self.disabled || self.options.is_empty() {
+        if self.state.is_disabled() || self.options.is_empty() {
             return;
         }
 
@@ -600,7 +523,7 @@ impl<M: Send + Sync> Widget<M> for RadioGroup<M> {
                 // Focus is on one of our options
                 let option_idx = focus_path[current_path.len()];
                 if option_idx < self.options.len() {
-                    self.focused = true;
+                    self.state.set_focused(true);
                     self.focused_option = option_idx;
                     return;
                 }
@@ -608,7 +531,14 @@ impl<M: Send + Sync> Widget<M> for RadioGroup<M> {
         }
 
         // Not focused
-        self.focused = false;
+        self.state.set_focused(false);
+    }
+}
+
+// Implement StatefulWidgetBuilder to provide common builder methods
+impl<M> StatefulWidgetBuilder for RadioGroup<M> {
+    fn widget_state_mut(&mut self) -> &mut WidgetState {
+        &mut self.state
     }
 }
 

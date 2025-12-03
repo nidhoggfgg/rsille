@@ -3,7 +3,7 @@
 use super::*;
 use crate::event::{Event, KeyCode, MouseButton, MouseEventKind};
 use crate::style::{Style, ThemeManager};
-use crate::widget::common::{StyleManager, WidgetState};
+use crate::widget::common::{StatefulWidgetBuilder, StyleManager, WidgetState};
 use std::sync::Arc;
 
 /// Interactive checkbox widget
@@ -94,52 +94,6 @@ impl<M> Checkbox<M> {
         F: Fn(bool) -> M + Send + Sync + 'static,
     {
         self.on_change = Some(Arc::new(handler));
-        self
-    }
-
-    /// Set the disabled state
-    ///
-    /// Disabled checkboxes cannot be interacted with and use muted styling.
-    ///
-    /// # Examples
-    /// ```
-    /// use tui::widget::Checkbox;
-    ///
-    /// let checkbox = Checkbox::<()>::new("Disabled option")
-    ///     .disabled(true);
-    /// ```
-    pub fn disabled(mut self, disabled: bool) -> Self {
-        self.state.set_disabled(disabled);
-        self
-    }
-
-    /// Set a custom style (overrides theme styling)
-    ///
-    /// # Examples
-    /// ```
-    /// use tui::widget::Checkbox;
-    /// use tui::style::{Style, Color};
-    ///
-    /// let checkbox = Checkbox::<()>::new("Custom")
-    ///     .style(Style::default().fg(Color::Cyan));
-    /// ```
-    pub fn style(mut self, style: Style) -> Self {
-        self.state = self.state.with_style(style);
-        self
-    }
-
-    /// Set a custom focus style (overrides theme focus styling)
-    ///
-    /// # Examples
-    /// ```
-    /// use tui::widget::Checkbox;
-    /// use tui::style::{Style, Color};
-    ///
-    /// let checkbox = Checkbox::<()>::new("Custom Focus")
-    ///     .focus_style(Style::default().fg(Color::Cyan).bold());
-    /// ```
-    pub fn focus_style(mut self, style: Style) -> Self {
-        self.state = self.state.with_focus_style(style);
         self
     }
 
@@ -269,6 +223,13 @@ impl<M: Send + Sync> Widget<M> for Checkbox<M> {
 
     fn set_focused(&mut self, focused: bool) {
         self.state.set_focused(focused);
+    }
+}
+
+// Implement StatefulWidgetBuilder to provide common builder methods
+impl<M> StatefulWidgetBuilder for Checkbox<M> {
+    fn widget_state_mut(&mut self) -> &mut WidgetState {
+        &mut self.state
     }
 }
 

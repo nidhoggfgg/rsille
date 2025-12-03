@@ -16,14 +16,8 @@ use smallvec::SmallVec;
 use std::cell::RefCell;
 use std::sync::{Arc, RwLock};
 
-/// Widget path: index path from root container to widget
-///
-/// Uses SmallVec to avoid heap allocation for typical widget depths (< 8 levels).
-/// Most UI hierarchies have shallow nesting, so this optimization eliminates
-/// allocations in the common case.
-///
-/// Example: [0, 2, 1] means root.children[0].children[2].children[1]
-pub type WidgetPath = SmallVec<[usize; 8]>;
+// Re-export WidgetPath from widget_id module for convenience
+pub use crate::widget_id::WidgetPath;
 
 /// Render context for tracking current widget path during rendering
 ///

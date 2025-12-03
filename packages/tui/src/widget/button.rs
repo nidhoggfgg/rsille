@@ -4,7 +4,7 @@ use super::*;
 use crate::event::{Event, KeyCode, MouseButton, MouseEventKind};
 use crate::layout::border_renderer;
 use crate::style::{Color, Style, ThemeManager};
-use crate::widget::common::{StyleManager, WidgetState};
+use crate::widget::common::{StatefulWidgetBuilder, StyleManager, WidgetState};
 use std::sync::Arc;
 
 /// Button style variants
@@ -132,55 +132,6 @@ impl<M> Button<M> {
         F: Fn() -> M + Send + Sync + 'static,
     {
         self.on_click = Some(Arc::new(handler));
-        self
-    }
-
-    /// Set the disabled state
-    ///
-    /// Disabled buttons cannot be interacted with and use muted styling.
-    ///
-    /// # Examples
-    /// ```
-    /// use tui::widget::Button;
-    ///
-    /// let button = Button::<()>::new("Disabled")
-    ///     .disabled(true);
-    /// ```
-    pub fn disabled(mut self, disabled: bool) -> Self {
-        self.state.set_disabled(disabled);
-        self
-    }
-
-    /// Set a custom style (overrides theme styling)
-    ///
-    /// # Examples
-    /// ```
-    /// use tui::widget::Button;
-    /// use tui::style::{Style, Color};
-    ///
-    /// let button = Button::<()>::new("Custom")
-    ///     .style(Style::default().fg(Color::Cyan).bg(Color::Black));
-    /// ```
-    pub fn style(mut self, style: Style) -> Self {
-        self.state = self.state.with_style(style);
-        self
-    }
-
-    /// Set a custom focus style (overrides theme focus styling)
-    ///
-    /// This allows advanced customization of the button's appearance when focused.
-    /// For most use cases, the theme's default focus styling is sufficient.
-    ///
-    /// # Examples
-    /// ```
-    /// use tui::widget::Button;
-    /// use tui::style::{Style, Color};
-    ///
-    /// let button = Button::<()>::new("Custom Focus")
-    ///     .focus_style(Style::default().fg(Color::Cyan).bold());
-    /// ```
-    pub fn focus_style(mut self, style: Style) -> Self {
-        self.state = self.state.with_focus_style(style);
         self
     }
 
@@ -410,6 +361,13 @@ impl<M: Send + Sync> Widget<M> for Button<M> {
             // (preserve Hover state if mouse is over button)
             self.button_state = ButtonState::Normal;
         }
+    }
+}
+
+// Implement StatefulWidgetBuilder to provide common builder methods
+impl<M> StatefulWidgetBuilder for Button<M> {
+    fn widget_state_mut(&mut self) -> &mut WidgetState {
+        &mut self.state
     }
 }
 
