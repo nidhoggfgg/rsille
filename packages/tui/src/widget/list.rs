@@ -6,6 +6,7 @@
 use super::*;
 use crate::event::{Event, KeyCode, MouseButton, MouseEventKind};
 use crate::style::{Style, ThemeManager};
+use crate::widget::common::SelectableNavigation;
 use std::sync::Arc;
 
 /// Selection event information
@@ -113,10 +114,8 @@ impl<T: Clone> ListItem<T> {
 pub struct List<T: Clone, M = ()> {
     items: Vec<ListItem<T>>,
     selected_indices: Vec<usize>,
-    focused_index: Option<usize>,
     selection_mode: SelectionMode,
-    scroll_offset: usize,
-    viewport_height: u16,
+    navigation: SelectableNavigation,
     empty_message: String,
     show_scrollbar: bool,
     focused: bool,
@@ -131,10 +130,10 @@ impl<T: Clone, M> std::fmt::Debug for List<T, M> {
         f.debug_struct("List")
             .field("items", &self.items.len())
             .field("selected_indices", &self.selected_indices)
-            .field("focused_index", &self.focused_index)
+            .field("focused_index", &self.navigation.focused_index())
             .field("selection_mode", &self.selection_mode)
-            .field("scroll_offset", &self.scroll_offset)
-            .field("viewport_height", &self.viewport_height)
+            .field("scroll_offset", &self.navigation.scroll_offset())
+            .field("viewport_size", &self.navigation.scroll_offset())
             .field("empty_message", &self.empty_message)
             .field("show_scrollbar", &self.show_scrollbar)
             .field("focused", &self.focused)
@@ -165,13 +164,17 @@ impl<T: Clone, M> List<T, M> {
             None
         };
 
+        let navigation = SelectableNavigation::with_initial_focus(
+            items.len(),
+            10, // Default viewport height
+            focused_index,
+        );
+
         Self {
             items,
             selected_indices: Vec::new(),
-            focused_index,
             selection_mode: SelectionMode::default(),
-            scroll_offset: 0,
-            viewport_height: 10, // Default viewport height
+            navigation,
             empty_message: "No items".to_string(),
             show_scrollbar: true,
             focused: false,
@@ -214,8 +217,8 @@ impl<T: Clone, M> List<T, M> {
         self.items.push(item);
 
         // Update focused_index if this is the first non-disabled item
-        if self.focused_index.is_none() {
-            self.focused_index = Some(self.items.len() - 1);
+        if self.navigation.focused_index().is_none() {
+            self.navigation.set_focused_index(Some(self.items.len() - 1));
         }
 
         self
@@ -253,8 +256,8 @@ impl<T: Clone, M> List<T, M> {
         self.items.push(item);
 
         // Update focused_index if this is the first non-disabled item
-        if self.focused_index.is_none() {
-            self.focused_index = Some(self.items.len() - 1);
+        if self.navigation.focused_index().is_none() {
+            self.navigation.set_focused_index(Some(self.items.len() - 1));
         }
 
         self
@@ -280,8 +283,8 @@ impl<T: Clone, M> List<T, M> {
             self.items.push(item);
 
             // Update focused_index if this is the first non-disabled item
-            if self.focused_index.is_none() && !is_disabled {
-                self.focused_index = Some(self.items.len() - 1);
+            if self.navigation.focused_index().is_none() && !is_disabled {
+                self.navigation.set_focused_index(Some(self.items.len() - 1));
             }
         }
         self
@@ -316,9 +319,9 @@ impl<T: Clone, M> List<T, M> {
         // Validate the index
         if let Some(idx) = index {
             if idx < self.items.len() && !self.items[idx].disabled {
-                self.focused_index = Some(idx);
+                self.navigation.set_focused_index(Some(idx));
                 // Ensure the focused item is visible
-                self.ensure_focused_visible();
+                self.navigation.ensure_visible(self.items.len());
             }
         }
         self
@@ -336,7 +339,8 @@ impl<T: Clone, M> List<T, M> {
     ///     .scroll_offset(3);
     /// ```
     pub fn scroll_offset(mut self, offset: usize) -> Self {
-        self.scroll_offset = offset.min(self.items.len().saturating_sub(1));
+        let max_offset = self.items.len().saturating_sub(1);
+        self.navigation.set_scroll_offset(offset.min(max_offset));
         self
     }
 
@@ -344,14 +348,14 @@ impl<T: Clone, M> List<T, M> {
     ///
     /// This allows you to save the focused position before recreating the list.
     pub fn get_focused_index(&self) -> Option<usize> {
-        self.focused_index
+        self.navigation.focused_index()
     }
 
     /// Get the current scroll offset
     ///
     /// This allows you to save the scroll position before recreating the list.
     pub fn get_scroll_offset(&self) -> usize {
-        self.scroll_offset
+        self.navigation.scroll_offset()
     }
 
     /// Set the viewport height (number of visible items)
@@ -364,7 +368,7 @@ impl<T: Clone, M> List<T, M> {
     ///     .viewport_height(5);
     /// ```
     pub fn viewport_height(mut self, height: u16) -> Self {
-        self.viewport_height = height;
+        self.navigation.set_viewport_size(height as usize);
         self
     }
 
@@ -547,172 +551,10 @@ impl<T: Clone, M> List<T, M> {
         }
     }
 
-    /// Move focus to the next non-disabled item
-    fn focus_next(&mut self) {
-        if self.items.is_empty() {
-            return;
-        }
-
-        let start_idx = self.focused_index.map(|i| i + 1).unwrap_or(0);
-
-        // Search forward for next non-disabled item
-        for offset in 0..self.items.len() {
-            let idx = (start_idx + offset) % self.items.len();
-            if !self.items[idx].disabled {
-                self.focused_index = Some(idx);
-                self.ensure_focused_visible();
-                return;
-            }
-        }
-    }
-
-    /// Move focus to the previous non-disabled item
-    fn focus_previous(&mut self) {
-        if self.items.is_empty() {
-            return;
-        }
-
-        let start_idx = self
-            .focused_index
-            .unwrap_or(0)
-            .checked_sub(1)
-            .unwrap_or(self.items.len() - 1);
-
-        // Search backward for previous non-disabled item
-        for offset in 0..self.items.len() {
-            let idx = (start_idx + self.items.len() - offset) % self.items.len();
-            if !self.items[idx].disabled {
-                self.focused_index = Some(idx);
-                self.ensure_focused_visible();
-                return;
-            }
-        }
-    }
-
-    /// Move focus to the first non-disabled item
-    fn focus_first(&mut self) {
-        for (idx, item) in self.items.iter().enumerate() {
-            if !item.disabled {
-                self.focused_index = Some(idx);
-                self.ensure_focused_visible();
-                return;
-            }
-        }
-    }
-
-    /// Move focus to the last non-disabled item
-    fn focus_last(&mut self) {
-        for (idx, item) in self.items.iter().enumerate().rev() {
-            if !item.disabled {
-                self.focused_index = Some(idx);
-                self.ensure_focused_visible();
-                return;
-            }
-        }
-    }
-
-    /// Jump focus forward by a page
-    fn page_down(&mut self) {
-        if self.items.is_empty() {
-            return;
-        }
-
-        let page_size = self.viewport_height.saturating_sub(1).max(1) as usize;
-        let current = self.focused_index.unwrap_or(0);
-        let target = (current + page_size).min(self.items.len() - 1);
-
-        // Find nearest non-disabled item
-        for idx in target..self.items.len() {
-            if !self.items[idx].disabled {
-                self.focused_index = Some(idx);
-                self.ensure_focused_visible();
-                return;
-            }
-        }
-
-        // If no non-disabled item found forward, search backward from target
-        for idx in (0..=target).rev() {
-            if !self.items[idx].disabled {
-                self.focused_index = Some(idx);
-                self.ensure_focused_visible();
-                return;
-            }
-        }
-    }
-
-    /// Jump focus backward by a page
-    fn page_up(&mut self) {
-        if self.items.is_empty() {
-            return;
-        }
-
-        let page_size = self.viewport_height.saturating_sub(1).max(1) as usize;
-        let current = self.focused_index.unwrap_or(0);
-        let target = current.saturating_sub(page_size);
-
-        // Find nearest non-disabled item
-        for idx in (0..=target).rev() {
-            if !self.items[idx].disabled {
-                self.focused_index = Some(idx);
-                self.ensure_focused_visible();
-                return;
-            }
-        }
-
-        // If no non-disabled item found backward, search forward from target
-        for idx in target..self.items.len() {
-            if !self.items[idx].disabled {
-                self.focused_index = Some(idx);
-                self.ensure_focused_visible();
-                return;
-            }
-        }
-    }
-
-    /// Calculate how many items can fit in the viewport, considering dividers
-    fn calculate_visible_item_count(&self) -> usize {
-        let mut rows_used = 0;
-        let mut items_visible = 0;
-        let viewport_rows = self.viewport_height as usize;
-
-        for item in &self.items {
-            // Each item uses at least 1 row
-            let item_rows = if item.divider_below { 2 } else { 1 };
-
-            if rows_used + item_rows <= viewport_rows {
-                rows_used += item_rows;
-                items_visible += 1;
-            } else {
-                break;
-            }
-        }
-
-        items_visible.max(1) // At least 1 item should be visible
-    }
-
     /// Calculate total rows needed including dividers
     fn calculate_total_rows(&self) -> usize {
         let divider_count = self.items.iter().filter(|item| item.divider_below).count();
         self.items.len() + divider_count
-    }
-
-    /// Ensure the focused item is visible in the viewport
-    fn ensure_focused_visible(&mut self) {
-        if let Some(focused_idx) = self.focused_index {
-            // Calculate how many items can actually be visible
-            let visible_item_count = self.calculate_visible_item_count();
-
-            // If focused item is above viewport, scroll up
-            if focused_idx < self.scroll_offset {
-                self.scroll_offset = focused_idx;
-            }
-            // If focused item is at or beyond the last visible position, scroll down
-            // We want the focused item to be visible, so scroll when it reaches the last slot
-            else if focused_idx >= self.scroll_offset + visible_item_count {
-                // Scroll so the focused item becomes visible
-                self.scroll_offset = focused_idx.saturating_sub(visible_item_count - 1);
-            }
-        }
     }
 
     /// Toggle selection of the focused item
@@ -721,7 +563,7 @@ impl<T: Clone, M> List<T, M> {
             return vec![];
         }
 
-        let Some(focused_idx) = self.focused_index else {
+        let Some(focused_idx) = self.navigation.focused_index() else {
             return vec![];
         };
 
@@ -768,8 +610,8 @@ impl<T: Clone, M> List<T, M> {
 
             let event = SelectionEvent {
                 selected_values,
-                focused_index: self.focused_index,
-                scroll_offset: self.scroll_offset,
+                focused_index: self.navigation.focused_index(),
+                scroll_offset: self.navigation.scroll_offset(),
             };
 
             let message = handler(event);
@@ -812,8 +654,8 @@ impl<T: Clone + Send + Sync, M: Send + Sync> Widget<M> for List<T, M> {
         let item_styles = self.get_item_styles();
 
         // Calculate visible range
-        let viewport_size = height.min(self.viewport_height) as usize;
-        let visible_start = self.scroll_offset;
+        let viewport_size = height.min(self.navigation.viewport_size() as u16) as usize;
+        let visible_start = self.navigation.scroll_offset();
         let visible_end = (visible_start + viewport_size).min(self.items.len());
 
         // Determine scrollbar width - consider dividers when calculating total rows
@@ -838,7 +680,7 @@ impl<T: Clone + Send + Sync, M: Send + Sync> Widget<M> for List<T, M> {
                 break;
             }
 
-            let is_item_focused = Some(list_idx) == self.focused_index;
+            let is_item_focused = Some(list_idx) == self.navigation.focused_index();
             let is_selected = self.selected_indices.contains(&list_idx);
 
             // Get the appropriate style for this item
@@ -928,27 +770,27 @@ impl<T: Clone + Send + Sync, M: Send + Sync> Widget<M> for List<T, M> {
         match event {
             Event::Key(key_event) => match key_event.code {
                 KeyCode::Down => {
-                    self.focus_next();
+                    self.navigation.focus_next(|idx| self.items[idx].disabled, self.items.len());
                     EventResult::Consumed(vec![])
                 }
                 KeyCode::Up => {
-                    self.focus_previous();
+                    self.navigation.focus_previous(|idx| self.items[idx].disabled, self.items.len());
                     EventResult::Consumed(vec![])
                 }
                 KeyCode::Home => {
-                    self.focus_first();
+                    self.navigation.focus_first(|idx| self.items[idx].disabled, self.items.len());
                     EventResult::Consumed(vec![])
                 }
                 KeyCode::End => {
-                    self.focus_last();
+                    self.navigation.focus_last(|idx| self.items[idx].disabled, self.items.len());
                     EventResult::Consumed(vec![])
                 }
                 KeyCode::PageDown => {
-                    self.page_down();
+                    self.navigation.page_down(|idx| self.items[idx].disabled, self.items.len());
                     EventResult::Consumed(vec![])
                 }
                 KeyCode::PageUp => {
-                    self.page_up();
+                    self.navigation.page_up(|idx| self.items[idx].disabled, self.items.len());
                     EventResult::Consumed(vec![])
                 }
                 KeyCode::Enter | KeyCode::Char(' ') => {
@@ -965,11 +807,11 @@ impl<T: Clone + Send + Sync, M: Send + Sync> Widget<M> for List<T, M> {
                         EventResult::Consumed(messages)
                     }
                     MouseEventKind::ScrollDown => {
-                        self.focus_next();
+                        self.navigation.focus_next(|idx| self.items[idx].disabled, self.items.len());
                         EventResult::Consumed(vec![])
                     }
                     MouseEventKind::ScrollUp => {
-                        self.focus_previous();
+                        self.navigation.focus_previous(|idx| self.items[idx].disabled, self.items.len());
                         EventResult::Consumed(vec![])
                     }
                     _ => EventResult::Ignored,
@@ -1001,12 +843,12 @@ impl<T: Clone + Send + Sync, M: Send + Sync> Widget<M> for List<T, M> {
         };
 
         // Scrollbar width - only reserve space if content exceeds viewport
-        let needs_scrollbar = self.show_scrollbar && content_height > self.viewport_height as usize;
+        let needs_scrollbar = self.show_scrollbar && content_height > self.navigation.viewport_size();
         let scrollbar_width = if needs_scrollbar { 2 } else { 0 };
 
         let total_width = max_label_width + indicator_width + scrollbar_width;
 
-        let display_height = content_height.min(self.viewport_height as usize) as u16;
+        let display_height = content_height.min(self.navigation.viewport_size()) as u16;
 
         Constraints {
             min_width: total_width.max(20), // Minimum reasonable width
@@ -1030,8 +872,8 @@ impl<T: Clone + Send + Sync, M: Send + Sync> Widget<M> for List<T, M> {
         self.focused = focused;
 
         // When gaining focus, ensure we have a focused item
-        if focused && self.focused_index.is_none() && !self.items.is_empty() {
-            self.focus_first();
+        if focused && self.navigation.focused_index().is_none() && !self.items.is_empty() {
+            self.navigation.focus_first(|idx| self.items[idx].disabled, self.items.len());
         }
     }
 }
@@ -1054,7 +896,7 @@ impl<T: Clone, M> List<T, M> {
             .max(1.0)
             .round() as usize;
 
-        let scroll_ratio = self.scroll_offset as f64 / (total_items - viewport_size).max(1) as f64;
+        let scroll_ratio = self.navigation.scroll_offset() as f64 / (total_items - viewport_size).max(1) as f64;
         let thumb_position =
             (scroll_ratio * (scrollbar_height - thumb_size) as f64).round() as usize;
 

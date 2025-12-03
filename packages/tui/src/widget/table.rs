@@ -13,6 +13,7 @@
 use super::*;
 use crate::event::{Event, KeyCode, MouseButton, MouseEventKind};
 use crate::style::{BorderStyle, Style, ThemeManager};
+use crate::widget::common::SelectableNavigation;
 use std::sync::Arc;
 
 /// Table visual variant
@@ -141,11 +142,9 @@ pub struct Table<T: Clone, M = ()> {
     columns: Vec<Column<T>>,
     rows: Vec<T>,
     selected_indices: Vec<usize>,
-    focused_index: Option<usize>,
     selection_mode: SelectionMode,
-    scroll_offset: usize,
+    navigation: SelectableNavigation,
     horizontal_scroll: u16,
-    viewport_height: u16,
     empty_message: String,
     show_scrollbar: bool,
     show_header: bool,
@@ -166,11 +165,11 @@ impl<T: Clone, M> std::fmt::Debug for Table<T, M> {
             .field("columns", &self.columns.len())
             .field("rows", &self.rows.len())
             .field("selected_indices", &self.selected_indices)
-            .field("focused_index", &self.focused_index)
+            .field("focused_index", &self.navigation.focused_index())
             .field("selection_mode", &self.selection_mode)
-            .field("scroll_offset", &self.scroll_offset)
+            .field("scroll_offset", &self.navigation.scroll_offset())
             .field("horizontal_scroll", &self.horizontal_scroll)
-            .field("viewport_height", &self.viewport_height)
+            .field("viewport_height", &self.navigation.viewport_size())
             .field("show_header", &self.show_header)
             .field("focused", &self.focused)
             .finish()
@@ -180,15 +179,14 @@ impl<T: Clone, M> std::fmt::Debug for Table<T, M> {
 impl<T: Clone, M> Table<T, M> {
     /// Create a new table with column definitions
     pub fn new(columns: Vec<Column<T>>) -> Self {
+        let navigation = SelectableNavigation::new(0, 10); // Default viewport of 10 rows
         Self {
             columns,
             rows: Vec::new(),
             selected_indices: Vec::new(),
-            focused_index: None,
             selection_mode: SelectionMode::default(),
-            scroll_offset: 0,
+            navigation,
             horizontal_scroll: 0,
-            viewport_height: 10,
             empty_message: "No data".to_string(),
             show_scrollbar: true,
             show_header: true,
@@ -237,8 +235,8 @@ impl<T: Clone, M> Table<T, M> {
     pub fn rows(mut self, rows: Vec<T>) -> Self {
         self.rows = rows;
         // Auto-focus first row if any rows exist
-        if !self.rows.is_empty() && self.focused_index.is_none() {
-            self.focused_index = Some(0);
+        if !self.rows.is_empty() && self.navigation.focused_index().is_none() {
+            self.navigation.set_focused_index(Some(0));
         }
         self
     }
@@ -246,8 +244,8 @@ impl<T: Clone, M> Table<T, M> {
     /// Add a single row
     pub fn row(mut self, row: T) -> Self {
         self.rows.push(row);
-        if self.focused_index.is_none() {
-            self.focused_index = Some(0);
+        if self.navigation.focused_index().is_none() {
+            self.navigation.set_focused_index(Some(0));
         }
         self
     }
@@ -262,8 +260,8 @@ impl<T: Clone, M> Table<T, M> {
     pub fn focused_index(mut self, index: Option<usize>) -> Self {
         if let Some(idx) = index {
             if idx < self.rows.len() {
-                self.focused_index = Some(idx);
-                self.ensure_focused_visible();
+                self.navigation.set_focused_index(Some(idx));
+                self.navigation.ensure_visible(self.rows.len());
             }
         }
         self
@@ -271,13 +269,14 @@ impl<T: Clone, M> Table<T, M> {
 
     /// Set the scroll offset
     pub fn scroll_offset(mut self, offset: usize) -> Self {
-        self.scroll_offset = offset.min(self.rows.len().saturating_sub(1));
+        let max_offset = self.rows.len().saturating_sub(1);
+        self.navigation.set_scroll_offset(offset.min(max_offset));
         self
     }
 
     /// Set the viewport height
     pub fn viewport_height(mut self, height: u16) -> Self {
-        self.viewport_height = height;
+        self.navigation.set_viewport_size(height as usize);
         self
     }
 
@@ -448,90 +447,13 @@ impl<T: Clone, M> Table<T, M> {
         widths
     }
 
-    /// Move focus to the next row
-    fn focus_next(&mut self) {
-        if self.rows.is_empty() {
-            return;
-        }
-        let next = self
-            .focused_index
-            .map(|i| (i + 1).min(self.rows.len() - 1))
-            .unwrap_or(0);
-        self.focused_index = Some(next);
-        self.ensure_focused_visible();
-    }
-
-    /// Move focus to the previous row
-    fn focus_previous(&mut self) {
-        if self.rows.is_empty() {
-            return;
-        }
-        let prev = self.focused_index.map(|i| i.saturating_sub(1)).unwrap_or(0);
-        self.focused_index = Some(prev);
-        self.ensure_focused_visible();
-    }
-
-    /// Move focus to the first row
-    fn focus_first(&mut self) {
-        if !self.rows.is_empty() {
-            self.focused_index = Some(0);
-            self.ensure_focused_visible();
-        }
-    }
-
-    /// Move focus to the last row
-    fn focus_last(&mut self) {
-        if !self.rows.is_empty() {
-            self.focused_index = Some(self.rows.len() - 1);
-            self.ensure_focused_visible();
-        }
-    }
-
-    /// Jump focus forward by a page
-    fn page_down(&mut self) {
-        if self.rows.is_empty() {
-            return;
-        }
-        let page_size = self.viewport_height.saturating_sub(1).max(1) as usize;
-        let current = self.focused_index.unwrap_or(0);
-        self.focused_index = Some((current + page_size).min(self.rows.len() - 1));
-        self.ensure_focused_visible();
-    }
-
-    /// Jump focus backward by a page
-    fn page_up(&mut self) {
-        if self.rows.is_empty() {
-            return;
-        }
-        let page_size = self.viewport_height.saturating_sub(1).max(1) as usize;
-        let current = self.focused_index.unwrap_or(0);
-        self.focused_index = Some(current.saturating_sub(page_size));
-        self.ensure_focused_visible();
-    }
-
-    /// Ensure the focused row is visible in the viewport
-    fn ensure_focused_visible(&mut self) {
-        if let Some(focused_idx) = self.focused_index {
-            let viewport_size = self.viewport_height as usize;
-
-            // If focused row is above viewport, scroll up
-            if focused_idx < self.scroll_offset {
-                self.scroll_offset = focused_idx;
-            }
-            // If focused row is beyond viewport, scroll down
-            else if focused_idx >= self.scroll_offset + viewport_size {
-                self.scroll_offset = focused_idx.saturating_sub(viewport_size - 1);
-            }
-        }
-    }
-
     /// Toggle selection of the focused row
     fn toggle_selection(&mut self) -> Vec<M> {
         if self.selection_mode == SelectionMode::None {
             return vec![];
         }
 
-        let Some(focused_idx) = self.focused_index else {
+        let Some(focused_idx) = self.navigation.focused_index() else {
             return vec![];
         };
 
@@ -573,8 +495,8 @@ impl<T: Clone, M> Table<T, M> {
 
             let event = TableSelectionEvent {
                 selected_rows,
-                focused_index: self.focused_index,
-                scroll_offset: self.scroll_offset,
+                focused_index: self.navigation.focused_index(),
+                scroll_offset: self.navigation.scroll_offset(),
             };
 
             let message = handler(event);
@@ -737,7 +659,7 @@ impl<T: Clone + Send + Sync, M: Send + Sync> Widget<M> for Table<T, M> {
 
         // Calculate column widths
         let scrollbar_width =
-            if self.show_scrollbar && self.rows.len() > self.viewport_height as usize {
+            if self.show_scrollbar && self.rows.len() > self.navigation.viewport_size() {
                 2
             } else {
                 0
@@ -777,7 +699,7 @@ impl<T: Clone + Send + Sync, M: Send + Sync> Widget<M> for Table<T, M> {
 
         // Render rows
         let viewport_rows = (content_y + content_height).saturating_sub(y);
-        let visible_start = self.scroll_offset;
+        let visible_start = self.navigation.scroll_offset();
         let visible_end = (visible_start + viewport_rows as usize).min(self.rows.len());
 
         for row_idx in visible_start..visible_end {
@@ -800,7 +722,7 @@ impl<T: Clone + Send + Sync, M: Send + Sync> Widget<M> for Table<T, M> {
         }
 
         // Render scrollbar if needed
-        if self.show_scrollbar && self.rows.len() > self.viewport_height as usize {
+        if self.show_scrollbar && self.rows.len() > self.navigation.viewport_size() {
             let scrollbar_x = if self.variant == TableVariant::Bordered {
                 width.saturating_sub(3) // Account for border
             } else {
@@ -830,27 +752,27 @@ impl<T: Clone + Send + Sync, M: Send + Sync> Widget<M> for Table<T, M> {
         match event {
             Event::Key(key_event) => match key_event.code {
                 KeyCode::Down => {
-                    self.focus_next();
+                    self.navigation.focus_next(|_| false, self.rows.len());
                     EventResult::Consumed(vec![])
                 }
                 KeyCode::Up => {
-                    self.focus_previous();
+                    self.navigation.focus_previous(|_| false, self.rows.len());
                     EventResult::Consumed(vec![])
                 }
                 KeyCode::Home => {
-                    self.focus_first();
+                    self.navigation.focus_first(|_| false, self.rows.len());
                     EventResult::Consumed(vec![])
                 }
                 KeyCode::End => {
-                    self.focus_last();
+                    self.navigation.focus_last(|_| false, self.rows.len());
                     EventResult::Consumed(vec![])
                 }
                 KeyCode::PageDown => {
-                    self.page_down();
+                    self.navigation.page_down(|_| false, self.rows.len());
                     EventResult::Consumed(vec![])
                 }
                 KeyCode::PageUp => {
-                    self.page_up();
+                    self.navigation.page_up(|_| false, self.rows.len());
                     EventResult::Consumed(vec![])
                 }
                 KeyCode::Enter | KeyCode::Char(' ') => {
@@ -865,11 +787,11 @@ impl<T: Clone + Send + Sync, M: Send + Sync> Widget<M> for Table<T, M> {
                     EventResult::Consumed(messages)
                 }
                 MouseEventKind::ScrollDown => {
-                    self.focus_next();
+                    self.navigation.focus_next(|_| false, self.rows.len());
                     EventResult::Consumed(vec![])
                 }
                 MouseEventKind::ScrollUp => {
-                    self.focus_previous();
+                    self.navigation.focus_previous(|_| false, self.rows.len());
                     EventResult::Consumed(vec![])
                 }
                 _ => EventResult::Ignored,
@@ -910,7 +832,7 @@ impl<T: Clone + Send + Sync, M: Send + Sync> Widget<M> for Table<T, M> {
         }
 
         let scrollbar_width =
-            if self.show_scrollbar && self.rows.len() > self.viewport_height as usize {
+            if self.show_scrollbar && self.rows.len() > self.navigation.viewport_size() {
                 2
             } else {
                 0
@@ -923,7 +845,7 @@ impl<T: Clone + Send + Sync, M: Send + Sync> Widget<M> for Table<T, M> {
         let content_height = if self.rows.is_empty() {
             1
         } else {
-            self.rows.len().min(self.viewport_height as usize)
+            self.rows.len().min(self.navigation.viewport_size())
         };
         let total_height = (header_height + content_height) as u16;
 
@@ -947,8 +869,8 @@ impl<T: Clone + Send + Sync, M: Send + Sync> Widget<M> for Table<T, M> {
 
     fn set_focused(&mut self, focused: bool) {
         self.focused = focused;
-        if focused && self.focused_index.is_none() && !self.rows.is_empty() {
-            self.focus_first();
+        if focused && self.navigation.focused_index().is_none() && !self.rows.is_empty() {
+            self.navigation.focus_first(|_| false, self.rows.len());
         }
     }
 }
@@ -1124,7 +1046,7 @@ impl<T: Clone, M> Table<T, M> {
         styles: &TableStyles,
     ) {
         let row = &self.rows[row_idx];
-        let is_focused = Some(row_idx) == self.focused_index;
+        let is_focused = Some(row_idx) == self.navigation.focused_index();
         let is_selected = self.selected_indices.contains(&row_idx);
         let is_striped = self.variant == TableVariant::Striped && row_idx % 2 == 1;
 
@@ -1215,7 +1137,7 @@ impl<T: Clone, M> Table<T, M> {
     ) {
         let scrollbar_height = y_end.saturating_sub(y_start) as usize;
         let total_rows = self.rows.len();
-        let viewport_size = self.viewport_height as usize;
+        let viewport_size = self.navigation.viewport_size();
 
         if scrollbar_height == 0 || total_rows <= viewport_size {
             return;
@@ -1226,7 +1148,7 @@ impl<T: Clone, M> Table<T, M> {
             .max(1.0)
             .round() as usize;
 
-        let scroll_ratio = self.scroll_offset as f64 / (total_rows - viewport_size).max(1) as f64;
+        let scroll_ratio = self.navigation.scroll_offset() as f64 / (total_rows - viewport_size).max(1) as f64;
         let thumb_position =
             (scroll_ratio * (scrollbar_height - thumb_size) as f64).round() as usize;
 
