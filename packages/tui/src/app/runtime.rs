@@ -181,7 +181,7 @@ impl<State, M: Clone + std::fmt::Debug + Send + Sync + 'static> App<State, M> {
 
         event_loop
             .run()
-            .map_err(|e| WidgetError::render_error(e.to_string(), None))?;
+            .map_err(|e| WidgetError::render_error(e.to_string()))?;
 
         Ok(())
     }

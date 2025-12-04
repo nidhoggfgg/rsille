@@ -18,27 +18,18 @@ pub enum WidgetError {
     WidgetNotFound(String),
 
     /// Error during widget rendering
-    ///
-    /// Contains the error message and optional widget path for context
     RenderError {
         message: String,
-        widget_path: Option<Vec<usize>>,
     },
 
     /// Error during layout calculation
-    ///
-    /// Contains the original Taffy error and optional widget context
     LayoutError {
         source: taffy::TaffyError,
-        widget_path: Option<Vec<usize>>,
     },
 
     /// Error during event handling
-    ///
-    /// Contains the error message and optional widget context
     EventError {
         message: String,
-        widget_path: Option<Vec<usize>>,
     },
 
     /// IO error from underlying operations
@@ -46,27 +37,24 @@ pub enum WidgetError {
 }
 
 impl WidgetError {
-    /// Create a render error with a widget path
-    pub fn render_error(message: impl Into<String>, widget_path: Option<Vec<usize>>) -> Self {
+    /// Create a render error
+    pub fn render_error(message: impl Into<String>) -> Self {
         Self::RenderError {
             message: message.into(),
-            widget_path,
         }
     }
 
-    /// Create a layout error with a widget path
-    pub fn layout_error(source: taffy::TaffyError, widget_path: Option<Vec<usize>>) -> Self {
+    /// Create a layout error
+    pub fn layout_error(source: taffy::TaffyError) -> Self {
         Self::LayoutError {
             source,
-            widget_path,
         }
     }
 
-    /// Create an event error with a widget path
-    pub fn event_error(message: impl Into<String>, widget_path: Option<Vec<usize>>) -> Self {
+    /// Create an event error
+    pub fn event_error(message: impl Into<String>) -> Self {
         Self::EventError {
             message: message.into(),
-            widget_path,
         }
     }
 }
@@ -83,26 +71,14 @@ impl fmt::Display for WidgetError {
             WidgetError::WidgetNotFound(name) => {
                 write!(f, "Widget not found: {}", name)
             }
-            WidgetError::RenderError { message, widget_path } => {
-                write!(f, "Render error: {}", message)?;
-                if let Some(path) = widget_path {
-                    write!(f, " (widget path: {:?})", path)?;
-                }
-                Ok(())
+            WidgetError::RenderError { message } => {
+                write!(f, "Render error: {}", message)
             }
-            WidgetError::LayoutError { source, widget_path } => {
-                write!(f, "Layout error: {}", source)?;
-                if let Some(path) = widget_path {
-                    write!(f, " (widget path: {:?})", path)?;
-                }
-                Ok(())
+            WidgetError::LayoutError { source } => {
+                write!(f, "Layout error: {}", source)
             }
-            WidgetError::EventError { message, widget_path } => {
-                write!(f, "Event handling error: {}", message)?;
-                if let Some(path) = widget_path {
-                    write!(f, " (widget path: {:?})", path)?;
-                }
-                Ok(())
+            WidgetError::EventError { message } => {
+                write!(f, "Event handling error: {}", message)
             }
             WidgetError::Io(err) => {
                 write!(f, "IO error: {}", err)
@@ -129,6 +105,6 @@ impl From<std::io::Error> for WidgetError {
 
 impl From<taffy::TaffyError> for WidgetError {
     fn from(err: taffy::TaffyError) -> Self {
-        WidgetError::layout_error(err, None)
+        WidgetError::layout_error(err)
     }
 }
