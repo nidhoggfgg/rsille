@@ -489,51 +489,6 @@ impl<M: Send + Sync> Widget<M> for RadioGroup<M> {
             }
         }
     }
-
-    fn build_focus_chain_recursive(
-        &self,
-        current_path: &mut Vec<usize>,
-        chain: &mut Vec<crate::widget_id::WidgetId>,
-    ) {
-        // Skip if disabled or empty
-        if self.state.is_disabled() || self.options.is_empty() {
-            return;
-        }
-
-        // Add each option as a separate focusable item
-        // Using virtual child indices to represent each option
-        for option_idx in 0..self.options.len() {
-            current_path.push(option_idx);
-            chain.push(crate::widget_id::WidgetId::from_path(current_path));
-            current_path.pop();
-        }
-    }
-
-    fn update_focus_states_recursive(
-        &mut self,
-        current_path: &[usize],
-        focus_id: Option<crate::widget_id::WidgetId>,
-    ) {
-        // Check if focus is within this RadioGroup
-        if let Some(focus) = focus_id {
-            // Check each option to see if it matches the focused ID
-            for option_idx in 0..self.options.len() {
-                let mut option_path = current_path.to_vec();
-                option_path.push(option_idx);
-                let option_id = crate::widget_id::WidgetId::from_path(&option_path);
-
-                if focus == option_id {
-                    // This option is focused
-                    self.state.set_focused(true);
-                    self.focused_option = option_idx;
-                    return;
-                }
-            }
-        }
-
-        // Not focused
-        self.state.set_focused(false);
-    }
 }
 
 // Implement StatefulWidgetBuilder to provide common builder methods
