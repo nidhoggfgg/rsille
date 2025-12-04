@@ -528,9 +528,9 @@ impl<M: Send + Sync> Widget<M> for CheckboxGroup<M> {
     }
 
     fn focusable(&self) -> bool {
-        // CheckboxGroup itself is not focusable - individual options are
-        // Each option will be added to focus chain via build_focus_chain_recursive
-        false
+        // CheckboxGroup is focusable as a whole unit
+        // Users can Tab to the group, then use arrow keys to navigate options within it
+        !self.state.is_disabled()
     }
 
     fn is_focused(&self) -> bool {

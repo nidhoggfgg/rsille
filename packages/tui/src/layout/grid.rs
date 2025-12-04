@@ -12,7 +12,7 @@ use crate::event::{Event, EventResult};
 use crate::layout::Constraints;
 use crate::style::{BorderStyle, Padding, Style};
 use crate::widget::{IntoWidget, Widget};
-use std::sync::RwLock;
+use std::sync::Mutex;
 use taffy::style::{AlignItems, JustifyItems};
 
 /// A grid item with optional placement information
@@ -80,9 +80,10 @@ pub struct Grid<M = ()> {
     justify_items: Option<JustifyItems>,
     overflow: Overflow,
     /// Cached layout areas from last render (for mouse event handling)
-    cached_child_areas: RwLock<Vec<Area>>,
+    /// Using RefCell since rendering is single-threaded
+    cached_child_areas: Mutex<Vec<Area>>,
     /// Track if layout needs recalculation
-    layout_dirty: RwLock<bool>,
+    layout_dirty: Mutex<bool>,
 }
 
 impl<M> std::fmt::Debug for Grid<M> {
@@ -116,24 +117,24 @@ impl<M> Grid<M> {
             align_items: None,
             justify_items: None,
             overflow: Overflow::default(),
-            cached_child_areas: RwLock::new(Vec::new()),
-            layout_dirty: RwLock::new(true),
+            cached_child_areas: Mutex::new(Vec::new()),
+            layout_dirty: Mutex::new(true),
         }
     }
 
     /// Mark layout as dirty (needs recalculation)
     fn mark_dirty(&self) {
-        *self.layout_dirty.write().unwrap() = true;
+        *self.layout_dirty.lock().unwrap() = true;
     }
 
     /// Check if layout is dirty
     fn is_layout_dirty(&self) -> bool {
-        *self.layout_dirty.read().unwrap()
+        *self.layout_dirty.lock().unwrap()
     }
 
     /// Clear dirty flag
     fn clear_dirty(&self) {
-        *self.layout_dirty.write().unwrap() = false;
+        *self.layout_dirty.lock().unwrap() = false;
     }
 
     /// Set grid template columns from a string template
@@ -471,7 +472,7 @@ impl<M: Clone> Grid<M> {
             }
 
             // For other mouse events, use spatial routing
-            let cached_areas = self.cached_child_areas.read().unwrap();
+            let cached_areas = self.cached_child_areas.lock().unwrap();
             if !cached_areas.is_empty() {
                 for (idx, child_area) in cached_areas.iter().enumerate() {
                     // Check if mouse is within this child's area
@@ -610,17 +611,18 @@ impl<M: Clone> Widget<M> for Grid<M> {
             };
 
             // Cache the result
-            *self.cached_child_areas.write().unwrap() = areas.clone();
+            *self.cached_child_areas.lock().unwrap() = areas.clone();
             self.clear_dirty();
 
             areas
         } else {
             // Use cached layout
-            self.cached_child_areas.read().unwrap().clone()
+            self.cached_child_areas.lock().unwrap().clone()
         };
 
         // Render children
-        for (index, (item, child_area)) in self.children.iter().zip(child_areas.iter()).enumerate() {
+        for (index, (item, child_area)) in self.children.iter().zip(child_areas.iter()).enumerate()
+        {
             // Skip rendering if the child has zero dimensions
             if child_area.width() == 0 || child_area.height() == 0 {
                 continue;
@@ -674,7 +676,10 @@ impl<M: Clone> Widget<M> for Grid<M> {
         &self,
         current_path: &mut Vec<usize>,
         chain: &mut Vec<crate::widget_id::WidgetId>,
+        registry: &mut crate::focus::WidgetRegistry,
     ) {
+        use smallvec::SmallVec;
+
         // For nested grids, traverse children without adding self again
         for (idx, item) in self.children.iter().enumerate() {
             current_path.push(idx);
@@ -682,16 +687,15 @@ impl<M: Clone> Widget<M> for Grid<M> {
             // If child is focusable, add to chain with stable ID
             if item.widget().focusable() {
                 let widget_key = item.widget().widget_key();
-                let widget_id = crate::widget_id::WidgetId::from_path_and_key(
-                    current_path,
-                    widget_key,
-                );
+                let widget_id =
+                    crate::widget_id::WidgetId::from_path_and_key(current_path, widget_key);
                 chain.push(widget_id);
+                registry.register(widget_id, SmallVec::from_slice(current_path));
             }
 
             // Recursively build focus chain for nested layouts
             item.widget()
-                .build_focus_chain_recursive(current_path, chain);
+                .build_focus_chain_recursive(current_path, chain, registry);
 
             current_path.pop();
         }
@@ -727,49 +731,11 @@ impl<M> Default for Grid<M> {
 
 // Implement Layout trait for Grid
 impl<M: Clone> Layout<M> for Grid<M> {
-    fn build_focus_chain(&self, current_path: &mut Vec<usize>) -> (Vec<crate::widget_id::WidgetId>, crate::focus::WidgetRegistry) {
-        use smallvec::SmallVec;
-
-        let mut chain = Vec::new();
-        let mut registry = crate::focus::WidgetRegistry::new();
-
-        // Grid itself is not focusable
-        // Recursively traverse children
-        for (idx, item) in self.children.iter().enumerate() {
-            current_path.push(idx);
-
-            if item.widget().focusable() {
-                // Create stable WidgetId from current path and optional key
-                let widget_key = item.widget().widget_key();
-                let widget_id = crate::widget_id::WidgetId::from_path_and_key(
-                    current_path,
-                    widget_key,
-                );
-
-                // Register in both chain and registry
-                chain.push(widget_id);
-                registry.register(widget_id, SmallVec::from_slice(current_path));
-            }
-
-            // Recursively build for nested containers
-            let mut temp_chain = Vec::new();
-            item.widget().build_focus_chain_recursive(current_path, &mut temp_chain);
-
-            // Register all nested focusable widgets
-            for nested_id in temp_chain {
-                if !chain.contains(&nested_id) {
-                    chain.push(nested_id);
-                    registry.register(nested_id, SmallVec::from_slice(current_path));
-                }
-            }
-
-            current_path.pop();
-        }
-
-        (chain, registry)
-    }
-
-    fn update_focus_states(&mut self, focus_id: Option<crate::widget_id::WidgetId>, registry: &crate::focus::WidgetRegistry) {
+    fn update_focus_states(
+        &mut self,
+        focus_id: Option<crate::widget_id::WidgetId>,
+        registry: &crate::focus::WidgetRegistry,
+    ) {
         let mut base_path = Vec::new();
 
         for (idx, item) in self.children.iter_mut().enumerate() {
@@ -778,17 +744,15 @@ impl<M: Clone> Layout<M> for Grid<M> {
 
             // Build child ID to check if it's focused
             let widget_key = item.widget().widget_key();
-            let child_id = crate::widget_id::WidgetId::from_path_and_key(
-                &child_path,
-                widget_key,
-            );
+            let child_id = crate::widget_id::WidgetId::from_path_and_key(&child_path, widget_key);
 
             // Check if this child is focused by comparing IDs directly (O(1))
             let is_focused = focus_id.as_ref() == Some(&child_id);
             item.widget_mut().set_focused(is_focused);
 
             // Recursively update nested widgets
-            item.widget_mut().update_focus_states_recursive(&child_path, focus_id);
+            item.widget_mut()
+                .update_focus_states_recursive(&child_path, focus_id);
         }
     }
 
@@ -823,7 +787,7 @@ impl<M: Clone> Layout<M> for Grid<M> {
             }
 
             // For other mouse events, use spatial routing
-            let cached_areas = self.cached_child_areas.read().unwrap();
+            let cached_areas = self.cached_child_areas.lock().unwrap();
             if !cached_areas.is_empty() {
                 for (idx, child_area) in cached_areas.iter().enumerate() {
                     let is_hit = mouse_event.column >= child_area.x()

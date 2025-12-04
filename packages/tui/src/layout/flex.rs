@@ -9,7 +9,7 @@ use crate::event::{Event, EventResult};
 use crate::layout::Constraints;
 use crate::style::{BorderStyle, Padding, Style, ThemeManager};
 use crate::widget::{IntoWidget, Widget};
-use std::sync::RwLock;
+use std::sync::Mutex;
 use taffy::style::{AlignItems, JustifyContent};
 
 use super::layout::Layout;
@@ -33,7 +33,8 @@ pub struct Flex<M = ()> {
     justify_content: Option<JustifyContent>,
     overflow: Overflow,
     /// Cached layout areas from last render (for mouse event handling)
-    cached_child_areas: RwLock<Vec<Area>>,
+    /// Using RefCell since rendering is single-threaded
+    cached_child_areas: Mutex<Vec<Area>>,
 }
 
 impl<M> std::fmt::Debug for Flex<M> {
@@ -65,7 +66,7 @@ impl<M> Flex<M> {
             align_items: None,
             justify_content: None,
             overflow: Overflow::default(),
-            cached_child_areas: RwLock::new(Vec::new()),
+            cached_child_areas: Mutex::new(Vec::new()),
         }
     }
 
@@ -241,7 +242,6 @@ impl<M> Flex<M> {
 
 // Methods that require Clone bound
 impl<M: Clone> Flex<M> {
-
     /// Handle event and collect any generated messages
     pub fn handle_event_with_messages(&mut self, event: &Event) -> (EventResult<M>, Vec<M>)
     where
@@ -287,7 +287,7 @@ impl<M: Clone> Flex<M> {
             }
 
             // For other mouse events (click, drag, etc.), use spatial routing
-            let cached_areas = self.cached_child_areas.read().unwrap();
+            let cached_areas = self.cached_child_areas.lock().unwrap();
             if !cached_areas.is_empty() {
                 for (idx, child_area) in cached_areas.iter().enumerate() {
                     // Check if mouse is within this child's area
@@ -439,7 +439,7 @@ impl<M: Clone> Widget<M> for Flex<M> {
         };
 
         // Cache layout info for mouse event handling
-        *self.cached_child_areas.write().unwrap() = child_areas.clone();
+        *self.cached_child_areas.lock().unwrap() = child_areas.clone();
 
         // Render each child in its allocated area using sequential sub-chunk creation
         for (index, (child, child_area)) in self.children.iter().zip(child_areas).enumerate() {
@@ -556,7 +556,10 @@ impl<M: Clone> Widget<M> for Flex<M> {
         &self,
         current_path: &mut Vec<usize>,
         chain: &mut Vec<crate::widget_id::WidgetId>,
+        registry: &mut crate::focus::WidgetRegistry,
     ) {
+        use smallvec::SmallVec;
+
         // For nested layouts, traverse children without adding self again
         // (self was already added by parent's traversal)
         for (idx, child) in self.children.iter().enumerate() {
@@ -570,10 +573,11 @@ impl<M: Clone> Widget<M> for Flex<M> {
                     widget_key,
                 );
                 chain.push(widget_id);
+                registry.register(widget_id, SmallVec::from_slice(current_path));
             }
 
             // Recursively build focus chain for nested layouts
-            child.build_focus_chain_recursive(current_path, chain);
+            child.build_focus_chain_recursive(current_path, chain, registry);
 
             current_path.pop();
         }
@@ -642,48 +646,6 @@ pub fn row<M>() -> Flex<M> {
 
 // Implement Layout trait for Flex
 impl<M: Clone> Layout<M> for Flex<M> {
-    fn build_focus_chain(&self, current_path: &mut Vec<usize>) -> (Vec<crate::widget_id::WidgetId>, crate::focus::WidgetRegistry) {
-        use smallvec::SmallVec;
-
-        let mut chain = Vec::new();
-        let mut registry = crate::focus::WidgetRegistry::new();
-
-        // Flex itself is not focusable
-        // Recursively traverse children
-        for (idx, child) in self.children.iter().enumerate() {
-            current_path.push(idx);
-
-            if child.focusable() {
-                // Create stable WidgetId from current path and optional key
-                let widget_key = child.widget_key();
-                let widget_id = crate::widget_id::WidgetId::from_path_and_key(
-                    current_path,
-                    widget_key,
-                );
-
-                // Register in both chain and registry
-                chain.push(widget_id);
-                registry.register(widget_id, SmallVec::from_slice(current_path));
-            }
-
-            // Recursively build for nested containers (still need the old API for compatibility)
-            let mut temp_chain = Vec::new();
-            child.build_focus_chain_recursive(current_path, &mut temp_chain);
-
-            // Register all nested focusable widgets
-            for nested_id in temp_chain {
-                if !chain.contains(&nested_id) {
-                    chain.push(nested_id);
-                    registry.register(nested_id, SmallVec::from_slice(current_path));
-                }
-            }
-
-            current_path.pop();
-        }
-
-        (chain, registry)
-    }
-
     fn update_focus_states(&mut self, focus_id: Option<crate::widget_id::WidgetId>, registry: &crate::focus::WidgetRegistry) {
         // We need to rebuild child paths to check focus
         // But we can get the parent path from the first child in registry if available
