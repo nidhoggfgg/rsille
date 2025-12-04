@@ -39,7 +39,8 @@ use crate::{
     widget::Widget,
 };
 use render::area::Area;
-use std::sync::{Arc, RwLock};
+use std::sync::Mutex;
+use std::sync::Arc;
 
 /// Internal state for tracking widget interactions
 #[derive(Debug, Clone, Copy, Default)]
@@ -127,11 +128,11 @@ pub struct Enhanced<M, W> {
 
     // === Internal state ===
     /// Cached area from last render (for hit testing)
-    cached_area: RwLock<Option<Area>>,
+    cached_area: Mutex<Option<Area>>,
     /// Cached widget path from last render (for hover tracking)
-    cached_path: RwLock<Option<crate::hover::WidgetPath>>,
+    cached_path: Mutex<Option<crate::hover::WidgetPath>>,
     /// Interaction state (focus, hover, pressed, etc.)
-    state: RwLock<EnhancedState>,
+    state: Mutex<EnhancedState>,
 }
 
 impl<M, W> Enhanced<M, W> {
@@ -167,9 +168,9 @@ impl<M, W> Enhanced<M, W> {
             on_mouse_leave: None,
             on_focus: None,
             on_blur: None,
-            cached_area: RwLock::new(None),
-            cached_path: RwLock::new(None),
-            state: RwLock::new(EnhancedState::default()),
+            cached_area: Mutex::new(None),
+            cached_path: Mutex::new(None),
+            state: Mutex::new(EnhancedState::default()),
         }
     }
 
@@ -248,7 +249,7 @@ impl<M, W> Enhanced<M, W> {
     ///     .disabled(true)
     /// ```
     pub fn disabled(self, disabled: bool) -> Self {
-        self.state.write().unwrap().disabled = disabled;
+        self.state.lock().unwrap().disabled = disabled;
         self
     }
 
@@ -446,16 +447,16 @@ where
         let area = chunk.area();
 
         // Cache area for hit testing
-        *self.cached_area.write().unwrap() = Some(area);
+        *self.cached_area.lock().unwrap() = Some(area);
 
         // Register with HoverManager if we have mouse enter/leave handlers
         if self.on_mouse_enter.is_some() || self.on_mouse_leave.is_some() {
             let path = crate::hover::RenderContext::current_path();
-            *self.cached_path.write().unwrap() = Some(path.clone());
+            *self.cached_path.lock().unwrap() = Some(path.clone());
             crate::hover::HoverManager::global().register_widget(path, area);
         }
 
-        let state = self.state.read().unwrap();
+        let state = self.state.lock().unwrap();
 
         // Step 1: Compute effective style and fill background
         let effective_style = self.compute_effective_style(&state);
@@ -534,7 +535,7 @@ where
                 // Check for hover enter/leave events ONLY on mouse movement
                 use crate::event::MouseEventKind;
                 if matches!(mouse_event.kind, MouseEventKind::Moved) {
-                    if let Some(ref path) = *self.cached_path.read().unwrap() {
+                    if let Some(ref path) = *self.cached_path.lock().unwrap() {
                         if let Some(ref handler) = self.on_mouse_enter {
                             if crate::hover::HoverManager::global().should_fire_enter(path) {
                                 messages.push(handler());
@@ -554,7 +555,7 @@ where
             }
             Event::Key(key_event) => {
                 // Only handle key events if focused
-                if self.state.read().unwrap().focused {
+                if self.state.lock().unwrap().focused {
                     // Currently no key handling, but could add Enter/Space for activation
                     match key_event.code {
                         KeyCode::Enter | KeyCode::Char(' ') => {
@@ -611,11 +612,11 @@ where
     }
 
     fn is_focused(&self) -> bool {
-        self.state.read().unwrap().focused
+        self.state.lock().unwrap().focused
     }
 
     fn set_focused(&mut self, focused: bool) {
-        let mut state = self.state.write().unwrap();
+        let mut state = self.state.lock().unwrap();
         state.focused = focused;
         drop(state);
 
@@ -631,10 +632,11 @@ where
         &self,
         current_path: &mut Vec<usize>,
         chain: &mut Vec<crate::widget_id::WidgetId>,
+        registry: &mut crate::focus::WidgetRegistry,
     ) {
         // Layout has already checked focusable() and added us to chain if needed
         // Just delegate to inner in case it's a container with children
-        self.inner.build_focus_chain_recursive(current_path, chain);
+        self.inner.build_focus_chain_recursive(current_path, chain, registry);
     }
 
     fn update_focus_states_recursive(
@@ -691,7 +693,7 @@ impl<M, W> Enhanced<M, W> {
     /// Handle mouse events with hit testing
     fn handle_mouse_event(&mut self, mouse_event: &MouseEvent) -> Vec<M> {
         // Get cached area
-        let area = match *self.cached_area.read().unwrap() {
+        let area = match *self.cached_area.lock().unwrap() {
             Some(area) => area,
             None => return Vec::new(),
         };
@@ -704,7 +706,7 @@ impl<M, W> Enhanced<M, W> {
             && mouse_y >= area.y()
             && mouse_y < area.y() + area.height();
 
-        let mut state = self.state.write().unwrap();
+        let mut state = self.state.lock().unwrap();
         let mut messages = Vec::new();
 
         match mouse_event.kind {
@@ -764,7 +766,7 @@ where
             .field("has_on_mouse_leave", &self.on_mouse_leave.is_some())
             .field("has_on_focus", &self.on_focus.is_some())
             .field("has_on_blur", &self.on_blur.is_some())
-            .field("state", &*self.state.read().unwrap())
+            .field("state", &*self.state.lock().unwrap())
             .finish()
     }
 }
@@ -793,9 +795,9 @@ where
             on_mouse_leave: self.on_mouse_leave.clone(),
             on_focus: self.on_focus.clone(),
             on_blur: self.on_blur.clone(),
-            cached_area: RwLock::new(*self.cached_area.read().unwrap()),
-            cached_path: RwLock::new(self.cached_path.read().unwrap().clone()),
-            state: RwLock::new(*self.state.read().unwrap()),
+            cached_area: Mutex::new(*self.cached_area.lock().unwrap()),
+            cached_path: Mutex::new(self.cached_path.lock().unwrap().clone()),
+            state: Mutex::new(*self.state.lock().unwrap()),
         }
     }
 }

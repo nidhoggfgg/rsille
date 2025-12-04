@@ -241,7 +241,8 @@ pub trait Widget<M>: Send + Sync {
     ///
     /// # Arguments
     /// * `current_path` - Current path in the widget tree
-    /// * `chain` - Accumulated focus chain
+    /// * `chain` - Accumulated focus chain (ordered list of widget IDs)
+    /// * `registry` - Widget registry (maps widget IDs to their paths)
     ///
     /// # Default
     /// Does nothing - only containers need to implement this.
@@ -249,6 +250,7 @@ pub trait Widget<M>: Send + Sync {
         &self,
         _current_path: &mut Vec<usize>,
         _chain: &mut Vec<crate::widget_id::WidgetId>,
+        _registry: &mut crate::focus::WidgetRegistry,
     ) {
         // Default: no-op (leaf widgets don't have children)
     }
@@ -308,8 +310,9 @@ impl<M> Widget<M> for Box<dyn Widget<M>> {
         &self,
         current_path: &mut Vec<usize>,
         chain: &mut Vec<crate::widget_id::WidgetId>,
+        registry: &mut crate::focus::WidgetRegistry,
     ) {
-        (**self).build_focus_chain_recursive(current_path, chain)
+        (**self).build_focus_chain_recursive(current_path, chain, registry)
     }
 
     fn update_focus_states_recursive(

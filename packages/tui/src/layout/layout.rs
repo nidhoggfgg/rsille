@@ -10,13 +10,13 @@ use crate::widget::Widget;
 ///
 /// This trait is implemented by Flex and Grid, allowing either to be used
 /// as the return type of view functions in App::run.
+///
+/// # Focus Chain Building
+///
+/// Layout widgets use the standard Widget trait's `build_focus_chain_recursive`
+/// method to build their focus chains. AppWrapper initializes an empty chain
+/// and registry, then calls the root layout's `build_focus_chain_recursive`.
 pub trait Layout<M: Clone>: Widget<M> {
-    /// Build focus chain by recursively collecting focusable widgets
-    ///
-    /// Returns both the focus chain (ordered list of focusable widget IDs)
-    /// and a registry mapping IDs to their paths in the tree.
-    fn build_focus_chain(&self, current_path: &mut Vec<usize>) -> (Vec<WidgetId>, WidgetRegistry);
-
     /// Update focus state for all children based on focus ID
     fn update_focus_states(&mut self, focus_id: Option<WidgetId>, registry: &WidgetRegistry);
 
@@ -62,10 +62,11 @@ impl<M: Clone> Widget<M> for Box<dyn Layout<M>> {
 
     fn build_focus_chain_recursive(
         &self,
-        _current_path: &mut Vec<usize>,
-        _chain: &mut Vec<WidgetId>,
+        current_path: &mut Vec<usize>,
+        chain: &mut Vec<crate::widget_id::WidgetId>,
+        registry: &mut crate::focus::WidgetRegistry,
     ) {
-        // No-op for Layout (uses build_focus_chain instead)
+        (**self).build_focus_chain_recursive(current_path, chain, registry)
     }
 
     fn update_focus_states_recursive(
@@ -78,10 +79,6 @@ impl<M: Clone> Widget<M> for Box<dyn Layout<M>> {
 }
 
 impl<M: Clone> Layout<M> for Box<dyn Layout<M>> {
-    fn build_focus_chain(&self, current_path: &mut Vec<usize>) -> (Vec<WidgetId>, WidgetRegistry) {
-        (**self).build_focus_chain(current_path)
-    }
-
     fn update_focus_states(&mut self, focus_id: Option<WidgetId>, registry: &WidgetRegistry) {
         (**self).update_focus_states(focus_id, registry)
     }
