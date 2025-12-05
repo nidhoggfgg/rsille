@@ -179,7 +179,7 @@ fn view(state: &State) -> impl Layout<Message> {
         .child(label("Press 'q' or Esc to quit").fg(Color::Indexed(8)))
 }
 
-fn main() -> Result<()> {
+fn main() -> WidgetResult<()> {
     let app = App::new(State { layout_type: 0 });
     app.on_key(KeyCode::Char(' '), || Message::NextLayout)
         .on_key(KeyCode::Char('q'), || Message::Quit)

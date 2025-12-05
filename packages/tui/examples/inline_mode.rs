@@ -79,7 +79,7 @@ fn view(state: &AppState) -> impl Layout<Message> {
         ])
 }
 
-fn main() -> Result<()> {
+fn main() -> WidgetResult<()> {
     let app = App::new(AppState {
         spinner_frame: 0,
         progress: 0.0,

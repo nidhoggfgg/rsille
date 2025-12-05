@@ -3,7 +3,7 @@
 use std::fmt;
 
 /// Result type alias for TUI operations
-pub type Result<T> = std::result::Result<T, WidgetError>;
+pub type WidgetResult<T> = std::result::Result<T, WidgetError>;
 
 /// Errors that can occur during widget operations
 #[derive(Debug)]
@@ -18,19 +18,13 @@ pub enum WidgetError {
     WidgetNotFound(String),
 
     /// Error during widget rendering
-    RenderError {
-        message: String,
-    },
+    RenderError { message: String },
 
     /// Error during layout calculation
-    LayoutError {
-        source: taffy::TaffyError,
-    },
+    LayoutError { source: taffy::TaffyError },
 
     /// Error during event handling
-    EventError {
-        message: String,
-    },
+    EventError { message: String },
 
     /// IO error from underlying operations
     Io(std::io::Error),
@@ -46,9 +40,7 @@ impl WidgetError {
 
     /// Create a layout error
     pub fn layout_error(source: taffy::TaffyError) -> Self {
-        Self::LayoutError {
-            source,
-        }
+        Self::LayoutError { source }
     }
 
     /// Create an event error

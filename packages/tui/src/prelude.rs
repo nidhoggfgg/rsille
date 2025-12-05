@@ -183,7 +183,7 @@
 //! `ui!` macro as you prefer.
 
 pub use crate::app::App;
-pub use crate::error::{Result, WidgetError};
+pub use crate::error::{WidgetResult, WidgetError};
 pub use crate::event::{
     Event, EventResult, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
@@ -214,6 +214,7 @@ pub use crate::widget::{
     enhanced,
     label,
     list,
+    progress_bar,
     radio_group,
     spacer,
     table,
@@ -235,10 +236,13 @@ pub use crate::widget::{
     Enhanced,
     IntoWidget,
     Label,
+    LabelPosition,
     LineMarker,
     List,
     ListItem,
     ProfilingData,
+    ProgressBar,
+    ProgressMode,
     RadioDirection,
     RadioGroup,
     SelectionEvent,

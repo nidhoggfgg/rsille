@@ -73,7 +73,9 @@ fn view(state: &State) -> impl Layout<Message> {
                 .bold()
                 .fg(Color::Cyan),
         )
-        .child(label("Move your mouse over the boxes below to see enter/leave events"))
+        .child(label(
+            "Move your mouse over the boxes below to see enter/leave events",
+        ))
         .child(
             row()
                 .gap(3)
@@ -125,7 +127,7 @@ fn view(state: &State) -> impl Layout<Message> {
         .child(label("Press 'q' or Esc to quit").fg(Color::Indexed(8)))
 }
 
-fn main() -> Result<()> {
+fn main() -> WidgetResult<()> {
     let app = App::new(State {
         widget1_status: "Mouse Outside".to_string(),
         widget2_status: "Not hovering".to_string(),

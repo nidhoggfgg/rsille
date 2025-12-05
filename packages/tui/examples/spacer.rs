@@ -41,7 +41,7 @@ fn view(_state: &State) -> impl Layout<()> {
         .child(label("Press Esc to exit").fg(Color::Indexed(8)))
 }
 
-fn main() -> Result<()> {
+fn main() -> WidgetResult<()> {
     let app = App::new(State);
     app.run_inline(update, view)?;
     Ok(())

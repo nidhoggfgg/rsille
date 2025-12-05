@@ -150,7 +150,7 @@ fn view(state: &State) -> impl Layout<Message> {
         )
 }
 
-fn main() -> Result<()> {
+fn main() -> WidgetResult<()> {
     let app = App::new(State {
         remember_me: false,
         subscribe: false,

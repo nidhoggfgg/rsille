@@ -183,7 +183,7 @@ fn view(state: &State) -> impl Layout<Message> {
         )
 }
 
-fn main() -> Result<()> {
+fn main() -> WidgetResult<()> {
     let app = App::new(State {
         variant_index: 0,
         border_index: 0,

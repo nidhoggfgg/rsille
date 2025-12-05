@@ -14,4 +14,4 @@ pub mod ui_macro;
 // Convenience re-exports
 pub mod prelude;
 
-pub use error::{Result, WidgetError};
+pub use error::{WidgetResult, WidgetError};

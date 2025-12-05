@@ -23,7 +23,7 @@ impl SystemInfo {
     }
 }
 
-fn main() -> Result<()> {
+fn main() -> WidgetResult<()> {
     let system_data = vec![
         SystemInfo::new("OS", "Linux"),
         SystemInfo::new("Kernel", "6.6.87"),

@@ -63,7 +63,7 @@ fn view(state: &State) -> impl Layout<Message> {
         .child(label("Press Esc to quit"))
 }
 
-fn main() -> Result<()> {
+fn main() -> WidgetResult<()> {
     let app = App::new(State {
         current_theme: "Dark".to_string(),
     })

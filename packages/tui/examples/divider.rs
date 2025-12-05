@@ -140,7 +140,7 @@ fn view(_state: &State) -> impl Layout<()> {
         )
 }
 
-fn main() -> Result<()> {
+fn main() -> WidgetResult<()> {
     let app = App::new(State);
     app.run_inline(update, view)?;
     Ok(())

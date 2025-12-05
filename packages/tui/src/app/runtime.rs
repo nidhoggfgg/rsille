@@ -1,6 +1,6 @@
 use crate::event::KeyCode;
 use crate::style::{Theme, ThemeManager};
-use crate::{layout::Layout, Result, WidgetError};
+use crate::{layout::Layout, WidgetResult, WidgetError};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -83,7 +83,7 @@ impl<State, M: Clone + std::fmt::Debug + Send + Sync + 'static> App<State, M> {
         self
     }
 
-    pub fn run<F, V, L>(self, update: F, view: V) -> Result<()>
+    pub fn run<F, V, L>(self, update: F, view: V) -> WidgetResult<()>
     where
         F: Fn(&mut State, M) + Send + Sync + 'static,
         V: Fn(&State) -> L + Send + Sync + 'static,
@@ -96,7 +96,7 @@ impl<State, M: Clone + std::fmt::Debug + Send + Sync + 'static> App<State, M> {
         self.run_with_options(update, view_wrapper, false)
     }
 
-    pub fn run_inline<F, V, L>(self, update: F, view: V) -> Result<()>
+    pub fn run_inline<F, V, L>(self, update: F, view: V) -> WidgetResult<()>
     where
         F: Fn(&mut State, M) + Send + Sync + 'static,
         V: Fn(&State) -> L + Send + Sync + 'static,
@@ -110,7 +110,7 @@ impl<State, M: Clone + std::fmt::Debug + Send + Sync + 'static> App<State, M> {
     }
 
     /// Internal method to run the application with options
-    fn run_with_options<F, V>(self, update: F, view: V, inline_mode: bool) -> Result<()>
+    fn run_with_options<F, V>(self, update: F, view: V, inline_mode: bool) -> WidgetResult<()>
     where
         F: Fn(&mut State, M) + Send + Sync + 'static,
         V: Fn(&State) -> Box<dyn Layout<M>> + Send + Sync + 'static,
