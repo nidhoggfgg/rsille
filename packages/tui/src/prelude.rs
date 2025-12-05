@@ -224,6 +224,7 @@ pub use crate::widget::{
     spacer,
     table,
     text_input,
+    textarea,
 
     // types
     Button,
@@ -261,6 +262,8 @@ pub use crate::widget::{
     TableVariant,
     TextInput,
     TextInputVariant,
+    Textarea,
+    TextareaVariant,
     Widget,
 };
 
