@@ -13,7 +13,7 @@ pub struct Builder {
     pub(super) enable_alt_screen: bool,
     pub(super) enable_mouse_capture: bool,
     pub(super) enable_hide_cursor: bool,
-    pub(super) exit_code: KeyEvent,
+    pub(super) exit_code: Option<KeyEvent>,
     pub(super) frame_limit: Option<u16>,
     pub(super) max_event_per_frame: usize,
     pub(super) size: Size,
@@ -33,7 +33,7 @@ impl Builder {
             enable_alt_screen: false,
             enable_mouse_capture: false,
             enable_hide_cursor: false,
-            exit_code: KeyCode::Esc.into(),
+            exit_code: Some(KeyCode::Esc.into()),
             frame_limit: None,
             max_event_per_frame: 10,
             clear: true,
@@ -145,6 +145,28 @@ impl Builder {
     /// Actual height will be min(content_height, max_height, terminal_height)
     pub fn inline_max_height(&mut self, max_height: u16) -> &mut Self {
         self.inline_max_height = max_height;
+        self
+    }
+
+    /// Set the exit key code (default: ESC)
+    ///
+    /// When the user presses this key, the event loop will automatically exit.
+    /// Use `disable_exit_code()` if you want to handle exit logic in your application.
+    pub fn exit_code(&mut self, key: KeyEvent) -> &mut Self {
+        self.exit_code = Some(key);
+        self
+    }
+
+    /// Disable automatic exit on key press
+    ///
+    /// When disabled, the event loop will not automatically exit on any key press.
+    /// The application must handle its own exit logic.
+    /// This is useful when you want full control over exit behavior, such as:
+    /// - Handling ESC in dialogs/modals
+    /// - Implementing custom quit confirmations
+    /// - Using different exit shortcuts
+    pub fn disable_exit_code(&mut self) -> &mut Self {
+        self.exit_code = None;
         self
     }
 
