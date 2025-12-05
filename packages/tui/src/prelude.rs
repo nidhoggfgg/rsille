@@ -225,6 +225,7 @@ pub use crate::widget::{
     table,
     text_input,
     textarea,
+    tree_view,
 
     // types
     Button,
@@ -255,6 +256,7 @@ pub use crate::widget::{
     RadioGroup,
     SelectionEvent,
     SelectionMode,
+    SimpleTreeNode,
     SimpleWidget,
     Spacer,
     Table,
@@ -264,6 +266,10 @@ pub use crate::widget::{
     TextInputVariant,
     Textarea,
     TextareaVariant,
+    TreeExpandEvent,
+    TreeNode,
+    TreeSelectionEvent,
+    TreeView,
     Widget,
 };
 

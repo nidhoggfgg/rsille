@@ -21,6 +21,7 @@ mod spacer;
 mod table;
 mod text_input;
 mod textarea;
+mod tree;
 mod wrapper;
 
 pub use button::{button, Button, ButtonVariant};
@@ -39,6 +40,7 @@ pub use spacer::{spacer, Spacer};
 pub use table::{table, Column, ColumnWidth, Table, TableSelectionEvent, TableVariant};
 pub use text_input::{text_input, TextInput, TextInputVariant};
 pub use textarea::{textarea, Selection, Textarea, TextareaVariant};
+pub use tree::{tree_view, SimpleTreeNode, TreeExpandEvent, TreeNode, TreeSelectionEvent, TreeView};
 pub use wrapper::{enhanced, Enhanced};
 
 use crate::event::{Event, EventResult};
