@@ -179,19 +179,45 @@ where
             self.previous_inline_height
         );
 
-        // If height decreased, clear the extra lines from previous frame
-        if self.previous_inline_height > current_height {
-            let extra_lines = self.previous_inline_height - current_height;
-            for _ in 0..extra_lines {
-                queue_with_log!(self.out, MoveToPreviousLine(1))?;
-                queue_with_log!(self.out, Clear(ClearType::CurrentLine))?;
+        // Move cursor back to the start position first
+        // NOTE: After rendering, cursor is at the end of the last line (not next line's start)
+        // because we skip MoveToNextLine for the last line to prevent scrolling.
+        if self.buffer.previous().is_some() && self.previous_inline_height > 0 {
+            // Move to line start first
+            queue_with_log!(self.out, Print("\r"))?;
+            // Then move up to first line (if not already there)
+            if self.previous_inline_height > 1 {
+                queue_with_log!(
+                    self.out,
+                    MoveToPreviousLine(self.previous_inline_height - 1)
+                )?;
             }
         }
 
-        // Move cursor back to the start position
-        if self.buffer.previous().is_some() {
-            let lines = current_height.min(self.previous_inline_height);
-            queue_with_log!(self.out, MoveToPreviousLine(lines))?;
+        // If height decreased, clear the extra lines from previous frame
+        // Cursor is now at the start of line 0, so we need to:
+        // 1. Move down to where the extra lines start (line current_height)
+        // 2. Clear those lines
+        if self.previous_inline_height > current_height {
+            let extra_lines = self.previous_inline_height - current_height;
+            // Move down to line current_height
+            if current_height > 0 {
+                queue_with_log!(self.out, MoveToNextLine(current_height))?;
+            }
+            // Clear extra lines (be careful not to move past the last line)
+            for i in 0..extra_lines {
+                queue_with_log!(self.out, Clear(ClearType::CurrentLine))?;
+                // Don't move to next line after clearing the last extra line
+                if i < extra_lines - 1 {
+                    queue_with_log!(self.out, MoveToNextLine(1))?;
+                }
+            }
+            // Move back to line 0
+            let lines_to_move_back = current_height + extra_lines - 1;
+            if lines_to_move_back > 0 {
+                queue_with_log!(self.out, Print("\r"))?;
+                queue_with_log!(self.out, MoveToPreviousLine(lines_to_move_back))?;
+            }
         }
 
         // Render with line-level diffing
@@ -202,10 +228,15 @@ where
                 break;
             }
 
+            let is_last_line = line_diff.line_num == current_height - 1;
+
             match line_diff.state {
                 crate::buffer::LineState::Unchanged => {
                     // Line hasn't changed, just move to next line without re-rendering
-                    queue_with_log!(self.out, MoveToNextLine(1))?;
+                    // Skip MoveToNextLine for the last line to prevent terminal scrolling
+                    if !is_last_line {
+                        queue_with_log!(self.out, MoveToNextLine(1))?;
+                    }
                 }
                 crate::buffer::LineState::Changed {
                     cells,
@@ -237,14 +268,19 @@ where
                         }
                     }
 
-                    // in inline mode, "\n" could make the terminal scroll up
-                    // i know this is wired, but the "\n" doesn't move cursor
-                    // println!("position: {:?}", cursor::position().unwrap()); // --> position: (0, x)
-                    // queue_with_log!(stdout(), Print("\r\n")).unwrap();                // --> empty line
-                    // println!("position: {:?}", cursor::position().unwrap()); // --> position: (0, x) <- this is not x+1!
-                    queue_with_log!(self.out, Print("\r\n"))?;
-                    queue_with_log!(self.out, MoveToPreviousLine(1))?;
-                    queue_with_log!(self.out, MoveToNextLine(1))?;
+                    // Move to next line, but skip for the last line to prevent terminal scrolling
+                    // CRITICAL: When rendering at the bottom of the terminal, MoveToNextLine
+                    // would cause the terminal to scroll up, breaking cursor position tracking
+                    if !is_last_line {
+                        // in inline mode, "\n" could make the terminal scroll up
+                        // i know this is wired, but the "\n" doesn't move cursor
+                        // println!("position: {:?}", cursor::position().unwrap()); // --> position: (0, x)
+                        // queue_with_log!(stdout(), Print("\r\n")).unwrap();                // --> empty line
+                        // println!("position: {:?}", cursor::position().unwrap()); // --> position: (0, x) <- this is not x+1!
+                        queue_with_log!(self.out, Print("\r\n"))?;
+                        queue_with_log!(self.out, MoveToPreviousLine(1))?;
+                        queue_with_log!(self.out, MoveToNextLine(1))?;
+                    }
                 }
             }
         }
