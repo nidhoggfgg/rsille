@@ -260,7 +260,7 @@ fn view(state: &State) -> Box<dyn Layout<Message>> {
     }
 }
 
-fn main() -> Result<()> {
+fn main() -> WidgetResult<()> {
     let app = App::new(State {
         show_single: true,
         single_focused_index: None,

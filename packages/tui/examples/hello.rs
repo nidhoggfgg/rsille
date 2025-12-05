@@ -26,7 +26,7 @@ fn view(state: &State) -> impl Layout<()> {
         .child(label("Press Esc to quit").fg(Color::Indexed(8)))
 }
 
-fn main() -> Result<()> {
+fn main() -> WidgetResult<()> {
     let app = App::new(State {
         greeting: "👋 Hello, World!".to_string(),
     });

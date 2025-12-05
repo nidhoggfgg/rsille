@@ -203,7 +203,7 @@ fn view(state: &State) -> impl Layout<Message> {
         .child(label("Press Ctrl+C to exit"))
 }
 
-fn main() -> tui::Result<()> {
+fn main() -> tui::WidgetResult<()> {
     let state = State {
         selected_fruit: None,
         selected_country: None,

@@ -95,7 +95,7 @@ fn view(state: &State) -> impl Layout<Message> {
     }
 }
 
-fn main() -> Result<()> {
+fn main() -> WidgetResult<()> {
     let app = App::new(State { counter: 0 });
     app.on_key(KeyCode::Char('q'), || Message::Quit)
         .run(update, view)?;

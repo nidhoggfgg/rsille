@@ -105,7 +105,7 @@ fn view(state: &State) -> impl Layout<()> {
         )
 }
 
-fn main() -> Result<()> {
+fn main() -> WidgetResult<()> {
     let rust_code = r#"fn main() {
     let message = "Hello, Rust!";
     // Calculate fibonacci

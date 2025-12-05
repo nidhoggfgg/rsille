@@ -180,7 +180,7 @@ fn view(state: &State) -> impl Layout<Message> {
         .child(label("Press 'q' or Esc to quit").fg(Color::Indexed(8)))
 }
 
-fn main() -> Result<()> {
+fn main() -> WidgetResult<()> {
     let app = App::new(State {
         selected_card: None,
     });

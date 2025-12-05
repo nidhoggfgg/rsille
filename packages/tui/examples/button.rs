@@ -154,7 +154,7 @@ fn view(state: &State) -> impl Layout<Message> {
         )
 }
 
-fn main() -> Result<()> {
+fn main() -> WidgetResult<()> {
     let app = App::new(State {
         last_clicked: None,
         click_count: 0,

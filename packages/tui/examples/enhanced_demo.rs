@@ -184,7 +184,7 @@ fn create_card(title: &str, on_click_msg: Message) -> Enhanced<Message, Flex<Mes
     .on_focus(move || Message::FocusGained(title_owned.clone()))
 }
 
-fn main() -> Result<()> {
+fn main() -> WidgetResult<()> {
     let initial_state = State {
         last_event: "None".to_string(),
         click_count: 0,

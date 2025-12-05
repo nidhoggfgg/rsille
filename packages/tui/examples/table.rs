@@ -232,7 +232,7 @@ fn view(state: &State) -> impl Layout<Message> {
         .child(label("Q or Esc: Quit | M: Toggle mode").fg(Color::Indexed(8)))
 }
 
-fn main() -> Result<()> {
+fn main() -> WidgetResult<()> {
     let app = App::new(State {
         use_multiple_selection: false,
         focused_index: None,
