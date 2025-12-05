@@ -183,7 +183,7 @@
 //! `ui!` macro as you prefer.
 
 pub use crate::app::App;
-pub use crate::error::{WidgetResult, WidgetError};
+pub use crate::error::{WidgetError, WidgetResult};
 pub use crate::event::{
     Event, EventResult, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
@@ -194,6 +194,7 @@ pub use crate::layout::{
     row,
 
     // types
+    AlignItems,
     Constraints,
     Direction,
     Flex,
@@ -201,15 +202,19 @@ pub use crate::layout::{
     GridLine,
     GridPlacement,
     GridTrack,
+    JustifyContent,
     Layout,
 };
-pub use crate::style::{BorderStyle, Color, CssError, Padding, Style, TextModifiers};
+pub use crate::style::{BorderStyle, Color, CssError, Padding, Style, TextModifiers, ThemeManager};
 pub use crate::widget::{
     // fns
+    alert,
     button,
     checkbox,
     checkbox_group,
     code_block,
+    confirm,
+    dialog,
     divider,
     enhanced,
     label,
@@ -229,6 +234,9 @@ pub use crate::widget::{
     CodeBlock,
     Column,
     ColumnWidth,
+    Dialog,
+    DialogMessage,
+    DialogSize,
     Divider,
     DividerDirection,
     DividerTextPosition,
@@ -240,7 +248,6 @@ pub use crate::widget::{
     LineMarker,
     List,
     ListItem,
-    ProfilingData,
     ProgressBar,
     ProgressMode,
     RadioDirection,
@@ -255,7 +262,6 @@ pub use crate::widget::{
     TextInput,
     TextInputVariant,
     Widget,
-    WidgetLifecycle,
 };
 
 // The ui! macro is automatically available due to #[macro_export]

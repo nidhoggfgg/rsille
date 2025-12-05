@@ -734,9 +734,9 @@ impl<M: Clone> Layout<M> for Grid<M> {
     fn update_focus_states(
         &mut self,
         focus_id: Option<crate::widget_id::WidgetId>,
-        registry: &crate::focus::WidgetRegistry,
+        _registry: &crate::focus::WidgetRegistry,
     ) {
-        let mut base_path = Vec::new();
+        let base_path = Vec::new();
 
         for (idx, item) in self.children.iter_mut().enumerate() {
             let mut child_path = base_path.clone();

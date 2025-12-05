@@ -5,14 +5,12 @@ mod into_widget;
 // Common widget utilities
 pub mod common;
 
-// Widget lifecycle hooks
-pub mod lifecycle;
-
 // Widget implementations
 mod button;
 mod checkbox;
 mod checkbox_group;
 mod code_block;
+mod dialog;
 mod divider;
 mod label;
 mod list;
@@ -28,10 +26,10 @@ pub use button::{button, Button, ButtonVariant};
 pub use checkbox::{checkbox, Checkbox};
 pub use checkbox_group::{checkbox_group, CheckboxDirection, CheckboxGroup};
 pub use code_block::{code_block, CodeBlock, LineMarker};
+pub use dialog::{alert, confirm, dialog, Dialog, DialogMessage, DialogSize};
 pub use divider::{divider, Divider, DividerDirection, DividerTextPosition, DividerVariant};
 pub use into_widget::IntoWidget;
 pub use label::{label, Label};
-pub use lifecycle::{ProfilingData, WidgetLifecycle};
 pub use list::{list, List, ListItem, SelectionEvent, SelectionMode};
 pub use progress_bar::{progress_bar, LabelPosition, ProgressBar, ProgressMode};
 pub use radio::{radio_group, RadioDirection, RadioGroup};

@@ -40,20 +40,20 @@ impl<M> LayoutCache<M> {
         self.state_changed = true;
     }
 
-    /// Get cached layout, rebuilding if necessary
-    pub fn get_or_rebuild<F>(&mut self, builder: F) -> &mut Box<dyn Layout<M>>
-    where
-        F: FnOnce() -> Box<dyn Layout<M>>,
-    {
-        if self.state_changed || self.cached_layout.is_none() {
-            self.cached_layout = Some(builder());
-            self.state_changed = false;
-        }
+    // Get cached layout, rebuilding if necessary
+    // pub fn get_or_rebuild<F>(&mut self, builder: F) -> &mut Box<dyn Layout<M>>
+    // where
+    //     F: FnOnce() -> Box<dyn Layout<M>>,
+    // {
+    //     if self.state_changed || self.cached_layout.is_none() {
+    //         self.cached_layout = Some(builder());
+    //         self.state_changed = false;
+    //     }
 
-        self.cached_layout
-            .as_mut()
-            .expect("Layout should be cached after rebuild")
-    }
+    //     self.cached_layout
+    //         .as_mut()
+    //         .expect("Layout should be cached after rebuild")
+    // }
 
     /// Get cached layout without rebuilding (returns None if not cached)
     pub fn get(&self) -> Option<&Box<dyn Layout<M>>> {
@@ -65,10 +65,10 @@ impl<M> LayoutCache<M> {
         self.cached_layout.as_mut()
     }
 
-    /// Check if cache is valid
-    pub fn is_valid(&self) -> bool {
-        self.cached_layout.is_some() && !self.state_changed
-    }
+    // Check if cache is valid
+    // pub fn is_valid(&self) -> bool {
+    //     self.cached_layout.is_some() && !self.state_changed
+    // }
 
     /// Check if state has changed
     pub fn needs_rebuild(&self) -> bool {

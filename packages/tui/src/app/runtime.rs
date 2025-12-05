@@ -151,7 +151,8 @@ impl<State, M: Clone + std::fmt::Debug + Send + Sync + 'static> App<State, M> {
             .enable_raw_mode()
             .clear(false)
             .append_newline(false)
-            .enable_hide_cursor();
+            .enable_hide_cursor()
+            .disable_exit_code(); // App handles its own exit logic through EventRouter
 
         if inline_mode {
             builder

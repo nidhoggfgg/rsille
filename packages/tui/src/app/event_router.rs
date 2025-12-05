@@ -41,6 +41,12 @@ where
 
     /// Route a single event
     ///
+    /// Event handling order (with bubbling support):
+    /// 1. Route to widgets first - they can consume events to prevent bubbling
+    /// 2. If widget consumed the event, stop here (no bubbling)
+    /// 3. If widget ignored the event, handle Tab/Shift+Tab for focus navigation
+    /// 4. If still not handled, check global key handlers
+    ///
     /// Returns (should_continue, messages, needs_redraw, focus_changed)
     pub fn route_event(
         &self,
@@ -48,7 +54,22 @@ where
         layout: &mut Box<dyn Layout<M>>,
         focus_manager: &mut FocusManager,
     ) -> RouteResult<M> {
-        // Intercept Tab/Shift+Tab for focus navigation
+        // STEP 1: Route event to widgets first - they have priority
+        let focus_id = focus_manager.focus_id();
+        let registry = &focus_manager.registry;
+        let (result, mut messages) = layout.handle_event_with_focus(event, focus_id, registry);
+
+        // If widget consumed the event, stop here (event was handled, no bubbling)
+        if result.is_consumed() {
+            let needs_redraw = !messages.is_empty();
+            return RouteResult {
+                messages,
+                needs_redraw,
+                focus_changed: false,
+            };
+        }
+
+        // STEP 2: Widget ignored the event, now handle Tab/Shift+Tab for focus navigation
         if let Event::Key(key_event) = event {
             match key_event.code {
                 KeyCode::Tab if key_event.modifiers.contains(KeyModifiers::SHIFT) => {
@@ -72,22 +93,19 @@ where
                 _ => {}
             }
 
-            // Check global key handlers before routing to widgets
+            // STEP 3: Check global key handlers (app-level shortcuts)
             if let Some(handler) = self.global_key_handlers.get(&key_event.code) {
                 let message = handler();
+                messages.push(message);
                 return RouteResult {
-                    messages: vec![message],
+                    messages,
                     needs_redraw: true,
                     focus_changed: false,
                 };
             }
         }
 
-        // Route event to widgets with focus information
-        let focus_id = focus_manager.focus_id();
-        let registry = &focus_manager.registry;
-        let (_result, messages) = layout.handle_event_with_focus(event, focus_id, registry);
-
+        // Event was not handled by anyone
         let needs_redraw = !messages.is_empty();
 
         RouteResult {

@@ -77,7 +77,7 @@ impl Drop for TerminalGuard {
 pub struct EventLoop<T> {
     render: Render<Stdout, T>,
     raw_mode: bool,
-    exit_code: KeyEvent,
+    exit_code: Option<KeyEvent>,
     max_event_per_frame: usize,
     frame_limit: Option<u16>,
     alt_screen: bool,
@@ -118,7 +118,12 @@ where
     }
 
     pub fn exit_code(&mut self, exit_code: KeyEvent) -> &mut Self {
-        self.exit_code = exit_code;
+        self.exit_code = Some(exit_code);
+        self
+    }
+
+    pub fn disable_exit_code(&mut self) -> &mut Self {
+        self.exit_code = None;
         self
     }
 
@@ -321,7 +326,7 @@ fn event_thread(
     mut render_rx: mpsc::Receiver<()>,
     event_tx: mpsc::Sender<Vec<Event>>,
     stop_tx: std::sync::mpsc::Sender<()>,
-    exit_code: KeyEvent,
+    exit_code: Option<KeyEvent>,
     max_event_per_frame: usize,
 ) {
     let rt = match tokio::runtime::Builder::new_current_thread()
@@ -366,11 +371,14 @@ fn event_thread(
                 maybe_event = event => {
                     match maybe_event {
                         Some(Ok(event)) => {
-                            if let Event::Key(key_event) = event {
-                                if key_event == exit_code {
-                                    // User requested exit
-                                    let _ = stop_tx.send(());
-                                    break;
+                            // Only check exit code if it's enabled
+                            if let Some(exit_key) = exit_code {
+                                if let Event::Key(key_event) = event {
+                                    if key_event == exit_key {
+                                        // User requested exit
+                                        let _ = stop_tx.send(());
+                                        break;
+                                    }
                                 }
                             }
                             if events.len() < max_event_per_frame {

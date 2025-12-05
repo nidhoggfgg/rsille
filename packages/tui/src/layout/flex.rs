@@ -568,10 +568,8 @@ impl<M: Clone> Widget<M> for Flex<M> {
             // If child is focusable, add to chain with stable ID
             if child.focusable() {
                 let widget_key = child.widget_key();
-                let widget_id = crate::widget_id::WidgetId::from_path_and_key(
-                    current_path,
-                    widget_key,
-                );
+                let widget_id =
+                    crate::widget_id::WidgetId::from_path_and_key(current_path, widget_key);
                 chain.push(widget_id);
                 registry.register(widget_id, SmallVec::from_slice(current_path));
             }
@@ -646,10 +644,14 @@ pub fn row<M>() -> Flex<M> {
 
 // Implement Layout trait for Flex
 impl<M: Clone> Layout<M> for Flex<M> {
-    fn update_focus_states(&mut self, focus_id: Option<crate::widget_id::WidgetId>, registry: &crate::focus::WidgetRegistry) {
+    fn update_focus_states(
+        &mut self,
+        focus_id: Option<crate::widget_id::WidgetId>,
+        _registry: &crate::focus::WidgetRegistry,
+    ) {
         // We need to rebuild child paths to check focus
         // But we can get the parent path from the first child in registry if available
-        let mut base_path = Vec::new();
+        let base_path = Vec::new();
 
         for (idx, child) in self.children.iter_mut().enumerate() {
             let mut child_path = base_path.clone();
@@ -657,10 +659,7 @@ impl<M: Clone> Layout<M> for Flex<M> {
 
             // Build child ID to check if it's focused
             let widget_key = child.widget_key();
-            let child_id = crate::widget_id::WidgetId::from_path_and_key(
-                &child_path,
-                widget_key,
-            );
+            let child_id = crate::widget_id::WidgetId::from_path_and_key(&child_path, widget_key);
 
             // Check if this child is focused by comparing IDs directly (O(1))
             let is_focused = focus_id.as_ref() == Some(&child_id);
