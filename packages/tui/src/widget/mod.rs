@@ -20,6 +20,7 @@ mod select;
 mod spacer;
 mod table;
 mod text_input;
+mod textarea;
 mod wrapper;
 
 pub use button::{button, Button, ButtonVariant};
@@ -37,6 +38,7 @@ pub use select::{select, Select, SelectEvent, SelectItem};
 pub use spacer::{spacer, Spacer};
 pub use table::{table, Column, ColumnWidth, Table, TableSelectionEvent, TableVariant};
 pub use text_input::{text_input, TextInput, TextInputVariant};
+pub use textarea::{textarea, Selection, Textarea, TextareaVariant};
 pub use wrapper::{enhanced, Enhanced};
 
 use crate::event::{Event, EventResult};
