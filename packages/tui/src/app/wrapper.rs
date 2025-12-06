@@ -7,8 +7,8 @@ use crate::{
 };
 
 use super::{
-    event_router::EventRouter, hover_processor::HoverEventProcessor,
-    layout_cache::LayoutCache, runtime::App,
+    event_router::EventRouter, hover_processor::HoverEventProcessor, layout_cache::LayoutCache,
+    runtime::App,
 };
 
 /// Wrapper to adapt App to DrawUpdate trait for use with event_loop

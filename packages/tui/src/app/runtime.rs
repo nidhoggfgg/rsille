@@ -1,6 +1,6 @@
-use crate::event::{KeyCode, KeyEvent, KeyModifiers};
+use crate::event::{KeyCode, KeyEvent};
 use crate::style::{Theme, ThemeManager};
-use crate::{layout::Layout, WidgetResult, WidgetError};
+use crate::{layout::Layout, WidgetError, WidgetResult};
 use std::collections::HashMap;
 use std::sync::Arc;
 

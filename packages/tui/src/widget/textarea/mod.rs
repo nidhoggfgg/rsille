@@ -532,7 +532,6 @@ impl<M> Textarea<M> {
             Vec::new()
         }
     }
-
 }
 
 impl<M> Default for Textarea<M> {

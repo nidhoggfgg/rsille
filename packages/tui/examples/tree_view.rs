@@ -26,7 +26,6 @@ use tui::prelude::*;
 #[derive(Clone, Debug)]
 struct FileNode {
     name: String,
-    path: String,
     is_dir: bool,
     children: Vec<FileNode>,
 }
@@ -35,7 +34,6 @@ impl FileNode {
     fn dir(name: &str, children: Vec<FileNode>) -> Self {
         Self {
             name: name.to_string(),
-            path: format!("/{}", name),
             is_dir: true,
             children,
         }
@@ -44,7 +42,6 @@ impl FileNode {
     fn file(name: &str) -> Self {
         Self {
             name: name.to_string(),
-            path: format!("/{}", name),
             is_dir: false,
             children: Vec::new(),
         }
@@ -121,21 +118,33 @@ fn update(state: &mut State, msg: Message) {
             state.json_selected = event.selected_index;
         }
         Message::FileExpanded(event) => {
-            let action = if event.expanded { "Expanded" } else { "Collapsed" };
+            let action = if event.expanded {
+                "Expanded"
+            } else {
+                "Collapsed"
+            };
             state.selected_info = format!("{}: {}", action, event.node.label());
             // Persist state
             state.file_expanded = event.expanded_paths;
             state.file_selected = event.selected_index;
         }
         Message::AnimalExpanded(event) => {
-            let action = if event.expanded { "Expanded" } else { "Collapsed" };
+            let action = if event.expanded {
+                "Expanded"
+            } else {
+                "Collapsed"
+            };
             state.selected_info = format!("{}: {}", action, event.node.label());
             // Persist state
             state.animal_expanded = event.expanded_paths;
             state.animal_selected = event.selected_index;
         }
         Message::JsonExpanded(event) => {
-            let action = if event.expanded { "Expanded" } else { "Collapsed" };
+            let action = if event.expanded {
+                "Expanded"
+            } else {
+                "Collapsed"
+            };
             state.selected_info = format!("{}: {}", action, event.node.label());
             // Persist state
             state.json_expanded = event.expanded_paths;

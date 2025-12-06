@@ -39,10 +39,12 @@ pub use radio::{radio_group, RadioDirection, RadioGroup};
 pub use select::{select, Select, SelectEvent, SelectItem};
 pub use spacer::{spacer, Spacer};
 pub use table::{table, Column, ColumnWidth, Table, TableSelectionEvent, TableVariant};
-pub use tabs::{tabs, TabBadge, TabChangeEvent, TabItem, TabOrientation, Tabs, TabVariant};
+pub use tabs::{tabs, TabBadge, TabChangeEvent, TabItem, TabOrientation, TabVariant, Tabs};
 pub use text_input::{text_input, TextInput, TextInputVariant};
 pub use textarea::{textarea, Selection, Textarea, TextareaVariant};
-pub use tree::{tree_view, SimpleTreeNode, TreeExpandEvent, TreeNode, TreeSelectionEvent, TreeView};
+pub use tree::{
+    tree_view, SimpleTreeNode, TreeExpandEvent, TreeNode, TreeSelectionEvent, TreeView,
+};
 pub use wrapper::{enhanced, Enhanced};
 
 use crate::event::{Event, EventResult};

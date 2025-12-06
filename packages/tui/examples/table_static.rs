@@ -45,8 +45,7 @@ fn main() -> WidgetResult<()> {
     ];
 
     let app = App::new(());
-    app.on_key(KeyCode::Char('q'), || ())
-        .run_inline(
+    app.on_key(KeyCode::Char('q'), || ()).run_inline(
         |_state, _msg| {},
         move |_state| {
             col()

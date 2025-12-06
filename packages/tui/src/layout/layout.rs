@@ -1,10 +1,10 @@
 //! Layout trait for root-level widgets
 
 use crate::event::{Event, EventResult};
-use crate::widget_id::WidgetId;
 use crate::focus::WidgetRegistry;
 use crate::layout::Constraints;
 use crate::widget::Widget;
+use crate::widget_id::WidgetId;
 
 /// Layout trait for widgets that can be used as the root of a UI tree
 ///
