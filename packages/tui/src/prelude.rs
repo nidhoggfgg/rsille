@@ -182,7 +182,7 @@
 //! You can mix both styles in the same project, or gradually migrate to the
 //! `ui!` macro as you prefer.
 
-pub use crate::app::App;
+pub use crate::app::{App, QuitBehavior};
 pub use crate::error::{WidgetError, WidgetResult};
 pub use crate::event::{
     Event, EventResult, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,

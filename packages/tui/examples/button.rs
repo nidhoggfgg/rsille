@@ -12,7 +12,7 @@
 //! - Shift+Tab: Focus previous button
 //! - Enter/Space: Activate focused button
 //! - Mouse Click: Activate button
-//! - Esc: Quit
+//! - Esc: Quit (default quit key)
 //!
 //! Run with: cargo run --example button
 
@@ -31,7 +31,6 @@ struct State {
 #[derive(Clone, Debug)]
 enum Message {
     ButtonClicked(String),
-    Quit,
 }
 
 /// Update function - handles messages
@@ -40,9 +39,6 @@ fn update(state: &mut State, msg: Message) {
         Message::ButtonClicked(button_name) => {
             state.last_clicked = Some(button_name);
             state.click_count += 1;
-        }
-        Message::Quit => {
-            std::process::exit(0);
         }
     }
 }
@@ -159,7 +155,7 @@ fn main() -> WidgetResult<()> {
         last_clicked: None,
         click_count: 0,
     });
-    app.on_key(KeyCode::Char('q'), || Message::Quit)
-        .run_inline(update, view)?;
+    // No need to manually handle quit - Esc works by default
+    app.run_inline(update, view)?;
     Ok(())
 }

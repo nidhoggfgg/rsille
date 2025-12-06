@@ -37,8 +37,8 @@ where
     M: Clone + std::fmt::Debug + 'static,
 {
     pub fn new(app: App<State, M>, update_fn: F, view_fn: V) -> Self {
-        // Initialize event router with global key handlers from app
-        let mut event_router = EventRouter::new();
+        // Initialize event router with global key handlers and quit behavior from app
+        let mut event_router = EventRouter::with_quit_behavior(app.quit_behavior.clone());
         for (key, handler) in &app.global_key_handlers {
             event_router.add_global_handler(*key, {
                 let handler = handler.clone();
@@ -193,6 +193,11 @@ where
             let route_result =
                 self.event_router
                     .route_event(event, layout, &mut self.focus_manager);
+
+            // Check if application should quit
+            if route_result.should_quit {
+                std::process::exit(0);
+            }
 
             // Store messages for processing in update()
             self.messages.extend(route_result.messages);

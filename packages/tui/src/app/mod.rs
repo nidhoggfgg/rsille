@@ -6,4 +6,4 @@ mod layout_cache;
 mod runtime;
 mod wrapper;
 
-pub use runtime::App;
+pub use runtime::{App, QuitBehavior};

@@ -1,4 +1,4 @@
-use crate::event::KeyCode;
+use crate::event::{KeyCode, KeyEvent, KeyModifiers};
 use crate::style::{Theme, ThemeManager};
 use crate::{layout::Layout, WidgetResult, WidgetError};
 use std::collections::HashMap;
@@ -6,10 +6,30 @@ use std::sync::Arc;
 
 pub type EventHandler<M> = Arc<dyn Fn() -> M + Send + Sync>;
 
+/// Quit key configuration for the application
+#[derive(Debug, Clone)]
+pub enum QuitBehavior {
+    /// Use default quit key (Esc)
+    Default,
+    /// Use custom quit key (simple key without modifiers)
+    CustomKey(KeyCode),
+    /// Use custom key event (with modifiers like Ctrl+C)
+    CustomKeyEvent(KeyEvent),
+    /// Disable built-in quit handling (user must handle quit themselves)
+    Disabled,
+}
+
+impl Default for QuitBehavior {
+    fn default() -> Self {
+        Self::Default
+    }
+}
+
 /// Application runtime for managing TUI lifecycle
 pub struct App<State, M = ()> {
     pub(super) state: State,
     pub(super) global_key_handlers: HashMap<KeyCode, EventHandler<M>>,
+    pub(super) quit_behavior: QuitBehavior,
 }
 
 // Manual Debug implementation because EventHandler contains Fn
@@ -18,6 +38,7 @@ impl<State: std::fmt::Debug, M> std::fmt::Debug for App<State, M> {
         f.debug_struct("App")
             .field("state", &self.state)
             .field("global_key_handlers", &self.global_key_handlers.keys())
+            .field("quit_behavior", &self.quit_behavior)
             .finish()
     }
 }
@@ -42,6 +63,7 @@ impl<State, M: Clone + std::fmt::Debug + Send + Sync + 'static> App<State, M> {
         Self {
             state,
             global_key_handlers: HashMap::new(),
+            quit_behavior: QuitBehavior::default(),
         }
     }
 
@@ -80,6 +102,71 @@ impl<State, M: Clone + std::fmt::Debug + Send + Sync + 'static> App<State, M> {
     /// ```
     pub fn with_theme(self, theme: Theme) -> Self {
         ThemeManager::global().set_theme(theme);
+        self
+    }
+
+    /// Configure the quit key behavior
+    ///
+    /// By default, the application uses `Esc` key to quit.
+    /// You can customize the quit key, or disable it entirely to handle quit logic yourself.
+    ///
+    /// # Example
+    /// ```no_run
+    /// use tui::prelude::*;
+    /// use tui::event::KeyCode;
+    ///
+    /// // Use 'q' key to quit
+    /// let app = App::new(state)
+    ///     .with_quit_key(KeyCode::Char('q'));
+    ///
+    /// // Disable built-in quit (handle it yourself via on_key)
+    /// let app = App::new(state)
+    ///     .disable_quit_key()
+    ///     .on_key(KeyCode::Char('q'), || Message::Quit);
+    /// ```
+    pub fn with_quit_key(mut self, key: KeyCode) -> Self {
+        self.quit_behavior = QuitBehavior::CustomKey(key);
+        self
+    }
+
+    /// Configure quit key with modifiers (e.g., Ctrl+C)
+    ///
+    /// Use this method to set a quit key that requires modifier keys like Ctrl, Alt, or Shift.
+    ///
+    /// # Example
+    /// ```no_run
+    /// use tui::prelude::*;
+    /// use tui::event::{KeyCode, KeyEvent, KeyModifiers};
+    ///
+    /// // Use Ctrl+C to quit
+    /// let app = App::new(state)
+    ///     .with_quit_key_event(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+    ///
+    /// // Use Ctrl+Q to quit
+    /// let app = App::new(state)
+    ///     .with_quit_key_event(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::CONTROL));
+    /// ```
+    pub fn with_quit_key_event(mut self, key_event: KeyEvent) -> Self {
+        self.quit_behavior = QuitBehavior::CustomKeyEvent(key_event);
+        self
+    }
+
+    /// Disable built-in quit key handling
+    ///
+    /// When disabled, you must handle application exit yourself through
+    /// your update function (e.g., by calling `std::process::exit(0)`).
+    ///
+    /// # Example
+    /// ```no_run
+    /// use tui::prelude::*;
+    /// use tui::event::KeyCode;
+    ///
+    /// let app = App::new(state)
+    ///     .disable_quit_key()
+    ///     .on_key(KeyCode::Char('q'), || Message::Quit);
+    /// ```
+    pub fn disable_quit_key(mut self) -> Self {
+        self.quit_behavior = QuitBehavior::Disabled;
         self
     }
 
