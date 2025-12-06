@@ -3,6 +3,9 @@
 //! The simplest possible TUI application.
 //! Demonstrates minimal setup with a single label.
 //!
+//! Controls:
+//! - Esc: Quit (default quit key)
+//!
 //! Run with: cargo run --example hello
 
 use tui::prelude::*;
@@ -30,6 +33,7 @@ fn main() -> WidgetResult<()> {
     let app = App::new(State {
         greeting: "👋 Hello, World!".to_string(),
     });
+    // The app now has a default quit key (Esc) built-in
     app.run_inline(update, view)?;
     Ok(())
 }
