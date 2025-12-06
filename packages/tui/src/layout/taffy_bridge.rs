@@ -75,9 +75,7 @@ impl TaffyBridge {
             ..Default::default()
         };
 
-        let container = self
-            .tree
-            .new_with_children(container_style, &nodes)?;
+        let container = self.tree.new_with_children(container_style, &nodes)?;
 
         // Compute layout
         let available_size = Size {
@@ -162,9 +160,7 @@ impl TaffyBridge {
             ..Default::default()
         };
 
-        let container = self
-            .tree
-            .new_with_children(container_style, &nodes)?;
+        let container = self.tree.new_with_children(container_style, &nodes)?;
 
         // Compute layout
         let available_size = Size {

@@ -286,8 +286,8 @@ impl<M> ProgressBar<M> {
             bar.push(ch);
         }
 
-        let theme_style = ThemeManager::global()
-            .with_theme(|theme| Style::default().fg(theme.colors.primary));
+        let theme_style =
+            ThemeManager::global().with_theme(|theme| Style::default().fg(theme.colors.primary));
         let final_style = self.style.merge(theme_style);
         let render_style = final_style.to_render_style();
 
@@ -354,7 +354,9 @@ impl<M: Send + Sync> Widget<M> for ProgressBar<M> {
 
         // Get theme colors
         let (filled_style, empty_style) = ThemeManager::global().with_theme(|theme| {
-            let filled = Style::default().fg(theme.colors.primary).bg(theme.colors.primary);
+            let filled = Style::default()
+                .fg(theme.colors.primary)
+                .bg(theme.colors.primary);
             let empty = Style::default().fg(theme.colors.border);
             (filled, empty)
         });

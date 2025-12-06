@@ -264,9 +264,7 @@ impl HoverManager {
         // For small widget counts (< 20), linear scan is faster due to cache locality
         const SPATIAL_INDEX_THRESHOLD: usize = 20;
 
-        if self.spatial_grid.is_none()
-            && self.widget_areas.capacity() > SPATIAL_INDEX_THRESHOLD
-        {
+        if self.spatial_grid.is_none() && self.widget_areas.capacity() > SPATIAL_INDEX_THRESHOLD {
             // Initialize spatial grid with 16x16 cell size
             let (width, height) = self.terminal_size;
             self.spatial_grid = Some(SpatialGrid::new(width, height, 16));
@@ -446,10 +444,7 @@ impl HoverManagerHandle {
     /// Should be called on resize events to maintain optimal spatial indexing.
     #[inline]
     pub fn set_terminal_size(&self, width: u16, height: u16) {
-        self.inner
-            .write()
-            .unwrap()
-            .set_terminal_size(width, height);
+        self.inner.write().unwrap().set_terminal_size(width, height);
     }
 
     /// Begin a new render frame

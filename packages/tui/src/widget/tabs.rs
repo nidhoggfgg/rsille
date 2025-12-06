@@ -526,24 +526,16 @@ impl<M: Send + Sync> Widget<M> for Tabs<M> {
                 let tab_bar_height = self.tab_bar_height();
 
                 // Render tab bar at the top
-                if let Ok(mut tab_chunk) = chunk.shrink(
-                    0,
-                    area.height().saturating_sub(tab_bar_height),
-                    0,
-                    0,
-                ) {
+                if let Ok(mut tab_chunk) =
+                    chunk.shrink(0, area.height().saturating_sub(tab_bar_height), 0, 0)
+                {
                     self.render_horizontal_tabs(&mut tab_chunk);
                 }
 
                 // Render active tab content below
                 if area.height() > tab_bar_height {
                     if let Some(active_tab) = self.tabs.get(self.active_index) {
-                        if let Ok(mut content_chunk) = chunk.shrink(
-                            tab_bar_height,
-                            0,
-                            0,
-                            0,
-                        ) {
+                        if let Ok(mut content_chunk) = chunk.shrink(tab_bar_height, 0, 0, 0) {
                             active_tab.content.render(&mut content_chunk);
                         }
                     }
@@ -553,24 +545,16 @@ impl<M: Send + Sync> Widget<M> for Tabs<M> {
                 let tab_bar_width = self.tab_bar_width();
 
                 // Render tab bar on the left
-                if let Ok(mut tab_chunk) = chunk.shrink(
-                    0,
-                    0,
-                    0,
-                    area.width().saturating_sub(tab_bar_width),
-                ) {
+                if let Ok(mut tab_chunk) =
+                    chunk.shrink(0, 0, 0, area.width().saturating_sub(tab_bar_width))
+                {
                     self.render_vertical_tabs(&mut tab_chunk, area.height());
                 }
 
                 // Render active tab content on the right
                 if area.width() > tab_bar_width {
                     if let Some(active_tab) = self.tabs.get(self.active_index) {
-                        if let Ok(mut content_chunk) = chunk.shrink(
-                            0,
-                            0,
-                            tab_bar_width,
-                            0,
-                        ) {
+                        if let Ok(mut content_chunk) = chunk.shrink(0, 0, tab_bar_width, 0) {
                             active_tab.content.render(&mut content_chunk);
                         }
                     }
@@ -640,17 +624,20 @@ impl<M: Send + Sync> Widget<M> for Tabs<M> {
                 let tab_bar_height = self.tab_bar_height();
 
                 // Calculate minimum width: max of tab bar width and content width
-                let tab_bar_width = self.tabs.iter()
+                let tab_bar_width = self
+                    .tabs
+                    .iter()
                     .map(|t| t.display_width() + 4) // label + padding
                     .sum::<u16>()
                     + self.tabs.len().saturating_sub(1) as u16; // gaps between tabs
 
-                let (content_min_width, content_min_height) = if let Some(active_tab) = self.tabs.get(self.active_index) {
-                    let c = active_tab.content.constraints();
-                    (c.min_width, c.min_height)
-                } else {
-                    (10, 1)
-                };
+                let (content_min_width, content_min_height) =
+                    if let Some(active_tab) = self.tabs.get(self.active_index) {
+                        let c = active_tab.content.constraints();
+                        (c.min_width, c.min_height)
+                    } else {
+                        (10, 1)
+                    };
 
                 Constraints {
                     min_width: tab_bar_width.max(content_min_width),
@@ -667,12 +654,13 @@ impl<M: Send + Sync> Widget<M> for Tabs<M> {
                 // Calculate minimum height: max of tab bar height and content height
                 let tab_bar_height = self.tabs.len().max(3) as u16;
 
-                let (content_min_width, content_min_height) = if let Some(active_tab) = self.tabs.get(self.active_index) {
-                    let c = active_tab.content.constraints();
-                    (c.min_width, c.min_height)
-                } else {
-                    (10, 1)
-                };
+                let (content_min_width, content_min_height) =
+                    if let Some(active_tab) = self.tabs.get(self.active_index) {
+                        let c = active_tab.content.constraints();
+                        (c.min_width, c.min_height)
+                    } else {
+                        (10, 1)
+                    };
 
                 Constraints {
                     min_width: tab_bar_width + content_min_width,

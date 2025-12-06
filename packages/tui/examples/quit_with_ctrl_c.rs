@@ -24,20 +24,10 @@ fn view(state: &State) -> impl Layout<()> {
     col()
         .padding(Padding::new(3, 3, 2, 2))
         .gap(1)
-        .child(
-            label("Ctrl+C Quit Example")
-                .fg(Color::Cyan)
-                .bold(),
-        )
+        .child(label("Ctrl+C Quit Example").fg(Color::Cyan).bold())
         .child(spacer().height(1))
-        .child(
-            label("This app uses Ctrl+C to quit instead of Esc")
-                .fg(Color::Green),
-        )
-        .child(
-            label("This is useful when Esc is needed for other purposes")
-                .fg(Color::Indexed(8)),
-        )
+        .child(label("This app uses Ctrl+C to quit instead of Esc").fg(Color::Green))
+        .child(label("This is useful when Esc is needed for other purposes").fg(Color::Indexed(8)))
         .child(spacer().height(1))
         .child(label(format!("Counter: {}", state.counter)).fg(Color::Yellow))
         .child(spacer().height(1))

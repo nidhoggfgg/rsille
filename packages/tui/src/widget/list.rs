@@ -218,7 +218,8 @@ impl<T: Clone, M> List<T, M> {
 
         // Update focused_index if this is the first non-disabled item
         if self.navigation.focused_index().is_none() {
-            self.navigation.set_focused_index(Some(self.items.len() - 1));
+            self.navigation
+                .set_focused_index(Some(self.items.len() - 1));
         }
 
         self
@@ -257,7 +258,8 @@ impl<T: Clone, M> List<T, M> {
 
         // Update focused_index if this is the first non-disabled item
         if self.navigation.focused_index().is_none() {
-            self.navigation.set_focused_index(Some(self.items.len() - 1));
+            self.navigation
+                .set_focused_index(Some(self.items.len() - 1));
         }
 
         self
@@ -284,7 +286,8 @@ impl<T: Clone, M> List<T, M> {
 
             // Update focused_index if this is the first non-disabled item
             if self.navigation.focused_index().is_none() && !is_disabled {
-                self.navigation.set_focused_index(Some(self.items.len() - 1));
+                self.navigation
+                    .set_focused_index(Some(self.items.len() - 1));
             }
         }
         self
@@ -770,27 +773,33 @@ impl<T: Clone + Send + Sync, M: Send + Sync> Widget<M> for List<T, M> {
         match event {
             Event::Key(key_event) => match key_event.code {
                 KeyCode::Down => {
-                    self.navigation.focus_next(|idx| self.items[idx].disabled, self.items.len());
+                    self.navigation
+                        .focus_next(|idx| self.items[idx].disabled, self.items.len());
                     EventResult::Consumed(vec![])
                 }
                 KeyCode::Up => {
-                    self.navigation.focus_previous(|idx| self.items[idx].disabled, self.items.len());
+                    self.navigation
+                        .focus_previous(|idx| self.items[idx].disabled, self.items.len());
                     EventResult::Consumed(vec![])
                 }
                 KeyCode::Home => {
-                    self.navigation.focus_first(|idx| self.items[idx].disabled, self.items.len());
+                    self.navigation
+                        .focus_first(|idx| self.items[idx].disabled, self.items.len());
                     EventResult::Consumed(vec![])
                 }
                 KeyCode::End => {
-                    self.navigation.focus_last(|idx| self.items[idx].disabled, self.items.len());
+                    self.navigation
+                        .focus_last(|idx| self.items[idx].disabled, self.items.len());
                     EventResult::Consumed(vec![])
                 }
                 KeyCode::PageDown => {
-                    self.navigation.page_down(|idx| self.items[idx].disabled, self.items.len());
+                    self.navigation
+                        .page_down(|idx| self.items[idx].disabled, self.items.len());
                     EventResult::Consumed(vec![])
                 }
                 KeyCode::PageUp => {
-                    self.navigation.page_up(|idx| self.items[idx].disabled, self.items.len());
+                    self.navigation
+                        .page_up(|idx| self.items[idx].disabled, self.items.len());
                     EventResult::Consumed(vec![])
                 }
                 KeyCode::Enter | KeyCode::Char(' ') => {
@@ -807,11 +816,13 @@ impl<T: Clone + Send + Sync, M: Send + Sync> Widget<M> for List<T, M> {
                         EventResult::Consumed(messages)
                     }
                     MouseEventKind::ScrollDown => {
-                        self.navigation.focus_next(|idx| self.items[idx].disabled, self.items.len());
+                        self.navigation
+                            .focus_next(|idx| self.items[idx].disabled, self.items.len());
                         EventResult::Consumed(vec![])
                     }
                     MouseEventKind::ScrollUp => {
-                        self.navigation.focus_previous(|idx| self.items[idx].disabled, self.items.len());
+                        self.navigation
+                            .focus_previous(|idx| self.items[idx].disabled, self.items.len());
                         EventResult::Consumed(vec![])
                     }
                     _ => EventResult::Ignored,
@@ -843,7 +854,8 @@ impl<T: Clone + Send + Sync, M: Send + Sync> Widget<M> for List<T, M> {
         };
 
         // Scrollbar width - only reserve space if content exceeds viewport
-        let needs_scrollbar = self.show_scrollbar && content_height > self.navigation.viewport_size();
+        let needs_scrollbar =
+            self.show_scrollbar && content_height > self.navigation.viewport_size();
         let scrollbar_width = if needs_scrollbar { 2 } else { 0 };
 
         let total_width = max_label_width + indicator_width + scrollbar_width;
@@ -873,7 +885,8 @@ impl<T: Clone + Send + Sync, M: Send + Sync> Widget<M> for List<T, M> {
 
         // When gaining focus, ensure we have a focused item
         if focused && self.navigation.focused_index().is_none() && !self.items.is_empty() {
-            self.navigation.focus_first(|idx| self.items[idx].disabled, self.items.len());
+            self.navigation
+                .focus_first(|idx| self.items[idx].disabled, self.items.len());
         }
     }
 }
@@ -896,7 +909,8 @@ impl<T: Clone, M> List<T, M> {
             .max(1.0)
             .round() as usize;
 
-        let scroll_ratio = self.navigation.scroll_offset() as f64 / (total_items - viewport_size).max(1) as f64;
+        let scroll_ratio =
+            self.navigation.scroll_offset() as f64 / (total_items - viewport_size).max(1) as f64;
         let thumb_position =
             (scroll_ratio * (scrollbar_height - thumb_size) as f64).round() as usize;
 

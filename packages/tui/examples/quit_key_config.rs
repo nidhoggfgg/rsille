@@ -32,7 +32,7 @@ enum Message {
 }
 
 /// Update function for disabled mode
-fn update_with_quit(state: &mut State, msg: Message) {
+fn update_with_quit(_state: &mut State, msg: Message) {
     match msg {
         Message::Quit => {
             std::process::exit(0);
@@ -41,7 +41,7 @@ fn update_with_quit(state: &mut State, msg: Message) {
 }
 
 /// View function for disabled mode
-fn view_with_quit(state: &State) -> impl Layout<Message> {
+fn view_with_quit(_state: &State) -> impl Layout<Message> {
     col()
         .padding(Padding::new(3, 3, 2, 2))
         .gap(1)

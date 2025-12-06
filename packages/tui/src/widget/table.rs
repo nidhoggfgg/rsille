@@ -1148,7 +1148,8 @@ impl<T: Clone, M> Table<T, M> {
             .max(1.0)
             .round() as usize;
 
-        let scroll_ratio = self.navigation.scroll_offset() as f64 / (total_rows - viewport_size).max(1) as f64;
+        let scroll_ratio =
+            self.navigation.scroll_offset() as f64 / (total_rows - viewport_size).max(1) as f64;
         let thumb_position =
             (scroll_ratio * (scrollbar_height - thumb_size) as f64).round() as usize;
 

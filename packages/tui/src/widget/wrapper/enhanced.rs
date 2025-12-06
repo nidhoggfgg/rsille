@@ -39,8 +39,8 @@ use crate::{
     widget::Widget,
 };
 use render::area::Area;
-use std::sync::Mutex;
 use std::sync::Arc;
+use std::sync::Mutex;
 
 /// Internal state for tracking widget interactions
 #[derive(Debug, Clone, Copy, Default)]
@@ -478,10 +478,7 @@ where
                 .saturating_sub(padding.top + padding.bottom);
 
             if new_width > 0 && new_height > 0 {
-                content_area = Area::new(
-                    (new_x, new_y).into(),
-                    (new_width, new_height).into(),
-                );
+                content_area = Area::new((new_x, new_y).into(), (new_width, new_height).into());
             } else {
                 // Padding consumed all space
                 return;
@@ -504,10 +501,7 @@ where
             let new_height = content_area.height().saturating_sub(2);
 
             if new_width > 0 && new_height > 0 {
-                content_area = Area::new(
-                    (new_x, new_y).into(),
-                    (new_width, new_height).into(),
-                );
+                content_area = Area::new((new_x, new_y).into(), (new_width, new_height).into());
             } else {
                 // Border consumed all space
                 return;
@@ -636,7 +630,8 @@ where
     ) {
         // Layout has already checked focusable() and added us to chain if needed
         // Just delegate to inner in case it's a container with children
-        self.inner.build_focus_chain_recursive(current_path, chain, registry);
+        self.inner
+            .build_focus_chain_recursive(current_path, chain, registry);
     }
 
     fn update_focus_states_recursive(
@@ -657,36 +652,30 @@ impl<M, W> Enhanced<M, W> {
     /// Compute effective style based on current state
     fn compute_effective_style(&self, state: &EnhancedState) -> Style {
         if state.disabled {
-            self.disabled_style.unwrap_or_else(|| {
-                ThemeManager::global().with_theme(|t| t.styles.disabled)
-            })
+            self.disabled_style
+                .unwrap_or_else(|| ThemeManager::global().with_theme(|t| t.styles.disabled))
         } else if state.focused {
-            self.focus_style
-                .or(self.base_style)
-                .unwrap_or_else(|| {
-                    ThemeManager::global().with_theme(|t| t.styles.interactive_focused)
-                })
+            self.focus_style.or(self.base_style).unwrap_or_else(|| {
+                ThemeManager::global().with_theme(|t| t.styles.interactive_focused)
+            })
         } else if state.hovering {
             self.hover_style
                 .or(self.base_style)
                 .unwrap_or_else(|| ThemeManager::global().with_theme(|t| t.styles.hover))
         } else {
-            self.base_style.unwrap_or_else(|| {
-                ThemeManager::global().with_theme(|t| t.styles.interactive)
-            })
+            self.base_style
+                .unwrap_or_else(|| ThemeManager::global().with_theme(|t| t.styles.interactive))
         }
     }
 
     /// Compute border color based on current state
     fn compute_border_color(&self, state: &EnhancedState) -> Color {
         if state.focused {
-            self.focus_border_color.unwrap_or_else(|| {
-                ThemeManager::global().with_theme(|t| t.colors.focus_ring)
-            })
+            self.focus_border_color
+                .unwrap_or_else(|| ThemeManager::global().with_theme(|t| t.colors.focus_ring))
         } else {
-            self.border_color.unwrap_or_else(|| {
-                ThemeManager::global().with_theme(|t| t.colors.border)
-            })
+            self.border_color
+                .unwrap_or_else(|| ThemeManager::global().with_theme(|t| t.colors.border))
         }
     }
 
@@ -712,7 +701,6 @@ impl<M, W> Enhanced<M, W> {
         match mouse_event.kind {
             // Note: Mouse enter/leave is now handled by HoverManager
             // to work correctly across component tree rebuilds
-
             MouseEventKind::Down(MouseButton::Left) => {
                 if is_inside {
                     state.pressed = true;
