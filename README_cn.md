@@ -1,3 +1,5 @@
+**重要：目前在开发[v3版本](https://github.com/nidhoggfgg/rsille/tree/v3)**
+
 <div align="center">
 
 # Rsille 🎨
