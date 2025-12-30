@@ -353,6 +353,11 @@ where
     pub fn thing_mut(&mut self) -> &mut T {
         &mut self.thing
     }
+
+    /// Check if the render buffer has pending changes that need to be rendered
+    pub fn has_pending_changes(&self) -> bool {
+        self.buffer.has_pending_changes()
+    }
 }
 
 #[cfg(test)]

@@ -302,8 +302,11 @@ where
                     }
                 }
 
-                if let Err(e) = self.render.render() {
-                    error!("Error rendering: {}", e);
+                // Only render if there are pending changes
+                if !events.is_empty() || self.render.has_pending_changes() {
+                    if let Err(e) = self.render.render() {
+                        error!("Error rendering: {}", e);
+                    }
                 }
 
                 // frame limit
