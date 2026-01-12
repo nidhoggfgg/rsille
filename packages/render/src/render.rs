@@ -5,8 +5,6 @@ use crossterm::{
 };
 use log::debug;
 
-use crate::queue_with_log;
-
 use crate::{
     area::{Position, Size},
     buffer::Buffer,
@@ -59,7 +57,7 @@ where
         self.thing.draw(chunk)?;
 
         if self.clear {
-            queue_with_log!(self.out, Clear(ClearType::All))?;
+            crossterm::queue!(self.out, Clear(ClearType::All))?;
         }
 
         // Inline mode: use relative positioning with line-level differential rendering
@@ -70,7 +68,7 @@ where
         }
 
         if self.append_newline {
-            queue_with_log!(self.out, Print("\n"))?;
+            crossterm::queue!(self.out, Print("\n"))?;
         }
 
         // ensure the output is flushed to terminal
@@ -106,16 +104,16 @@ where
                 }
 
                 // Move cursor to this position (absolute positioning)
-                queue_with_log!(self.out, MoveTo(self.pos.x + x, self.pos.y + y))?;
+                crossterm::queue!(self.out, MoveTo(self.pos.x + x, self.pos.y + y))?;
 
                 // Reset color if we had color before but current cell doesn't
                 if has_color_cache && !cell.has_color() {
-                    queue_with_log!(self.out, ResetColor)?;
+                    crossterm::queue!(self.out, ResetColor)?;
                 }
 
                 // Reset attributes if we had attributes before but current cell doesn't
                 if has_attr_cache && !cell.has_attr() {
-                    queue_with_log!(self.out, SetAttribute(Attribute::Reset))?;
+                    crossterm::queue!(self.out, SetAttribute(Attribute::Reset))?;
                 }
 
                 cell.queue(&mut self.out)?;
@@ -147,18 +145,18 @@ where
 
                 // Only move cursor when starting a new line
                 if need_move {
-                    queue_with_log!(self.out, MoveTo(self.pos.x, self.pos.y + y))?;
+                    crossterm::queue!(self.out, MoveTo(self.pos.x, self.pos.y + y))?;
                     need_move = false;
                 }
 
                 // Reset color if we had color before but current cell doesn't
                 if has_color_cache && !cell.has_color() {
-                    queue_with_log!(self.out, ResetColor)?;
+                    crossterm::queue!(self.out, ResetColor)?;
                 }
 
                 // Reset attributes if we had attributes before but current cell doesn't
                 if has_attr_cache && !cell.has_attr() {
-                    queue_with_log!(self.out, SetAttribute(Attribute::Reset))?;
+                    crossterm::queue!(self.out, SetAttribute(Attribute::Reset))?;
                 }
 
                 cell.queue(&mut self.out)?;
@@ -184,10 +182,10 @@ where
         // because we skip MoveToNextLine for the last line to prevent scrolling.
         if self.buffer.previous().is_some() && self.previous_inline_height > 0 {
             // Move to line start first
-            queue_with_log!(self.out, Print("\r"))?;
+            crossterm::queue!(self.out, Print("\r"))?;
             // Then move up to first line (if not already there)
             if self.previous_inline_height > 1 {
-                queue_with_log!(
+                crossterm::queue!(
                     self.out,
                     MoveToPreviousLine(self.previous_inline_height - 1)
                 )?;
@@ -202,21 +200,21 @@ where
             let extra_lines = self.previous_inline_height - current_height;
             // Move down to line current_height
             if current_height > 0 {
-                queue_with_log!(self.out, MoveToNextLine(current_height))?;
+                crossterm::queue!(self.out, MoveToNextLine(current_height))?;
             }
             // Clear extra lines (be careful not to move past the last line)
             for i in 0..extra_lines {
-                queue_with_log!(self.out, Clear(ClearType::CurrentLine))?;
+                crossterm::queue!(self.out, Clear(ClearType::CurrentLine))?;
                 // Don't move to next line after clearing the last extra line
                 if i < extra_lines - 1 {
-                    queue_with_log!(self.out, MoveToNextLine(1))?;
+                    crossterm::queue!(self.out, MoveToNextLine(1))?;
                 }
             }
             // Move back to line 0
             let lines_to_move_back = current_height + extra_lines - 1;
             if lines_to_move_back > 0 {
-                queue_with_log!(self.out, Print("\r"))?;
-                queue_with_log!(self.out, MoveToPreviousLine(lines_to_move_back))?;
+                crossterm::queue!(self.out, Print("\r"))?;
+                crossterm::queue!(self.out, MoveToPreviousLine(lines_to_move_back))?;
             }
         }
 
@@ -235,7 +233,7 @@ where
                     // Line hasn't changed, just move to next line without re-rendering
                     // Skip MoveToNextLine for the last line to prevent terminal scrolling
                     if !is_last_line {
-                        queue_with_log!(self.out, MoveToNextLine(1))?;
+                        crossterm::queue!(self.out, MoveToNextLine(1))?;
                     }
                 }
                 crate::buffer::LineState::Changed {
@@ -247,12 +245,12 @@ where
                     for cell in cells {
                         // Reset color if we had color before but current cell doesn't
                         if has_color_cache && !cell.has_color() {
-                            queue_with_log!(self.out, ResetColor)?;
+                            crossterm::queue!(self.out, ResetColor)?;
                         }
 
                         // Reset attributes if we had attributes before but current cell doesn't
                         if has_attr_cache && !cell.has_attr() {
-                            queue_with_log!(self.out, SetAttribute(Attribute::Reset))?;
+                            crossterm::queue!(self.out, SetAttribute(Attribute::Reset))?;
                         }
 
                         cell.queue(&mut self.out)?;
@@ -264,7 +262,7 @@ where
                     if current_len < previous_len {
                         let trailing_spaces = previous_len - current_len;
                         for _ in 0..trailing_spaces {
-                            queue_with_log!(self.out, Print(' '))?;
+                            crossterm::queue!(self.out, Print(' '))?;
                         }
                     }
 
@@ -275,11 +273,11 @@ where
                         // in inline mode, "\n" could make the terminal scroll up
                         // i know this is wired, but the "\n" doesn't move cursor
                         // println!("position: {:?}", cursor::position().unwrap()); // --> position: (0, x)
-                        // queue_with_log!(stdout(), Print("\r\n")).unwrap();                // --> empty line
+                        // crossterm::queue!(stdout(), Print("\r\n")).unwrap();                // --> empty line
                         // println!("position: {:?}", cursor::position().unwrap()); // --> position: (0, x) <- this is not x+1!
-                        queue_with_log!(self.out, Print("\r\n"))?;
-                        queue_with_log!(self.out, MoveToPreviousLine(1))?;
-                        queue_with_log!(self.out, MoveToNextLine(1))?;
+                        crossterm::queue!(self.out, Print("\r\n"))?;
+                        crossterm::queue!(self.out, MoveToPreviousLine(1))?;
+                        crossterm::queue!(self.out, MoveToNextLine(1))?;
                     }
                 }
             }

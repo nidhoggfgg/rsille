@@ -4,8 +4,6 @@ use crossterm::style::{Attributes, Colors, Print, SetAttributes, SetColors};
 use log::trace;
 use unicode_width::UnicodeWidthChar;
 
-use crate::queue_with_log;
-
 /// 样式定义，包含颜色和文本属性
 #[derive(Debug, Clone, PartialEq, Eq, Default, Copy)]
 pub struct Style {
@@ -201,12 +199,12 @@ impl Stylized {
             }
 
             if let Some(colors) = self.style.colors {
-                queue_with_log!(buffer, SetColors(colors))?;
+                crossterm::queue!(buffer, SetColors(colors))?;
             }
             if let Some(attr) = self.style.attr {
-                queue_with_log!(buffer, SetAttributes(attr))?;
+                crossterm::queue!(buffer, SetAttributes(attr))?;
             }
-            queue_with_log!(buffer, Print(ch))?;
+            crossterm::queue!(buffer, Print(ch))?;
         }
         Ok(())
     }
