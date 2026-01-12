@@ -12,6 +12,17 @@ pub trait Update {
     fn on_events(&mut self, events: &[crossterm::event::Event]) -> Result<(), DrawErr>;
     fn update(&mut self) -> Result<bool, DrawErr>;
 
+    /// Check if the application should quit
+    ///
+    /// This allows the application to signal a clean shutdown without
+    /// calling std::process::exit(), which would bypass terminal cleanup.
+    ///
+    /// The event loop will gracefully stop after the current frame when
+    /// this returns true, allowing proper cleanup via Drop.
+    fn should_quit(&self) -> bool {
+        false
+    }
+
     /// Get required size for next render (optional)
     ///
     /// Returns None to keep current size, or Some(Size) to request a resize.

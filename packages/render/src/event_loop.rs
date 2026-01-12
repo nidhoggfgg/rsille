@@ -288,6 +288,15 @@ where
                     error!("Error updating render state: {}", e);
                 }
 
+                // Check if application wants to quit
+                if self.render.thing().should_quit() {
+                    info!(
+                        target: "render::event_loop",
+                        "Application requested quit"
+                    );
+                    break;
+                }
+
                 // Query required size BEFORE rendering
                 // This allows dynamic size adjustment based on current state
                 let current_size = self.render.size();

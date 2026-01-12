@@ -18,6 +18,7 @@ pub struct AppWrapper<State, F, V, M> {
     view_fn: V,
     messages: Vec<M>,
     needs_redraw: bool,
+    should_quit: bool,
 
     // Separated subsystems
     event_router: EventRouter<M>,
@@ -52,6 +53,7 @@ where
             view_fn,
             messages: Vec::new(),
             needs_redraw: true,
+            should_quit: false,
             event_router,
             layout_cache: LayoutCache::new(),
             focus_manager: FocusManager::new(),
@@ -194,9 +196,10 @@ where
                 self.event_router
                     .route_event(event, layout, &mut self.focus_manager);
 
-            // Check if application should quit
+            // Set quit flag instead of calling exit
+            // This allows proper cleanup through TerminalGuard's Drop
             if route_result.should_quit {
-                std::process::exit(0);
+                self.should_quit = true;
             }
 
             // Store messages for processing in update()
@@ -243,6 +246,10 @@ where
 
         // Always return true to ensure continuous rendering for animations
         Ok(true)
+    }
+
+    fn should_quit(&self) -> bool {
+        self.should_quit
     }
 
     fn required_size(&self, current_size: Size) -> Option<Size> {
