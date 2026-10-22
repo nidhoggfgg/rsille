@@ -3,16 +3,36 @@ name = "tui"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
+publish = false
+
+description = "Composable terminal application framework for rsille"
+repository = "https://github.com/nidhoggfgg/rsille.git"
+readme = "README.md"
+
+[lib]
+name = "tui"
+doctest = false
 
 [dependencies]
 render = { path = "../render" }
 rsille-canvas = { package = "canvas", path = "../canvas" }
 crossterm = { workspace = true }
 taffy = { workspace = true }
-syntect = { workspace = true }
-once_cell = { workspace = true }
+syntect = { workspace = true, optional = true }
+once_cell = { workspace = true, optional = true }
 rustc-hash = "2.0"
 smallvec = "1.13"
+
+[features]
+default = []
+syntax-highlighting = ["dep:syntect", "dep:once_cell"]
+
+[dev-dependencies]
+tokio = { workspace = true }
+
+[[example]]
+name = "workflow"
+path = "examples/basics/workflow.rs"
 
 [[example]]
 name = "hello"

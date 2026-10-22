@@ -1,12 +1,6 @@
-pub mod braille;
-pub mod utils;
+//! Internal workspace crate; the published API is `rsille::canvas`.
 
-pub use canvas::Canvas;
-pub use canvas::Paint;
-pub use canvas::PaintErr;
+extern crate render;
+extern crate self as canvas;
 
-pub mod color;
-
-mod bound;
-mod canvas;
-mod tile;
+include!("../../../src/canvas/api.rs");

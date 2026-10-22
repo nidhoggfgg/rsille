@@ -247,5 +247,8 @@ fn main() -> WidgetResult<()> {
             },
         ])
     })
-    .run_with_effects(update, view)
+    .update(update)
+    .view(view)
+    .run()
+    .map(|_| ())
 }

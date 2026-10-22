@@ -8,7 +8,11 @@ use tui::prelude::*;
 fn main() -> WidgetResult<()> {
     let state = ();
 
-    App::new(state).run(update, view)
+    App::new(state)
+        .update(|state, msg, _ctx| update(state, msg))
+        .view(view)
+        .run()
+        .map(|_| ())
 }
 
 fn update(_state: &mut (), _msg: ()) {}

@@ -13,7 +13,11 @@ fn main() -> WidgetResult<()> {
     App::new(State {
         density: "comfortable".to_owned(),
     })
-    .run_inline(|state, value| state.density = value, view)
+    .mode(Mode::Inline)
+    .update(|state, value, _ctx| state.density = value)
+    .view(view)
+    .run()
+    .map(|_| ())
 }
 
 fn view(state: &State) -> impl Widget<String> {

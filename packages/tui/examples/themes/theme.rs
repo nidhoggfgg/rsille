@@ -35,7 +35,11 @@ fn main() -> WidgetResult<()> {
         .on_key(KeyCode::Char('3'), || Msg::SetTheme(2))
         .on_key(KeyCode::Char('4'), || Msg::SetTheme(3))
         .on_key(KeyCode::Char('5'), || Msg::SetTheme(4))
-        .run_inline(update, view)
+        .mode(Mode::Inline)
+        .update(|state, msg, _ctx| update(state, msg))
+        .view(view)
+        .run()
+        .map(|_| ())
 }
 
 fn update(state: &mut State, msg: Msg) {

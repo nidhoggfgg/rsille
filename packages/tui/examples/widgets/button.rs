@@ -15,7 +15,12 @@ enum Msg {
 fn main() -> WidgetResult<()> {
     let state = 0i32;
 
-    App::new(state).run_inline(update, view)
+    App::new(state)
+        .mode(Mode::Inline)
+        .update(|state, msg, _ctx| update(state, msg))
+        .view(view)
+        .run()
+        .map(|_| ())
 }
 
 fn update(state: &mut i32, msg: Msg) {

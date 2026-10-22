@@ -14,7 +14,12 @@ const MARKDOWN: &str = r#"# Release Notes
 "#;
 
 fn main() -> WidgetResult<()> {
-    App::new(()).run_inline(|_, _| {}, view)
+    App::new(())
+        .mode(Mode::Inline)
+        .update(|_, _, _ctx| {})
+        .view(view)
+        .run()
+        .map(|_| ())
 }
 
 fn view(_: &()) -> impl Widget<()> {

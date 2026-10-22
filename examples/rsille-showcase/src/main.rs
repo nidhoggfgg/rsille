@@ -120,7 +120,10 @@ fn main() -> WidgetResult<()> {
     App::new(State::default())
         .on_frame(Msg::Frame)
         .on_tick(Duration::from_millis(900), || Msg::Tick)
-        .run_inline(update, view)
+        .mode(Mode::Inline)
+        .update(|state, msg, _ctx| update(state, msg))
+        .view(view)
+        .run().map(|_| ())
 }
 
 fn update(state: &mut State, msg: Msg) {

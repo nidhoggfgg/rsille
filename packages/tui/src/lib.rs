@@ -1,24 +1,7 @@
-pub mod animation;
-pub mod app;
-pub mod effect;
-pub mod error;
-pub mod event;
-pub mod focus;
-pub mod layout;
-pub(crate) mod offscreen;
-pub mod shell;
-pub mod state;
-pub mod style;
-pub mod text;
-pub(crate) mod visual_engine;
-pub mod widget;
-pub mod widgets;
+//! Internal workspace crate; the published API is `rsille::tui`.
 
-pub mod prelude;
-pub mod runtime;
+extern crate render;
+extern crate rsille_canvas as canvas;
+extern crate self as tui;
 
-pub use error::{WidgetError, WidgetResult};
-pub use render::InlineMouseMode;
-
-pub mod scope;
-pub mod subscription;
+include!("../../../src/tui/api.rs");

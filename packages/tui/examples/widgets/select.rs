@@ -16,7 +16,12 @@ struct State {
 }
 
 fn main() -> WidgetResult<()> {
-    App::new(State::default()).run_inline(update, view)
+    App::new(State::default())
+        .mode(Mode::Inline)
+        .update(|state, msg, _ctx| update(state, msg))
+        .view(view)
+        .run()
+        .map(|_| ())
 }
 
 fn update(state: &mut State, msg: Msg) {

@@ -1,6 +1,7 @@
 //! Run without a TTY: cargo run -p tui --example headless
 use std::time::Duration;
 use tui::prelude::*;
+use tui::runtime::ManualClock;
 
 #[derive(Clone, Debug)]
 enum Msg {
@@ -12,21 +13,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let clock = ManualClock::default();
     let mut app = App::new((String::new(), false))
         .with_clock(clock.clone())
-        .build_with_effects(
-            |state, message, ctx| match message {
-                Msg::Edit(text) => {
-                    state.0 = text;
-                    ctx.debounce("save", Duration::from_millis(300), Msg::Save);
-                }
-                Msg::Save => state.1 = true,
-            },
-            |state| {
-                text_input()
-                    .key("editor")
-                    .value(&state.0)
-                    .on_change(Msg::Edit)
-            },
-        )
+        .update(|state, message, ctx| match message {
+            Msg::Edit(text) => {
+                state.0 = text;
+                ctx.debounce("save", Duration::from_millis(300), Msg::Save);
+            }
+            Msg::Save => state.1 = true,
+        })
+        .view(|state| {
+            text_input()
+                .key("editor")
+                .value(&state.0)
+                .on_change(Msg::Edit)
+        })
+        .build()
         .size(40, 3);
 
     app.step(&[Event::Key(KeyEvent::new(

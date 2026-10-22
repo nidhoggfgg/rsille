@@ -13,7 +13,11 @@ fn main() -> WidgetResult<()> {
     App::new(State {
         selected: "none".to_owned(),
     })
-    .run_inline(|state, id| state.selected = id, view)
+    .mode(Mode::Inline)
+    .update(|state, id, _ctx| state.selected = id)
+    .view(view)
+    .run()
+    .map(|_| ())
 }
 
 fn view(state: &State) -> impl Widget<String> {

@@ -13,7 +13,11 @@ fn main() -> WidgetResult<()> {
     App::new(State {
         tab: "overview".to_owned(),
     })
-    .run_inline(|state, tab| state.tab = tab, view)
+    .mode(Mode::Inline)
+    .update(|state, tab, _ctx| state.tab = tab)
+    .view(view)
+    .run()
+    .map(|_| ())
 }
 
 fn view(state: &State) -> impl Widget<String> {

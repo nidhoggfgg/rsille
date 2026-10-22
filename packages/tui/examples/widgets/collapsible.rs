@@ -8,7 +8,12 @@ use tui::prelude::*;
 struct Msg(bool);
 
 fn main() -> WidgetResult<()> {
-    App::new(true).run_inline(|open, msg| *open = msg.0, view)
+    App::new(true)
+        .mode(Mode::Inline)
+        .update(|open, msg: Msg, _ctx| *open = msg.0)
+        .view(view)
+        .run()
+        .map(|_| ())
 }
 
 fn view(open: &bool) -> impl Widget<Msg> {

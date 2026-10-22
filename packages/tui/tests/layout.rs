@@ -1,4 +1,5 @@
 use std::{cell::Cell, rc::Rc, time::Duration};
+use tui::runtime::ManualClock;
 
 use render::{area::Area, chunk::Chunk};
 use tui::{animation::AnimationCtx, prelude::*};

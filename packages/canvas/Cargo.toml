@@ -2,8 +2,16 @@
 name = "canvas"
 version = "0.1.0"
 edition = "2021"
-exclude = ["examples"]
 license = "MIT"
+publish = false
+
+description = "Braille canvas and graphics for rsille"
+repository = "https://github.com/nidhoggfgg/rsille.git"
+readme = "README.md"
+
+[lib]
+name = "canvas"
+doctest = false
 
 [dependencies]
 render = { path = "../render" }

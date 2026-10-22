@@ -20,7 +20,12 @@ struct State {
 }
 
 fn main() -> WidgetResult<()> {
-    App::new(State::default()).run_inline(update, view)
+    App::new(State::default())
+        .mode(Mode::Inline)
+        .update(|state, msg, _ctx| update(state, msg))
+        .view(view)
+        .run()
+        .map(|_| ())
 }
 
 fn update(state: &mut State, msg: Msg) {
@@ -41,10 +46,17 @@ fn view(state: &State) -> impl Widget<Msg> {
                 .height(16)
                 .multi_select(true)
                 .items([
+                    TreeItem::new("src", "src")
+                        .child(TreeItem::new("src/tui", "tui"))
+                        .child(TreeItem::new("src/render", "render"))
+                        .child(TreeItem::new("src/canvas", "canvas")),
                     TreeItem::new("packages", "packages")
                         .child(
                             TreeItem::new("packages/tui", "tui")
-                                .child(TreeItem::new("packages/tui/src", "src"))
+                                .child(
+                                    TreeItem::new("packages/tui/src", "src")
+                                        .child(TreeItem::new("packages/tui/src/lib.rs", "lib.rs")),
+                                )
                                 .child(
                                     TreeItem::new("packages/tui/examples", "examples")
                                         .child(

@@ -3,20 +3,31 @@ name = "rsille"
 version = "3.0.0"
 edition = "2021"
 authors = ["nidhoggfgg <nidhoggfgg@gmail.com>"]
-description = "A full feature braille code art lib"
+description = "Terminal application framework with Unicode text, layout, animation and braille graphics"
 keywords = ["braille", "terminal", "tui", "cli", "animation"]
 readme = "README.md"
 license = "MIT"
 repository = "https://github.com/nidhoggfgg/rsille.git"
-exclude = ["examples", "imgs", "pyrsille"]
+include = ["src/**", "examples/basic_canvas.rs", "README*", "MIGRATION_V3.md", "LICENCE", "Cargo.toml"]
 
 [dependencies]
-canvas = { path = "packages/canvas" }
-tui = { path = "packages/tui" }
-render = { path = "packages/render" }
+crossterm = { workspace = true }
+tokio = { workspace = true }
+async-trait = { workspace = true }
+futures = { workspace = true }
+rayon = { workspace = true }
+unicode-width = { workspace = true }
+unicode-segmentation = { workspace = true }
+log = { workspace = true }
+taffy = { workspace = true }
+syntect = { workspace = true, optional = true }
+once_cell = { workspace = true, optional = true }
+rustc-hash = "2.0"
+smallvec = "1.13"
 
 [features]
 default = []
+syntax-highlighting = ["dep:syntect", "dep:once_cell"]
 
 [workspace]
 members = ["packages/canvas", "packages/render", "packages/tui"]

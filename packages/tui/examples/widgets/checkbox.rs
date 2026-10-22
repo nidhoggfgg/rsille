@@ -21,7 +21,11 @@ fn main() -> WidgetResult<()> {
         remember: true,
         subscribe: false,
     })
-    .run_inline(update, view)
+    .mode(Mode::Inline)
+    .update(|state, msg, _ctx| update(state, msg))
+    .view(view)
+    .run()
+    .map(|_| ())
 }
 
 fn update(state: &mut State, msg: Msg) {

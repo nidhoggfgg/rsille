@@ -10,7 +10,11 @@ struct Msg(FrameInfo);
 fn main() -> WidgetResult<()> {
     App::new(0usize)
         .on_frame(Msg)
-        .run_inline(|frame, msg| *frame = msg.0.frame as usize, view)
+        .mode(Mode::Inline)
+        .update(|frame, msg, _ctx| *frame = msg.0.frame as usize)
+        .view(view)
+        .run()
+        .map(|_| ())
 }
 
 fn view(frame: &usize) -> impl Widget<Msg> {

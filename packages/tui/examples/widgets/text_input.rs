@@ -14,7 +14,12 @@ enum Msg {
 fn main() -> WidgetResult<()> {
     let state = String::new();
 
-    App::new(state).run_inline(update, view)
+    App::new(state)
+        .mode(Mode::Inline)
+        .update(|state, msg, _ctx| update(state, msg))
+        .view(view)
+        .run()
+        .map(|_| ())
 }
 
 fn update(state: &mut String, msg: Msg) {

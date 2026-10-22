@@ -1,13 +1,13 @@
-//! # rsille
+#![doc = include_str!("../README.md")]
 
-/// Canvas module for braille art creation and manipulation
-#[doc(inline)]
-pub use canvas;
+/// Terminal rendering engine, compiled from the internal render crate's sources.
+#[path = "render/api.rs"]
+pub mod render;
 
-/// Rendering engine
-#[doc(inline)]
-pub use render;
+/// Braille canvas, compiled from the internal canvas crate's sources.
+#[path = "canvas/api.rs"]
+pub mod canvas;
 
-/// Text User Interface components
-#[doc(inline)]
-pub use tui;
+/// Terminal application framework, compiled from the internal TUI crate's sources.
+#[path = "tui/api.rs"]
+pub mod tui;

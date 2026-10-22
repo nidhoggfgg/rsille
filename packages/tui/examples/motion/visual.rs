@@ -8,10 +8,13 @@ use tui::prelude::*;
 struct Msg(FrameInfo);
 
 fn main() -> WidgetResult<()> {
-    App::new(0.0).on_frame(Msg).run_inline(
-        |progress, msg| *progress = (msg.0.since_start.as_secs_f64() % 2.0) / 2.0,
-        view,
-    )
+    App::new(0.0)
+        .on_frame(Msg)
+        .mode(Mode::Inline)
+        .update(|progress, msg, _ctx| *progress = (msg.0.since_start.as_secs_f64() % 2.0) / 2.0)
+        .view(view)
+        .run()
+        .map(|_| ())
 }
 
 fn view(progress: &f64) -> impl Widget<Msg> {

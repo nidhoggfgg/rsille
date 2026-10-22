@@ -4,20 +4,20 @@ use std::time::Duration;
 use tui::prelude::*;
 
 fn main() -> WidgetResult<()> {
-    let app = App::new(false).build(
-        |ready, ()| *ready = true,
-        |ready| {
+    let app = App::new(false)
+        .update(|ready, (), _ctx| *ready = true)
+        .view(|ready| {
             label(if *ready {
                 "Background complete"
             } else {
                 "Waiting for background work"
             })
-        },
-    );
+        })
+        .build();
     let handle = app.handle();
     std::thread::spawn(move || {
         std::thread::sleep(Duration::from_millis(300));
         let _ = handle.send(());
     });
-    app.run()
+    app.run().map(|_| ())
 }

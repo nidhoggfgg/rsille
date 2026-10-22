@@ -2,6 +2,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tui::prelude::*;
+use tui::runtime::ManualClock;
 use tui::widgets::TextInputState;
 
 fn key(code: KeyCode) -> Event {

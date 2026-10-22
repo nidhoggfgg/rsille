@@ -5,6 +5,40 @@ widget or one framework feature, including its common variants. Larger app-like
 showcases belong in the repository-level `examples/` directory as separate
 projects.
 
+## Unified Application Entry
+
+Use `App::new(state).mode(Mode::Inline).update(update).view(view).run()`.
+The default mode is fullscreen. Every update receives `UpdateCtx`, including
+simple updates that ignore it. Configure theme, subscriptions, keys and runtime
+hooks before `.update()`. `ctx.exit()` requests exit; the returned `AppExit`
+contains final state and an `ExitReason`. `build()` on the same builder creates
+a headless runtime; its later `run()` uses the configured mode. `into_exit()`
+recovers state after headless execution.
+
+Use `.run_async().await` inside a Tokio runtime with I/O and time enabled.
+Synchronous terminal entry reports an error inside Tokio before changing terminal
+state. Terminal update/view closures may borrow local data; `build()` stores
+`'static` closures. UI state need not be `Send`, `Clone`, or `Debug`, and messages
+need only `Send + 'static`. Clock/executor tools live in `tui::runtime`, outside
+the common prelude. Legacy `App::run*` / `build*` are compatibility adapters;
+see [migration details](../../../MIGRATION_V3.md).
+
+`workflow` runs a complete Unicode edit → debounce → background save → exit flow:
+
+```bash
+cargo run -p tui --example workflow
+cargo run -p tui --example workflow -- --async
+cargo run -p tui --example workflow -- --headless
+```
+
+Both modes use the same state, update and view. The headless branch injects a
+manual clock/executor, checks focus, saved state, task completion and exit reason,
+without sleeping. `cargo test -p tui --test api` runs this exact flow.
+
+Default features are empty. For code highlighting, run
+`cargo run -p tui --features syntax-highlighting --example code_viewer`.
+The code viewer otherwise displays plain text with the same navigation.
+
 ## Categories
 
 - `basics/`: minimal first-run examples.
@@ -39,7 +73,7 @@ cargo check -p tui --examples
 
 ## Driving An Application Without A Terminal
 
-`headless` demonstrates `App::build_with_effects`, `Runtime::step` and
+`headless` demonstrates `.update(update).view(view).build()`, `Runtime::step` and
 `ManualClock`. It runs without a TTY. `step(&events)` dispatches input, processes
 messages and due timers, updates animations and draws into `Runtime::frame()`.
 The frame exposes cells and styles; `state()`, `focused_key()`, `bounds(path)`,

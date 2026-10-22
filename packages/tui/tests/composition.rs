@@ -1,6 +1,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tui::prelude::*;
+use tui::runtime::{ManualClock, ManualExecutor};
 use tui::widgets::TextInputState;
 
 fn key(code: KeyCode) -> Event {

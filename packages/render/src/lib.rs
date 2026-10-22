@@ -1,17 +1,5 @@
-mod builder;
-mod draw_err;
-mod draw_update;
-mod render;
-mod wake;
+//! Internal workspace crate; the published API is `rsille::render`.
 
-pub mod area;
-pub mod buffer;
-pub mod chunk;
-pub mod event_loop;
-pub mod style;
-pub mod text;
-pub use builder::{Builder, InlineMouseMode};
-pub use draw_err::DrawErr;
-pub use draw_update::*;
-pub use render::Render;
-pub use wake::WakeHandle;
+extern crate self as render;
+
+include!("../../../src/render/api.rs");

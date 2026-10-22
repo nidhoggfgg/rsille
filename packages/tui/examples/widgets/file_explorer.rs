@@ -21,7 +21,12 @@ struct State {
 }
 
 fn main() -> WidgetResult<()> {
-    App::new(State::default()).run_inline(update, view)
+    App::new(State::default())
+        .mode(Mode::Inline)
+        .update(|state, msg, _ctx| update(state, msg))
+        .view(view)
+        .run()
+        .map(|_| ())
 }
 
 fn update(state: &mut State, msg: Msg) {
@@ -43,24 +48,25 @@ fn view(state: &State) -> impl Widget<Msg> {
                 .height(18)
                 .multi_select(true)
                 .items([
+                    FileExplorerItem::directory("src", "src")
+                        .child(
+                            FileExplorerItem::directory("src/tui", "tui")
+                                .child(FileExplorerItem::file("src/tui/api.rs", "api.rs"))
+                                .child(FileExplorerItem::file("src/tui/app.rs", "app.rs"))
+                                .child(FileExplorerItem::lazy_directory(
+                                    "src/tui/widgets",
+                                    "widgets",
+                                )),
+                        )
+                        .child(FileExplorerItem::directory("src/render", "render"))
+                        .child(FileExplorerItem::directory("src/canvas", "canvas")),
                     FileExplorerItem::directory("packages", "packages")
                         .child(
                             FileExplorerItem::directory("packages/tui", "tui")
-                                .child(
-                                    FileExplorerItem::directory("packages/tui/src", "src")
-                                        .child(FileExplorerItem::file(
-                                            "packages/tui/src/lib.rs",
-                                            "lib.rs",
-                                        ))
-                                        .child(FileExplorerItem::file(
-                                            "packages/tui/src/app.rs",
-                                            "app.rs",
-                                        ))
-                                        .child(FileExplorerItem::lazy_directory(
-                                            "packages/tui/src/widgets",
-                                            "widgets",
-                                        )),
-                                )
+                                .child(FileExplorerItem::file(
+                                    "packages/tui/Cargo.toml",
+                                    "Cargo.toml",
+                                ))
                                 .child(
                                     FileExplorerItem::directory(
                                         "packages/tui/examples",
@@ -78,16 +84,9 @@ fn view(state: &State) -> impl Widget<Msg> {
                                     ),
                                 ),
                         )
-                        .child(FileExplorerItem::directory("packages/render", "render")),
-                    FileExplorerItem::directory("docs", "docs")
-                        .child(FileExplorerItem::file(
-                            "docs/tui-gap-data-components.md",
-                            "tui-gap-data-components.md",
-                        ))
-                        .child(FileExplorerItem::file(
-                            "docs/tui-gap-async-model.md",
-                            "tui-gap-async-model.md",
-                        )),
+                        .child(FileExplorerItem::directory("packages/render", "render"))
+                        .child(FileExplorerItem::directory("packages/canvas", "canvas")),
+                    FileExplorerItem::file("MIGRATION_V3.md", "MIGRATION_V3.md"),
                     FileExplorerItem::file("Cargo.toml", "Cargo.toml"),
                 ])
                 .on_change(Msg::Focused)
