@@ -1,6 +1,6 @@
 //! Border rendering helper functions
 
-use crate::style::BorderStyle;
+use crate::style::{BorderChars, BorderStyle};
 use render::chunk::Chunk;
 use render::style::Style;
 
@@ -22,7 +22,7 @@ pub fn render_border(chunk: &mut Chunk, border: BorderStyle, style: Style) {
         return; // Not enough space for border
     }
 
-    let chars = border.chars();
+    let chars = border_chars(chunk, border);
 
     // Top and bottom borders
     for x in 1..width.saturating_sub(1) {
@@ -61,7 +61,7 @@ pub fn render_border_bottom(chunk: &mut Chunk, border: BorderStyle, style: Style
         return;
     }
 
-    let chars = border.chars();
+    let chars = border_chars(chunk, border);
 
     // Only draw horizontal line at bottom
     for x in 0..width {
@@ -82,6 +82,34 @@ pub fn render_background(chunk: &mut Chunk, style: Style) {
     for y in 0..height {
         for x in 0..width {
             let _ = chunk.set_char(x, y, ' ', style);
+        }
+    }
+}
+
+// Box-drawing characters are ambiguous in some width policies. Fall back to
+// one-column ASCII so borders retain their geometry on those terminals.
+fn border_chars(chunk: &Chunk<'_>, border: BorderStyle) -> BorderChars {
+    let chars = border.chars();
+    let mut bytes = [0; 4];
+    if chunk
+        .text_metrics()
+        .grapheme_width(chars.horizontal.encode_utf8(&mut bytes), 0)
+        == 1
+    {
+        chars
+    } else {
+        BorderChars {
+            top_left: '+',
+            top_right: '+',
+            bottom_left: '+',
+            bottom_right: '+',
+            horizontal: '-',
+            vertical: '|',
+            top_junction: '+',
+            bottom_junction: '+',
+            left_junction: '+',
+            right_junction: '+',
+            cross: '+',
         }
     }
 }

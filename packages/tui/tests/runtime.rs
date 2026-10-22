@@ -11,7 +11,7 @@ fn frame_text<M: Clone + std::fmt::Debug + Send + 'static, S>(app: &Runtime<S, M
         .content()
         .iter()
         .filter(|cell| !cell.is_occupied)
-        .filter_map(|cell| cell.content.c)
+        .filter_map(|cell| cell.content.as_char())
         .collect()
 }
 

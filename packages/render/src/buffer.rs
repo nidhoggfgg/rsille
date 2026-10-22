@@ -12,6 +12,7 @@ pub struct Buffer {
     content: Vec<Cell>,
     previous: Option<Vec<Cell>>,
     dirty: bool,
+    text_metrics: crate::text::TextMetrics,
 }
 
 // every position in the buffer is absolute
@@ -19,18 +20,19 @@ impl Buffer {
     pub fn new(size: Size) -> Self {
         Self {
             size,
-            content: vec![Cell::space(); (size.width * size.height) as usize],
+            content: vec![Cell::space(); size.width as usize * size.height as usize],
             previous: None,
             dirty: true, // Mark dirty on creation to force initial render
+            text_metrics: crate::text::TextMetrics::default(),
         }
     }
 
     pub fn index(&self, pos: Position) -> Option<usize> {
-        if self.size.less_any((pos.x, pos.y).into()) {
+        if pos.x >= self.size.width || pos.y >= self.size.height {
             return None;
         }
 
-        Some((pos.y * self.size.width + pos.x) as usize)
+        Some(pos.y as usize * self.size.width as usize + pos.x as usize)
     }
 
     pub fn is_occupied(&self, pos: Position) -> bool {
@@ -53,55 +55,85 @@ impl Buffer {
         }
     }
 
-    pub fn set(&mut self, pos: Position, content: Stylized) -> Result<usize, DrawErr> {
-        if let Some(i) = self.index(pos) {
-            let width = content.width();
-            if i + width > self.content.len() || i == self.content.len() {
-                return Err(DrawErr::out_of_bounds(pos, self.size));
-            }
-            if self.content[i].is_occupied {
-                return Err(DrawErr::position_occupied(pos));
-            }
-            self.content[i].content = content;
-            self.dirty = true; // Mark dirty when content changes
-            for j in 1..width {
-                self.content[i + j].is_occupied = true;
-            }
-            Ok(width)
-        } else {
-            Err(DrawErr::out_of_bounds(pos, self.size))
+    pub fn text_metrics(&self) -> crate::text::TextMetrics {
+        self.text_metrics
+    }
+
+    /// Change the policy before drawing; clears content and forces a full redraw.
+    pub fn set_text_metrics(&mut self, metrics: crate::text::TextMetrics) {
+        if self.text_metrics != metrics {
+            self.text_metrics = metrics;
+            self.content.fill(Cell::space());
+            self.reset_diff();
+            self.dirty = true;
         }
     }
 
-    pub fn overwrite(&mut self, pos: Position, content: Stylized) -> Result<usize, DrawErr> {
-        if let Some(i) = self.index(pos) {
-            let width = content.width();
-            if i + width > self.content.len() || i == self.content.len() {
-                return Err(DrawErr::out_of_bounds(pos, self.size));
-            }
-
-            if self.content[i].is_occupied {
-                if let Some(owner) = self.content[i].owner {
-                    for j in owner..i {
-                        self.content[j] = Cell::space();
-                    }
-                }
-            }
-
-            let base_style = self.content[i].content.style;
-            let mut content = content;
-            content.style = base_style.merge(content.style);
-
-            self.content[i] = Cell::new(content);
-            self.dirty = true; // Mark dirty when content changes
-            for j in i + 1..i + width {
-                self.content[j].is_occupied = true;
-                self.content[j].owner = Some(i);
-            }
-            Ok(width)
-        } else {
-            Err(DrawErr::out_of_bounds(pos, self.size))
+    pub fn set(&mut self, pos: Position, content: Stylized) -> Result<usize, DrawErr> {
+        if self.is_occupied(pos) {
+            return Err(DrawErr::position_occupied(pos));
         }
+        self.write(pos, content, false)
+    }
+
+    pub fn overwrite(&mut self, pos: Position, content: Stylized) -> Result<usize, DrawErr> {
+        self.write(pos, content, true)
+    }
+
+    /// Clear the complete owner of any destination cell, including its tail.
+    fn erase_owner(&mut self, index: usize) {
+        let owner = self.content[index].owner.unwrap_or(index);
+        let end = (owner + self.content[owner].width().max(1)).min(self.content.len());
+        for cell in &mut self.content[owner..end] {
+            *cell = Cell::space();
+        }
+    }
+
+    fn write(
+        &mut self,
+        pos: Position,
+        mut content: Stylized,
+        merge: bool,
+    ) -> Result<usize, DrawErr> {
+        let i = self
+            .index(pos)
+            .ok_or_else(|| DrawErr::out_of_bounds(pos, self.size))?;
+        let width = content.width_with(self.text_metrics, pos.x as usize);
+        if pos.x as usize + width > self.size.width as usize {
+            return Err(DrawErr::out_of_bounds(pos, self.size));
+        }
+        // Zero-width/empty/control cells never erase an existing glyph.
+        if width == 0 {
+            return Ok(0);
+        }
+        let style = self.content[self.content[i].owner.unwrap_or(i)]
+            .content
+            .style;
+        for index in i..i + width {
+            self.erase_owner(index);
+        }
+        if merge {
+            content.style = style.merge(content.style);
+        }
+        // Tabs are expanded by Chunk; direct writes follow the same rule.
+        if content.as_char() == Some('\t') {
+            for cell in &mut self.content[i..i + width] {
+                *cell = Cell::new(Stylized::new(' ', content.style));
+            }
+        } else {
+            self.content[i] = Cell::new(content.clone());
+            self.content[i].columns = width;
+            for j in i + 1..i + width {
+                self.content[j] = Cell {
+                    content: Stylized::empty().with_style(content.style),
+                    is_occupied: true,
+                    owner: Some(i),
+                    columns: 0,
+                };
+            }
+        }
+        self.dirty = true;
+        Ok(width)
     }
 
     pub fn size(&self) -> Size {
@@ -166,7 +198,7 @@ impl Buffer {
         );
 
         self.size = new_size;
-        self.content = vec![Cell::space(); (new_size.width * new_size.height) as usize];
+        self.content = vec![Cell::space(); new_size.width as usize * new_size.height as usize];
         // Clear previous buffer on resize to force full redraw
         self.previous = None;
         self.dirty = true; // Mark dirty on resize
@@ -225,8 +257,8 @@ impl<'a> Iterator for DiffIterator<'a> {
 
             // Only yield cells that changed and are not occupied by wide characters
             if curr != prev && !curr.is_occupied {
-                let x = (i as u16) % self.width;
-                let y = (i as u16) / self.width;
+                let x = (i % self.width as usize) as u16;
+                let y = (i / self.width as usize) as u16;
                 return Some((x, y, curr));
             }
         }
@@ -253,8 +285,8 @@ impl<'a> Iterator for AllCellsIterator<'a> {
 
             // Only yield cells that are not occupied by wide characters
             if !cell.is_occupied {
-                let x = (i as u16) % self.width;
-                let y = (i as u16) / self.width;
+                let x = (i % self.width as usize) as u16;
+                let y = (i / self.width as usize) as u16;
                 return Some((x, y, cell));
             }
         }
@@ -392,22 +424,21 @@ pub struct Cell {
     pub content: Stylized,
     pub is_occupied: bool,
     pub owner: Option<usize>,
+    columns: usize,
 }
 
 impl Cell {
     pub fn raw(c: char) -> Self {
-        Self {
-            content: Stylized::plain(c),
-            is_occupied: false,
-            owner: None,
-        }
+        Self::new(Stylized::plain(c))
     }
 
     pub fn new(content: Stylized) -> Self {
+        let columns = content.width();
         Self {
             content,
             is_occupied: false,
             owner: None,
+            columns,
         }
     }
 
@@ -416,11 +447,12 @@ impl Cell {
             content: Stylized::space(),
             is_occupied: false,
             owner: None,
+            columns: 1,
         }
     }
 
     pub fn width(&self) -> usize {
-        self.content.width()
+        self.columns
     }
 
     pub fn width_cjk(&self) -> usize {
@@ -570,7 +602,7 @@ mod tests {
 
         let cell = &buffer.content()[0];
         let colors = cell.content.style.colors.unwrap();
-        assert_eq!(cell.content.c, Some('H'));
+        assert_eq!(cell.content.as_char(), Some('H'));
         assert_eq!(colors.foreground, Some(Color::White));
         assert_eq!(colors.background, Some(Color::Blue));
     }
@@ -617,12 +649,12 @@ mod tests {
         // Check changed cell at (1, 0)
         assert!(diff
             .iter()
-            .any(|(x, y, cell)| { *x == 1 && *y == 0 && cell.content.c == Some('X') }));
+            .any(|(x, y, cell)| { *x == 1 && *y == 0 && cell.content.as_char() == Some('X') }));
 
         // Check new cell at (3, 0)
         assert!(diff
             .iter()
-            .any(|(x, y, cell)| { *x == 3 && *y == 0 && cell.content.c == Some('d') }));
+            .any(|(x, y, cell)| { *x == 3 && *y == 0 && cell.content.as_char() == Some('d') }));
     }
 
     #[test]
@@ -651,13 +683,13 @@ mod tests {
         // Verify some cells
         assert!(all
             .iter()
-            .any(|(x, y, cell)| { *x == 0 && *y == 0 && cell.content.c == Some('a') }));
+            .any(|(x, y, cell)| { *x == 0 && *y == 0 && cell.content.as_char() == Some('a') }));
         assert!(all
             .iter()
-            .any(|(x, y, cell)| { *x == 1 && *y == 0 && cell.content.c == Some('b') }));
+            .any(|(x, y, cell)| { *x == 1 && *y == 0 && cell.content.as_char() == Some('b') }));
         assert!(all
             .iter()
-            .any(|(x, y, cell)| { *x == 0 && *y == 1 && cell.content.c == Some('c') }));
+            .any(|(x, y, cell)| { *x == 0 && *y == 1 && cell.content.as_char() == Some('c') }));
     }
 
     #[test]

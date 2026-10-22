@@ -136,7 +136,7 @@ impl<M> Divider<M> {
         text: &str,
         render_style: render::style::Style,
     ) {
-        use unicode_width::UnicodeWidthStr;
+        use render::text::TextWidth;
 
         let area = chunk.area();
         let width = area.width() as usize;

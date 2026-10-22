@@ -1776,6 +1776,7 @@ where
         let size = chunk.area().size();
 
         self.sync_theme();
+        chunk.set_text_metrics(self.theme.text_metrics);
 
         self.ensure_tree();
         let tree = self.cached_tree.as_ref().unwrap();

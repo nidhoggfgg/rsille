@@ -1,10 +1,10 @@
 //! Content viewers for code, logs, and diffs.
 
 use once_cell::sync::Lazy;
+use render::text::TextWidth;
 use syntect::easy::HighlightLines;
 use syntect::highlighting::{Style as SyntectStyle, ThemeSet};
 use syntect::parsing::SyntaxSet;
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::event::{Event, KeyCode};
 use crate::focus::FocusConfig;
@@ -656,7 +656,7 @@ fn render_log(
         }
         let line = &lines[line_index];
         let style = log_style(line.level);
-        let text = truncate_to_width(&line.message, content_width as usize);
+        let text = truncate_to_width(&line.message, content_width as usize, chunk.text_metrics());
         let _ = chunk.set_string(
             content_x,
             content_y + row as u16,
@@ -768,33 +768,35 @@ fn draw_highlighted_line(
     ranges: &[(SyntectStyle, &str)],
     fallback: render::style::Style,
 ) {
-    let mut cursor_x = x;
-    let mut remaining = width;
-
-    for (style, text) in ranges {
-        if remaining == 0 {
-            break;
+    let spans = ranges
+        .iter()
+        .map(|(style, text)| {
+            let style = Style::default()
+                .fg(Color::Rgb(
+                    style.foreground.r,
+                    style.foreground.g,
+                    style.foreground.b,
+                ))
+                .to_render_style();
+            render::text::Span::new(*text, style)
+        })
+        .collect();
+    let line = render::text::Line::from_texts(spans);
+    let area = render::area::Area::new(
+        (
+            chunk.area().x().saturating_add(x),
+            chunk.area().y().saturating_add(y),
+        )
+            .into(),
+        (width.min(u16::MAX as usize) as u16, 1).into(),
+    );
+    let _ = chunk.with_clip(area, |line_chunk| {
+        if line.content.iter().all(|s| s.is_empty()) {
+            let _ = line_chunk.set_char(0, 0, ' ', fallback);
+        } else {
+            let _ = line_chunk.set_line(0, 0, &line);
         }
-        let segment = truncate_to_width(text, remaining);
-        if segment.is_empty() {
-            continue;
-        }
-        let render_style = Style::default()
-            .fg(Color::Rgb(
-                style.foreground.r,
-                style.foreground.g,
-                style.foreground.b,
-            ))
-            .to_render_style();
-        let _ = chunk.set_string(cursor_x, y, &segment, render_style);
-        let segment_width = segment.width() as u16;
-        cursor_x = cursor_x.saturating_add(segment_width);
-        remaining = remaining.saturating_sub(segment_width as usize);
-    }
-
-    if remaining == width {
-        let _ = chunk.set_char(x, y, ' ', fallback);
-    }
+    });
 }
 
 fn draw_plain_line(
@@ -805,7 +807,7 @@ fn draw_plain_line(
     line: &str,
     style: render::style::Style,
 ) {
-    let text = truncate_to_width(line, width);
+    let text = truncate_to_width(line, width, chunk.text_metrics());
     let _ = chunk.set_string(x, y, &text, style);
 }
 
@@ -835,7 +837,7 @@ fn draw_diff_line(
     } else {
         fallback
     };
-    let text = truncate_to_width(line, width);
+    let text = truncate_to_width(line, width, chunk.text_metrics());
     let _ = chunk.fill(x, y, width as u16, 1, ' ', style);
     let _ = chunk.set_string(x, y, &text, style);
 }
@@ -877,7 +879,7 @@ fn draw_markdown_line(
         fallback
     };
 
-    let text = truncate_to_width(line, width);
+    let text = truncate_to_width(line, width, chunk.text_metrics());
     let _ = chunk.set_string(x, y, &text, style);
 }
 
@@ -891,20 +893,8 @@ fn log_style(level: LogLevel) -> Style {
     }
 }
 
-fn truncate_to_width(text: &str, max_width: usize) -> String {
-    let mut out = String::new();
-    let mut width = 0;
-
-    for ch in text.chars() {
-        let char_width = ch.width().unwrap_or(0);
-        if width + char_width > max_width {
-            break;
-        }
-        out.push(ch);
-        width += char_width;
-    }
-
-    out
+fn truncate_to_width(text: &str, max_width: usize, metrics: render::text::TextMetrics) -> String {
+    metrics.clip(text, 0, max_width)
 }
 
 #[cfg(test)]

@@ -628,8 +628,51 @@ fn bench_extreme_sizes(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_unicode_cell(c: &mut Criterion) {
+    use render::{chunk::Chunk, style::Style};
+    use std::sync::Arc;
+    let mut group = c.benchmark_group("unicode_cell");
+    for text in ["a", "中", "e\u{301}", "👩🏽‍💻"] {
+        group.bench_with_input(BenchmarkId::new("construct", text), &text, |b, text| {
+            b.iter(|| Stylized::grapheme(black_box(text), Style::default()));
+        });
+        let symbol = Stylized::grapheme(text, Style::default());
+        group.bench_with_input(BenchmarkId::new("clone", text), &symbol, |b, symbol| {
+            b.iter(|| black_box(symbol.clone()));
+        });
+        // An always-shared UTF-8 representation, including scalar cells.
+        group.bench_with_input(
+            BenchmarkId::new("always_shared_construct", text),
+            &text,
+            |b, text| {
+                b.iter(|| Arc::<str>::from(black_box(*text)));
+            },
+        );
+    }
+    let text = "ASCII 中文 e\u{301} 👩🏽‍💻 🇨🇳";
+    group.bench_function("draw_and_diff", |b| {
+        let mut buffer = Buffer::new((80, 24).into());
+        b.iter(|| {
+            buffer.clear();
+            let mut chunk = Chunk::new(
+                &mut buffer,
+                render::area::Area::new((0, 0).into(), (80, 24).into()),
+            )
+            .unwrap();
+            for row in 0..24 {
+                chunk
+                    .set_string(0, row, black_box(text), Style::default())
+                    .unwrap();
+            }
+            black_box(buffer.diff().unwrap().count());
+        });
+    });
+    group.finish();
+}
+
 criterion_group!(
     benches,
+    bench_unicode_cell,
     bench_buffer_operations,
     bench_cell_diff,
     bench_line_diff,

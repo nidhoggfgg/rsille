@@ -1,6 +1,6 @@
 //! Data table widget with internal row navigation.
 
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+use render::text::TextWidth;
 
 use crate::event::{Event, KeyCode, KeyModifiers};
 use crate::focus::FocusConfig;
@@ -398,29 +398,18 @@ impl<M> DataTable<M> {
             .or_else(|| visible_indices.first().copied().map(|_| 0))
     }
 
-    fn truncate_to_width(text: &str, max_width: usize) -> String {
-        let mut out = String::new();
-        let mut width = 0;
-
-        for ch in text.chars() {
-            let char_width = ch.width().unwrap_or(0);
-            if width + char_width > max_width {
-                break;
-            }
-            out.push(ch);
-            width += char_width;
-        }
-
-        out
-    }
-
-    fn pad_cell(text: &str, width: usize, align: TableAlign) -> String {
+    fn pad_cell(
+        text: &str,
+        width: usize,
+        align: TableAlign,
+        metrics: render::text::TextMetrics,
+    ) -> String {
         if width == 0 {
             return String::new();
         }
 
-        let truncated = Self::truncate_to_width(text, width);
-        let text_width = truncated.width();
+        let truncated = metrics.clip(text, 0, width);
+        let text_width = metrics.width(&truncated);
         let remaining = width.saturating_sub(text_width);
 
         match align {
@@ -542,7 +531,12 @@ impl<M> DataTable<M> {
 
             let (source_index, column) = visible_columns[index];
             let cell_text = cells.get(source_index).map(String::as_str).unwrap_or("");
-            let rendered = Self::pad_cell(cell_text, *width as usize, column.align);
+            let rendered = Self::pad_cell(
+                cell_text,
+                *width as usize,
+                column.align,
+                chunk.text_metrics(),
+            );
             let cell_style = active_cell
                 .filter(|(active_index, _)| *active_index == index)
                 .map(|(_, style)| style)
@@ -667,6 +661,7 @@ impl<M: 'static> Widget<M> for DataTable<M> {
 
         let is_focused = ctx.is_focused();
         let theme = ctx.theme();
+        let metrics = theme.text_metrics;
         let base_style = if self.disabled {
             theme.styles.interactive_disabled
         } else {
@@ -715,8 +710,7 @@ impl<M: 'static> Widget<M> for DataTable<M> {
         let visible_columns = self.visible_columns();
 
         if visible_columns.is_empty() {
-            let message =
-                Self::truncate_to_width("Add columns to render a table", content_width as usize);
+            let message = metrics.clip("Add columns to render a table", 0, content_width as usize);
             let _ = chunk.set_string(content_x, content_y, &message, muted_style);
             return;
         }
@@ -766,7 +760,7 @@ impl<M: 'static> Widget<M> for DataTable<M> {
 
         let visible_indices = self.visible_row_indices();
         if visible_indices.is_empty() {
-            let message = Self::truncate_to_width(&self.empty_message, content_width as usize);
+            let message = metrics.clip(&self.empty_message, 0, content_width as usize);
             let _ = chunk.set_string(content_x, rows_y, &message, muted_style);
             return;
         }
@@ -981,6 +975,14 @@ impl<M: 'static> Widget<M> for DataTable<M> {
         style
     }
 
+    fn layout_style_with(&self, ctx: &crate::widget::MeasureCtx) -> LayoutStyle {
+        let mut style = self.layout_style();
+        let width = self.preferred_width_with(ctx.theme().text_metrics);
+        style.min_width = width;
+        style.preferred_width = Some(width);
+        style
+    }
+
     fn focus_config(&self) -> FocusConfig {
         if self.disabled || !self.has_enabled_rows() {
             FocusConfig::None
@@ -1022,11 +1024,19 @@ fn sync_state_aliases(state: &mut DataTableState) {
 
 impl<M> DataTable<M> {
     fn preferred_width(&self) -> u16 {
+        self.preferred_width_with(render::text::TextMetrics::default())
+    }
+
+    fn preferred_width_with(&self, metrics: render::text::TextMetrics) -> u16 {
         let visible = self.visible_columns();
         let separator_width = visible.len().saturating_sub(1) as u16;
         let content_width = visible
             .iter()
-            .map(|(_, column)| column.width.max(column.title.width() as u16))
+            .map(|(_, column)| {
+                column
+                    .width
+                    .max(metrics.width(&column.title).min(u16::MAX as usize) as u16)
+            })
             .sum::<u16>()
             .saturating_add(separator_width);
         content_width

@@ -467,6 +467,8 @@ impl ThemeStyles {
 /// A complete theme definition
 #[derive(Debug, Clone)]
 pub struct Theme {
+    /// Shared terminal text width and tab-stop policy.
+    pub text_metrics: render::text::TextMetrics,
     /// Theme name
     pub name: String,
     /// Semantic style roles
@@ -481,11 +483,17 @@ impl Theme {
     /// Create a new theme with the given name and semantic styles
     pub fn new(name: impl Into<String>, styles: ThemeStyles) -> Self {
         Self {
+            text_metrics: render::text::TextMetrics::default(),
             name: name.into(),
             styles,
             animations: AnimationTheme::default(),
             effects: ThemeEffects::default(),
         }
+    }
+
+    pub fn with_text_metrics(mut self, metrics: render::text::TextMetrics) -> Self {
+        self.text_metrics = metrics;
+        self
     }
 
     /// Set theme-level animation defaults.

@@ -345,7 +345,9 @@ fn apply_glitch(sample: &mut CellSample, ctx: &VisualCtx<'_>, seed: u64, intensi
     if noise(x, y, seed ^ 0xC0DE) < active * 0.55 {
         let charset = ['#', '%', '&', '+', '*', '!', '?', '/', '\\'];
         let index = (noise(y, x, seed ^ 0xC4A7) * charset.len() as f64) as usize;
-        sample.content.c = Some(charset[index.min(charset.len() - 1)]);
+        sample
+            .content
+            .set_char(charset[index.min(charset.len() - 1)]);
     }
 
     let color = if noise(x, y, seed ^ 0xC010) < 0.5 {
@@ -409,7 +411,7 @@ fn apply_typewriter(
     let cursor_index = (ctx.progress.clamp(0.0, 1.0) * total as f64).floor() as usize;
     if cursor && index == cursor_index.min(total.saturating_sub(1)) && ctx.progress > 0.0 {
         sample.visible = true;
-        sample.content.c = Some(if ctx.capabilities.unicode_blocks {
+        sample.content.set_char(if ctx.capabilities.unicode_blocks {
             '▌'
         } else {
             '|'
@@ -445,10 +447,7 @@ fn apply_blur_like(sample: &mut CellSample, ctx: &VisualCtx<'_>, radius: f64, mo
     }
 
     dim_foreground(sample, ctx, amount * 0.6);
-    let Some(ch) = sample.content.c else {
-        return;
-    };
-    if ch.is_whitespace() {
+    if sample.content.is_empty() || sample.content.is_whitespace() {
         return;
     }
 
@@ -458,7 +457,7 @@ fn apply_blur_like(sample: &mut CellSample, ctx: &VisualCtx<'_>, radius: f64, mo
     let n = noise(x, y, seed);
 
     if amount > 0.66 && n < amount * 0.55 {
-        sample.content.c = Some(' ');
+        sample.content.set_char(' ');
     } else if amount > 0.34 && n < amount {
         let chars: &[char] = if ctx.capabilities.unicode_blocks {
             &['░', '▒', '.', ':']
@@ -466,7 +465,7 @@ fn apply_blur_like(sample: &mut CellSample, ctx: &VisualCtx<'_>, radius: f64, mo
             &['.', ':', ' ']
         };
         let index = (noise(y, x, seed.rotate_left(9)) * chars.len() as f64) as usize;
-        sample.content.c = Some(chars[index.min(chars.len() - 1)]);
+        sample.content.set_char(chars[index.min(chars.len() - 1)]);
     }
 }
 
@@ -496,7 +495,7 @@ fn apply_sparkle(
     color: Color,
 ) {
     let density = finite_or(density, 0.08).clamp(0.0, 0.35);
-    if density <= 0.0 || sample.content.c.map(char::is_whitespace).unwrap_or(true) {
+    if density <= 0.0 || sample.content.is_whitespace() {
         return;
     }
 
@@ -518,7 +517,7 @@ fn apply_sparkle(
     if twinkle < 0.22 {
         let chars = ['*', '+', '.'];
         let index = (noise(x, y, frame_seed.rotate_left(13)) * chars.len() as f64) as usize;
-        sample.content.c = Some(chars[index.min(chars.len() - 1)]);
+        sample.content.set_char(chars[index.min(chars.len() - 1)]);
     }
 }
 

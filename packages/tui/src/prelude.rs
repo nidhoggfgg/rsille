@@ -64,3 +64,5 @@ pub use crate::InlineMouseMode;
 
 pub use crate::scope::Scope;
 pub use crate::subscription::Subscription;
+
+pub use crate::text::{AmbiguousWidth, EditBuffer, Line, Span, Text, TextMetrics};

@@ -469,9 +469,14 @@ pub trait Widget<M> {
         LayoutStyle::from_constraints(self.constraints())
     }
 
+    /// Resolve intrinsic layout constraints using the active theme/text policy.
+    fn layout_style_with(&self, _ctx: &MeasureCtx) -> LayoutStyle {
+        self.layout_style()
+    }
+
     /// Measure the widget's preferred size for a proposed parent allocation.
-    fn measure(&self, proposal: SizeProposal, _ctx: &MeasureCtx) -> MeasuredSize {
-        self.layout_style().resolve_fallback_size(proposal)
+    fn measure(&self, proposal: SizeProposal, ctx: &MeasureCtx) -> MeasuredSize {
+        self.layout_style_with(ctx).resolve_fallback_size(proposal)
     }
 
     /// How this widget participates in keyboard focus.
@@ -556,6 +561,10 @@ impl<M> Widget<M> for Box<dyn Widget<M>> {
 
     fn layout_style(&self) -> LayoutStyle {
         (**self).layout_style()
+    }
+
+    fn layout_style_with(&self, ctx: &MeasureCtx) -> LayoutStyle {
+        (**self).layout_style_with(ctx)
     }
 
     fn measure(&self, proposal: SizeProposal, ctx: &MeasureCtx) -> MeasuredSize {
@@ -1366,6 +1375,12 @@ impl<'a, M> EventCtx<'a, M> {
         self.stop_propagation = outcome.stop_propagation;
         self.focus_request = outcome.focus_request;
         self.messages.extend(messages.into_iter().map(map));
+    }
+
+    pub fn text_metrics(&self) -> render::text::TextMetrics {
+        self.theme
+            .map(|theme| theme.text_metrics)
+            .unwrap_or_default()
     }
 
     /// Get or create mutable persistent state for this widget.

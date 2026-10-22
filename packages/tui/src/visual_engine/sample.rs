@@ -5,7 +5,7 @@ use render::style::Stylized;
 /// Coordinates are local to [`VisualCtx::area`]. `source_*` identifies the
 /// child-rendered cell being sampled; `dest_*` is the current destination after
 /// geometry effects have mapped it.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CellSample {
     pub source_x: f64,
     pub source_y: f64,

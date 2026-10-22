@@ -1,7 +1,5 @@
 //! List widget with roving internal selection.
 
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
-
 use crate::event::{Event, KeyCode, MouseButton, MouseEventKind};
 use crate::focus::FocusConfig;
 use crate::layout::border_renderer;
@@ -236,22 +234,6 @@ impl<M> List<M> {
             .find(|(_, item)| !item.disabled)
             .map(|(index, _)| index)
     }
-
-    fn truncate_to_width(text: &str, max_width: usize) -> String {
-        let mut out = String::new();
-        let mut width = 0;
-
-        for ch in text.chars() {
-            let char_width = ch.width().unwrap_or(0);
-            if width + char_width > max_width {
-                break;
-            }
-            out.push(ch);
-            width += char_width;
-        }
-
-        out
-    }
 }
 
 impl<M> Default for List<M> {
@@ -269,6 +251,7 @@ impl<M: 'static> Widget<M> for List<M> {
 
         let is_focused = ctx.is_focused();
         let theme = ctx.theme();
+        let metrics = theme.text_metrics;
         let base_style = if self.disabled {
             theme.styles.interactive_disabled
         } else {
@@ -352,8 +335,9 @@ impl<M: 'static> Widget<M> for List<M> {
             } else {
                 "   "
             };
-            let available_width = content_width.saturating_sub(prefix.width() as u16) as usize;
-            let text = Self::truncate_to_width(&item.label, available_width);
+            let available_width =
+                content_width.saturating_sub(metrics.width(prefix) as u16) as usize;
+            let text = metrics.clip(&item.label, 0, available_width);
             let line = format!("{prefix}{text}");
             let _ = chunk.set_string(content_x, y, &line, style);
         }
@@ -529,6 +513,14 @@ impl<M: 'static> Widget<M> for List<M> {
         style
     }
 
+    fn layout_style_with(&self, ctx: &crate::widget::MeasureCtx) -> LayoutStyle {
+        let mut style = self.layout_style();
+        let width = self.preferred_width_with(ctx.theme().text_metrics);
+        style.min_width = width;
+        style.preferred_width = Some(width);
+        style
+    }
+
     fn focus_config(&self) -> FocusConfig {
         if self.disabled || !self.has_enabled_items() {
             FocusConfig::None
@@ -557,9 +549,13 @@ fn active_item_id(state: &ListState) -> Option<String> {
 
 impl<M> List<M> {
     fn preferred_width(&self) -> u16 {
+        self.preferred_width_with(render::text::TextMetrics::default())
+    }
+
+    fn preferred_width_with(&self, metrics: render::text::TextMetrics) -> u16 {
         self.items
             .iter()
-            .map(|item| item.label.width() as u16)
+            .map(|item| metrics.width(&item.label).min(u16::MAX as usize) as u16)
             .max()
             .unwrap_or(10)
             .saturating_add(4)

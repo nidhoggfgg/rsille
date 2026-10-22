@@ -242,6 +242,22 @@ impl<M> Widget<M> for Animated<M> {
         self.render_area_with_clip(chunk, ctx, display_area, clip, target, hit_area);
     }
 
+    fn layout_style_with(&self, ctx: &crate::widget::MeasureCtx) -> crate::layout::LayoutStyle {
+        self.child
+            .layout_style_with(&ctx.child_ctx(WidgetKey::for_child(0, self.child.as_ref())))
+    }
+
+    fn measure(
+        &self,
+        proposal: crate::layout::SizeProposal,
+        ctx: &crate::widget::MeasureCtx,
+    ) -> crate::layout::MeasuredSize {
+        self.child.measure(
+            proposal,
+            &ctx.child_ctx(WidgetKey::for_child(0, self.child.as_ref())),
+        )
+    }
+
     fn constraints(&self) -> Constraints {
         self.child.constraints()
     }

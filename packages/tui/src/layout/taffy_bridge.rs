@@ -114,7 +114,12 @@ impl TaffyBridge {
 
         let mut nodes = Vec::with_capacity(widgets.len());
         for (index, widget) in widgets.iter().enumerate() {
-            let style = self.layout_style_to_style(widget.layout_style(), direction, align_items);
+            let child_ctx = measure_ctx.child_ctx(WidgetKey::for_child(index, widget.as_ref()));
+            let style = self.layout_style_to_style(
+                widget.layout_style_with(&child_ctx),
+                direction,
+                align_items,
+            );
             let node = self.tree.new_leaf_with_context(style, index)?;
             nodes.push(node);
         }
@@ -164,7 +169,7 @@ impl TaffyBridge {
                 };
                 let child_ctx = measure_ctx.child_ctx(WidgetKey::for_child(index, widget.as_ref()));
                 let measured = widget.measure(proposal, &child_ctx);
-                let measured = widget.layout_style().clamp_size(measured);
+                let measured = widget.layout_style_with(&child_ctx).clamp_size(measured);
 
                 Size {
                     width: measured.width as f32,
@@ -205,8 +210,11 @@ impl TaffyBridge {
         // Create Taffy nodes for each widget with placement
         let mut nodes = Vec::with_capacity(items.len());
         for (index, (widget, placement)) in items.iter().enumerate() {
-            let style =
-                self.layout_style_to_grid_style_with_placement(widget.layout_style(), placement);
+            let child_ctx = measure_ctx.child_ctx(WidgetKey::for_child(index, *widget));
+            let style = self.layout_style_to_grid_style_with_placement(
+                widget.layout_style_with(&child_ctx),
+                placement,
+            );
             let node = self.tree.new_leaf_with_context(style, index)?;
             nodes.push(node);
         }
@@ -266,7 +274,7 @@ impl TaffyBridge {
                 };
                 let child_ctx = measure_ctx.child_ctx(WidgetKey::for_child(index, *widget));
                 let measured = widget.measure(proposal, &child_ctx);
-                let measured = widget.layout_style().clamp_size(measured);
+                let measured = widget.layout_style_with(&child_ctx).clamp_size(measured);
 
                 Size {
                     width: measured.width as f32,

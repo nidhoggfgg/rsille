@@ -1,7 +1,6 @@
 //! Panel container widget.
 
 use render::area::Area;
-use unicode_width::UnicodeWidthChar;
 
 use crate::event::Event;
 use crate::layout::border_renderer;
@@ -126,7 +125,7 @@ impl<M> Widget<M> for Panel<M> {
             border_renderer::render_border(chunk, border, border_render_style);
             if let Some(title) = self.title.as_ref() {
                 let available = area.width().saturating_sub(4) as usize;
-                let display = truncate_to_width(title, available);
+                let display = truncate_to_width(title, available, chunk.text_metrics());
                 if !display.is_empty() {
                     let _ = chunk.set_string(2, 0, &display, border_render_style);
                 }
@@ -357,18 +356,8 @@ fn fit_axis(natural: u16, proposal: AxisLimit) -> u16 {
     }
 }
 
-fn truncate_to_width(text: &str, max_width: usize) -> String {
-    let mut out = String::new();
-    let mut width = 0;
-    for ch in text.chars() {
-        let ch_width = ch.width().unwrap_or(0);
-        if width + ch_width > max_width {
-            break;
-        }
-        out.push(ch);
-        width += ch_width;
-    }
-    out
+fn truncate_to_width(text: &str, max_width: usize, metrics: render::text::TextMetrics) -> String {
+    metrics.clip(text, 0, max_width)
 }
 
 pub fn panel<M>() -> Panel<M> {
@@ -522,6 +511,6 @@ mod tests {
 
     fn cell_char(buffer: &Buffer, x: u16, y: u16) -> Option<char> {
         let index = (y * buffer.size().width + x) as usize;
-        buffer.content()[index].content.c
+        buffer.content()[index].content.as_char()
     }
 }

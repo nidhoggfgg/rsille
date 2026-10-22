@@ -1,6 +1,6 @@
 //! Progress and loading indicator widgets.
 
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+use render::text::TextWidth;
 
 use crate::layout::Constraints;
 use crate::style::Style;
@@ -125,8 +125,11 @@ impl<M> Widget<M> for ProgressBar<M> {
         }
 
         if let Some(label) = self.label.as_ref() {
-            let text = truncate_to_width(label, area.width() as usize);
-            let x = area.width().saturating_sub(text.width() as u16) / 2;
+            let text = truncate_to_width(label, area.width() as usize, chunk.text_metrics());
+            let x = area
+                .width()
+                .saturating_sub(chunk.text_metrics().width(&text) as u16)
+                / 2;
             let _ = chunk.set_string(x, 0, &text, fill_style);
         }
     }
@@ -327,7 +330,11 @@ impl<M> Widget<M> for LoadingIndicator<M> {
 
         if let Some(label) = self.label.as_ref() {
             let _ = chunk.set_char(1, 0, ' ', label_style);
-            let display = truncate_to_width(label, area.width().saturating_sub(2) as usize);
+            let display = truncate_to_width(
+                label,
+                area.width().saturating_sub(2) as usize,
+                chunk.text_metrics(),
+            );
             let _ = chunk.set_string(2, 0, &display, label_style);
         }
     }
@@ -352,18 +359,8 @@ impl<M> Widget<M> for LoadingIndicator<M> {
     }
 }
 
-fn truncate_to_width(text: &str, max_width: usize) -> String {
-    let mut out = String::new();
-    let mut width = 0;
-    for ch in text.chars() {
-        let ch_width = ch.width().unwrap_or(0);
-        if width + ch_width > max_width {
-            break;
-        }
-        out.push(ch);
-        width += ch_width;
-    }
-    out
+fn truncate_to_width(text: &str, max_width: usize, metrics: render::text::TextMetrics) -> String {
+    metrics.clip(text, 0, max_width)
 }
 
 pub fn progress_bar<M>(value: f64) -> ProgressBar<M> {
@@ -437,7 +434,7 @@ mod tests {
         let rendered: String = (0..9)
             .map(|x| {
                 let index = x as usize;
-                buffer.content()[index].content.c.unwrap()
+                buffer.content()[index].content.as_char().unwrap()
             })
             .collect();
         assert_eq!(rendered, "⠸ Loading");
@@ -458,7 +455,7 @@ mod tests {
         (0..width)
             .map(|x| {
                 let index = x as usize;
-                buffer.content()[index].content.c.unwrap()
+                buffer.content()[index].content.as_char().unwrap()
             })
             .collect()
     }

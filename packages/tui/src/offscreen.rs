@@ -78,7 +78,7 @@ impl BlitRegion {
 }
 
 /// A cell selected for blitting after source/destination clipping.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct BlitCell {
     pub(crate) source_x: u16,
     pub(crate) source_y: u16,
@@ -213,10 +213,29 @@ pub(crate) fn for_each_blit_cell(
                 stats.skipped_clean += 1;
                 continue;
             }
-            if should_skip_cell(cell, options) {
-                stats.skipped_blank += 1;
-                continue;
-            }
+            let owner = cell.owner.unwrap_or(index);
+            let owner_x = owner % source_width;
+            let owner_width = source.content()[owner].width();
+            let owner_dest = region.dest_x as i64 + owner_x as i64 - region.source_x as i64;
+            let fully_visible = owner_x >= region.source_x
+                && owner_x + owner_width
+                    <= region
+                        .source_x
+                        .saturating_add(region.width)
+                        .min(source_width)
+                && owner_dest >= 0
+                && dest_size
+                    .map(|size| owner_dest + owner_width as i64 <= size.width as i64)
+                    .unwrap_or(true);
+            let content = if !fully_visible {
+                Stylized::new(' ', source.content()[owner].content.style)
+            } else {
+                if should_skip_cell(cell, options) {
+                    stats.skipped_blank += 1;
+                    continue;
+                }
+                cell.content.clone()
+            };
 
             stats.visited += 1;
             visit(BlitCell {
@@ -224,7 +243,7 @@ pub(crate) fn for_each_blit_cell(
                 source_y: source_y as u16,
                 dest_x: dest_x as u16,
                 dest_y: dest_y as u16,
-                content: cell.content,
+                content,
             });
         }
     }
@@ -237,10 +256,10 @@ fn should_skip_cell(cell: &Cell, options: BlitOptions) -> bool {
 }
 
 fn is_blank_cell(cell: &Cell) -> bool {
-    match cell.content.c {
-        None => true,
+    match cell.content.as_char() {
+        _ if cell.content.is_empty() => true,
         Some(' ') => !cell.content.has_color() && !cell.content.has_attr(),
-        Some(_) => false,
+        _ => false,
     }
 }
 
@@ -327,7 +346,7 @@ mod tests {
             BlitRegion::new(0, 0, 0, 0, 3, 1),
             Some((3, 1).into()),
             BlitOptions::default().skip_blank().dirty_only(),
-            |cell| visited.push((cell.dest_x, cell.dest_y, cell.content.c)),
+            |cell| visited.push((cell.dest_x, cell.dest_y, cell.content.as_char())),
         );
 
         assert_eq!(visited, vec![(1, 0, Some('c'))]);
@@ -336,8 +355,46 @@ mod tests {
         assert_eq!(stats.skipped_blank, 0);
     }
 
+    #[test]
+    fn blit_replaces_partial_graphemes_at_each_edge_with_spaces() {
+        use render::style::Style;
+        let mut source = Buffer::new((6, 1).into());
+        let mut chunk = Chunk::new(&mut source, Area::new((0, 0).into(), (6, 1).into())).unwrap();
+        chunk.set_string(0, 0, "👩🏽‍💻x中z", Style::default()).unwrap();
+        for (source_x, dest_x, width, expected) in
+            [(1, 0, 4, " x中"), (0, 0, 4, "👩🏽‍💻x "), (0, -1, 6, " x中z")]
+        {
+            let target_width = if dest_x < 0 { 5 } else { 4 };
+            let mut target = Buffer::new((target_width, 1).into());
+            let mut chunk = Chunk::new(
+                &mut target,
+                Area::new((0, 0).into(), (target_width, 1).into()),
+            )
+            .unwrap();
+            blit_region(
+                &mut chunk,
+                &source,
+                BlitRegion::new(source_x, 0, dest_x, 0, width, 1),
+                BlitOptions::default(),
+            );
+            let actual: String = target
+                .content()
+                .iter()
+                .filter(|c| !c.is_occupied)
+                .map(|c| c.content.symbol().into_owned())
+                .collect();
+            assert_eq!(actual, expected);
+            for (i, cell) in target.content().iter().enumerate() {
+                if cell.is_occupied {
+                    let owner = cell.owner.unwrap();
+                    assert!(owner < i && owner + target.content()[owner].width() > i);
+                }
+            }
+        }
+    }
+
     fn cell_char(buffer: &Buffer, x: u16, y: u16) -> Option<char> {
         let index = (y * buffer.size().width + x) as usize;
-        buffer.content().get(index)?.content.c
+        buffer.content().get(index)?.content.as_char()
     }
 }

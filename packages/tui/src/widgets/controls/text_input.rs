@@ -1,10 +1,10 @@
 //! TextInput widget — stateful text input using WidgetStore
 
-use std::borrow::Cow;
+use crate::text::{
+    cursor_scroll, floor_boundary, paint_editor_line, EditBuffer, TextMetrics, UnicodeSegmentation,
+};
 
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
-
-use crate::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+use crate::event::{Event, MouseButton, MouseEventKind};
 use crate::focus::FocusConfig;
 use crate::layout::border_renderer;
 use crate::layout::Constraints;
@@ -33,6 +33,9 @@ pub enum TextInputVariant {
 #[derive(Debug, Clone, Default)]
 pub struct TextInputState {
     pub cursor_position: usize,
+    pub selection_anchor: Option<usize>,
+    /// Horizontal viewport offset in terminal columns.
+    pub horizontal_offset: usize,
     /// Current editing value, synchronized before input and updated on each edit.
     pub value: Option<String>,
 }
@@ -173,14 +176,15 @@ impl<M: 'static> Widget<M> for TextInput<M> {
         if state.value.as_deref() != Some(self.value.as_str()) {
             state.value = Some(self.value.clone());
         }
-        state.cursor_position = state.cursor_position.min(self.value.len());
-        while !self.value.is_char_boundary(state.cursor_position) {
-            state.cursor_position -= 1;
-        }
+        state.cursor_position = floor_boundary(&self.value, state.cursor_position);
+        state.selection_anchor = state
+            .selection_anchor
+            .map(|a| floor_boundary(&self.value, a));
     }
 
     fn render(&self, chunk: &mut render::chunk::Chunk, ctx: &RenderCtx) {
         let area = chunk.area();
+        ctx.record_bounds(area);
         let width = area.width();
         let height = area.height();
 
@@ -220,189 +224,140 @@ impl<M: 'static> Widget<M> for TextInput<M> {
             return;
         }
 
-        // Read cursor position from the persistent store
-        let cursor_position = ctx
-            .state::<TextInputState>()
-            .map(|s| s.cursor_position.min(self.value.len()))
-            .unwrap_or_else(|| self.value.len());
+        let state = ctx.state_or_default::<TextInputState>();
+        let cursor = floor_boundary(&self.value, state.cursor_position);
+        let metrics = theme.text_metrics;
+        let mut selection = state
+            .selection_anchor
+            .filter(|a| *a != cursor)
+            .map(|a| a.min(cursor)..a.max(cursor));
+        let masked;
+        let (text, cursor) = if self.variant == TextInputVariant::Password {
+            selection = selection.map(|s| {
+                self.value[..s.start].graphemes(true).count() * "•".len()
+                    ..self.value[..s.end].graphemes(true).count() * "•".len()
+            });
+            masked = "•".repeat(self.value.graphemes(true).count());
+            (
+                masked.as_str(),
+                self.value[..cursor].graphemes(true).count() * "•".len(),
+            )
+        } else {
+            (self.value.as_str(), cursor)
+        };
+        let column = metrics.byte_to_column(text, cursor);
+        let offset = cursor_scroll(column, state.horizontal_offset, available_width);
 
-        if self.value.is_empty() {
-            if !is_focused {
-                if let Some(ref placeholder) = self.placeholder {
-                    let display_text: String = placeholder.chars().take(available_width).collect();
-                    let _ =
-                        chunk.set_string(text_start_x, text_y, &display_text, placeholder_style);
-                }
-            } else {
-                let _ = chunk.set_char(text_start_x, text_y, ' ', cursor_style);
+        if text.is_empty() && !is_focused {
+            if let Some(placeholder) = &self.placeholder {
+                let display = metrics.clip(placeholder, 0, available_width);
+                let _ = chunk.set_string(text_start_x, text_y, &display, placeholder_style);
             }
         } else {
-            let text_before_cursor = &self.value[..cursor_position];
-            let cursor_visual_pos = text_before_cursor.width();
-
-            // Build display text: avoid clone when no truncation needed
-            let display_text: Cow<str> = if self.variant == TextInputVariant::Password {
-                let masked = "•".repeat(self.value.chars().count());
-                if masked.width() > available_width {
-                    let mut result = String::new();
-                    let mut w = 0;
-                    for ch in masked.chars() {
-                        let ch_w = ch.width().unwrap_or(0);
-                        if w + ch_w > available_width {
-                            break;
-                        }
-                        result.push(ch);
-                        w += ch_w;
-                    }
-                    Cow::Owned(result)
+            paint_editor_line(
+                chunk,
+                (text_start_x, text_y),
+                text,
+                0,
+                selection,
+                (offset, available_width),
+                render_style,
+                theme.styles.selection_range.to_render_style(),
+            );
+            if is_focused {
+                let g = text[cursor..].graphemes(true).next().unwrap_or(" ");
+                let width = metrics.grapheme_width(g, column);
+                let g = if width == 0 || column - offset + width > available_width {
+                    " "
                 } else {
-                    Cow::Owned(masked)
-                }
-            } else if self.value.width() > available_width {
-                let mut result = String::new();
-                let mut w = 0;
-                for ch in self.value.chars() {
-                    let ch_w = ch.width().unwrap_or(0);
-                    if w + ch_w > available_width {
-                        break;
-                    }
-                    result.push(ch);
-                    w += ch_w;
-                }
-                Cow::Owned(result)
-            } else {
-                Cow::Borrowed(self.value.as_str())
-            };
-
-            let _ = chunk.set_string(text_start_x, text_y, display_text.as_ref(), render_style);
-
-            if is_focused && cursor_visual_pos <= available_width {
-                let cursor_x = text_start_x + cursor_visual_pos as u16;
-                let cursor_char = if cursor_position >= self.value.len() {
-                    ' '
-                } else if self.variant == TextInputVariant::Password {
-                    '•'
-                } else {
-                    self.value[cursor_position..].chars().next().unwrap_or(' ')
+                    g
                 };
-                let _ = chunk.set_char(cursor_x, text_y, cursor_char, cursor_style);
+                let _ = chunk.set_forced(
+                    text_start_x + (column - offset) as u16,
+                    text_y,
+                    render::style::Stylized::grapheme(g, cursor_style),
+                );
             }
         }
     }
 
     fn handle_event(&self, event: &Event, ctx: &mut EventCtx<M>) {
-        if ctx.phase() != EventPhase::Target {
+        if ctx.phase() != EventPhase::Target || self.disabled {
             return;
         }
-        if self.disabled {
-            return;
-        }
-
-        if let Event::Key(KeyEvent {
-            code, modifiers, ..
-        }) = event
-        {
-            let mut msg_to_emit: Option<M> = None;
-
+        let metrics = ctx.text_metrics();
+        let local = ctx.local_mouse_position(event);
+        let width = ctx.bounds().map(|a| a.width()).unwrap_or(24);
+        let (start_x, available) = match self.variant {
+            TextInputVariant::Borderless => (1, width.saturating_sub(2) as usize),
+            _ => (2, width.saturating_sub(4) as usize),
+        };
+        let state = ctx.state_mut::<TextInputState>();
+        let mut editor = EditBuffer::new(
+            state.value.clone().unwrap_or_else(|| self.value.clone()),
+            state.cursor_position,
+            state.selection_anchor,
+        );
+        if let (Event::Mouse(mouse), Some((x, y))) = (event, local) {
+            if mouse.kind == MouseEventKind::Down(MouseButton::Left)
+                && y == 1
+                && x >= start_x
+                && (x - start_x) < available as u16
             {
-                let state = ctx.state_mut::<TextInputState>();
-
-                // Fallback for manually constructed EventCtx; runtime syncs before input.
-                if state.value.is_none() {
-                    state.value = Some(self.value.clone());
-                }
-
-                let value: &str = state.value.as_deref().unwrap_or(self.value.as_str());
-                let value_len = value.len();
-
-                // Clamp cursor to value length
-                state.cursor_position = state.cursor_position.min(value_len);
-
-                match code {
-                    KeyCode::Char(c) => {
-                        if modifiers.contains(KeyModifiers::CONTROL) {
-                            if *c == 'a' {
-                                state.cursor_position = value_len;
-                            }
-                            return;
-                        }
-                        let mut new_val = value.to_string();
-                        new_val.insert(state.cursor_position, *c);
-                        state.cursor_position += c.len_utf8();
-                        state.value = Some(new_val.clone());
-                        if let Some(ref handler) = self.on_change {
-                            msg_to_emit = Some(handler(new_val));
-                        }
-                    }
-                    KeyCode::Backspace => {
-                        if state.cursor_position > 0 {
-                            let mut idx = state.cursor_position - 1;
-                            while idx > 0 && !value.is_char_boundary(idx) {
-                                idx -= 1;
-                            }
-                            let mut new_val = value.to_string();
-                            new_val.remove(idx);
-                            state.cursor_position = idx;
-                            state.value = Some(new_val.clone());
-                            if let Some(ref handler) = self.on_change {
-                                msg_to_emit = Some(handler(new_val));
-                            }
-                        }
-                    }
-                    KeyCode::Delete => {
-                        if state.cursor_position < value_len {
-                            // Ensure we're at a char boundary for multi-byte UTF-8
-                            let mut idx = state.cursor_position;
-                            while idx < value_len && !value.is_char_boundary(idx) {
-                                idx += 1;
-                            }
-                            if idx < value_len {
-                                let mut new_val = value.to_string();
-                                new_val.remove(idx);
-                                state.value = Some(new_val.clone());
-                                if let Some(ref handler) = self.on_change {
-                                    msg_to_emit = Some(handler(new_val));
-                                }
-                            }
-                        }
-                    }
-                    KeyCode::Left => {
-                        if state.cursor_position > 0 {
-                            let mut idx = state.cursor_position - 1;
-                            while idx > 0 && !value.is_char_boundary(idx) {
-                                idx -= 1;
-                            }
-                            state.cursor_position = idx;
-                        }
-                    }
-                    KeyCode::Right => {
-                        if state.cursor_position < value_len {
-                            let mut idx = state.cursor_position + 1;
-                            while idx < value_len && !value.is_char_boundary(idx) {
-                                idx += 1;
-                            }
-                            state.cursor_position = idx;
-                        }
-                    }
-                    KeyCode::Home => {
-                        state.cursor_position = 0;
-                    }
-                    KeyCode::End => {
-                        state.cursor_position = value_len;
-                    }
-                    KeyCode::Enter => {
-                        if let Some(ref handler) = self.on_submit {
-                            msg_to_emit = Some(handler(value.to_string()));
-                        }
-                    }
-                    _ => {}
-                }
+                let column = if self.variant == TextInputVariant::Password {
+                    editor.value[..editor.cursor].graphemes(true).count() * metrics.width("•")
+                } else {
+                    metrics.byte_to_column(&editor.value, editor.cursor)
+                };
+                let offset = cursor_scroll(column, state.horizontal_offset, available);
+                let column = offset + (x - start_x) as usize;
+                editor.cursor = if self.variant == TextInputVariant::Password {
+                    editor
+                        .value
+                        .grapheme_indices(true)
+                        .nth(column / metrics.width("•").max(1))
+                        .map(|(b, _)| b)
+                        .unwrap_or(editor.value.len())
+                } else {
+                    metrics.column_to_byte(&editor.value, column)
+                };
+                editor.anchor = None;
+            } else {
+                return;
             }
-
-            if let Some(msg) = msg_to_emit {
-                ctx.emit(msg);
+        } else {
+            let result = editor.handle(event, metrics, false);
+            if !result.handled {
+                return;
             }
+            let message = if result.changed {
+                self.on_change.as_ref().map(|f| f(editor.value.clone()))
+            } else if result.submit {
+                self.on_submit.as_ref().map(|f| f(editor.value.clone()))
+            } else {
+                None
+            };
+            state.cursor_position = editor.cursor;
+            state.selection_anchor = editor.anchor;
+            state.horizontal_offset = input_scroll(
+                &editor.value,
+                editor.cursor,
+                state.horizontal_offset,
+                available,
+                metrics,
+                self.variant,
+            );
+            state.value = Some(editor.value);
+            ctx.set_handled();
+            if let Some(message) = message {
+                ctx.emit(message);
+            }
+            return;
         }
+        state.cursor_position = editor.cursor;
+        state.selection_anchor = editor.anchor;
+        state.value = Some(editor.value);
+        ctx.set_handled();
     }
 
     fn constraints(&self) -> Constraints {
@@ -431,4 +386,20 @@ impl<M: 'static> Widget<M> for TextInput<M> {
 /// Create a new text input widget.
 pub fn text_input<M>() -> TextInput<M> {
     TextInput::new()
+}
+
+fn input_scroll(
+    value: &str,
+    cursor: usize,
+    offset: usize,
+    width: usize,
+    metrics: TextMetrics,
+    variant: TextInputVariant,
+) -> usize {
+    let column = if variant == TextInputVariant::Password {
+        value[..cursor].graphemes(true).count() * metrics.width("•")
+    } else {
+        metrics.byte_to_column(value, cursor)
+    };
+    cursor_scroll(column, offset, width)
 }

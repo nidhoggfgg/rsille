@@ -114,6 +114,9 @@ impl<M: 'static, N: 'static> Widget<N> for MappedWidget<M, N> {
     fn layout_style(&self) -> LayoutStyle {
         self.inner().layout_style()
     }
+    fn layout_style_with(&self, ctx: &MeasureCtx) -> LayoutStyle {
+        self.inner().layout_style_with(ctx)
+    }
     fn measure(&self, proposal: SizeProposal, ctx: &MeasureCtx) -> MeasuredSize {
         self.inner().measure(proposal, ctx)
     }
@@ -151,6 +154,10 @@ impl<M> Widget<M> for ScopedWidget<M> {
     }
     fn layout_style(&self) -> LayoutStyle {
         self.children[0].layout_style()
+    }
+    fn layout_style_with(&self, ctx: &MeasureCtx) -> LayoutStyle {
+        self.children[0]
+            .layout_style_with(&ctx.child_ctx(WidgetKey::for_child(0, self.children[0].as_ref())))
     }
     fn measure(&self, proposal: SizeProposal, ctx: &MeasureCtx) -> MeasuredSize {
         self.children[0].measure(

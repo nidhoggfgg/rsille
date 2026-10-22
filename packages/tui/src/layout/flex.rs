@@ -522,7 +522,7 @@ mod tests {
         let cell = &buffer.content()[0];
         let colors = cell.content.style.colors.unwrap();
         let surface_colors = theme.styles.surface.to_render_style().colors.unwrap();
-        assert_eq!(cell.content.c, Some('H'));
+        assert_eq!(cell.content.as_char(), Some('H'));
         assert_eq!(colors.background, surface_colors.background);
     }
 

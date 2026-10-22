@@ -583,6 +583,7 @@ impl<M> Visual<M> {
             area,
             Some(seed),
             |offscreen_chunk| {
+                offscreen_chunk.set_text_metrics(ctx.theme().text_metrics);
                 let started = profile_enabled.then(Instant::now);
                 self.child.render(offscreen_chunk, child_ctx);
                 if let Some(started) = started {
@@ -678,6 +679,22 @@ impl<M> Widget<M> for Visual<M> {
 
     fn hit_test_mode(&self) -> HitTestMode {
         self.hit_test_mode
+    }
+
+    fn layout_style_with(&self, ctx: &crate::widget::MeasureCtx) -> crate::layout::LayoutStyle {
+        self.child
+            .layout_style_with(&ctx.child_ctx(WidgetKey::for_child(0, self.child.as_ref())))
+    }
+
+    fn measure(
+        &self,
+        proposal: crate::layout::SizeProposal,
+        ctx: &crate::widget::MeasureCtx,
+    ) -> crate::layout::MeasuredSize {
+        self.child.measure(
+            proposal,
+            &ctx.child_ctx(WidgetKey::for_child(0, self.child.as_ref())),
+        )
     }
 
     fn constraints(&self) -> Constraints {

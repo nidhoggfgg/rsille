@@ -27,18 +27,25 @@ impl<'a> Chunk<'a> {
     }
 
     pub fn set(&mut self, x: u16, y: u16, content: Stylized) -> Result<usize, DrawErr> {
-        let content_width = content.width() as u16;
-        if x + content_width > self.area.size().width {
+        let content_width = content.width_with(self.text_metrics(), x as usize) as u16;
+        if x as usize + content_width as usize > self.area.size().width as usize {
             trace!(
                 target: "render::chunk",
                 "content too wide at ({}, {}): width={}, available={}",
-                x, y, content_width, self.area.size().width - x
+                x, y, content_width, self.area.size().width.saturating_sub(x)
             );
             return Err(DrawErr::content_too_wide(
                 content_width,
                 self.area.size().width,
                 x,
             ));
+        }
+
+        if content.as_char() == Some('\t') {
+            for offset in 0..content_width {
+                self.set(x + offset, y, Stylized::new(' ', content.style))?;
+            }
+            return Ok(content_width as usize);
         }
 
         if let Some(pos) = self.area.to_absolute(x, y) {
@@ -62,18 +69,25 @@ impl<'a> Chunk<'a> {
     }
 
     pub fn set_forced(&mut self, x: u16, y: u16, content: Stylized) -> Result<usize, DrawErr> {
-        let content_width = content.width() as u16;
-        if x + content_width > self.area.size().width {
+        let content_width = content.width_with(self.text_metrics(), x as usize) as u16;
+        if x as usize + content_width as usize > self.area.size().width as usize {
             trace!(
                 target: "render::chunk",
                 "forced set: content too wide at ({}, {}): width={}, available={}",
-                x, y, content_width, self.area.size().width - x
+                x, y, content_width, self.area.size().width.saturating_sub(x)
             );
             return Err(DrawErr::content_too_wide(
                 content_width,
                 self.area.size().width,
                 x,
             ));
+        }
+
+        if content.as_char() == Some('\t') {
+            for offset in 0..content_width {
+                self.set_forced(x + offset, y, Stylized::new(' ', content.style))?;
+            }
+            return Ok(content_width as usize);
         }
 
         if let Some(pos) = self.area.to_absolute(x, y) {
@@ -86,6 +100,46 @@ impl<'a> Chunk<'a> {
             );
             Err(DrawErr::out_of_bounds((x, y).into(), self.area.size()))
         }
+    }
+
+    pub fn text_metrics(&self) -> crate::text::TextMetrics {
+        self.buffer.text_metrics()
+    }
+
+    pub fn set_text_metrics(&mut self, metrics: crate::text::TextMetrics) {
+        self.buffer.set_text_metrics(metrics);
+    }
+
+    /// Paint rich text, preserving graphemes crossing span boundaries.
+    pub fn set_line(
+        &mut self,
+        x: u16,
+        y: u16,
+        line: &crate::text::Line<'_>,
+    ) -> Result<(), DrawErr> {
+        let mut column = 0usize;
+        for cell in line.cells() {
+            let width = cell.width_with(self.text_metrics(), column);
+            if x as usize + column + width > self.area.width() as usize {
+                break;
+            }
+            if width == 0 {
+                continue;
+            }
+            if cell.as_char() == Some('\t') {
+                for offset in 0..width {
+                    self.set_forced(
+                        x + (column + offset) as u16,
+                        y,
+                        Stylized::new(' ', cell.style),
+                    )?;
+                }
+            } else {
+                self.set_forced(x + column as u16, y, cell)?;
+            }
+            column += width;
+        }
+        Ok(())
     }
 
     pub fn area(&self) -> Area {
@@ -135,16 +189,42 @@ impl<'a> Chunk<'a> {
         string: &str,
         style: Style,
     ) -> Result<(), DrawErr> {
-        let mut current_x = x;
-        for ch in string.chars() {
-            if current_x >= self.area.size().width {
-                break; // Stop if we exceed the chunk width
+        use crate::text::UnicodeSegmentation;
+        let mut column = 0usize;
+        let metrics = self.text_metrics();
+        for g in string.graphemes(true) {
+            let width = metrics.grapheme_width(g, column);
+            if x as usize + column + width > self.area.width() as usize {
+                break;
             }
-            let stylized = Stylized::new(ch, style);
-            match self.set_forced(current_x, y, stylized) {
-                Ok(width) => current_x += width as u16,
-                Err(_) => break, // Stop on error
+            if width == 0 {
+                continue;
             }
+            if g == "\t" {
+                for offset in 0..width {
+                    self.set_forced(x + (column + offset) as u16, y, Stylized::new(' ', style))?;
+                }
+            } else {
+                self.set_forced(x + column as u16, y, Stylized::grapheme(g, style))?;
+            }
+            column += width;
+        }
+        Ok(())
+    }
+
+    /// Paint rich text with explicit line boundaries and clipping.
+    pub fn set_text(
+        &mut self,
+        x: u16,
+        y: u16,
+        text: &crate::text::Text<'_>,
+    ) -> Result<(), DrawErr> {
+        for (row, line) in text.lines.iter().enumerate() {
+            let row = y as usize + row;
+            if row >= self.area.height() as usize {
+                break;
+            }
+            self.set_line(x, row as u16, line)?;
         }
         Ok(())
     }
@@ -160,9 +240,16 @@ impl<'a> Chunk<'a> {
         style: Style,
     ) -> Result<(), DrawErr> {
         for dy in 0..height {
-            for dx in 0..width {
+            let mut dx = 0usize;
+            while dx < width as usize {
                 let stylized = Stylized::new(ch, style);
-                let _ = self.set_forced(x + dx, y + dy, stylized);
+                let columns = stylized.width_with(self.text_metrics(), x as usize + dx);
+                if columns == 0 || dx + columns > width as usize {
+                    break;
+                }
+                let _ =
+                    self.set_forced(x.saturating_add(dx as u16), y.saturating_add(dy), stylized);
+                dx += columns;
             }
         }
         Ok(())

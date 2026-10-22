@@ -1,8 +1,8 @@
 use std::{borrow::Cow, io};
 
+use crate::text::{AmbiguousWidth, TextMetrics, UnicodeSegmentation};
 use crossterm::style::{Attributes, Colors, Print, SetAttributes, SetColors};
-use log::trace;
-use unicode_width::UnicodeWidthChar;
+use std::sync::Arc;
 
 /// 样式定义，包含颜色和文本属性
 #[derive(Debug, Clone, PartialEq, Eq, Default, Copy)]
@@ -105,116 +105,146 @@ fn merge_colors(base: Option<Colors>, overlay: Option<Colors>) -> Option<Colors>
     }
 }
 
-/// 带样式的单个字符
-#[derive(Debug, Clone, PartialEq, Eq, Default, Copy)]
+/// A terminal cell containing one extended grapheme cluster.
+/// Scalars are stored inline; multi-scalar clusters share their UTF-8 storage
+/// when buffers are cloned. Empty cells produce no terminal output.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Stylized {
-    pub c: Option<char>,
+    symbol: Symbol,
     pub style: Style,
 }
 
-impl Stylized {
-    /// 创建一个带样式的字符
-    #[inline]
-    pub fn new(c: char, style: Style) -> Self {
-        Self { c: Some(c), style }
-    }
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+enum Symbol {
+    #[default]
+    Empty,
+    Scalar(char),
+    Cluster(Arc<str>),
+}
 
-    /// 创建一个无样式的字符
-    #[inline]
-    pub fn plain(c: char) -> Self {
+impl Stylized {
+    pub fn new(c: char, style: Style) -> Self {
         Self {
-            c: Some(c),
-            style: Style::default(),
+            symbol: Symbol::Scalar(c),
+            style,
         }
     }
-
-    /// 创建一个空格字符
-    #[inline]
+    pub fn plain(c: char) -> Self {
+        Self::new(c, Style::default())
+    }
     pub fn space() -> Self {
         Self::plain(' ')
     }
-
-    /// 创建一个空字符（不渲染任何内容）
-    #[inline]
     pub fn empty() -> Self {
-        Self {
-            c: None,
-            style: Style::default(),
+        Self::default()
+    }
+
+    /// Store the first complete grapheme; use Chunk::set_string for text.
+    pub fn grapheme(text: &str, style: Style) -> Self {
+        let symbol = match text.graphemes(true).next() {
+            None => Symbol::Empty,
+            Some(g) => {
+                let mut chars = g.chars();
+                let first = chars.next().unwrap();
+                if chars.next().is_none() {
+                    Symbol::Scalar(first)
+                } else {
+                    Symbol::Cluster(Arc::from(g))
+                }
+            }
+        };
+        Self { symbol, style }
+    }
+
+    pub fn symbol(&self) -> Cow<'_, str> {
+        match &self.symbol {
+            Symbol::Empty => Cow::Borrowed(""),
+            Symbol::Scalar(c) => Cow::Owned(c.to_string()),
+            Symbol::Cluster(text) => Cow::Borrowed(text),
         }
     }
 
-    /// 设置字符
-    #[inline]
+    /// Scalar-only compatibility accessor. Multi-scalar graphemes return None.
+    pub fn as_char(&self) -> Option<char> {
+        match self.symbol {
+            Symbol::Scalar(c) => Some(c),
+            _ => None,
+        }
+    }
     pub fn set_char(&mut self, c: char) -> &mut Self {
-        self.c = Some(c);
+        self.symbol = Symbol::Scalar(c);
         self
     }
-
-    /// 设置样式
-    #[inline]
+    pub fn set_grapheme(&mut self, text: &str) -> &mut Self {
+        self.symbol = Self::grapheme(text, self.style).symbol;
+        self
+    }
     pub fn set_style(&mut self, style: Style) -> &mut Self {
         self.style = style;
         self
     }
-
-    /// 应用样式（链式调用）
-    #[inline]
     pub fn with_style(mut self, style: Style) -> Self {
         self.style = style;
         self
     }
-
-    /// 是否为空字符
-    #[inline]
     pub fn is_empty(&self) -> bool {
-        self.c.is_none()
+        matches!(self.symbol, Symbol::Empty)
     }
-
-    /// 检查是否有颜色样式
-    #[inline]
+    pub fn is_whitespace(&self) -> bool {
+        match &self.symbol {
+            Symbol::Empty => true,
+            Symbol::Scalar(c) => c.is_whitespace(),
+            Symbol::Cluster(text) => text.chars().all(char::is_whitespace),
+        }
+    }
     pub fn has_color(&self) -> bool {
         self.style.has_color()
     }
-
-    /// 检查是否有属性样式
-    #[inline]
     pub fn has_attr(&self) -> bool {
         self.style.has_attr()
     }
-
-    /// 获取字符宽度
-    #[inline]
     pub fn width(&self) -> usize {
-        self.c.and_then(|c| c.width()).unwrap_or(0)
+        self.width_with(TextMetrics::default(), 0)
     }
-
-    /// 获取字符宽度（CJK 模式）
-    #[inline]
     pub fn width_cjk(&self) -> usize {
-        self.c.and_then(|c| c.width_cjk()).unwrap_or(0)
+        self.width_with(
+            TextMetrics {
+                ambiguous_width: AmbiguousWidth::Wide,
+                ..TextMetrics::default()
+            },
+            0,
+        )
     }
-
-    /// 将字符和样式输出到缓冲区
+    pub fn width_with(&self, metrics: TextMetrics, column: usize) -> usize {
+        // Avoid allocation for the overwhelmingly common scalar cell.
+        let mut bytes = [0; 4];
+        match &self.symbol {
+            Symbol::Empty => 0,
+            Symbol::Scalar(c) => metrics.grapheme_width(c.encode_utf8(&mut bytes), column),
+            Symbol::Cluster(text) => metrics.grapheme_width(text, column),
+        }
+    }
     pub fn queue(&self, buffer: &mut impl io::Write) -> io::Result<()> {
-        if let Some(ch) = self.c {
-            #[cfg(debug_assertions)]
-            if self.style.colors.is_some() || self.style.attr.is_some() {
-                trace!(
-                    target: "render::style",
-                    "applying style to '{}': colors={:?}, attr={:?}",
-                    if ch.is_whitespace() { ' ' } else { ch },
-                    self.style.colors,
-                    self.style.attr
-                );
+        if self.is_empty() || self.width() == 0 {
+            return Ok(());
+        }
+        if let Some(colors) = self.style.colors {
+            crossterm::queue!(buffer, SetColors(colors))?;
+        }
+        if let Some(attr) = self.style.attr {
+            crossterm::queue!(buffer, SetAttributes(attr))?;
+        }
+        match &self.symbol {
+            Symbol::Empty => {}
+            Symbol::Scalar('\t') => {
+                crossterm::queue!(buffer, Print(" ".repeat(self.width())))?;
             }
-
-            if let Some(colors) = self.style.colors {
-                crossterm::queue!(buffer, SetColors(colors))?;
+            Symbol::Scalar(c) => {
+                crossterm::queue!(buffer, Print(c))?;
             }
-            if let Some(attr) = self.style.attr {
-                crossterm::queue!(buffer, SetAttributes(attr))?;
+            Symbol::Cluster(text) => {
+                crossterm::queue!(buffer, Print(text))?;
             }
-            crossterm::queue!(buffer, Print(ch))?;
         }
         Ok(())
     }
@@ -277,7 +307,41 @@ impl<'a> StylizedLine<'a> {
     /// 获取行的显示宽度
     #[inline]
     pub fn width(&self) -> usize {
-        self.content.iter().map(|x| x.width()).sum()
+        self.width_with(TextMetrics::default())
+    }
+
+    pub fn width_with(&self, metrics: TextMetrics) -> usize {
+        metrics.width(
+            &self
+                .content
+                .iter()
+                .map(|s| s.content.as_ref())
+                .collect::<String>(),
+        )
+    }
+
+    /// Graphemes spanning multiple spans use the leading span's style.
+    pub fn cells(&self) -> Vec<Stylized> {
+        let text: String = self.content.iter().map(|s| s.content.as_ref()).collect();
+        let mut offset = 0;
+        let spans: Vec<_> = self
+            .content
+            .iter()
+            .map(|span| {
+                offset += span.content.len();
+                (offset, span.style)
+            })
+            .collect();
+        text.grapheme_indices(true)
+            .map(|(byte, g)| {
+                let style = spans
+                    .iter()
+                    .find(|(end, _)| *end > byte)
+                    .map(|(_, s)| *s)
+                    .unwrap_or_default();
+                Stylized::grapheme(g, style)
+            })
+            .collect()
     }
 
     /// 判断是否为空行
@@ -383,16 +447,21 @@ impl<'a> StylizedText<'a> {
     /// 获取文本显示宽度
     #[inline]
     pub fn width(&self) -> usize {
-        self.content.chars().map(|x| x.width().unwrap_or(0)).sum()
+        self.width_with(TextMetrics::default())
+    }
+
+    pub fn width_with(&self, metrics: TextMetrics) -> usize {
+        metrics.width(&self.content)
     }
 
     /// 获取文本显示宽度（CJK 模式）
     #[inline]
     pub fn width_cjk(&self) -> usize {
-        self.content
-            .chars()
-            .map(|x| x.width_cjk().unwrap_or(0))
-            .sum()
+        TextMetrics {
+            ambiguous_width: AmbiguousWidth::Wide,
+            ..TextMetrics::default()
+        }
+        .width(&self.content)
     }
 
     /// 判断是否为空文本
@@ -401,30 +470,31 @@ impl<'a> StylizedText<'a> {
         self.content.is_empty()
     }
 
-    /// 获取文本长度（字符数）
+    /// 获取文本长度（字素簇数）
     #[inline]
     pub fn len(&self) -> usize {
-        self.content.chars().count()
+        self.content.graphemes(true).count()
     }
 
     /// 将文本输出到缓冲区
     pub fn queue(&self, buffer: &mut impl io::Write) -> io::Result<()> {
-        for c in self.content.chars() {
-            Stylized::new(c, self.style).queue(buffer)?;
+        let text = TextMetrics::default().expand(&self.content);
+        for c in text.graphemes(true) {
+            Stylized::grapheme(c, self.style).queue(buffer)?;
         }
         Ok(())
     }
 }
 
 pub struct StylizedTextIter<'a> {
-    chars: std::str::Chars<'a>,
+    graphemes: unicode_segmentation::Graphemes<'a>,
     style: Style,
 }
 
 impl<'a> StylizedTextIter<'a> {
     fn new(text: &'a StylizedText<'a>) -> Self {
         Self {
-            chars: text.content.chars(),
+            graphemes: text.content.graphemes(true),
             style: text.style,
         }
     }
@@ -434,8 +504,8 @@ impl Iterator for StylizedTextIter<'_> {
     type Item = Stylized;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let c = self.chars.next()?;
-        Some(Stylized::new(c, self.style))
+        let c = self.graphemes.next()?;
+        Some(Stylized::grapheme(c, self.style))
     }
 }
 

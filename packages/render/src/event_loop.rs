@@ -5,7 +5,10 @@ use std::{
 
 use crossterm::{
     cursor::{position, Hide, MoveToNextLine, Show},
-    event::{DisableMouseCapture, EnableMouseCapture, Event, EventStream, KeyEvent, MouseEvent},
+    event::{
+        DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+        Event, EventStream, KeyEvent, MouseEvent,
+    },
     execute,
     terminal::{
         size as terminal_size, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen,
@@ -22,6 +25,7 @@ struct TerminalGuard {
     mouse_capture: bool,
     raw_mode: bool,
     alt_screen: bool,
+    bracketed_paste: bool,
 }
 
 impl TerminalGuard {
@@ -32,31 +36,42 @@ impl TerminalGuard {
         mouse_capture: bool,
         hide_cursor: bool,
     ) -> Result<Self, DrawErr> {
+        // Keep the guard live during setup so partial failures roll back.
+        let mut guard = Self {
+            hide_cursor: false,
+            mouse_capture: false,
+            raw_mode: false,
+            alt_screen: false,
+            bracketed_paste: false,
+        };
         if alt_screen {
             execute!(stdout(), EnterAlternateScreen).map_err(DrawErr::TerminalSetup)?;
+            guard.alt_screen = true;
             execute!(stdout(), Clear(ClearType::All)).map_err(DrawErr::TerminalSetup)?;
         }
         if raw_mode {
             crossterm::terminal::enable_raw_mode().map_err(DrawErr::TerminalSetup)?;
+            guard.raw_mode = true;
+            execute!(stdout(), EnableBracketedPaste).map_err(DrawErr::TerminalSetup)?;
+            guard.bracketed_paste = true;
         }
         if mouse_capture {
             execute!(stdout(), EnableMouseCapture).map_err(DrawErr::TerminalSetup)?;
+            guard.mouse_capture = true;
         }
         if hide_cursor {
             execute!(stdout(), Hide).map_err(DrawErr::TerminalSetup)?;
+            guard.hide_cursor = true;
         }
-
-        Ok(Self {
-            hide_cursor,
-            mouse_capture,
-            raw_mode,
-            alt_screen,
-        })
+        Ok(guard)
     }
 }
 
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
+        if self.bracketed_paste {
+            let _ = execute!(stdout(), DisableBracketedPaste);
+        }
         if self.hide_cursor {
             let _ = execute!(stdout(), Show);
         }

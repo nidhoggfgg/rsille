@@ -1,10 +1,10 @@
 //! Multiline text area widget.
 
-use std::borrow::Cow;
+use crate::text::{
+    cursor_scroll, floor_boundary, paint_editor_line, EditBuffer, TextMetrics, UnicodeSegmentation,
+};
 
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
-
-use crate::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+use crate::event::{Event, MouseButton, MouseEventKind};
 use crate::focus::FocusConfig;
 use crate::layout::border_renderer;
 use crate::layout::{ensure_item_visible, Constraints, LayoutStyle};
@@ -22,6 +22,8 @@ pub enum TextAreaVariant {
 #[derive(Debug, Clone, Default)]
 pub struct TextAreaState {
     pub cursor_position: usize,
+    pub selection_anchor: Option<usize>,
+    pub horizontal_offset: usize,
     pub scroll_offset: usize,
     pub value: Option<String>,
 }
@@ -165,11 +167,12 @@ impl<M: 'static> Widget<M> for TextArea<M> {
         if state.value.as_deref() != Some(self.value.as_str()) {
             state.value = Some(self.value.clone());
         }
-        state.cursor_position = state.cursor_position.min(self.value.len());
-        while !self.value.is_char_boundary(state.cursor_position) {
-            state.cursor_position -= 1;
-        }
-        let (line, _) = line_col_for_byte(&self.value, state.cursor_position);
+        state.cursor_position = floor_boundary(&self.value, state.cursor_position);
+        state.selection_anchor = state
+            .selection_anchor
+            .map(|a| floor_boundary(&self.value, a));
+        let (line, _) =
+            TextMetrics::default().byte_to_line_column(&self.value, state.cursor_position);
         let visible_rows = match self.variant {
             TextAreaVariant::Default => self.height.saturating_sub(2),
             TextAreaVariant::Borderless => self.height,
@@ -180,6 +183,7 @@ impl<M: 'static> Widget<M> for TextArea<M> {
 
     fn render(&self, chunk: &mut render::chunk::Chunk, ctx: &RenderCtx) {
         let area = chunk.area();
+        ctx.record_bounds(area);
         if area.width() == 0 || area.height() == 0 {
             return;
         }
@@ -212,15 +216,18 @@ impl<M: 'static> Widget<M> for TextArea<M> {
         }
 
         let state = ctx.state_or_default::<TextAreaState>();
-        let cursor_position = state.cursor_position.min(self.value.len());
-        let (cursor_line, cursor_col) = line_col_for_byte(&self.value, cursor_position);
+        let cursor_position = floor_boundary(&self.value, state.cursor_position);
+        let metrics = theme.text_metrics;
+        let (cursor_line, cursor_col) = metrics.byte_to_line_column(&self.value, cursor_position);
+        let horizontal_offset =
+            cursor_scroll(cursor_col, state.horizontal_offset, content_width as usize);
         let visible_rows = content_height as usize;
         let scroll_offset = ensure_item_visible(state.scroll_offset, cursor_line, visible_rows);
 
         if self.value.is_empty() {
             if let Some(placeholder) = self.placeholder.as_ref() {
                 if !is_focused {
-                    let display = truncate_to_width(placeholder, content_width as usize);
+                    let display = metrics.clip(placeholder, 0, content_width as usize);
                     let _ = chunk.set_string(content_x, content_y, &display, placeholder_style);
                 }
             }
@@ -230,34 +237,53 @@ impl<M: 'static> Widget<M> for TextArea<M> {
             return;
         }
 
-        for (row, line) in self
+        let selection = state
+            .selection_anchor
+            .filter(|a| *a != cursor_position)
+            .map(|a| a.min(cursor_position)..a.max(cursor_position));
+        for (row, (byte_start, line)) in self
             .value
             .split('\n')
+            .scan(0, |offset, line| {
+                let start = *offset;
+                *offset += line.len() + 1;
+                Some((start, line))
+            })
             .skip(scroll_offset)
             .take(visible_rows)
             .enumerate()
         {
-            let display: Cow<str> = if line.width() > content_width as usize {
-                Cow::Owned(truncate_to_width(line, content_width as usize))
-            } else {
-                Cow::Borrowed(line)
-            };
-            let _ = chunk.set_string(content_x, content_y + row as u16, &display, render_style);
+            paint_editor_line(
+                chunk,
+                (content_x, content_y + row as u16),
+                line,
+                byte_start,
+                selection.clone(),
+                (horizontal_offset, content_width as usize),
+                render_style,
+                theme.styles.selection_range.to_render_style(),
+            );
         }
 
-        if is_focused
-            && cursor_line >= scroll_offset
-            && cursor_line < scroll_offset + visible_rows
-            && cursor_col <= content_width as usize
+        if is_focused && cursor_line >= scroll_offset && cursor_line < scroll_offset + visible_rows
         {
             let y = content_y + (cursor_line - scroll_offset) as u16;
-            let cursor_line_text = self.value.split('\n').nth(cursor_line).unwrap_or("");
-            let before_cursor = take_chars(cursor_line_text, cursor_col);
-            let cursor_x = content_x + before_cursor.width().min(content_width as usize) as u16;
-            if cursor_x < content_x + content_width {
-                let cursor_char = cursor_line_text.chars().nth(cursor_col).unwrap_or(' ');
-                let _ = chunk.set_char(cursor_x, y, cursor_char, cursor_style);
-            }
+            let g = self.value[cursor_position..]
+                .graphemes(true)
+                .next()
+                .unwrap_or(" ");
+            let width = metrics.grapheme_width(g, cursor_col);
+            let g = if width == 0 || cursor_col - horizontal_offset + width > content_width as usize
+            {
+                " "
+            } else {
+                g
+            };
+            let _ = chunk.set_forced(
+                content_x + (cursor_col - horizontal_offset) as u16,
+                y,
+                render::style::Stylized::grapheme(g, cursor_style),
+            );
         }
     }
 
@@ -265,120 +291,70 @@ impl<M: 'static> Widget<M> for TextArea<M> {
         if ctx.phase() != EventPhase::Target || self.disabled {
             return;
         }
-
-        let Event::Key(KeyEvent {
-            code, modifiers, ..
-        }) = event
-        else {
-            return;
+        let metrics = ctx.text_metrics();
+        let local = ctx.local_mouse_position(event);
+        let bounds = ctx.bounds();
+        let inset = u16::from(self.variant == TextAreaVariant::Default);
+        let rows = bounds
+            .map(|a| a.height())
+            .unwrap_or(self.height)
+            .saturating_sub(inset * 2)
+            .max(1) as usize;
+        let columns = bounds
+            .map(|a| a.width())
+            .unwrap_or(20)
+            .saturating_sub(inset * 2)
+            .max(1) as usize;
+        let state = ctx.state_mut::<TextAreaState>();
+        let mut editor = EditBuffer::new(
+            state.value.clone().unwrap_or_else(|| self.value.clone()),
+            state.cursor_position,
+            state.selection_anchor,
+        );
+        let result = if let (Event::Mouse(mouse), Some((x, y))) = (event, local) {
+            if mouse.kind != MouseEventKind::Down(MouseButton::Left)
+                || x < inset
+                || y < inset
+                || x as usize >= columns + inset as usize
+                || y as usize >= rows + inset as usize
+            {
+                return;
+            }
+            let (line, col) = metrics.byte_to_line_column(&editor.value, editor.cursor);
+            let scroll = ensure_item_visible(state.scroll_offset, line, rows);
+            let horizontal = cursor_scroll(col, state.horizontal_offset, columns);
+            editor.cursor = metrics.line_column_to_byte(
+                &editor.value,
+                scroll + (y - inset) as usize,
+                horizontal + (x - inset) as usize,
+            );
+            editor.anchor = None;
+            crate::text::EditResult {
+                handled: true,
+                ..Default::default()
+            }
+        } else {
+            editor.handle(event, metrics, true)
         };
-
-        let mut msg_to_emit = None;
-        {
-            let state = ctx.state_mut::<TextAreaState>();
-            // Fallback for manually constructed EventCtx; runtime syncs before input.
-            if state.value.is_none() {
-                state.value = Some(self.value.clone());
-            }
-
-            let value = state.value.as_deref().unwrap_or(self.value.as_str());
-            state.cursor_position = state.cursor_position.min(value.len());
-            let mut new_cursor = state.cursor_position;
-            let mut next_value = None;
-
-            match code {
-                KeyCode::Char(c) => {
-                    if modifiers.contains(KeyModifiers::CONTROL) {
-                        return;
-                    }
-                    let mut updated = value.to_string();
-                    updated.insert(new_cursor, *c);
-                    new_cursor += c.len_utf8();
-                    next_value = Some(updated);
-                }
-                KeyCode::Enter => {
-                    if modifiers.contains(KeyModifiers::CONTROL) {
-                        if let Some(handler) = self.on_submit.as_ref() {
-                            msg_to_emit = Some(handler(value.to_string()));
-                        }
-                    } else {
-                        let mut updated = value.to_string();
-                        updated.insert(new_cursor, '\n');
-                        new_cursor += 1;
-                        next_value = Some(updated);
-                    }
-                }
-                KeyCode::Backspace => {
-                    if new_cursor > 0 {
-                        let previous = previous_char_boundary(value, new_cursor);
-                        let mut updated = value.to_string();
-                        updated.replace_range(previous..new_cursor, "");
-                        new_cursor = previous;
-                        next_value = Some(updated);
-                    }
-                }
-                KeyCode::Delete => {
-                    if new_cursor < value.len() {
-                        let next = next_char_boundary(value, new_cursor);
-                        let mut updated = value.to_string();
-                        updated.replace_range(new_cursor..next, "");
-                        next_value = Some(updated);
-                    }
-                }
-                KeyCode::Left => new_cursor = previous_char_boundary(value, new_cursor),
-                KeyCode::Right => new_cursor = next_char_boundary(value, new_cursor),
-                KeyCode::Up => {
-                    let (line, col) = line_col_for_byte(value, new_cursor);
-                    if line > 0 {
-                        new_cursor = byte_for_line_col(value, line - 1, col);
-                    }
-                }
-                KeyCode::Down => {
-                    let (line, col) = line_col_for_byte(value, new_cursor);
-                    let last_line = value.split('\n').count().saturating_sub(1);
-                    if line < last_line {
-                        new_cursor = byte_for_line_col(value, line + 1, col);
-                    }
-                }
-                KeyCode::Home => {
-                    let (line, _) = line_col_for_byte(value, new_cursor);
-                    new_cursor = byte_for_line_col(value, line, 0);
-                }
-                KeyCode::End => {
-                    let (line, _) = line_col_for_byte(value, new_cursor);
-                    let line_len = value
-                        .split('\n')
-                        .nth(line)
-                        .map(str::chars)
-                        .map(Iterator::count)
-                        .unwrap_or(0);
-                    new_cursor = byte_for_line_col(value, line, line_len);
-                }
-                _ => return,
-            }
-
-            if let Some(updated) = next_value {
-                state.cursor_position = new_cursor;
-                let (line, _) = line_col_for_byte(&updated, new_cursor);
-                let visible_rows = self.height.saturating_sub(2) as usize;
-                state.scroll_offset =
-                    ensure_item_visible(state.scroll_offset, line, visible_rows.max(1));
-                state.value = Some(updated.clone());
-                if let Some(handler) = self.on_change.as_ref() {
-                    msg_to_emit = Some(handler(updated));
-                }
-            } else {
-                state.cursor_position = new_cursor;
-                let (line, _) = line_col_for_byte(value, new_cursor);
-                let visible_rows = self.height.saturating_sub(2) as usize;
-                state.scroll_offset =
-                    ensure_item_visible(state.scroll_offset, line, visible_rows.max(1));
-            }
+        if !result.handled {
+            return;
         }
-
+        let message = if result.changed {
+            self.on_change.as_ref().map(|f| f(editor.value.clone()))
+        } else if result.submit {
+            self.on_submit.as_ref().map(|f| f(editor.value.clone()))
+        } else {
+            None
+        };
+        state.cursor_position = editor.cursor;
+        state.selection_anchor = editor.anchor;
+        let (line, col) = metrics.byte_to_line_column(&editor.value, editor.cursor);
+        state.scroll_offset = ensure_item_visible(state.scroll_offset, line, rows);
+        state.horizontal_offset = cursor_scroll(col, state.horizontal_offset, columns);
+        state.value = Some(editor.value);
         ctx.set_handled();
-        if let Some(msg) = msg_to_emit {
-            ctx.emit(msg);
+        if let Some(message) = message {
+            ctx.emit(message);
         }
     }
 
@@ -398,6 +374,14 @@ impl<M: 'static> Widget<M> for TextArea<M> {
         style
     }
 
+    fn layout_style_with(&self, ctx: &crate::widget::MeasureCtx) -> LayoutStyle {
+        let mut style = self.layout_style();
+        let width = self.preferred_width_with(ctx.theme().text_metrics);
+        style.min_width = width;
+        style.preferred_width = Some(width);
+        style
+    }
+
     fn focus_config(&self) -> FocusConfig {
         if self.disabled {
             FocusConfig::None
@@ -411,100 +395,26 @@ impl<M: 'static> Widget<M> for TextArea<M> {
     }
 }
 
-fn previous_char_boundary(value: &str, cursor: usize) -> usize {
-    if cursor == 0 {
-        return 0;
-    }
-    let mut idx = cursor.saturating_sub(1);
-    while idx > 0 && !value.is_char_boundary(idx) {
-        idx -= 1;
-    }
-    idx
-}
-
-fn next_char_boundary(value: &str, cursor: usize) -> usize {
-    if cursor >= value.len() {
-        return value.len();
-    }
-    let mut idx = cursor + 1;
-    while idx < value.len() && !value.is_char_boundary(idx) {
-        idx += 1;
-    }
-    idx
-}
-
-fn line_col_for_byte(value: &str, cursor: usize) -> (usize, usize) {
-    let cursor = cursor.min(value.len());
-    let mut line = 0;
-    let mut col = 0;
-    for (idx, ch) in value.char_indices() {
-        if idx >= cursor {
-            break;
-        }
-        if ch == '\n' {
-            line += 1;
-            col = 0;
-        } else {
-            col += 1;
-        }
-    }
-    (line, col)
-}
-
-fn byte_for_line_col(value: &str, target_line: usize, target_col: usize) -> usize {
-    let mut line = 0;
-    let mut col = 0;
-    for (idx, ch) in value.char_indices() {
-        if line == target_line && col == target_col {
-            return idx;
-        }
-        if ch == '\n' {
-            if line == target_line {
-                return idx;
-            }
-            line += 1;
-            col = 0;
-        } else {
-            col += 1;
-        }
-    }
-    value.len()
-}
-
-fn take_chars(text: &str, count: usize) -> String {
-    text.chars().take(count).collect()
-}
-
-fn truncate_to_width(text: &str, max_width: usize) -> String {
-    let mut out = String::new();
-    let mut width = 0;
-    for ch in text.chars() {
-        let ch_width = ch.width().unwrap_or(0);
-        if width + ch_width > max_width {
-            break;
-        }
-        out.push(ch);
-        width += ch_width;
-    }
-    out
-}
-
 pub fn textarea<M>() -> TextArea<M> {
     TextArea::new()
 }
 
 impl<M> TextArea<M> {
     fn preferred_width(&self) -> u16 {
+        self.preferred_width_with(TextMetrics::default())
+    }
+
+    fn preferred_width_with(&self, metrics: TextMetrics) -> u16 {
         let value_width = self
             .value
             .split('\n')
-            .map(|line| line.width() as u16)
+            .map(|line| metrics.width(line).min(u16::MAX as usize) as u16)
             .max()
             .unwrap_or(0);
         let placeholder_width = self
             .placeholder
             .as_deref()
-            .map(|placeholder| placeholder.width() as u16)
+            .map(|placeholder| metrics.width(placeholder).min(u16::MAX as usize) as u16)
             .unwrap_or(0);
         value_width.max(placeholder_width).max(20).saturating_add(
             if self.variant == TextAreaVariant::Default {

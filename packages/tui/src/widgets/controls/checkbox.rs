@@ -1,6 +1,6 @@
 //! Checkbox widget.
 
-use unicode_width::UnicodeWidthStr;
+use render::text::TextWidth;
 
 use crate::event::{Event, KeyCode, MouseButton, MouseEventKind};
 use crate::focus::FocusConfig;
@@ -106,7 +106,7 @@ impl<M> Widget<M> for Checkbox<M> {
 
         let mark = if self.checked { "x" } else { " " };
         let text = format!("[{mark}] {}", self.label);
-        let display = truncate_to_width(&text, area.width() as usize);
+        let display = truncate_to_width(&text, area.width() as usize, chunk.text_metrics());
         let _ = chunk.set_string(0, 0, &display, style);
     }
 
@@ -154,18 +154,8 @@ impl<M> Widget<M> for Checkbox<M> {
     }
 }
 
-fn truncate_to_width(text: &str, max_width: usize) -> String {
-    let mut out = String::new();
-    let mut width = 0;
-    for ch in text.chars() {
-        let ch_width = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
-        if width + ch_width > max_width {
-            break;
-        }
-        out.push(ch);
-        width += ch_width;
-    }
-    out
+fn truncate_to_width(text: &str, max_width: usize, metrics: render::text::TextMetrics) -> String {
+    metrics.clip(text, 0, max_width)
 }
 
 /// Create a checkbox widget.

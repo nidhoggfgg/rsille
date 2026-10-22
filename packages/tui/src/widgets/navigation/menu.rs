@@ -1,6 +1,6 @@
 //! Menu widget with roving selection.
 
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+use render::text::TextWidth;
 
 use crate::event::{Event, KeyCode, MouseButton, MouseEventKind};
 use crate::focus::FocusConfig;
@@ -278,8 +278,11 @@ impl<M: 'static> Widget<M> for Menu<M> {
             let y = content_y + row as u16;
             let _ = chunk.fill(content_x, y, content_width, 1, ' ', style);
             let prefix = if is_active { "> " } else { "  " };
-            let text =
-                truncate_to_width(&format!("{prefix}{}", item.label), content_width as usize);
+            let text = truncate_to_width(
+                &format!("{prefix}{}", item.label),
+                content_width as usize,
+                chunk.text_metrics(),
+            );
             let _ = chunk.set_string(content_x, y, &text, style);
         }
     }
@@ -431,18 +434,8 @@ impl<M: 'static> Widget<M> for Menu<M> {
     }
 }
 
-fn truncate_to_width(text: &str, max_width: usize) -> String {
-    let mut out = String::new();
-    let mut width = 0;
-    for ch in text.chars() {
-        let ch_width = ch.width().unwrap_or(0);
-        if width + ch_width > max_width {
-            break;
-        }
-        out.push(ch);
-        width += ch_width;
-    }
-    out
+fn truncate_to_width(text: &str, max_width: usize, metrics: render::text::TextMetrics) -> String {
+    metrics.clip(text, 0, max_width)
 }
 
 pub fn menu<M>() -> Menu<M> {

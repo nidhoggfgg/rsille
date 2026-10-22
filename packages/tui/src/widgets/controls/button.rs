@@ -159,8 +159,7 @@ impl<M> Widget<M> for Button<M> {
         }
 
         // Center label text
-        use unicode_width::UnicodeWidthStr;
-        let text_width = self.label.width() as u16;
+        let text_width = chunk.text_metrics().width(&self.label) as u16;
         let padding_offset = if matches!(self.variant, ButtonVariant::Ghost) {
             1
         } else {
@@ -210,7 +209,7 @@ impl<M> Widget<M> for Button<M> {
     }
 
     fn constraints(&self) -> Constraints {
-        use unicode_width::UnicodeWidthStr;
+        use render::text::TextWidth;
         let label_width = self.label.width() as u16;
         let (total_width, height) = match self.variant {
             ButtonVariant::Ghost => (label_width + 6, 3),
@@ -370,6 +369,6 @@ mod tests {
 
     fn cell_char(buffer: &Buffer, x: u16, y: u16) -> Option<char> {
         let index = (y * buffer.size().width + x) as usize;
-        buffer.content()[index].content.c
+        buffer.content()[index].content.as_char()
     }
 }

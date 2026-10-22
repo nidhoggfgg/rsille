@@ -1,6 +1,6 @@
 //! Select widget with expandable option list.
 
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+use render::text::TextWidth;
 
 use crate::event::{Event, KeyCode, MouseButton, MouseEventKind};
 use crate::focus::FocusConfig;
@@ -238,20 +238,12 @@ impl<M> Select<M> {
             .or_else(|| filtered.first().copied())
     }
 
-    fn truncate_to_width(text: &str, max_width: usize) -> String {
-        let mut out = String::new();
-        let mut width = 0;
-
-        for ch in text.chars() {
-            let char_width = ch.width().unwrap_or(0);
-            if width + char_width > max_width {
-                break;
-            }
-            out.push(ch);
-            width += char_width;
-        }
-
-        out
+    fn truncate_to_width(
+        text: &str,
+        max_width: usize,
+        metrics: render::text::TextMetrics,
+    ) -> String {
+        metrics.clip(text, 0, max_width)
     }
 
     fn filter_row_offset(&self) -> u16 {
@@ -331,12 +323,14 @@ impl<M: 'static> Widget<M> for Select<M> {
 
         let state = ctx.state_or_default::<SelectState>();
         let indicator = if state.is_open { "^" } else { "v" };
-        let indicator_width = indicator.width() as u16;
+        let indicator_width = chunk.text_metrics().width(&indicator) as u16;
         let display_width = content_width.saturating_sub(indicator_width + 1) as usize;
         let display_text = self
             .selected_label(state)
-            .map(|label| Self::truncate_to_width(label, display_width))
-            .unwrap_or_else(|| Self::truncate_to_width(&self.placeholder, display_width));
+            .map(|label| Self::truncate_to_width(label, display_width, chunk.text_metrics()))
+            .unwrap_or_else(|| {
+                Self::truncate_to_width(&self.placeholder, display_width, chunk.text_metrics())
+            });
         let display_style = if self.selected_label(state).is_some() {
             field_style
         } else {
@@ -366,7 +360,11 @@ impl<M: 'static> Widget<M> for Select<M> {
             };
             let query_line = format!(
                 "? {}",
-                Self::truncate_to_width(query_text, content_width.saturating_sub(2) as usize)
+                Self::truncate_to_width(
+                    query_text,
+                    content_width.saturating_sub(2) as usize,
+                    chunk.text_metrics()
+                )
             );
             let _ = chunk.fill(content_x, list_y, content_width, 1, ' ', field_style);
             let _ = chunk.set_string(content_x, list_y, &query_line, query_style);
@@ -378,15 +376,19 @@ impl<M: 'static> Widget<M> for Select<M> {
         list_y = list_y.saturating_add(1);
 
         if self.options.is_empty() {
-            let message = Self::truncate_to_width("No options", content_width as usize);
+            let message =
+                Self::truncate_to_width("No options", content_width as usize, chunk.text_metrics());
             let _ = chunk.set_string(content_x, list_y, &message, muted_style);
             return;
         }
 
         let filtered = self.filtered_indices(state);
         if filtered.is_empty() {
-            let message =
-                Self::truncate_to_width(&self.empty_search_message, content_width as usize);
+            let message = Self::truncate_to_width(
+                &self.empty_search_message,
+                content_width as usize,
+                chunk.text_metrics(),
+            );
             let _ = chunk.set_string(content_x, list_y, &message, muted_style);
             return;
         }
@@ -429,8 +431,9 @@ impl<M: 'static> Widget<M> for Select<M> {
             } else {
                 "   "
             };
-            let available = content_width.saturating_sub(prefix.width() as u16) as usize;
-            let text = Self::truncate_to_width(&option.label, available);
+            let available =
+                content_width.saturating_sub(chunk.text_metrics().width(&prefix) as u16) as usize;
+            let text = Self::truncate_to_width(&option.label, available, chunk.text_metrics());
             let line = format!("{prefix}{text}");
             let _ = chunk.set_string(content_x, y, &line, style);
         }

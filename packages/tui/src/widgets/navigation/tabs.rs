@@ -1,6 +1,6 @@
 //! Tabs widget.
 
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+use render::text::TextWidth;
 
 use crate::event::{Event, KeyCode, MouseButton, MouseEventKind};
 use crate::focus::FocusConfig;
@@ -248,9 +248,9 @@ impl<M: 'static> Widget<M> for Tabs<M> {
                 format!(" {} ", item.label)
             };
             let available = area.width().saturating_sub(x) as usize;
-            let display = truncate_to_width(&text, available);
+            let display = truncate_to_width(&text, available, chunk.text_metrics());
             let _ = chunk.set_string(x, 0, &display, style);
-            x = x.saturating_add(display.width() as u16 + 1);
+            x = x.saturating_add(chunk.text_metrics().width(&display) as u16 + 1);
         }
     }
 
@@ -354,18 +354,8 @@ impl<M: 'static> Widget<M> for Tabs<M> {
     }
 }
 
-fn truncate_to_width(text: &str, max_width: usize) -> String {
-    let mut out = String::new();
-    let mut width = 0;
-    for ch in text.chars() {
-        let ch_width = ch.width().unwrap_or(0);
-        if width + ch_width > max_width {
-            break;
-        }
-        out.push(ch);
-        width += ch_width;
-    }
-    out
+fn truncate_to_width(text: &str, max_width: usize, metrics: render::text::TextMetrics) -> String {
+    metrics.clip(text, 0, max_width)
 }
 
 pub fn tabs<M>() -> Tabs<M> {

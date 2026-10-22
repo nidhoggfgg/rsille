@@ -11,6 +11,7 @@ async-trait = { workspace = true }
 futures = { workspace = true }
 rayon = { workspace = true }
 unicode-width = { workspace = true }
+unicode-segmentation = { workspace = true }
 log = { workspace = true }
 
 [dev-dependencies]

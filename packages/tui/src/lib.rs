@@ -9,6 +9,7 @@ pub(crate) mod offscreen;
 pub mod shell;
 pub mod state;
 pub mod style;
+pub mod text;
 pub(crate) mod visual_engine;
 pub mod widget;
 pub mod widgets;

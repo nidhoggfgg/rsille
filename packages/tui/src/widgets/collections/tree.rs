@@ -1,7 +1,7 @@
 //! Tree widget with expandable nodes and internal navigation.
 
+use render::text::TextWidth;
 use rustc_hash::FxHashSet;
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::event::{Event, KeyCode};
 use crate::focus::FocusConfig;
@@ -281,23 +281,19 @@ impl<M> Tree<M> {
             .map(|(index, _)| index)
     }
 
-    fn truncate_to_width(text: &str, max_width: usize) -> String {
-        let mut out = String::new();
-        let mut width = 0;
-
-        for ch in text.chars() {
-            let char_width = ch.width().unwrap_or(0);
-            if width + char_width > max_width {
-                break;
-            }
-            out.push(ch);
-            width += char_width;
-        }
-
-        out
+    fn truncate_to_width(
+        text: &str,
+        max_width: usize,
+        metrics: render::text::TextMetrics,
+    ) -> String {
+        metrics.clip(text, 0, max_width)
     }
 
-    fn render_row_text(row: &VisibleTreeRow, width: usize) -> String {
+    fn render_row_text(
+        row: &VisibleTreeRow,
+        width: usize,
+        metrics: render::text::TextMetrics,
+    ) -> String {
         let indent = "  ".repeat(row.depth);
         let marker = if row.has_children {
             if row.is_expanded {
@@ -309,7 +305,7 @@ impl<M> Tree<M> {
             "  "
         };
         let available = width.saturating_sub(indent.width() + marker.width());
-        let label = Self::truncate_to_width(&row.label, available);
+        let label = Self::truncate_to_width(&row.label, available, metrics);
         format!("{indent}{marker}{label}")
     }
 }
@@ -377,7 +373,11 @@ impl<M: 'static> Widget<M> for Tree<M> {
         let rows = self.flatten_visible_rows(&state.expanded_items);
 
         if rows.is_empty() {
-            let message = Self::truncate_to_width(&self.empty_message, content_width as usize);
+            let message = Self::truncate_to_width(
+                &self.empty_message,
+                content_width as usize,
+                chunk.text_metrics(),
+            );
             let _ = chunk.set_string(content_x, content_y, &message, muted_style);
             return;
         }
@@ -410,7 +410,8 @@ impl<M: 'static> Widget<M> for Tree<M> {
 
             let y = content_y + row as u16;
             let _ = chunk.fill(content_x, y, content_width, 1, ' ', style);
-            let text = Self::render_row_text(row_item, content_width as usize);
+            let text =
+                Self::render_row_text(row_item, content_width as usize, chunk.text_metrics());
             let _ = chunk.set_string(content_x, y, &text, style);
         }
     }

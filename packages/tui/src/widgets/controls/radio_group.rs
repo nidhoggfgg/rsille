@@ -1,6 +1,6 @@
 //! Radio group widget.
 
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+use render::text::TextWidth;
 
 use crate::event::{Event, KeyCode, MouseButton, MouseEventKind};
 use crate::focus::FocusConfig;
@@ -227,7 +227,7 @@ impl<M: 'static> Widget<M> for RadioGroup<M> {
             let mark = if is_selected { "*" } else { " " };
             let prefix = if is_active { ">" } else { " " };
             let text = format!("{prefix} ({mark}) {}", option.label);
-            let display = truncate_to_width(&text, area.width() as usize);
+            let display = truncate_to_width(&text, area.width() as usize, chunk.text_metrics());
             let _ = chunk.set_string(0, row as u16, &display, style);
         }
     }
@@ -333,18 +333,8 @@ impl<M: 'static> Widget<M> for RadioGroup<M> {
     }
 }
 
-fn truncate_to_width(text: &str, max_width: usize) -> String {
-    let mut out = String::new();
-    let mut width = 0;
-    for ch in text.chars() {
-        let ch_width = ch.width().unwrap_or(0);
-        if width + ch_width > max_width {
-            break;
-        }
-        out.push(ch);
-        width += ch_width;
-    }
-    out
+fn truncate_to_width(text: &str, max_width: usize, metrics: render::text::TextMetrics) -> String {
+    metrics.clip(text, 0, max_width)
 }
 
 pub fn radio_group<M>() -> RadioGroup<M> {

@@ -7,8 +7,8 @@ use crate::layout::{
     AxisLimit, Constraints, HorizontalAlign, LayoutStyle, MeasuredSize, SizeProposal, VerticalAlign,
 };
 use crate::style::{Color, Style};
+use crate::text::{TextMetrics, UnicodeSegmentation};
 use crate::widget::{EventCtx, MeasureCtx, RenderCtx, Widget};
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 /// Label widget for displaying text.
 #[derive(Debug, Clone)]
@@ -157,11 +157,15 @@ impl<M> Label<M> {
     }
 
     fn effective_constraints(&self) -> Constraints {
+        self.constraints_with(TextMetrics::default())
+    }
+
+    fn constraints_with(&self, metrics: TextMetrics) -> Constraints {
         self.constraints.unwrap_or_else(|| {
-            let (width, height) = label_size(&self.content, self.tab_width);
+            let (width, height) = label_size(&self.content, self.tab_width, metrics);
             if self.wrap != TextWrap::None {
                 return Constraints {
-                    min_width: min_content_width(&self.content, self.tab_width, self.wrap),
+                    min_width: min_content_width(&self.content, self.tab_width, self.wrap, metrics),
                     max_width: None,
                     min_height: height,
                     max_height: None,
@@ -182,6 +186,7 @@ impl<M> Label<M> {
 
 impl<M> Widget<M> for Label<M> {
     fn render(&self, chunk: &mut render::chunk::Chunk, ctx: &RenderCtx) {
+        let metrics = ctx.theme().text_metrics;
         let area = chunk.area();
         if area.width() == 0 || area.height() == 0 {
             return;
@@ -189,7 +194,13 @@ impl<M> Widget<M> for Label<M> {
         let theme_style = ctx.theme().styles.text;
         let final_style = self.style.merge(theme_style);
         let render_style = final_style.to_render_style();
-        let lines = render_lines(&self.content, self.tab_width, self.wrap, area.width());
+        let lines = render_lines(
+            &self.content,
+            self.tab_width,
+            self.wrap,
+            area.width(),
+            metrics,
+        );
         let content_height = lines.len().min(u16::MAX as usize) as u16;
         let y_offset = self.vertical_align.offset(area.height(), content_height);
         let visible_rows = area.height().saturating_sub(y_offset) as usize;
@@ -200,7 +211,7 @@ impl<M> Widget<M> for Label<M> {
             }
 
             let y = y_offset + row as u16;
-            let line_width = display_width(line);
+            let line_width = display_width(line, metrics);
             let x = self.horizontal_align.offset(area.width(), line_width);
             let _ = chunk.set_string(x, y, line, render_style);
         }
@@ -213,45 +224,61 @@ impl<M> Widget<M> for Label<M> {
     }
 
     fn layout_style(&self) -> LayoutStyle {
-        let mut style = LayoutStyle::from_constraints(self.effective_constraints());
+        self.layout_with(TextMetrics::default())
+    }
+
+    fn layout_style_with(&self, ctx: &MeasureCtx) -> LayoutStyle {
+        self.layout_with(ctx.theme().text_metrics)
+    }
+
+    fn measure(&self, proposal: SizeProposal, ctx: &MeasureCtx) -> MeasuredSize {
+        self.measure_with(proposal, ctx.theme().text_metrics)
+    }
+
+    fn key(&self) -> Option<&str> {
+        self.widget_key.as_deref()
+    }
+}
+
+impl<M> Label<M> {
+    fn layout_with(&self, metrics: TextMetrics) -> LayoutStyle {
+        let mut style = LayoutStyle::from_constraints(self.constraints_with(metrics));
         if self.constraints.is_none() && self.wrap != TextWrap::None {
-            let (width, height) = label_size(&self.content, self.tab_width);
+            let (width, height) = label_size(&self.content, self.tab_width, metrics);
             style.preferred_width = Some(width);
             style.preferred_height = Some(height);
         }
         style
     }
 
-    fn measure(&self, proposal: SizeProposal, _ctx: &MeasureCtx) -> MeasuredSize {
+    fn measure_with(&self, proposal: SizeProposal, metrics: TextMetrics) -> MeasuredSize {
         let measured = match self.wrap {
             TextWrap::None => {
-                let (width, height) = label_size(&self.content, self.tab_width);
+                let (width, height) = label_size(&self.content, self.tab_width, metrics);
                 MeasuredSize::new(width, height)
             }
             TextWrap::Word | TextWrap::Char => match proposal.width {
                 AxisLimit::Unbounded => {
-                    let (width, height) = label_size(&self.content, self.tab_width);
+                    let (width, height) = label_size(&self.content, self.tab_width, metrics);
                     MeasuredSize::new(width, height)
                 }
                 AxisLimit::AtMost(width) => {
-                    let lines = render_lines(&self.content, self.tab_width, self.wrap, width);
+                    let lines =
+                        render_lines(&self.content, self.tab_width, self.wrap, width, metrics);
                     MeasuredSize::new(
-                        max_line_width(&lines).min(width),
+                        max_line_width(&lines, metrics).min(width),
                         measured_line_count(&lines),
                     )
                 }
                 AxisLimit::Exact(width) => {
-                    let lines = render_lines(&self.content, self.tab_width, self.wrap, width);
+                    let lines =
+                        render_lines(&self.content, self.tab_width, self.wrap, width, metrics);
                     MeasuredSize::new(width, measured_line_count(&lines))
                 }
             },
         };
 
-        self.layout_style().clamp_size(measured)
-    }
-
-    fn key(&self) -> Option<&str> {
-        self.widget_key.as_deref()
+        self.layout_with(metrics).clamp_size(measured)
     }
 }
 
@@ -260,7 +287,7 @@ pub fn label<M>(content: impl Into<String>) -> Label<M> {
     Label::new(content)
 }
 
-fn label_size(content: &str, tab_width: Option<u16>) -> (u16, u16) {
+fn label_size(content: &str, tab_width: Option<u16>, metrics: TextMetrics) -> (u16, u16) {
     if content.is_empty() {
         return (0, 0);
     }
@@ -269,19 +296,25 @@ fn label_size(content: &str, tab_width: Option<u16>) -> (u16, u16) {
     let mut height: u16 = 0;
     for line in content.split('\n') {
         let line = line.strip_suffix('\r').unwrap_or(line);
-        let line = expand_tabs(line, tab_width);
-        width = width.max(display_width(line.as_ref()));
+        let line = expand_tabs(line, tab_width, metrics);
+        width = width.max(display_width(line.as_ref(), metrics));
         height = height.saturating_add(1);
     }
 
     (width, height)
 }
 
-fn display_width(content: &str) -> u16 {
-    content.width().min(u16::MAX as usize) as u16
+fn display_width(content: &str, metrics: TextMetrics) -> u16 {
+    metrics.width(content).min(u16::MAX as usize) as u16
 }
 
-fn render_lines(content: &str, tab_width: Option<u16>, wrap: TextWrap, width: u16) -> Vec<String> {
+fn render_lines(
+    content: &str,
+    tab_width: Option<u16>,
+    wrap: TextWrap,
+    width: u16,
+    metrics: TextMetrics,
+) -> Vec<String> {
     if content.is_empty() {
         return Vec::new();
     }
@@ -291,15 +324,20 @@ fn render_lines(content: &str, tab_width: Option<u16>, wrap: TextWrap, width: u1
             .split('\n')
             .map(|line| {
                 let line = line.strip_suffix('\r').unwrap_or(line);
-                expand_tabs(line, tab_width).into_owned()
+                expand_tabs(line, tab_width, metrics).into_owned()
             })
             .collect(),
-        TextWrap::Word => wrap_lines_word(content, tab_width, width),
-        TextWrap::Char => wrap_lines_char(content, tab_width, width),
+        TextWrap::Word => wrap_lines_word(content, tab_width, width, metrics),
+        TextWrap::Char => wrap_lines_char(content, tab_width, width, metrics),
     }
 }
 
-fn wrap_lines_word(content: &str, tab_width: Option<u16>, width: u16) -> Vec<String> {
+fn wrap_lines_word(
+    content: &str,
+    tab_width: Option<u16>,
+    width: u16,
+    metrics: TextMetrics,
+) -> Vec<String> {
     if width == 0 {
         return Vec::new();
     }
@@ -307,21 +345,21 @@ fn wrap_lines_word(content: &str, tab_width: Option<u16>, width: u16) -> Vec<Str
     let mut lines = Vec::new();
     for source_line in content.split('\n') {
         let source_line = source_line.strip_suffix('\r').unwrap_or(source_line);
-        let source_line = expand_tabs(source_line, tab_width);
+        let source_line = expand_tabs(source_line, tab_width, metrics);
         let mut current = String::new();
         let mut current_width: u16 = 0;
 
         for word in source_line.split_whitespace() {
-            let word_width = display_width(word);
+            let word_width = display_width(word, metrics);
             if word_width > width {
                 if !current.is_empty() {
                     lines.push(std::mem::take(&mut current));
                     current_width = 0;
                 }
-                let mut wrapped_word = wrap_single_line_char(word, width);
+                let mut wrapped_word = wrap_single_line_char(word, width, metrics);
                 if let Some(last) = wrapped_word.pop() {
                     lines.extend(wrapped_word);
-                    current_width = display_width(&last);
+                    current_width = display_width(&last, metrics);
                     current = last;
                 }
                 continue;
@@ -352,7 +390,12 @@ fn wrap_lines_word(content: &str, tab_width: Option<u16>, width: u16) -> Vec<Str
     lines
 }
 
-fn wrap_lines_char(content: &str, tab_width: Option<u16>, width: u16) -> Vec<String> {
+fn wrap_lines_char(
+    content: &str,
+    tab_width: Option<u16>,
+    width: u16,
+    metrics: TextMetrics,
+) -> Vec<String> {
     if width == 0 {
         return Vec::new();
     }
@@ -360,51 +403,39 @@ fn wrap_lines_char(content: &str, tab_width: Option<u16>, width: u16) -> Vec<Str
     let mut lines = Vec::new();
     for source_line in content.split('\n') {
         let source_line = source_line.strip_suffix('\r').unwrap_or(source_line);
-        let source_line = expand_tabs(source_line, tab_width);
-        lines.extend(wrap_single_line_char(source_line.as_ref(), width));
+        let source_line = expand_tabs(source_line, tab_width, metrics);
+        lines.extend(wrap_single_line_char(source_line.as_ref(), width, metrics));
     }
     lines
 }
 
-fn wrap_single_line_char(line: &str, width: u16) -> Vec<String> {
+fn wrap_single_line_char(line: &str, width: u16, metrics: TextMetrics) -> Vec<String> {
     if line.is_empty() {
         return vec![String::new()];
     }
 
-    let mut lines = Vec::new();
-    let mut current = String::new();
-    let mut current_width: u16 = 0;
-
-    for ch in line.chars() {
-        let char_width = ch.width().unwrap_or(0).min(u16::MAX as usize) as u16;
-        if current_width > 0 && current_width.saturating_add(char_width) > width {
-            lines.push(std::mem::take(&mut current));
-            current_width = 0;
-        }
-
-        current.push(ch);
-        current_width = current_width.saturating_add(char_width);
-
-        if char_width > width {
-            lines.push(std::mem::take(&mut current));
-            current_width = 0;
-        }
-    }
-
-    lines.push(current);
-    lines
+    metrics
+        .wrap(line, width as usize)
+        .into_iter()
+        .map(|line_range| line[line_range.bytes].to_owned())
+        .collect()
 }
 
-fn min_content_width(content: &str, tab_width: Option<u16>, wrap: TextWrap) -> u16 {
+fn min_content_width(
+    content: &str,
+    tab_width: Option<u16>,
+    wrap: TextWrap,
+    metrics: TextMetrics,
+) -> u16 {
     match wrap {
-        TextWrap::None => label_size(content, tab_width).0,
+        TextWrap::None => label_size(content, tab_width, metrics).0,
         TextWrap::Char => content
             .split('\n')
             .flat_map(|line| {
                 let line = line.strip_suffix('\r').unwrap_or(line);
-                expand_tabs(line, tab_width)
-                    .chars()
-                    .map(|ch| ch.width().unwrap_or(0).min(u16::MAX as usize) as u16)
+                expand_tabs(line, tab_width, metrics)
+                    .graphemes(true)
+                    .map(|g| metrics.grapheme_width(g, 0).min(u16::MAX as usize) as u16)
                     .collect::<Vec<_>>()
             })
             .max()
@@ -413,9 +444,9 @@ fn min_content_width(content: &str, tab_width: Option<u16>, wrap: TextWrap) -> u
             .split('\n')
             .flat_map(|line| {
                 let line = line.strip_suffix('\r').unwrap_or(line);
-                expand_tabs(line, tab_width)
+                expand_tabs(line, tab_width, metrics)
                     .split_whitespace()
-                    .map(display_width)
+                    .map(|text| display_width(text, metrics))
                     .collect::<Vec<_>>()
             })
             .max()
@@ -423,10 +454,10 @@ fn min_content_width(content: &str, tab_width: Option<u16>, wrap: TextWrap) -> u
     }
 }
 
-fn max_line_width(lines: &[String]) -> u16 {
+fn max_line_width(lines: &[String], metrics: TextMetrics) -> u16 {
     lines
         .iter()
-        .map(|line| display_width(line))
+        .map(|line| display_width(line, metrics))
         .max()
         .unwrap_or(0)
 }
@@ -435,30 +466,15 @@ fn measured_line_count(lines: &[String]) -> u16 {
     lines.len().min(u16::MAX as usize) as u16
 }
 
-fn expand_tabs(content: &str, tab_width: Option<u16>) -> Cow<'_, str> {
-    let Some(tab_width) = tab_width else {
-        return Cow::Borrowed(content);
+fn expand_tabs(content: &str, tab_width: Option<u16>, metrics: TextMetrics) -> Cow<'_, str> {
+    let metrics = TextMetrics {
+        tab_width: tab_width.map(usize::from).unwrap_or(metrics.tab_width),
+        ..metrics
     };
-
     if !content.contains('\t') {
         return Cow::Borrowed(content);
     }
-
-    let tab_width = tab_width as usize;
-    let mut expanded = String::with_capacity(content.len());
-    let mut current_width = 0;
-    for ch in content.chars() {
-        if ch == '\t' {
-            let spaces = tab_width - (current_width % tab_width);
-            expanded.extend(std::iter::repeat(' ').take(spaces));
-            current_width += spaces;
-        } else {
-            expanded.push(ch);
-            current_width += ch.width().unwrap_or(0);
-        }
-    }
-
-    Cow::Owned(expanded)
+    Cow::Owned(metrics.expand(content))
 }
 
 #[cfg(test)]
@@ -643,6 +659,6 @@ mod tests {
 
     fn cell_char(buffer: &Buffer, x: u16, y: u16) -> Option<char> {
         let index = (y * buffer.size().width + x) as usize;
-        buffer.content()[index].content.c
+        buffer.content()[index].content.as_char()
     }
 }

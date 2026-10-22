@@ -1,6 +1,6 @@
 //! Searchable command palette with fuzzy matching.
 
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+use render::text::TextWidth;
 
 use crate::event::{Event, KeyCode};
 use crate::focus::FocusConfig;
@@ -277,20 +277,12 @@ impl<M> CommandPalette<M> {
         Some(position)
     }
 
-    fn truncate_to_width(text: &str, max_width: usize) -> String {
-        let mut out = String::new();
-        let mut width = 0;
-
-        for ch in text.chars() {
-            let char_width = ch.width().unwrap_or(0);
-            if width + char_width > max_width {
-                break;
-            }
-            out.push(ch);
-            width += char_width;
-        }
-
-        out
+    fn truncate_to_width(
+        text: &str,
+        max_width: usize,
+        metrics: render::text::TextMetrics,
+    ) -> String {
+        metrics.clip(text, 0, max_width)
     }
 }
 
@@ -354,7 +346,7 @@ impl<M: 'static> Widget<M> for CommandPalette<M> {
 
         let mut cursor_y = content_y;
         if let Some(title) = self.title.as_deref() {
-            let line = Self::truncate_to_width(title, content_width as usize);
+            let line = Self::truncate_to_width(title, content_width as usize, chunk.text_metrics());
             let _ = chunk.fill(content_x, cursor_y, content_width, 1, ' ', header_style);
             let _ = chunk.set_string(content_x, cursor_y, &line, header_style);
             cursor_y = cursor_y.saturating_add(1);
@@ -371,12 +363,13 @@ impl<M: 'static> Widget<M> for CommandPalette<M> {
         } else {
             field_style
         };
-        let available = content_width.saturating_sub(prompt.width() as u16) as usize;
-        let query = Self::truncate_to_width(query_text, available);
+        let available =
+            content_width.saturating_sub(chunk.text_metrics().width(&prompt) as u16) as usize;
+        let query = Self::truncate_to_width(query_text, available, chunk.text_metrics());
         let _ = chunk.fill(content_x, cursor_y, content_width, 1, ' ', field_style);
         let _ = chunk.set_string(content_x, cursor_y, &prompt, field_style);
         let _ = chunk.set_string(
-            content_x + prompt.width() as u16,
+            content_x + chunk.text_metrics().width(&prompt) as u16,
             cursor_y,
             &query,
             display_style,
@@ -387,7 +380,11 @@ impl<M: 'static> Widget<M> for CommandPalette<M> {
         cursor_y = cursor_y.saturating_add(1);
 
         if filtered.is_empty() {
-            let message = Self::truncate_to_width(&self.empty_message, content_width as usize);
+            let message = Self::truncate_to_width(
+                &self.empty_message,
+                content_width as usize,
+                chunk.text_metrics(),
+            );
             let _ = chunk.set_string(content_x, cursor_y, &message, muted_style);
             return;
         }
@@ -414,8 +411,9 @@ impl<M: 'static> Widget<M> for CommandPalette<M> {
             let _ = chunk.fill(content_x, y, content_width, 1, ' ', style);
 
             let prefix = if is_active { "> " } else { "  " };
-            let available = content_width.saturating_sub(prefix.width() as u16) as usize;
-            let text = Self::truncate_to_width(&item.label, available);
+            let available =
+                content_width.saturating_sub(chunk.text_metrics().width(&prefix) as u16) as usize;
+            let text = Self::truncate_to_width(&item.label, available, chunk.text_metrics());
             let line = format!("{prefix}{text}");
             let _ = chunk.set_string(content_x, y, &line, style);
         }

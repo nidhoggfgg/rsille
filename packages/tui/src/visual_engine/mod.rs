@@ -168,7 +168,8 @@ mod tests {
 
         impl CellEffect for Uppercase {
             fn apply(&self, sample: &mut CellSample, _ctx: VisualCtx<'_>) {
-                sample.content.c = sample.content.c.and_then(|ch| ch.to_uppercase().next());
+                let text = sample.content.symbol().to_uppercase();
+                sample.content.set_grapheme(&text);
             }
 
             fn estimated_cost(&self) -> VisualEffectCost {
@@ -612,7 +613,7 @@ mod tests {
         let effect = VisualEffect::scanline().density(0.5).intensity(0.5);
         let mut target = CellSample::new(0, 0, Stylized::plain('x'));
         let mut untouched = CellSample::new(0, 1, Stylized::plain('x'));
-        let original = untouched;
+        let original = untouched.clone();
 
         effect.apply(&mut target, &ctx);
         effect.apply(&mut untouched, &ctx);
@@ -669,8 +670,8 @@ mod tests {
         effect.apply(&mut blurry, &blurry_ctx);
         effect.apply(&mut clear, &clear_ctx);
 
-        assert_ne!(blurry.content.c, Some('x'));
-        assert_eq!(clear.content.c, Some('x'));
+        assert_ne!(blurry.content.as_char(), Some('x'));
+        assert_eq!(clear.content.as_char(), Some('x'));
     }
 
     #[test]
@@ -717,7 +718,7 @@ mod tests {
         let off = VisualEffect::sparkle().density(0.0);
         let on = VisualEffect::sparkle().density(1.0).with_seed(1);
         let mut unchanged = CellSample::new(0, 0, Stylized::plain('x'));
-        let original = unchanged;
+        let original = unchanged.clone();
         let mut first = CellSample::new(0, 0, Stylized::plain('x'));
         let mut second = CellSample::new(0, 0, Stylized::plain('x'));
 
@@ -767,7 +768,7 @@ mod tests {
             .and_then(|colors| colors.foreground)
             .unwrap();
         assert!(!matches!(foreground, CrosstermColor::Rgb { .. }));
-        assert!(!matches!(blur.content.c, Some('░' | '▒')));
+        assert!(!matches!(blur.content.as_char(), Some('░' | '▒')));
     }
 
     #[test]
@@ -873,6 +874,6 @@ mod tests {
     }
 
     fn cell_char(buffer: &Buffer, x: u16, y: u16) -> Option<char> {
-        cell(buffer, x, y)?.content.c
+        cell(buffer, x, y)?.content.as_char()
     }
 }

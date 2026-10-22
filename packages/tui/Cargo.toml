@@ -7,7 +7,6 @@ license = "MIT"
 [dependencies]
 render = { path = "../render" }
 rsille-canvas = { package = "canvas", path = "../canvas" }
-unicode-width = { workspace = true }
 crossterm = { workspace = true }
 taffy = { workspace = true }
 syntect = { workspace = true }

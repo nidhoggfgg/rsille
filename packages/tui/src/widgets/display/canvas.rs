@@ -303,6 +303,6 @@ mod tests {
 
     fn cell_char(buffer: &Buffer, x: u16, y: u16) -> Option<char> {
         let index = (y * buffer.size().width + x) as usize;
-        buffer.content()[index].content.c
+        buffer.content()[index].content.as_char()
     }
 }

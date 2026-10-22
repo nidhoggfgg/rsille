@@ -1,7 +1,7 @@
 //! Scroll containers and reusable scroll helpers.
 
 use render::area::Area;
-use unicode_width::UnicodeWidthStr;
+use render::text::TextWidth;
 
 use super::border_renderer::{render_background, render_border};
 use crate::event::{Event, KeyCode, MouseEventKind};
@@ -622,6 +622,7 @@ impl<M> Widget<M> for ScrollView<M> {
         let Some(offscreen) = render_to_offscreen(
             Area::new((0, 0).into(), offscreen_size),
             |offscreen_chunk| {
+                offscreen_chunk.set_text_metrics(ctx.theme().text_metrics);
                 self.child.render(offscreen_chunk, &child_ctx);
             },
         ) else {
