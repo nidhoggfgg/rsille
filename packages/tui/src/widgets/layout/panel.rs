@@ -1,5 +1,6 @@
 //! Panel container widget.
 
+use crate::layout::{ChildLayout, Layout};
 use render::area::Area;
 
 use crate::event::Event;
@@ -118,7 +119,7 @@ impl<M> Widget<M> for Panel<M> {
         let border_render_style = border_style.to_render_style();
         let _ = chunk.fill(0, 0, area.width(), area.height(), ' ', render_style);
 
-        let inner = if let Some(border) = self.border {
+        if let Some(border) = self.border {
             if area.width() < 2 || area.height() < 2 {
                 return;
             }
@@ -130,21 +131,27 @@ impl<M> Widget<M> for Panel<M> {
                     let _ = chunk.set_string(2, 0, &display, border_render_style);
                 }
             }
-            Area::new(
-                (area.x() + 1, area.y() + 1).into(),
-                (area.width() - 2, area.height() - 2).into(),
-            )
+        }
+
+        ctx.render_children(chunk, self);
+    }
+
+    fn layout(&self, area: Area, ctx: &MeasureCtx) -> Layout {
+        let inner = if self.border.is_some() {
+            if area.width() < 2 || area.height() < 2 {
+                return Layout::default();
+            }
+            area.shrink_saturating(1, 1, 1, 1)
         } else {
             area
         };
-
         let content = inner.shrink_saturating(
             self.padding.top,
             self.padding.bottom,
             self.padding.left,
             self.padding.right,
         );
-        render_children_vertical_clipped(chunk, ctx, &self.children, content, inner, self.gap);
+        layout_children_vertical(&self.children, content, inner, self.gap, ctx)
     }
 
     fn handle_event(&self, _event: &Event, _ctx: &mut EventCtx<M>) {}
@@ -182,28 +189,16 @@ impl<M> Widget<M> for Panel<M> {
     }
 }
 
-pub(crate) fn render_children_vertical<M>(
-    chunk: &mut render::chunk::Chunk,
-    ctx: &RenderCtx,
-    children: &[Box<dyn Widget<M>>],
-    content: Area,
-    gap: u16,
-) {
-    render_children_vertical_clipped(chunk, ctx, children, content, content, gap);
-}
-
-pub(crate) fn render_children_vertical_clipped<M>(
-    chunk: &mut render::chunk::Chunk,
-    ctx: &RenderCtx,
+pub(crate) fn layout_children_vertical<M>(
     children: &[Box<dyn Widget<M>>],
     content: Area,
     clip: Area,
     gap: u16,
-) {
+    ctx: &MeasureCtx,
+) -> Layout {
     if content.width() == 0 || content.height() == 0 {
-        return;
+        return Layout::default();
     }
-
     let layout_content = Area::new(
         content.pos(),
         (
@@ -214,74 +209,40 @@ pub(crate) fn render_children_vertical_clipped<M>(
         )
             .into(),
     );
-    let mut bridge = TaffyBridge::new();
-    let measure_ctx = ctx.measure_ctx();
-    let child_areas = match bridge.compute_layout_measured(
-        children,
-        layout_content,
-        Direction::Vertical,
-        gap,
-        None,
-        None,
-        &measure_ctx,
-    ) {
-        Ok(areas) => areas,
-        Err(_) => {
-            render_children_vertical_min_size(chunk, ctx, children, content, gap);
-            return;
-        }
-    };
-
-    for (index, (child, child_area)) in children.iter().zip(child_areas).enumerate() {
-        let child_area = Area::new(
-            (content.x(), child_area.y()).into(),
-            (content.width(), child_area.height()).into(),
+    let areas = TaffyBridge::new()
+        .compute_layout_measured(
+            children,
+            layout_content,
+            Direction::Vertical,
+            gap,
+            None,
+            None,
+            ctx,
+        )
+        .unwrap_or_else(|_| {
+            let mut y = content.y();
+            children
+                .iter()
+                .map(|child| {
+                    let height = child.constraints().min_height.min(
+                        content
+                            .y()
+                            .saturating_add(content.height())
+                            .saturating_sub(y),
+                    );
+                    let area = Area::new((content.x(), y).into(), (content.width(), height).into());
+                    y = y.saturating_add(height).saturating_add(gap);
+                    area
+                })
+                .collect()
+        });
+    Layout::new(areas.into_iter().enumerate().filter_map(|(i, area)| {
+        let area = Area::new(
+            (content.x(), area.y()).into(),
+            (content.width(), area.height()).into(),
         );
-
-        if child_area.width() == 0 || child_area.height() == 0 {
-            continue;
-        }
-
-        let Some(child_area) = child_area.clamp_to(&clip) else {
-            continue;
-        };
-
-        ctx.render_child_at(
-            chunk,
-            WidgetKey::for_child(index, child.as_ref()),
-            child.as_ref(),
-            child_area,
-        );
-    }
-}
-
-fn render_children_vertical_min_size<M>(
-    chunk: &mut render::chunk::Chunk,
-    ctx: &RenderCtx,
-    children: &[Box<dyn Widget<M>>],
-    content: Area,
-    gap: u16,
-) {
-    let mut y = content.y();
-    let bottom = content.y().saturating_add(content.height());
-    for (index, child) in children.iter().enumerate() {
-        if y >= bottom {
-            break;
-        }
-        let remaining = bottom - y;
-        let height = child.constraints().min_height.min(remaining);
-        if height == 0 {
-            continue;
-        }
-        let child_area = Area::new((content.x(), y).into(), (content.width(), height).into());
-        ctx.render_child_at(
-            chunk,
-            WidgetKey::for_child(index, child.as_ref()),
-            child.as_ref(),
-            child_area,
-        );
-        y = y.saturating_add(height).saturating_add(gap);
-    }
+        area.clamp_to(&clip).map(|area| ChildLayout::new(i, area))
+    }))
 }
 
 fn measure_vertical_children<M>(

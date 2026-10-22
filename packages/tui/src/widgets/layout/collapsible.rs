@@ -1,14 +1,17 @@
 //! Collapsible container widget.
 
+use crate::layout::Layout;
+use render::area::Area;
+
 use render::text::TextWidth;
 
 use crate::event::{Event, KeyCode};
 use crate::focus::FocusConfig;
 use crate::layout::Constraints;
 use crate::style::{Padding, Style};
-use crate::widget::{EventCtx, EventPhase, IntoWidget, RenderCtx, Widget};
+use crate::widget::{EventCtx, EventPhase, IntoWidget, MeasureCtx, RenderCtx, Widget};
 
-use super::panel::{container_constraints, render_children_vertical};
+use super::panel::{container_constraints, layout_children_vertical};
 
 pub struct Collapsible<M = ()> {
     title: String,
@@ -154,10 +157,17 @@ impl<M> Widget<M> for Collapsible<M> {
             return;
         }
 
+        ctx.render_children(chunk, self);
+    }
+
+    fn layout(&self, area: Area, ctx: &MeasureCtx) -> Layout {
+        if !self.expanded || area.height() <= 1 {
+            return Layout::default();
+        }
         let content = area
             .shrink_saturating(1, 0, self.padding.left, self.padding.right)
             .shrink_saturating(self.padding.top, self.padding.bottom, 0, 0);
-        render_children_vertical(chunk, ctx, &self.children, content, self.gap);
+        layout_children_vertical(&self.children, content, content, self.gap, ctx)
     }
 
     fn handle_event(&self, event: &Event, ctx: &mut EventCtx<M>) {

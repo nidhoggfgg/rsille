@@ -87,6 +87,9 @@ impl<M: 'static, N: 'static> Widget<N> for MappedWidget<M, N> {
     fn render(&self, chunk: &mut Chunk, ctx: &RenderCtx) {
         self.inner().render(chunk, ctx);
     }
+    fn layout(&self, area: Area, ctx: &MeasureCtx) -> Layout {
+        self.inner().layout(area, ctx)
+    }
     fn handle_event(&self, event: &Event, ctx: &mut EventCtx<N>) {
         ctx.map_messages(
             |child| self.inner().handle_event(event, child),

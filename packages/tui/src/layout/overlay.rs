@@ -1,5 +1,6 @@
 //! Layered containers for overlays, popups, and anchored floating UI.
 
+use crate::layout::{ChildLayout, Layout};
 use render::area::Area;
 
 use crate::event::Event;
@@ -269,14 +270,7 @@ impl<M> Widget<M> for Stack<M> {
 
         ctx.record_bounds(area);
 
-        for (index, child) in self.children.iter().enumerate() {
-            ctx.render_child_at(
-                chunk,
-                WidgetKey::for_child(index, child.as_ref()),
-                child.as_ref(),
-                area,
-            );
-        }
+        ctx.render_children(chunk, self);
     }
 
     fn handle_event(&self, _event: &Event, _ctx: &mut EventCtx<M>) {}
@@ -512,31 +506,23 @@ impl<M> Widget<M> for Overlay<M> {
 
         ctx.record_bounds(area);
 
-        ctx.render_child_at(
-            chunk,
-            WidgetKey::for_child(0, self.children[0].as_ref()),
-            self.children[0].as_ref(),
-            area,
-        );
+        ctx.render_children(chunk, self);
+    }
 
-        let mut layer_indices: Vec<usize> = (1..self.children.len()).collect();
-        layer_indices.sort_by_key(|index| self.z_indices[*index]);
-        let measure_ctx = ctx.measure_ctx();
-
-        for index in layer_indices {
-            let layer_area = self.placement_area(area, index, &measure_ctx);
-            if layer_area.width() == 0 || layer_area.height() == 0 {
-                continue;
-            }
-            if layer_area.intersects(&area) {
-                ctx.render_child_at(
-                    chunk,
-                    WidgetKey::for_child(index, self.children[index].as_ref()),
-                    self.children[index].as_ref(),
-                    layer_area,
-                );
-            }
+    fn layout(&self, area: Area, ctx: &MeasureCtx) -> Layout {
+        if self.children.is_empty() {
+            return Layout::default();
         }
+        let mut indices: Vec<_> = (1..self.children.len()).collect();
+        indices.sort_by_key(|i| self.z_indices[*i]);
+        let mut children = vec![ChildLayout::new(0, area)];
+        children.extend(indices.into_iter().filter_map(|i| {
+            let layer = self.placement_area(area, i, ctx);
+            layer
+                .intersects(&area)
+                .then_some(ChildLayout::new(i, layer))
+        }));
+        Layout::new(children)
     }
 
     fn handle_event(&self, _event: &Event, _ctx: &mut EventCtx<M>) {}

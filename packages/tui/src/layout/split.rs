@@ -1,5 +1,6 @@
 //! Resizable split-pane layouts.
 
+use crate::layout::{ChildLayout, Layout};
 use render::area::Area;
 
 use crate::event::{Event, KeyCode, MouseButton, MouseEventKind};
@@ -250,6 +251,18 @@ impl<M> Split<M> {
 }
 
 impl<M> Widget<M> for Split<M> {
+    fn layout(&self, area: Area, ctx: &MeasureCtx) -> Layout {
+        let state = ctx.state::<SplitState>().copied().unwrap_or_default();
+        let Some(layout) = self.layout(area, &state) else {
+            return Layout::default();
+        };
+        Layout::new([
+            ChildLayout::new(0, layout.first),
+            ChildLayout::new(1, layout.second),
+        ])
+        .with_data(layout)
+    }
+
     fn render(&self, chunk: &mut render::chunk::Chunk, ctx: &RenderCtx) {
         let area = chunk.area();
         if area.width() == 0 || area.height() == 0 {
@@ -258,24 +271,11 @@ impl<M> Widget<M> for Split<M> {
 
         ctx.record_bounds(area);
 
-        let state = *ctx.state_or_default::<SplitState>();
-        let Some(layout) = self.layout(area, &state) else {
+        let result = ctx.layout(self, area);
+        let Some(layout) = result.data::<SplitLayout>() else {
             return;
         };
-
-        ctx.render_child_at(
-            chunk,
-            WidgetKey::for_child(0, self.children[0].as_ref()),
-            self.children[0].as_ref(),
-            layout.first,
-        );
-
-        ctx.render_child_at(
-            chunk,
-            WidgetKey::for_child(1, self.children[1].as_ref()),
-            self.children[1].as_ref(),
-            layout.second,
-        );
+        ctx.render_children(chunk, self);
 
         if let Ok(mut divider_chunk) = chunk.from_area(layout.divider) {
             let divider_style = self
@@ -344,6 +344,7 @@ impl<M> Widget<M> for Split<M> {
             return;
         }
 
+        let (pointer_x, pointer_y) = ctx.layout_mouse_position(event).unwrap_or((0, 0));
         let Some(bounds) = ctx.bounds() else {
             return;
         };
@@ -391,17 +392,15 @@ impl<M> Widget<M> for Split<M> {
             },
             Event::Mouse(mouse_event) => match mouse_event.kind {
                 MouseEventKind::Down(MouseButton::Left) => {
-                    let inside_divider = mouse_event.column >= layout.divider.x()
-                        && mouse_event.column < layout.divider.x() + layout.divider.width()
-                        && mouse_event.row >= layout.divider.y()
-                        && mouse_event.row < layout.divider.y() + layout.divider.height();
+                    let inside_divider = pointer_x >= layout.divider.x()
+                        && pointer_x < layout.divider.x() + layout.divider.width()
+                        && pointer_y >= layout.divider.y()
+                        && pointer_y < layout.divider.y() + layout.divider.height();
                     if inside_divider {
                         dragging = true;
                         next_size = match self.direction {
-                            SplitDirection::Horizontal => {
-                                mouse_event.column.saturating_sub(bounds.x())
-                            }
-                            SplitDirection::Vertical => mouse_event.row.saturating_sub(bounds.y()),
+                            SplitDirection::Horizontal => pointer_x.saturating_sub(bounds.x()),
+                            SplitDirection::Vertical => pointer_y.saturating_sub(bounds.y()),
                         };
                         handled = true;
                         ctx.request_focus_self();
@@ -409,8 +408,8 @@ impl<M> Widget<M> for Split<M> {
                 }
                 MouseEventKind::Drag(MouseButton::Left) if dragging => {
                     next_size = match self.direction {
-                        SplitDirection::Horizontal => mouse_event.column.saturating_sub(bounds.x()),
-                        SplitDirection::Vertical => mouse_event.row.saturating_sub(bounds.y()),
+                        SplitDirection::Horizontal => pointer_x.saturating_sub(bounds.x()),
+                        SplitDirection::Vertical => pointer_y.saturating_sub(bounds.y()),
                     };
                     handled = true;
                 }
@@ -427,6 +426,7 @@ impl<M> Widget<M> for Split<M> {
             let state = ctx.state_mut::<SplitState>();
             state.first_size = Some(self.clamp_first_size(next_size, total_main));
             state.dragging = dragging;
+            ctx.request_layout();
             ctx.set_handled();
         }
     }

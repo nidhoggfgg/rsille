@@ -20,7 +20,9 @@ use crate::effect::{
 };
 use crate::event::{KeyCode, KeyModifiers, MouseButton, MouseEventKind};
 use crate::focus::FocusManager;
-use crate::layout::{AxisLimit, SizeProposal};
+use crate::layout::{
+    AxisLimit, Invalidation, LayoutCache, LayoutGeometry, LayoutStats, SizeProposal,
+};
 use crate::scope::{ResourceKey, Scope};
 use crate::shell::{CommandRouter, HotkeyRegistry};
 use crate::style::Theme;
@@ -219,6 +221,29 @@ impl<State, M: Clone + std::fmt::Debug + Send + 'static> Runtime<State, M> {
         self.core.geometry.borrow().get(path).copied()
     }
 
+    /// Target, displayed allocation, visible clip and hit area from the last paint.
+    pub fn layout_geometry(&self, path: &WidgetPath) -> Option<LayoutGeometry> {
+        self.core.store.layout_geometry.borrow().get(path).copied()
+    }
+
+    /// Cumulative layout computations and cache hits for profiling/tests.
+    pub fn layout_stats(&self) -> LayoutStats {
+        self.core.layouts.stats()
+    }
+
+    /// Refresh layout (and paint) on the next step, including custom external dependencies.
+    pub fn request_layout(&mut self) {
+        self.core.layouts.clear();
+        self.needs_draw = true;
+        self.core.wake.wake();
+    }
+
+    /// Paint the existing view and reuse its layout on the next step.
+    pub fn request_paint(&mut self) {
+        self.needs_draw = true;
+        self.core.wake.wake();
+    }
+
     pub fn widget_state<T: 'static>(&self, id: &WidgetId) -> Option<&T> {
         self.core.store.get(id.clone())
     }
@@ -361,6 +386,7 @@ pub(crate) struct AppRuntime<State, U, V, M> {
     animation_store: RefCell<AnimationStore>,
     geometry: RefCell<HashMap<WidgetPath, render::area::Area>>,
     hit_regions: RefCell<Vec<HitRegion>>,
+    layouts: LayoutCache,
     focus: FocusManager,
     cached_tree: Option<Box<dyn Widget<M>>>,
     previous_tree: Option<Box<dyn Widget<M>>>,
@@ -615,6 +641,7 @@ impl<State, U, V, M: Send + 'static> AppRuntime<State, U, V, M> {
             animation_store: RefCell::new(AnimationStore::new()),
             geometry: RefCell::new(HashMap::new()),
             hit_regions: RefCell::new(Vec::new()),
+            layouts: LayoutCache::default(),
             focus: FocusManager::new(),
             cached_tree: None,
             previous_tree: None,
@@ -678,6 +705,7 @@ impl<State, U, V, M: Send + 'static> AppRuntime<State, U, V, M> {
         if self.cached_tree.is_some() {
             return;
         }
+        self.layouts.clear();
         let tree = (self.view_fn)(&self.state);
         // Validate before modifying state: even keys below separate unkeyed
         // wrappers share the nearest named ancestor's namespace.
@@ -998,7 +1026,12 @@ impl<State, U, V, M: Send + 'static> AppRuntime<State, U, V, M> {
 
     fn sync_theme(&mut self) {
         if let Some(resolver) = self.theme_resolver.as_ref() {
-            self.theme = resolver(&self.state);
+            let theme = resolver(&self.state);
+            if self.theme != theme {
+                self.theme = theme;
+                self.layouts.clear();
+                self.store.invalidation.request_paint();
+            }
         }
     }
 
@@ -1221,8 +1254,8 @@ impl<State, U, V, M: Send + 'static> AppRuntime<State, U, V, M> {
         now: Instant,
         motion_policy: MotionPolicy,
         animation_theme: crate::animation::AnimationTheme,
-    ) -> bool {
-        let mut needs_render = {
+    ) -> Invalidation {
+        let mut requests = {
             let mut ctx = AnimationCtx::with_identity(
                 store,
                 path.clone(),
@@ -1232,7 +1265,13 @@ impl<State, U, V, M: Send + 'static> AppRuntime<State, U, V, M> {
                 motion_policy,
                 animation_theme,
             );
-            widget.animate(&mut ctx)
+            let legacy = widget.animate(&mut ctx);
+            let mut requests = ctx.invalidation();
+            if legacy {
+                requests.request_paint();
+                requests.request_next_frame();
+            }
+            requests
         };
 
         for (index, child) in widget.children().iter().enumerate() {
@@ -1240,7 +1279,7 @@ impl<State, U, V, M: Send + 'static> AppRuntime<State, U, V, M> {
             let (child_id, child_stable_scope_id) =
                 WidgetId::for_child(&id, &stable_scope_id, &key);
             path.push(key);
-            needs_render |= Self::animate_widget_tree(
+            requests.merge(Self::animate_widget_tree(
                 child.as_ref(),
                 path,
                 child_id,
@@ -1250,11 +1289,11 @@ impl<State, U, V, M: Send + 'static> AppRuntime<State, U, V, M> {
                 now,
                 motion_policy,
                 animation_theme,
-            );
+            ));
             path.pop();
         }
 
-        needs_render
+        requests
     }
 
     fn animation_time(&self) -> Instant {
@@ -1276,9 +1315,9 @@ impl<State, U, V, M: Send + 'static> AppRuntime<State, U, V, M> {
         now
     }
 
-    fn animate_widgets(&mut self) -> bool {
+    fn animate_widgets(&mut self) -> Invalidation {
         if self.cached_tree.is_none() {
-            return false;
+            return Invalidation::default();
         }
 
         let focused_id = self.focus.current_id().cloned();
@@ -1287,7 +1326,7 @@ impl<State, U, V, M: Send + 'static> AppRuntime<State, U, V, M> {
         let animation_theme = self.theme.animations;
         let tree = self.cached_tree.as_ref().unwrap();
         let mut store = self.animation_store.borrow_mut();
-        let mut needs_render = Self::animate_widget_tree(
+        let mut requests = Self::animate_widget_tree(
             tree.as_ref(),
             &mut path,
             WidgetId::root(),
@@ -1298,11 +1337,17 @@ impl<State, U, V, M: Send + 'static> AppRuntime<State, U, V, M> {
             self.motion_policy,
             animation_theme,
         );
-        needs_render |= store.advance(now);
+        if store.advance(now) {
+            requests.request_paint();
+            requests.request_next_frame();
+        }
         // A completed exit still needs one frame to remove its retained pixels
         // and resources, even if no live animation changed.
-        needs_render |= !self.exiting_visuals.is_empty();
-        needs_render
+        if !self.exiting_visuals.is_empty() {
+            requests.request_paint();
+            requests.request_next_frame();
+        }
+        requests
     }
 
     fn render_exiting_visuals(&self, chunk: &mut Chunk, ctx: &RenderCtx, now: Instant) {
@@ -1781,11 +1826,28 @@ where
         self.ensure_tree();
         let tree = self.cached_tree.as_ref().unwrap();
         sync_widget_states(tree.as_ref(), &mut self.store);
+        if self.store.invalidation.layout {
+            self.layouts.clear();
+            self.store.invalidation.layout = false;
+        }
         let render_now = self.animation_now();
         self.prune_completed_exit_visuals(render_now);
         let tree = self.cached_tree.as_ref().unwrap();
 
-        // Render
+        // Resolve the target tree before painting. Geometry-changing animations
+        // may refresh only the nodes whose displayed allocation differs.
+        let measure_ctx = MeasureCtx::with_runtime(
+            &self.store,
+            &self.theme,
+            render_now,
+            self.render_frame,
+            self.visual_capabilities,
+        );
+        self.layouts
+            .resolve(tree.as_ref(), chunk.area(), &measure_ctx);
+
+        // Paint and record displayed/clipped hit geometry from those allocations.
+        self.store.layout_geometry.borrow_mut().clear();
         let focused_path = self.focus.current_path();
         let focused_id = self.focus.current_id().cloned();
         self.geometry.borrow_mut().clear();
@@ -1802,7 +1864,11 @@ where
             self.render_frame,
             self.motion_policy,
             self.visual_capabilities,
-        );
+        )
+        .with_layouts(&self.layouts)
+        .with_viewport(chunk.area());
+        ctx.record_bounds(chunk.area());
+        ctx.record_hit_bounds(chunk.area(), chunk.area(), tree.hit_test_mode());
         tree.render(&mut chunk, &ctx);
         self.render_exiting_visuals(&mut chunk, &ctx, render_now);
         self.prune_live_animations();
@@ -2113,11 +2179,16 @@ where
             // still occur between messages.
             sync_widget_states(self.cached_tree.as_ref().unwrap().as_ref(), &mut self.store);
         }
-        let needs_animation_frame = self.animate_widgets();
-        self.next_animation_at =
-            needs_animation_frame.then(|| self.clock.now() + Self::FRAME_INTERVAL);
+        let mut requests = self.animate_widgets();
+        requests.merge(std::mem::take(&mut self.store.invalidation));
+        if requests.layout {
+            self.layouts.clear();
+        }
+        self.next_animation_at = requests
+            .next_frame
+            .then(|| self.clock.now() + Self::FRAME_INTERVAL);
 
-        Ok(processed_messages || needs_animation_frame)
+        Ok(processed_messages || requests.paint || requests.layout)
     }
 
     fn should_quit(&self) -> bool {

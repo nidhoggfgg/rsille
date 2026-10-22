@@ -1,5 +1,6 @@
 //! Grid layout container
 
+use crate::layout::{ChildLayout, Layout};
 use render::area::Area;
 
 use super::border_renderer::{render_background, render_border};
@@ -263,6 +264,24 @@ impl<M> Widget<M> for Grid<M> {
             return;
         }
 
+        ctx.render_children(chunk, self);
+    }
+
+    fn layout(&self, area: Area, ctx: &MeasureCtx) -> Layout {
+        let content_area = if self.border.is_some() {
+            area.shrink_saturating(1, 1, 1, 1)
+        } else {
+            area
+        };
+        let padded_area = content_area.shrink_saturating(
+            self.padding.top,
+            self.padding.bottom,
+            self.padding.left,
+            self.padding.right,
+        );
+        if padded_area.width() == 0 || padded_area.height() == 0 {
+            return Layout::default();
+        }
         let gap_row = self.gap_row.unwrap_or(self.gap);
         let gap_column = self.gap_column.unwrap_or(self.gap);
 
@@ -284,29 +303,21 @@ impl<M> Widget<M> for Grid<M> {
             gap_column,
             self.align_items,
             self.justify_items,
-            &ctx.measure_ctx(),
+            ctx,
         ) {
             Ok(areas) => areas,
-            Err(_) => return,
+            Err(_) => return Layout::default(),
         };
 
-        for (index, (child, child_area)) in self.children.iter().zip(child_areas.iter()).enumerate()
-        {
-            if child_area.width() == 0 || child_area.height() == 0 {
-                continue;
-            }
-
-            let Some(child_area) = child_area.clamp_to(&content_area) else {
-                continue;
-            };
-
-            ctx.render_child_at(
-                chunk,
-                WidgetKey::for_child(index, child.as_ref()),
-                child.as_ref(),
-                child_area,
-            );
-        }
+        Layout::new(
+            child_areas
+                .into_iter()
+                .enumerate()
+                .filter_map(|(index, area)| {
+                    area.clamp_to(&content_area)
+                        .map(|area| ChildLayout::new(index, area))
+                }),
+        )
     }
 
     fn handle_event(&self, _event: &Event, _ctx: &mut EventCtx<M>) {

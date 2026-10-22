@@ -19,8 +19,9 @@ pub use crate::focus::{FocusConfig, FocusScope, ScopeEntry};
 pub use crate::layout::{
     clamp_scroll_offset, col, ensure_item_visible, grid, max_scroll_offset, overlay, row,
     scroll_lines, scroll_offset_for_item, scroll_view, scrollbar, split, stack, AlignItems,
-    AnchorRect, AxisLimit, Constraints, Direction, Flex, Grid, GridLine, GridPlacement, GridTrack,
-    HorizontalAlign, JustifyContent, LayoutStyle, MeasuredSize, Overflow, Overlay, OverlayAnchor,
+    AnchorRect, AxisLimit, ChildLayout, Constraints, Direction, Flex, Grid, GridLine,
+    GridPlacement, GridTrack, HorizontalAlign, Invalidation, JustifyContent, Layout,
+    LayoutGeometry, LayoutStats, LayoutStyle, MeasuredSize, Overflow, Overlay, OverlayAnchor,
     OverlayLayer, OverlayPlacement, ScrollAxis, ScrollState, ScrollView, Scrollbar,
     ScrollbarOrientation, ScrollbarVisibility, SizeProposal, Split, SplitDirection, SplitSize,
     SplitState, Stack, VerticalAlign,

@@ -242,13 +242,9 @@ impl<M> Widget<M> for Label<M> {
 
 impl<M> Label<M> {
     fn layout_with(&self, metrics: TextMetrics) -> LayoutStyle {
-        let mut style = LayoutStyle::from_constraints(self.constraints_with(metrics));
-        if self.constraints.is_none() && self.wrap != TextWrap::None {
-            let (width, height) = label_size(&self.content, self.tab_width, metrics);
-            style.preferred_width = Some(width);
-            style.preferred_height = Some(height);
-        }
-        style
+        // Wrapped height depends on the allocated width. Leave both axes
+        // intrinsic so the layout engine asks measure() with that constraint.
+        LayoutStyle::from_constraints(self.constraints_with(metrics))
     }
 
     fn measure_with(&self, proposal: SizeProposal, metrics: TextMetrics) -> MeasuredSize {

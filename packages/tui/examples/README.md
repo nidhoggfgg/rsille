@@ -301,3 +301,91 @@ only measures allocation; the grapheme constructor also performs segmentation.
 A short local run measured approximately 12 ns for ASCII construction, 1.3 ns
 for its clone, 24 ns for a composite clone, and 70 µs for the draw/diff scenario;
 these are observations, not performance guarantees or cross-machine baselines.
+
+## Layout phases and invalidation
+
+The runtime reconciles the description and widget state, resolves the target
+layout tree, then paints it. `Widget::layout(area, &MeasureCtx) -> Layout`
+allocates children without drawing. `ChildLayout::index` addresses
+`Widget::children()`, and the order of allocations is paint/hit order.
+`Layout::with_data` can retain immutable container geometry for painting,
+such as a scroll viewport or split divider. Flex, Grid, Panel, Dialog,
+Collapsible, Stack, Overlay, Split and ScrollView use this protocol.
+
+A custom container only needs to allocate its children and call
+`ctx.render_children(chunk, self)` in `render`. The framework applies keys,
+scopes, layout animations, clipping and hit routing:
+
+```rust,ignore
+fn layout(&self, area: Area, _ctx: &MeasureCtx) -> Layout {
+    Layout::new([ChildLayout::new(0, area.shrink_saturating(1, 1, 2, 2))])
+}
+
+fn render(&self, chunk: &mut Chunk, ctx: &RenderCtx) {
+    ctx.render_children(chunk, self);
+}
+```
+
+The default `layout` stacks all exposed children in the allocated area. Leaves
+need no change. A legacy custom container that computes geometry in `render`
+continues to work, but must adopt this protocol to reuse its own layout.
+`Box<dyn Widget<_>>` and message mapping forward the layout hook transparently.
+Direct rendering with `RenderCtx::new` computes layout on demand and requires
+no runtime or terminal session.
+
+The runtime caches each node's layout output by path and allocation. A new
+view description, changed theme (including text metrics), or explicit layout
+request clears the cache. Resizing recomputes allocations whose constraints
+changed. Time/frame metadata is available during measurement, but a custom
+widget that depends on it must request layout when those dependencies change.
+There is no general property hashing, persistent Taffy tree, or measurement
+memoization yet. Application messages conservatively rebuild the description
+and invalidate layout, including messages that change only colors.
+
+| Context | Request | Behavior |
+| --- | --- | --- |
+| `EventCtx`, `StateCtx`, `AnimationCtx` | `request_layout()` | Remeasure/layout and paint |
+| `EventCtx`, `StateCtx`, `AnimationCtx` | `request_paint()` | Paint using existing allocations |
+| `EventCtx`, `AnimationCtx` | `request_next_frame()` | Schedule another update; no implicit paint/layout |
+| headless `Runtime` | `request_layout()` / `request_paint()` | Wake and refresh on the next `step` |
+
+`EventCtx::state_mut` requests paint. If internal state changes intrinsic size
+or child allocations, call `request_layout` as well. Lifecycle synchronization
+has the same explicit requirement for layout-dependent internal state. Existing
+application-controlled properties are covered by description rebuilding.
+Animation hooks should use the three independent requests and return `false`;
+returning `true` keeps the legacy behavior of paint plus another update.
+Color animations and cursor movement reuse layout. Geometry animations refresh
+affected descendant allocations when their displayed size/position changes;
+this refresh may happen during paint after the target layout phase.
+
+`Runtime::bounds(path)` reports the last visible screen bounds.
+`Runtime::layout_geometry(path)` additionally exposes the full target and
+displayed allocations, visible clip and hit area. Target/display use the
+parent's layout space; clip/hit are screen coordinates. Scroll content includes
+`coordinate_offset` to map its offscreen layout space to the screen.
+`EventCtx::bounds()` preserves the complete displayed allocation, so partial
+clipping does not shift local input positions. Use `local_mouse_position` for
+widget-relative coordinates or `layout_mouse_position` for coordinates in the
+same space as `bounds`; `mouse_position` remains the absolute screen position.
+`bounds_for` reports visible screen bounds. Hits are clipped to ancestor
+viewports and respect the animation's `HitTestMode`.
+
+`Runtime::layout_stats()` exposes cumulative layout computation/cache-hit
+counts (including leaves). Run `cargo test -p tui --test layout` for headless
+regressions covering custom/mapped containers, independent animation requests,
+color animation reuse, resize/wrapping, split resizing, scroll clicks, animation
+geometry and clipping. Run `cargo bench -p tui --bench layout` to compare the
+same 64-label scene over 2,000 warmed frames: measurement count, layout count,
+allocation calls (including reallocations), and mean frame time. The benchmark
+compares explicit paint requests against explicit full layout requests; it
+excludes terminal output and view rebuilding. Use it as a local baseline before
+adding more cache machinery, not as a cross-machine performance guarantee.
+
+A local optimized run on 2026-10-22 produced the following means; these are
+observations, not thresholds:
+
+| Update | Measurements/frame | Layout nodes/frame | Allocations/frame | µs/frame |
+| --- | ---: | ---: | ---: | ---: |
+| Paint only | 0 | 0 | 256 | 183.2 |
+| Layout + paint | 320 | 73 | 3,115 | 851.3 |

@@ -1,5 +1,6 @@
 //! Dialog container widget.
 
+use crate::layout::Layout;
 use render::area::Area;
 
 use crate::event::Event;
@@ -7,9 +8,9 @@ use crate::focus::{FocusConfig, FocusScope, ScopeEntry};
 use crate::layout::border_renderer;
 use crate::layout::Constraints;
 use crate::style::{BorderStyle, Padding, Style};
-use crate::widget::{EventCtx, IntoWidget, RenderCtx, Widget};
+use crate::widget::{EventCtx, IntoWidget, MeasureCtx, RenderCtx, Widget};
 
-use super::panel::{container_constraints, render_children_vertical};
+use super::panel::{container_constraints, layout_children_vertical};
 
 /// Modal-style surface intended for use inside `overlay()`.
 pub struct Dialog<M = ()> {
@@ -149,17 +150,20 @@ impl<M> Widget<M> for Dialog<M> {
             }
         }
 
-        let inner = Area::new(
-            (area.x() + 1, area.y() + 1).into(),
-            (area.width() - 2, area.height() - 2).into(),
-        )
-        .shrink_saturating(
+        ctx.render_children(chunk, self);
+    }
+
+    fn layout(&self, area: Area, ctx: &MeasureCtx) -> Layout {
+        if area.width() < 2 || area.height() < 2 {
+            return Layout::default();
+        }
+        let content = area.shrink_saturating(1, 1, 1, 1).shrink_saturating(
             self.padding.top,
             self.padding.bottom,
             self.padding.left,
             self.padding.right,
         );
-        render_children_vertical(chunk, ctx, &self.children, inner, self.gap);
+        layout_children_vertical(&self.children, content, content, self.gap, ctx)
     }
 
     fn handle_event(&self, _event: &Event, _ctx: &mut EventCtx<M>) {}

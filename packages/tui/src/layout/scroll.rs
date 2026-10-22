@@ -1,5 +1,6 @@
 //! Scroll containers and reusable scroll helpers.
 
+use crate::layout::{ChildLayout, Layout};
 use render::area::Area;
 use render::text::TextWidth;
 
@@ -571,6 +572,21 @@ impl<M> ScrollView<M> {
 }
 
 impl<M> Widget<M> for ScrollView<M> {
+    fn layout(&self, area: Area, ctx: &MeasureCtx) -> Layout {
+        let Some(metrics) = self.resolve_metrics(area, Some(ctx)) else {
+            return Layout::default();
+        };
+        let content = Area::new(
+            (0, 0).into(),
+            (
+                metrics.content_width.min(u16::MAX as usize) as u16,
+                metrics.content_height.min(u16::MAX as usize) as u16,
+            )
+                .into(),
+        );
+        Layout::new([ChildLayout::new(0, content)]).with_data(metrics)
+    }
+
     fn render(&self, chunk: &mut render::chunk::Chunk, ctx: &RenderCtx) {
         let area = chunk.area();
         if area.width() == 0 || area.height() == 0 {
@@ -595,8 +611,8 @@ impl<M> Widget<M> for ScrollView<M> {
             render_border(chunk, border, border_render_style);
         }
 
-        let measure_ctx = ctx.measure_ctx();
-        let Some(metrics) = self.resolve_metrics(area, Some(&measure_ctx)) else {
+        let result = ctx.layout(self, area);
+        let Some(metrics) = result.data::<ScrollMetrics>() else {
             return;
         };
         if metrics.viewport.width() == 0 || metrics.viewport.height() == 0 {
@@ -618,7 +634,18 @@ impl<M> Widget<M> for ScrollView<M> {
             .into();
         let child_ctx = ctx
             .child_ctx(WidgetKey::for_child(0, self.child.as_ref()))
-            .with_hit_area(None);
+            .with_viewport(metrics.viewport)
+            .with_coordinate_offset(
+                metrics.viewport.x() as i32 - scroll_state.offset_x.min(i32::MAX as usize) as i32,
+                metrics.viewport.y() as i32 - scroll_state.offset_y.min(i32::MAX as usize) as i32,
+            );
+        let content_area = Area::new((0, 0).into(), offscreen_size);
+        child_ctx.record_bounds(content_area);
+        child_ctx.record_hit_bounds(
+            content_area,
+            content_area,
+            crate::animation::HitTestMode::Target,
+        );
         let Some(offscreen) = render_to_offscreen(
             Area::new((0, 0).into(), offscreen_size),
             |offscreen_chunk| {

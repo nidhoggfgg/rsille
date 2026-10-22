@@ -215,7 +215,7 @@ impl Palette {
 /// including user-defined custom widgets. Instead of hardcoding styles for
 /// specific components, we provide semantic roles based on the purpose and
 /// context of UI elements.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ThemeStyles {
     // === Action Styles ===
     /// Primary action style (e.g., primary buttons, key actions)
@@ -465,7 +465,7 @@ impl ThemeStyles {
 }
 
 /// A complete theme definition
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Theme {
     /// Shared terminal text width and tab-stop policy.
     pub text_metrics: render::text::TextMetrics,

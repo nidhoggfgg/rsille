@@ -177,3 +177,7 @@ path = "examples/widgets/tree.rs"
 [[example]]
 name = "composition"
 path = "examples/basics/composition.rs"
+
+[[bench]]
+name = "layout"
+harness = false

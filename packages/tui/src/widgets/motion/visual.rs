@@ -511,6 +511,8 @@ impl<M> Visual<M> {
         let child_ctx = ctx
             .child_ctx(WidgetKey::for_child(0, self.child.as_ref()))
             .with_hit_area(hit_area);
+        child_ctx.record_bounds(chunk.area());
+        child_ctx.record_child_hit_area(child_ctx.path(), hit_area);
         self.render_visual_content(chunk, ctx, &child_ctx);
     }
 

@@ -5,6 +5,7 @@ use std::any::{Any, TypeId};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt;
+use std::rc::Rc;
 
 use render::area::Area;
 use render::chunk::Chunk;
@@ -16,7 +17,10 @@ use crate::animation::{
 };
 use crate::event::Event;
 use crate::focus::FocusConfig;
-use crate::layout::{Constraints, LayoutStyle, MeasuredSize, SizeProposal};
+use crate::layout::{
+    ChildLayout, Constraints, Invalidation, Layout, LayoutCache, LayoutGeometry, LayoutStyle,
+    MeasuredSize, SizeProposal,
+};
 use crate::style::Style;
 use crate::style::Theme;
 use crate::widgets::visual::TerminalVisualCapabilities;
@@ -301,6 +305,15 @@ impl<'a> StateCtx<'a> {
     pub fn state_mut<T: Default + 'static>(&mut self) -> &mut T {
         self.store.get_or_default(&self.id)
     }
+
+    /// Lifecycle synchronization that changes intrinsic size must invalidate layout.
+    pub fn request_layout(&mut self) {
+        self.store.invalidation.request_layout();
+    }
+
+    pub fn request_paint(&mut self) {
+        self.store.invalidation.request_paint();
+    }
 }
 
 /// Read-only context passed during widget measurement.
@@ -427,6 +440,18 @@ pub trait Widget<M> {
     /// `ctx.is_focused()`. The widget draws at relative coordinates within the chunk.
     fn render(&self, chunk: &mut Chunk, ctx: &RenderCtx);
 
+    /// Compute child allocations independently of painting. Containers override
+    /// this and paint them with `RenderCtx::render_children`. The default stacks
+    /// children in the allocated area; leaves return an empty layout.
+    fn layout(&self, area: Area, _ctx: &MeasureCtx) -> Layout {
+        Layout::new(
+            self.children()
+                .iter()
+                .enumerate()
+                .map(|(i, _)| ChildLayout::new(i, area)),
+        )
+    }
+
     /// Handle an event routed to this widget by the framework.
     ///
     /// Widgets receive events during capture, target, and bubble phases.
@@ -436,7 +461,9 @@ pub trait Widget<M> {
 
     /// Advance component-level animation state for this widget.
     ///
-    /// Return `true` when the animation changed a value or needs another frame.
+    /// Prefer `AnimationCtx::request_paint`, `request_layout` and
+    /// `request_next_frame` for independent requests. Returning `true` retains
+    /// the legacy meaning: paint and schedule another update, reusing layout.
     fn animate(&self, _ctx: &mut AnimationCtx) -> bool {
         false
     }
@@ -529,6 +556,10 @@ impl<M> Widget<M> for Box<dyn Widget<M>> {
 
     fn render(&self, chunk: &mut Chunk, ctx: &RenderCtx) {
         (**self).render(chunk, ctx)
+    }
+
+    fn layout(&self, area: Area, ctx: &MeasureCtx) -> Layout {
+        (**self).layout(area, ctx)
     }
 
     fn handle_event(&self, event: &Event, ctx: &mut EventCtx<M>) {
@@ -679,6 +710,7 @@ impl HitRegion {
     }
 }
 
+#[derive(Clone)]
 pub struct RenderCtx<'a> {
     store: &'a WidgetStore,
     animation_store: AnimationStoreView<'a>,
@@ -698,6 +730,9 @@ pub struct RenderCtx<'a> {
     layout_target: Option<Area>,
     layout_managed: bool,
     exit_render: bool,
+    layouts: Option<&'a LayoutCache>,
+    coordinate_offset: (i32, i32),
+    viewport_clip: Option<Area>,
 }
 
 impl<'a> RenderCtx<'a> {
@@ -727,6 +762,9 @@ impl<'a> RenderCtx<'a> {
             layout_target: None,
             layout_managed: false,
             exit_render: false,
+            layouts: None,
+            coordinate_offset: (0, 0),
+            viewport_clip: None,
         }
     }
 
@@ -762,6 +800,38 @@ impl<'a> RenderCtx<'a> {
             layout_target: None,
             layout_managed: false,
             exit_render: false,
+            layouts: None,
+            coordinate_offset: (0, 0),
+            viewport_clip: None,
+        }
+    }
+
+    pub(crate) fn with_layouts(mut self, layouts: &'a LayoutCache) -> Self {
+        self.layouts = Some(layouts);
+        self
+    }
+
+    /// Read the layout prepared before painting. Direct, non-runtime rendering
+    /// computes it on demand. Animated allocations refresh affected nodes only.
+    pub fn layout<M>(&self, widget: &dyn Widget<M>, area: Area) -> Rc<Layout> {
+        match self.layouts {
+            Some(cache) => cache.resolve(widget, area, &self.measure_ctx()),
+            None => Rc::new(widget.layout(area, &self.measure_ctx())),
+        }
+    }
+
+    /// Paint allocated children with framework-managed identity, animation,
+    /// clipping and hit regions. Custom containers need only implement layout.
+    pub fn render_children<M>(&self, chunk: &mut Chunk, widget: &dyn Widget<M>) {
+        let layout = self.layout(widget, chunk.area());
+        for allocation in &layout.children {
+            let child = widget.children()[allocation.index].as_ref();
+            self.render_child_at(
+                chunk,
+                WidgetKey::for_child(allocation.index, child),
+                child,
+                allocation.area,
+            );
         }
     }
 
@@ -977,6 +1047,9 @@ impl<'a> RenderCtx<'a> {
             layout_target: None,
             layout_managed: false,
             exit_render: self.exit_render,
+            layouts: self.layouts,
+            coordinate_offset: self.coordinate_offset,
+            viewport_clip: self.viewport_clip,
         }
     }
 
@@ -1007,6 +1080,9 @@ impl<'a> RenderCtx<'a> {
             layout_target: Some(target),
             layout_managed: true,
             exit_render: self.exit_render,
+            layouts: self.layouts,
+            coordinate_offset: self.coordinate_offset,
+            viewport_clip: self.viewport_clip,
         }
     }
 
@@ -1036,6 +1112,9 @@ impl<'a> RenderCtx<'a> {
             layout_target: self.layout_target,
             layout_managed: self.layout_managed,
             exit_render: true,
+            layouts: None,
+            coordinate_offset: self.coordinate_offset,
+            viewport_clip: self.viewport_clip,
         }
     }
 
@@ -1057,7 +1136,7 @@ impl<'a> RenderCtx<'a> {
     ) -> (Area, RenderCtx<'a>, ClipMode) {
         let path = self.current_path.child(key.clone());
         let (id, _) = WidgetId::for_child(&self.current_id, &self.stable_scope_id, &key);
-        self.geometry.borrow_mut().insert(path.clone(), target);
+        self.record_bounds_for(&path, target);
 
         if let Some(shared) = child.shared_transition() {
             let display = match self.animation_store {
@@ -1076,6 +1155,7 @@ impl<'a> RenderCtx<'a> {
                         .0
                 }
             };
+            self.record_display_bounds(&path, target, display);
             let hit_area = hit_area_for(shared.layout.hit_test, target, display);
             self.record_child_hit_area(&path, hit_area);
             return (
@@ -1103,6 +1183,7 @@ impl<'a> RenderCtx<'a> {
                         .0
                 }
             };
+            self.record_display_bounds(&path, target, display);
             let hit_area = hit_area_for(transition.hit_test, target, display);
             self.record_child_hit_area(&path, hit_area);
             return (
@@ -1129,7 +1210,8 @@ impl<'a> RenderCtx<'a> {
         child: &dyn Widget<M>,
         target: Area,
     ) {
-        let (display, child_ctx, clip) = self.prepare_child_layout(key, child, target);
+        let parent_ctx = self.clone().with_viewport(chunk.area());
+        let (display, mut child_ctx, clip) = parent_ctx.prepare_child_layout(key, child, target);
         if display.width() == 0 || display.height() == 0 {
             return;
         }
@@ -1144,7 +1226,12 @@ impl<'a> RenderCtx<'a> {
             }
         };
 
+        let viewport = parent_ctx
+            .screen_area(chunk.area())
+            .and_then(|area| parent_ctx.constrain_viewport(area));
+        child_ctx.viewport_clip = Some(viewport.unwrap_or_else(zero_area));
         let _ = chunk.with_clip(render_area, |child_chunk| {
+            child_ctx.record_bounds(child_chunk.area());
             child.render(child_chunk, &child_ctx);
         });
     }
@@ -1161,37 +1248,108 @@ impl<'a> RenderCtx<'a> {
 
     /// Record the rendered bounds for the current widget.
     pub fn record_bounds(&self, area: Area) {
-        self.geometry
-            .borrow_mut()
-            .insert(self.current_path.clone(), area);
+        self.record_bounds_for(&self.current_path, area);
     }
 
-    /// Record explicit pointer hit-test bounds for the current widget.
-    pub fn record_hit_bounds(&self, target: Area, display: Area, mode: HitTestMode) {
-        self.record_child_hit_area(&self.current_path, hit_area_for(mode, target, display));
+    fn record_bounds_for(&self, path: &WidgetPath, area: Area) {
+        let display = area;
+        let screen = self
+            .screen_area(area)
+            .and_then(|area| self.constrain_viewport(area))
+            .unwrap_or_else(zero_area);
+        self.geometry.borrow_mut().insert(path.clone(), screen);
+        let mut nodes = self.store.layout_geometry.borrow_mut();
+        let node = nodes.entry(path.clone()).or_insert(LayoutGeometry {
+            target: area,
+            display,
+            clip: screen,
+            hit: None,
+            coordinate_offset: self.coordinate_offset,
+        });
+        node.clip = screen;
+        node.coordinate_offset = self.coordinate_offset;
     }
 
-    pub(crate) fn with_hit_area(mut self, area: Option<Area>) -> Self {
-        self.hit_clip = Some(
-            area.and_then(|area| self.constrain_hit_area(area))
+    fn record_display_bounds(&self, path: &WidgetPath, target: Area, display: Area) {
+        self.record_bounds_for(path, display);
+        if let Some(node) = self.store.layout_geometry.borrow_mut().get_mut(path) {
+            node.target = target;
+            node.display = display;
+        }
+    }
+
+    /// Translate offscreen content into the parent's coordinate space.
+    pub(crate) fn with_coordinate_offset(mut self, x: i32, y: i32) -> Self {
+        self.coordinate_offset.0 = self.coordinate_offset.0.saturating_add(x);
+        self.coordinate_offset.1 = self.coordinate_offset.1.saturating_add(y);
+        self
+    }
+
+    fn screen_area(&self, area: Area) -> Option<Area> {
+        let x = area.x() as i32 + self.coordinate_offset.0;
+        let y = area.y() as i32 + self.coordinate_offset.1;
+        let right = (x + area.width() as i32).clamp(0, u16::MAX as i32);
+        let bottom = (y + area.height() as i32).clamp(0, u16::MAX as i32);
+        let left = x.clamp(0, u16::MAX as i32);
+        let top = y.clamp(0, u16::MAX as i32);
+        let area = Area::new(
+            (left as u16, top as u16).into(),
+            ((right - left) as u16, (bottom - top) as u16).into(),
+        );
+        (area.width() > 0 && area.height() > 0).then_some(area)
+    }
+
+    /// Set the visible viewport in the current coordinate space.
+    pub(crate) fn with_viewport(mut self, area: Area) -> Self {
+        self.viewport_clip = Some(
+            self.screen_area(area)
+                .and_then(|a| self.constrain_viewport(a))
                 .unwrap_or_else(zero_area),
         );
         self
     }
 
-    fn record_child_hit_area(&self, path: &WidgetPath, area: Option<Area>) {
+    fn constrain_viewport(&self, area: Area) -> Option<Area> {
+        match self.viewport_clip {
+            Some(clip) => area.clamp_to(&clip),
+            None => Some(area),
+        }
+    }
+
+    /// Record explicit pointer hit-test bounds for the current widget.
+    pub fn record_hit_bounds(&self, target: Area, display: Area, mode: HitTestMode) {
+        self.record_display_bounds(&self.current_path, target, display);
+        self.record_child_hit_area(&self.current_path, hit_area_for(mode, target, display));
+    }
+
+    pub(crate) fn with_hit_area(mut self, area: Option<Area>) -> Self {
+        self.hit_clip = Some(
+            area.and_then(|area| self.screen_area(area))
+                .and_then(|area| self.constrain_hit_area(area))
+                .unwrap_or_else(zero_area),
+        );
+        self
+    }
+
+    pub(crate) fn record_child_hit_area(&self, path: &WidgetPath, area: Option<Area>) {
         let Some(regions) = self.hit_regions else {
             return;
         };
 
-        let area = area.and_then(|area| self.constrain_hit_area(area));
+        let area = area
+            .and_then(|area| self.screen_area(area))
+            .and_then(|area| self.constrain_hit_area(area));
 
+        if let Some(node) = self.store.layout_geometry.borrow_mut().get_mut(path) {
+            node.hit = area.filter(|area| area.width() > 0 && area.height() > 0);
+        }
         if let Some(region) = area.and_then(|area| HitRegion::new(path.clone(), area)) {
             regions.borrow_mut().push(region);
         }
     }
 
     fn constrain_hit_area(&self, area: Area) -> Option<Area> {
+        let area = self.constrain_viewport(area)?;
         match self.hit_clip {
             Some(clip) => area.clamp_to(&clip),
             None => Some(area),
@@ -1385,7 +1543,23 @@ impl<'a, M> EventCtx<'a, M> {
 
     /// Get or create mutable persistent state for this widget.
     pub fn state_mut<T: Default + 'static>(&mut self) -> &mut T {
+        self.store.invalidation.request_paint();
         self.store.get_or_default::<T>(self.id.clone())
+    }
+
+    /// Request geometry and measurement refresh after changing layout-dependent state.
+    pub fn request_layout(&mut self) {
+        self.store.invalidation.request_layout();
+    }
+
+    /// Request a paint using the existing allocations.
+    pub fn request_paint(&mut self) {
+        self.store.invalidation.request_paint();
+    }
+
+    /// Schedule another update without implicitly requesting paint.
+    pub fn request_next_frame(&mut self) {
+        self.store.invalidation.request_next_frame();
     }
 
     /// Emit a message that will be delivered to the application's `update` function.
@@ -1436,9 +1610,14 @@ impl<'a, M> EventCtx<'a, M> {
         self.already_handled
     }
 
-    /// The last rendered bounds for the current widget.
+    /// Complete allocation in the current layout space, including scrolled-out content.
     pub fn bounds(&self) -> Option<Area> {
-        self.geometry.get(&self.path).copied()
+        self.store
+            .layout_geometry
+            .borrow()
+            .get(&self.path)
+            .map(|node| node.display)
+            .or_else(|| self.geometry.get(&self.path).copied())
     }
 
     /// The last rendered bounds for an arbitrary widget path.
@@ -1454,9 +1633,24 @@ impl<'a, M> EventCtx<'a, M> {
         }
     }
 
+    /// Mouse coordinates in the same layout space as `bounds()`. Offscreen
+    /// scroll content retains its complete allocation for correct local editing.
+    pub fn layout_mouse_position(&self, event: &Event) -> Option<(u16, u16)> {
+        let (x, y) = self.mouse_position(event)?;
+        let nodes = self.store.layout_geometry.borrow();
+        let (dx, dy) = nodes
+            .get(&self.path)
+            .map(|node| node.coordinate_offset)
+            .unwrap_or((0, 0));
+        Some((
+            (x as i32 - dx).clamp(0, u16::MAX as i32) as u16,
+            (y as i32 - dy).clamp(0, u16::MAX as i32) as u16,
+        ))
+    }
+
     /// Mouse coordinates relative to the current widget bounds.
     pub fn local_mouse_position(&self, event: &Event) -> Option<(u16, u16)> {
-        let (x, y) = self.mouse_position(event)?;
+        let (x, y) = self.layout_mouse_position(event)?;
         let bounds = self.bounds()?;
 
         if x < bounds.x()
@@ -1544,6 +1738,8 @@ impl<'a, M> EventCtx<'a, M> {
 pub struct WidgetStore {
     states: HashMap<WidgetId, Box<dyn Any>>,
     component_types: HashMap<WidgetId, TypeId>,
+    pub(crate) invalidation: Invalidation,
+    pub(crate) layout_geometry: RefCell<HashMap<WidgetPath, LayoutGeometry>>,
 }
 
 impl WidgetStore {

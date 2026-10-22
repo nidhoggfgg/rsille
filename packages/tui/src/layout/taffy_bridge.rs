@@ -491,11 +491,10 @@ impl TaffyBridge {
                     } else {
                         Dimension::auto()
                     }
-                } else if layout_style.flex_grow > 0.0 {
-                    // Flex grow will handle it
-                    Dimension::auto()
                 } else {
-                    Dimension::length(layout_style.min_width as f32)
+                    // Intrinsic width comes from measurement, including custom
+                    // state and wrapped text. min_size still enforces minima.
+                    Dimension::auto()
                 };
 
                 // Cross axis is Height

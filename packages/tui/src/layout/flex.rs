@@ -6,7 +6,7 @@ use super::border_renderer::{render_background, render_border};
 use super::taffy_bridge::TaffyBridge;
 use crate::event::Event;
 use crate::focus::{FocusConfig, FocusScope};
-use crate::layout::{AxisLimit, Constraints, MeasuredSize, SizeProposal};
+use crate::layout::{AxisLimit, ChildLayout, Constraints, Layout, MeasuredSize, SizeProposal};
 use crate::style::{BorderStyle, Padding, Style};
 use crate::widget::{EventCtx, IntoWidget, MeasureCtx, RenderCtx, Widget, WidgetKey};
 use taffy::style::{AlignItems, JustifyContent};
@@ -213,37 +213,42 @@ impl<M> Widget<M> for Flex<M> {
             return;
         }
 
-        let mut bridge = TaffyBridge::new();
-        let measure_ctx = ctx.measure_ctx();
-        let child_areas = match bridge.compute_layout_measured(
-            &self.children,
-            inner,
-            self.direction,
-            self.gap,
-            self.align_items,
-            self.justify_content,
-            &measure_ctx,
-        ) {
-            Ok(areas) => areas,
-            Err(_) => return,
-        };
+        ctx.render_children(chunk, self);
+    }
 
-        for (index, (child, child_area)) in self.children.iter().zip(child_areas).enumerate() {
-            if child_area.width() == 0 || child_area.height() == 0 {
-                continue;
+    fn layout(&self, area: Area, ctx: &MeasureCtx) -> Layout {
+        let border_area = if self.border.is_some() {
+            if area.width() < 2 || area.height() < 2 {
+                return Layout::default();
             }
-
-            let Some(child_area) = child_area.clamp_to(&border_area) else {
-                continue;
-            };
-
-            ctx.render_child_at(
-                chunk,
-                WidgetKey::for_child(index, child.as_ref()),
-                child.as_ref(),
-                child_area,
-            );
+            area.shrink_saturating(1, 1, 1, 1)
+        } else {
+            area
+        };
+        let inner = border_area.shrink_saturating(
+            self.padding.top,
+            self.padding.bottom,
+            self.padding.left,
+            self.padding.right,
+        );
+        if inner.width() == 0 || inner.height() == 0 {
+            return Layout::default();
         }
+        let areas = TaffyBridge::new()
+            .compute_layout_measured(
+                &self.children,
+                inner,
+                self.direction,
+                self.gap,
+                self.align_items,
+                self.justify_content,
+                ctx,
+            )
+            .unwrap_or_default();
+        Layout::new(areas.into_iter().enumerate().filter_map(|(index, area)| {
+            area.clamp_to(&border_area)
+                .map(|area| ChildLayout::new(index, area))
+        }))
     }
 
     fn handle_event(&self, _event: &Event, _ctx: &mut EventCtx<M>) {

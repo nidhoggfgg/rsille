@@ -1424,6 +1424,7 @@ impl AnimationStore {
 
 /// Mutable context passed to a widget's animation hook.
 pub struct AnimationCtx<'a> {
+    invalidation: crate::layout::Invalidation,
     store: &'a mut AnimationStore,
     path: WidgetPath,
     id: WidgetId,
@@ -1484,6 +1485,7 @@ impl<'a> AnimationCtx<'a> {
         animation_theme: AnimationTheme,
     ) -> Self {
         Self {
+            invalidation: crate::layout::Invalidation::default(),
             store,
             path,
             id,
@@ -1492,6 +1494,25 @@ impl<'a> AnimationCtx<'a> {
             motion_policy,
             animation_theme,
         }
+    }
+
+    /// Repaint without discarding layout or scheduling another update.
+    pub fn request_paint(&mut self) {
+        self.invalidation.request_paint();
+    }
+
+    /// Remeasure and lay out before the next paint.
+    pub fn request_layout(&mut self) {
+        self.invalidation.request_layout();
+    }
+
+    /// Schedule the next animation update independently of paint/layout.
+    pub fn request_next_frame(&mut self) {
+        self.invalidation.request_next_frame();
+    }
+
+    pub(crate) fn invalidation(&self) -> crate::layout::Invalidation {
+        self.invalidation
     }
 
     pub fn path(&self) -> &WidgetPath {

@@ -28,3 +28,7 @@ pub use scroll::{
 };
 pub use split::{split, Split, SplitDirection, SplitSize, SplitState};
 pub use taffy::style::{AlignItems, JustifyContent, JustifyItems};
+
+mod result;
+pub(crate) use result::LayoutCache;
+pub use result::{ChildLayout, Invalidation, Layout, LayoutGeometry, LayoutStats};
