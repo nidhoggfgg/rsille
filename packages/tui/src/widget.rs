@@ -1,4 +1,4 @@
-use std::any::Any;
+use std::any::{Any, TypeId};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt;
@@ -251,6 +251,55 @@ impl fmt::Display for WidgetId {
 // Widget trait
 // ---------------------------------------------------------------------------
 
+/// Lifecycle of a mounted description. Hidden, retained children remain mounted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Lifecycle {
+    Mount,
+    Sync,
+    Unmount,
+}
+
+/// Mutable widget-local state access during reconciliation, before measurement.
+/// Unmount runs once at logical removal, before exit rendering retains resources.
+pub struct StateCtx<'a> {
+    store: &'a mut WidgetStore,
+    path: WidgetPath,
+    id: WidgetId,
+    lifecycle: Lifecycle,
+}
+
+impl<'a> StateCtx<'a> {
+    pub(crate) fn new(
+        store: &'a mut WidgetStore,
+        path: WidgetPath,
+        id: WidgetId,
+        lifecycle: Lifecycle,
+    ) -> Self {
+        Self {
+            store,
+            path,
+            id,
+            lifecycle,
+        }
+    }
+
+    pub fn lifecycle(&self) -> Lifecycle {
+        self.lifecycle
+    }
+    pub fn path(&self) -> &WidgetPath {
+        &self.path
+    }
+    pub fn id(&self) -> &WidgetId {
+        &self.id
+    }
+    pub fn state<T: 'static>(&self) -> Option<&T> {
+        self.store.get(&self.id)
+    }
+    pub fn state_mut<T: Default + 'static>(&mut self) -> &mut T {
+        self.store.get_or_default(&self.id)
+    }
+}
+
 /// Read-only context passed during widget measurement.
 ///
 /// Measurement is intentionally side-effect free: widgets may inspect theme,
@@ -353,6 +402,22 @@ impl<'a> MeasureCtx<'a> {
 ///
 /// The generic parameter `M` is the message type for the application.
 pub trait Widget<M> {
+    /// Concrete component type used together with identity to match state.
+    /// Transparent boxing must forward this method. The default distinguishes
+    /// concrete Rust types, including generic parameters, using `TypeId`.
+    fn widget_type(&self) -> TypeId
+    where
+        Self: 'static,
+    {
+        TypeId::of::<Self>()
+    }
+
+    /// Initialize state on Mount, synchronize controlled properties on Sync,
+    /// and release interactive resources on Unmount. Mount also performs the
+    /// initial property synchronization. Sync may also run before input batches
+    /// and drawing; implementations must make it idempotent.
+    fn lifecycle(&self, _ctx: &mut StateCtx) {}
+
     /// Render the widget into the provided chunk.
     ///
     /// Read persistent state from `ctx.state::<T>()` and focus info from
@@ -417,6 +482,14 @@ pub trait Widget<M> {
         &[]
     }
 
+    /// Hidden children explicitly retained by this description. They receive
+    /// lifecycle synchronization but no focus, input, animation updates or draw.
+    /// These must be disjoint from `children()`, with the same local key rules.
+    /// Retention ends when the owning description drops them or is unmounted.
+    fn retained_children(&self) -> &[Box<dyn Widget<M>>] {
+        &[]
+    }
+
     /// Return a stable key for this widget.
     ///
     /// When set, the framework uses this key as a stable identity anchor. This
@@ -429,6 +502,17 @@ pub trait Widget<M> {
 }
 
 impl<M> Widget<M> for Box<dyn Widget<M>> {
+    fn widget_type(&self) -> TypeId
+    where
+        Self: 'static,
+    {
+        (**self).widget_type()
+    }
+
+    fn lifecycle(&self, ctx: &mut StateCtx) {
+        (**self).lifecycle(ctx)
+    }
+
     fn render(&self, chunk: &mut Chunk, ctx: &RenderCtx) {
         (**self).render(chunk, ctx)
     }
@@ -475,6 +559,10 @@ impl<M> Widget<M> for Box<dyn Widget<M>> {
 
     fn children(&self) -> &[Box<dyn Widget<M>>] {
         (**self).children()
+    }
+
+    fn retained_children(&self) -> &[Box<dyn Widget<M>>] {
+        (**self).retained_children()
     }
 
     fn key(&self) -> Option<&str> {
@@ -902,15 +990,17 @@ impl<'a> RenderCtx<'a> {
 
     pub(crate) fn exit_render_ctx<'b>(
         &'b self,
+        store: &'b WidgetStore,
+        animations: &'b AnimationStore,
         geometry: &'b RefCell<HashMap<WidgetPath, Area>>,
         hit_regions: &'b RefCell<Vec<HitRegion>>,
     ) -> RenderCtx<'b> {
         RenderCtx {
-            store: self.store,
-            animation_store: self.animation_store,
+            store,
+            animation_store: AnimationStoreView::ReadOnly(animations),
             theme: self.theme,
-            focused_path: self.focused_path,
-            focused_id: self.focused_id.clone(),
+            focused_path: None,
+            focused_id: None,
             current_path: self.current_path.clone(),
             current_id: self.current_id.clone(),
             stable_scope_id: self.stable_scope_id.clone(),
@@ -1397,11 +1487,46 @@ impl<'a, M> EventCtx<'a, M> {
 #[derive(Default)]
 pub struct WidgetStore {
     states: HashMap<WidgetId, Box<dyn Any>>,
+    component_types: HashMap<WidgetId, TypeId>,
 }
 
 impl WidgetStore {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Type of the mounted component, even when it has not allocated state.
+    pub fn component_type(&self, id: impl Into<WidgetId>) -> Option<TypeId> {
+        self.component_types.get(&id.into()).copied()
+    }
+
+    pub(crate) fn mount(&mut self, id: &WidgetId, component_type: TypeId) -> Lifecycle {
+        if self.component_type(id) == Some(component_type) {
+            Lifecycle::Sync
+        } else {
+            self.states.remove(id);
+            self.component_types.insert(id.clone(), component_type);
+            Lifecycle::Mount
+        }
+    }
+
+    pub(crate) fn extract(&mut self, mut predicate: impl FnMut(&WidgetId) -> bool) -> Self {
+        let ids: Vec<_> = self
+            .component_types
+            .keys()
+            .filter(|id| predicate(id))
+            .cloned()
+            .collect();
+        let mut extracted = Self::new();
+        for id in ids {
+            if let Some(state) = self.states.remove(&id) {
+                extracted.states.insert(id.clone(), state);
+            }
+            if let Some(component_type) = self.component_types.remove(&id) {
+                extracted.component_types.insert(id, component_type);
+            }
+        }
+        extracted
     }
 
     /// Read state for the given widget id. Returns `None` if no state is stored.
@@ -1414,10 +1539,10 @@ impl WidgetStore {
     pub fn get_or_default<T: Default + 'static>(&mut self, id: impl Into<WidgetId>) -> &mut T {
         let id = id.into();
         self.states
-            .entry(id)
+            .entry(id.clone())
             .or_insert_with(|| Box::new(T::default()))
             .downcast_mut()
-            .expect("WidgetStore type mismatch: a different type was stored at this widget id")
+            .unwrap_or_else(|| panic!("WidgetStore state type mismatch at {id:?}: requested {}. A component currently has one state slot; use an aggregate state type.", std::any::type_name::<T>()))
     }
 
     /// Apply a function to all states of type T. Used for frame-level resets.
@@ -1439,6 +1564,7 @@ impl WidgetStore {
         F: FnMut(&WidgetId) -> bool,
     {
         self.states.retain(|id, _| is_active(id));
+        self.component_types.retain(|id, _| is_active(id));
     }
 }
 

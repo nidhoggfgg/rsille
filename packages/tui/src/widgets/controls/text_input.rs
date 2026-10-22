@@ -9,7 +9,7 @@ use crate::focus::FocusConfig;
 use crate::layout::border_renderer;
 use crate::layout::Constraints;
 use crate::style::{BorderStyle, Style, Theme};
-use crate::widget::{EventCtx, EventPhase, RenderCtx, Widget};
+use crate::widget::{EventCtx, EventPhase, Lifecycle, RenderCtx, StateCtx, Widget};
 use crate::widgets::VariantWidget;
 
 /// Text input style variants.
@@ -33,12 +33,8 @@ pub enum TextInputVariant {
 #[derive(Debug, Clone, Default)]
 pub struct TextInputState {
     pub cursor_position: usize,
-    /// Current editing value; updated on each emit. When `modified_this_batch`
-    /// is true, we use this instead of the widget's `self.value` (which is stale).
+    /// Current editing value, synchronized before input and updated on each edit.
     pub value: Option<String>,
-    /// Set to true when we emit in this frame. Reset at start of each frame
-    /// so we sync from parent when value differs (external update).
-    pub modified_this_batch: bool,
 }
 
 /// Single-line text input field.
@@ -169,6 +165,20 @@ impl<M> Default for TextInput<M> {
 }
 
 impl<M: 'static> Widget<M> for TextInput<M> {
+    fn lifecycle(&self, ctx: &mut StateCtx) {
+        if ctx.lifecycle() == Lifecycle::Unmount {
+            return;
+        }
+        let state = ctx.state_mut::<TextInputState>();
+        if state.value.as_deref() != Some(self.value.as_str()) {
+            state.value = Some(self.value.clone());
+        }
+        state.cursor_position = state.cursor_position.min(self.value.len());
+        while !self.value.is_char_boundary(state.cursor_position) {
+            state.cursor_position -= 1;
+        }
+    }
+
     fn render(&self, chunk: &mut render::chunk::Chunk, ctx: &RenderCtx) {
         let area = chunk.area();
         let width = area.width();
@@ -297,13 +307,9 @@ impl<M: 'static> Widget<M> for TextInput<M> {
             {
                 let state = ctx.state_mut::<TextInputState>();
 
-                // Sync from parent when value differs (external update or first focus).
-                // Don't sync when modified_this_batch: we've emitted this frame and
-                // self.value is stale; use state.value instead.
-                if !state.modified_this_batch && state.value.as_deref() != Some(self.value.as_str())
-                {
+                // Fallback for manually constructed EventCtx; runtime syncs before input.
+                if state.value.is_none() {
                     state.value = Some(self.value.clone());
-                    state.cursor_position = state.cursor_position.min(self.value.len());
                 }
 
                 let value: &str = state.value.as_deref().unwrap_or(self.value.as_str());
@@ -324,7 +330,6 @@ impl<M: 'static> Widget<M> for TextInput<M> {
                         new_val.insert(state.cursor_position, *c);
                         state.cursor_position += c.len_utf8();
                         state.value = Some(new_val.clone());
-                        state.modified_this_batch = true;
                         if let Some(ref handler) = self.on_change {
                             msg_to_emit = Some(handler(new_val));
                         }
@@ -339,7 +344,6 @@ impl<M: 'static> Widget<M> for TextInput<M> {
                             new_val.remove(idx);
                             state.cursor_position = idx;
                             state.value = Some(new_val.clone());
-                            state.modified_this_batch = true;
                             if let Some(ref handler) = self.on_change {
                                 msg_to_emit = Some(handler(new_val));
                             }
@@ -356,7 +360,6 @@ impl<M: 'static> Widget<M> for TextInput<M> {
                                 let mut new_val = value.to_string();
                                 new_val.remove(idx);
                                 state.value = Some(new_val.clone());
-                                state.modified_this_batch = true;
                                 if let Some(ref handler) = self.on_change {
                                     msg_to_emit = Some(handler(new_val));
                                 }

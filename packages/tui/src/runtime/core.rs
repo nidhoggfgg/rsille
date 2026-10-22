@@ -12,7 +12,7 @@ use render::{Draw, DrawErr, InlineMouseMode, Update};
 
 use super::{Clock, Executor};
 use crate::animation::{
-    AnimationCtx, AnimationStore, MotionPolicy, Presence, Timeline, TimelineFrame, TransitionEffect,
+    AnimationCtx, AnimationStore, MotionPolicy, TimelineFrame, TransitionEffect,
 };
 use crate::effect::{
     run_task_attempt, CancellationToken, Effect, Task, TaskContext, TaskEvent, TaskEventSender,
@@ -24,11 +24,9 @@ use crate::layout::{AxisLimit, SizeProposal};
 use crate::shell::{CommandRouter, HotkeyRegistry};
 use crate::style::Theme;
 use crate::widget::{
-    EventCtx, EventPhase, FocusRequest, HitRegion, MeasureCtx, RenderCtx, Widget, WidgetId,
-    WidgetKey, WidgetPath, WidgetStore,
+    EventCtx, EventPhase, FocusRequest, HitRegion, Lifecycle, MeasureCtx, RenderCtx, StateCtx,
+    Widget, WidgetId, WidgetKey, WidgetPath, WidgetStore,
 };
-use crate::widgets::text_input::TextInputState;
-use crate::widgets::textarea::TextAreaState;
 use crate::widgets::visual::TerminalVisualCapabilities;
 use crate::WidgetResult;
 
@@ -337,8 +335,8 @@ pub(crate) struct AppRuntime<State, U, V, M> {
     hit_regions: RefCell<Vec<HitRegion>>,
     focus: FocusManager,
     cached_tree: Option<Box<dyn Widget<M>>>,
-    presence_previous_tree: Option<Box<dyn Widget<M>>>,
-    presence_previous_geometry: HashMap<WidgetPath, render::area::Area>,
+    previous_tree: Option<Box<dyn Widget<M>>>,
+    previous_geometry: HashMap<WidgetPath, render::area::Area>,
     exiting_visuals: Vec<ExitingVisual<M>>,
     messages: MessageQueue<M>,
     should_quit: bool,
@@ -372,6 +370,8 @@ pub(crate) struct AppRuntime<State, U, V, M> {
 }
 
 struct ExitingVisual<M> {
+    store: WidgetStore,
+    animations: AnimationStore,
     root: Box<dyn Widget<M>>,
     nodes: Vec<ExitingNode>,
 }
@@ -381,8 +381,77 @@ struct ExitingNode {
     bounds: render::area::Area,
 }
 
+/// The same identity walk is used for visible and explicitly retained children.
+/// Focus, event routing and animation continue to traverse visible children only.
+fn visit_widgets<M>(
+    widget: &(dyn Widget<M> + 'static),
+    visitor: &mut impl FnMut(&(dyn Widget<M> + 'static), &WidgetPath, &WidgetId),
+) {
+    fn walk<M>(
+        widget: &(dyn Widget<M> + 'static),
+        path: &WidgetPath,
+        id: &WidgetId,
+        scope: &WidgetId,
+        visitor: &mut impl FnMut(&(dyn Widget<M> + 'static), &WidgetPath, &WidgetId),
+    ) {
+        visitor(widget, path, id);
+        for (index, child) in widget
+            .children()
+            .iter()
+            .chain(widget.retained_children())
+            .enumerate()
+        {
+            let key = WidgetKey::for_child(index, child.as_ref());
+            let (child_id, child_scope) = WidgetId::for_child(id, scope, &key);
+            walk(
+                child.as_ref(),
+                &path.child(key),
+                &child_id,
+                &child_scope,
+                visitor,
+            );
+        }
+    }
+    walk(
+        widget,
+        &WidgetPath::root(),
+        &WidgetId::root(),
+        &WidgetId::root(),
+        visitor,
+    );
+}
+
+fn sync_widget_states<M: 'static>(widget: &(dyn Widget<M> + 'static), store: &mut WidgetStore) {
+    visit_widgets(widget, &mut |widget, path, id| {
+        let lifecycle = store.mount(id, widget.widget_type());
+        widget.lifecycle(&mut StateCtx::new(
+            store,
+            path.clone(),
+            id.clone(),
+            lifecycle,
+        ));
+    });
+}
+
+fn unmount_widget_states<M>(widget: &(dyn Widget<M> + 'static), store: &mut WidgetStore) {
+    visit_widgets(widget, &mut |widget, path, id| {
+        if store.component_type(id).is_some() {
+            widget.lifecycle(&mut StateCtx::new(
+                store,
+                path.clone(),
+                id.clone(),
+                Lifecycle::Unmount,
+            ));
+        }
+    });
+    store.retain_active(|_| false);
+}
+
 impl<State, U, V, M> Drop for AppRuntime<State, U, V, M> {
     fn drop(&mut self) {
+        if let Some(tree) = self.cached_tree.as_ref().or(self.previous_tree.as_ref()) {
+            unmount_widget_states(tree.as_ref(), &mut self.store);
+        }
         // Blocking jobs may outlive the UI. Signal cancellation without joining
         // them; dropping the receiver rejects all later messages.
         for record in self.tasks.values() {
@@ -504,8 +573,8 @@ impl<State, U, V, M: Send + 'static> AppRuntime<State, U, V, M> {
             hit_regions: RefCell::new(Vec::new()),
             focus: FocusManager::new(),
             cached_tree: None,
-            presence_previous_tree: None,
-            presence_previous_geometry: HashMap::new(),
+            previous_tree: None,
+            previous_geometry: HashMap::new(),
             exiting_visuals: Vec::new(),
             messages: MessageQueue::new(),
             should_quit: false,
@@ -555,55 +624,84 @@ impl<State, U, V, M: Send + 'static> AppRuntime<State, U, V, M> {
     where
         V: Fn(&State) -> Box<dyn Widget<M>>,
     {
-        if self.cached_tree.is_none() {
-            let tree = (self.view_fn)(&self.state);
-            self.focus.rebuild(tree.as_ref());
-            self.retain_state_for_live_and_exiting_paths();
-            self.cached_tree = Some(tree);
+        if self.cached_tree.is_some() {
+            return;
         }
+        let tree = (self.view_fn)(&self.state);
+        // Validate before modifying state: even keys below separate unkeyed
+        // wrappers share the nearest named ancestor's namespace.
+        let mut mounted = HashMap::new();
+        visit_widgets(tree.as_ref(), &mut |widget, path, id| {
+            if let Some((previous, _)) =
+                mounted.insert(id.clone(), (path.clone(), widget.widget_type()))
+            {
+                panic!("Duplicate widget key/identity {id:?}: paths {previous:?} and {path:?}. Keys must be unique within the nearest keyed ancestor (including retained children).");
+            }
+        });
+
+        if let Some(previous) = self.previous_tree.take() {
+            let mut removed = HashSet::new();
+            // The root always uses WidgetId::root(); its explicit key still
+            // defines a lifetime boundary for the entire application view.
+            let root_key_changed = previous.key() != tree.key();
+            visit_widgets(previous.as_ref(), &mut |widget, path, id| {
+                if root_key_changed
+                    || mounted.get(id).map(|(_, ty)| *ty) != Some(widget.widget_type())
+                {
+                    removed.insert(id.clone());
+                    widget.lifecycle(&mut StateCtx::new(
+                        &mut self.store,
+                        path.clone(),
+                        id.clone(),
+                        Lifecycle::Unmount,
+                    ));
+                }
+            });
+            for id in &removed {
+                self.focus.forget(id);
+            }
+            if let Some(captured) = self.pointer_capture.as_ref() {
+                // Capture follows identity across reordering, but never crosses
+                // an unmount/type change into a replacement at the same path.
+                let mut captured_id = None;
+                visit_widgets(previous.as_ref(), &mut |_, path, id| {
+                    if path == captured {
+                        captured_id = Some(id.clone());
+                    }
+                });
+                self.pointer_capture = captured_id
+                    .filter(|id| !removed.contains(id))
+                    .and_then(|id| mounted.get(&id).map(|(path, _)| path.clone()));
+            }
+            let geometry = std::mem::take(&mut self.previous_geometry);
+            self.start_exit_visuals(previous, geometry, &removed, self.animation_time());
+        }
+        self.store.retain_active(|id| mounted.contains_key(id));
+        sync_widget_states(tree.as_ref(), &mut self.store);
+        self.focus.rebuild(tree.as_ref());
+        if self
+            .pointer_capture
+            .as_ref()
+            .is_some_and(|path| !self.focus.live_paths().contains(path))
+        {
+            self.pointer_capture = None;
+        }
+        self.cached_tree = Some(tree);
+        self.prune_live_animations();
     }
 
-    fn exiting_paths(&self) -> Vec<WidgetPath> {
-        self.exiting_visuals
-            .iter()
-            .flat_map(|visual| visual.nodes.iter().map(|node| node.path.clone()))
-            .collect()
-    }
-
-    fn retain_state_for_live_and_exiting_paths(&mut self) {
-        let live_paths: Vec<WidgetPath> = self.focus.live_paths().iter().cloned().collect();
-        let live_ids: Vec<WidgetId> = self.focus.live_ids().iter().cloned().collect();
-        let exiting_paths = self.exiting_paths();
+    fn prune_live_animations(&mut self) {
         let mut live_shared_ids = HashSet::new();
         if let Some(tree) = self.cached_tree.as_ref() {
             let mut path = WidgetPath::root();
             Self::collect_shared_transition_ids(tree.as_ref(), &mut path, &mut live_shared_ids);
         }
-        self.store
-            .retain_active(|id| live_ids.iter().any(|live| live == id));
+        // Hidden children keep widget state only. Exiting state and animations
+        // are owned by the exit renderer, never by the live tree.
         let mut animation_store = self.animation_store.borrow_mut();
-        animation_store.retain_active(|id| live_ids.iter().any(|live| live == id));
-        animation_store.retain_timeline_paths(|path| {
-            live_paths.iter().any(|live| live == path)
-                || exiting_paths.iter().any(|exit| path.starts_with(exit))
-        });
+        animation_store.retain_active(|id| self.focus.live_ids().contains(id));
+        animation_store.retain_timeline_paths(|path| self.focus.live_paths().contains(path));
         animation_store.retain_shared_layouts(|id| live_shared_ids.contains(id));
-    }
-
-    fn collect_presence_declarations(
-        widget: &dyn Widget<M>,
-        path: &mut WidgetPath,
-        declarations: &mut HashMap<WidgetPath, Presence>,
-    ) {
-        if let Some(presence) = widget.presence() {
-            declarations.insert(path.clone(), presence.clone());
-        }
-
-        for (index, child) in widget.children().iter().enumerate() {
-            path.push(WidgetKey::for_child(index, child.as_ref()));
-            Self::collect_presence_declarations(child.as_ref(), path, declarations);
-            path.pop();
-        }
     }
 
     fn collect_shared_transition_ids(
@@ -626,43 +724,52 @@ impl<State, U, V, M: Send + 'static> AppRuntime<State, U, V, M> {
         &mut self,
         previous_tree: Box<dyn Widget<M>>,
         previous_geometry: HashMap<WidgetPath, render::area::Area>,
+        removed: &HashSet<WidgetId>,
         now: Instant,
     ) {
-        let mut previous_presence = HashMap::new();
-        let mut path = WidgetPath::root();
-        Self::collect_presence_declarations(
-            previous_tree.as_ref(),
-            &mut path,
-            &mut previous_presence,
-        );
-
-        if previous_presence.is_empty() {
-            return;
-        }
-
-        let live_paths: Vec<WidgetPath> = self.focus.live_paths().iter().cloned().collect();
-        let mut candidates: Vec<(WidgetPath, render::area::Area, Timeline)> = previous_presence
-            .into_iter()
-            .filter_map(|(path, presence)| {
-                if live_paths.iter().any(|live| live == &path) {
-                    return None;
+        let mut candidates = Vec::new();
+        let mut surviving_paths = Vec::new();
+        visit_widgets(previous_tree.as_ref(), &mut |_, path, id| {
+            if !removed.contains(id) {
+                surviving_paths.push(path.clone());
+            }
+        });
+        visit_widgets(previous_tree.as_ref(), &mut |widget, path, id| {
+            if !removed.contains(id) {
+                return;
+            }
+            // A keyed descendant that moved elsewhere remains mounted. Do not
+            // duplicate it in an ancestor exit or move its live state away.
+            if surviving_paths.iter().any(|live| live.starts_with(path)) {
+                return;
+            }
+            if let Some(timeline) = widget.presence().and_then(|presence| presence.exit.clone()) {
+                if let Some(bounds) = previous_geometry.get(path).copied() {
+                    candidates.push((path.clone(), bounds, timeline));
                 }
-
-                let timeline = presence.exit?;
-                let bounds = previous_geometry.get(&path).copied()?;
-                Some((path, bounds, timeline))
-            })
-            .collect();
+            }
+        });
 
         candidates.sort_by_key(|(path, _, _)| path.len());
 
+        let mut removed_paths = Vec::new();
+        visit_widgets(previous_tree.as_ref(), &mut |_, path, id| {
+            if removed.contains(id) {
+                removed_paths.push(path.clone());
+            }
+        });
+        let mut animations = self
+            .animation_store
+            .borrow_mut()
+            .extract(removed, &removed_paths);
+        let store = self.store.extract(|id| removed.contains(id));
         let mut nodes: Vec<ExitingNode> = Vec::new();
         for (path, bounds, timeline) in candidates {
             if nodes.iter().any(|node| path.starts_with(&node.path)) {
                 continue;
             }
 
-            self.animation_store.borrow_mut().track_timeline(
+            animations.track_timeline(
                 &path,
                 "exit",
                 timeline.clone(),
@@ -675,6 +782,8 @@ impl<State, U, V, M: Send + 'static> AppRuntime<State, U, V, M> {
 
         if !nodes.is_empty() {
             self.exiting_visuals.push(ExitingVisual {
+                store,
+                animations,
                 root: previous_tree,
                 nodes,
             });
@@ -942,17 +1051,22 @@ impl<State, U, V, M: Send + 'static> AppRuntime<State, U, V, M> {
         needs_render
     }
 
-    fn animation_now(&mut self) -> Instant {
+    fn animation_time(&self) -> Instant {
         if !self.motion_policy.deterministic {
             return self.clock.now();
         }
-
-        let now = self.animation_epoch
+        self.animation_epoch
             + self
                 .motion_policy
                 .deterministic_step
-                .saturating_mul(self.animation_frame.min(u32::MAX as u64) as u32);
-        self.animation_frame = self.animation_frame.wrapping_add(1);
+                .saturating_mul(self.animation_frame.min(u32::MAX as u64) as u32)
+    }
+
+    fn animation_now(&mut self) -> Instant {
+        let now = self.animation_time();
+        if self.motion_policy.deterministic {
+            self.animation_frame = self.animation_frame.wrapping_add(1);
+        }
         now
     }
 
@@ -979,20 +1093,21 @@ impl<State, U, V, M: Send + 'static> AppRuntime<State, U, V, M> {
             animation_theme,
         );
         needs_render |= store.advance(now);
+        // A completed exit still needs one frame to remove its retained pixels
+        // and resources, even if no live animation changed.
+        needs_render |= !self.exiting_visuals.is_empty();
         needs_render
     }
 
     fn render_exiting_visuals(&self, chunk: &mut Chunk, ctx: &RenderCtx, now: Instant) {
         let exit_geometry = RefCell::new(HashMap::new());
         let exit_hit_regions = RefCell::new(Vec::new());
-        let exit_ctx = ctx.exit_render_ctx(&exit_geometry, &exit_hit_regions);
-
         for visual in &self.exiting_visuals {
+            let animations = &visual.animations;
+            let exit_ctx =
+                ctx.exit_render_ctx(&visual.store, animations, &exit_geometry, &exit_hit_regions);
             for node in &visual.nodes {
-                let frames = self
-                    .animation_store
-                    .borrow()
-                    .timeline_frames(&node.path, "exit", now);
+                let frames = animations.timeline_frames(&node.path, "exit", now);
                 let display_area = exit_display_area(node.bounds, &frames);
 
                 if display_area.width() == 0 || display_area.height() == 0 {
@@ -1042,14 +1157,28 @@ impl<State, U, V, M: Send + 'static> AppRuntime<State, U, V, M> {
     }
 
     fn prune_completed_exit_visuals(&mut self, now: Instant) {
-        let animation_store = self.animation_store.borrow();
         for visual in &mut self.exiting_visuals {
+            visual.nodes.retain(|node| {
+                visual
+                    .animations
+                    .timeline_is_active(&node.path, "exit", now)
+            });
+            // A single previous tree can contain exits of different durations.
+            // Drop each completed subtree's resources independently.
+            let mut retained_ids = HashSet::new();
+            visit_widgets(visual.root.as_ref(), &mut |_, path, id| {
+                if visual.nodes.iter().any(|node| path.starts_with(&node.path)) {
+                    retained_ids.insert(id.clone());
+                }
+            });
+            visual.store.retain_active(|id| retained_ids.contains(id));
             visual
-                .nodes
-                .retain(|node| animation_store.timeline_is_active(&node.path, "exit", now));
+                .animations
+                .retain_active(|id| retained_ids.contains(id));
+            visual.animations.retain_timeline_paths(|path| {
+                visual.nodes.iter().any(|node| path.starts_with(&node.path))
+            });
         }
-        drop(animation_store);
-
         self.exiting_visuals
             .retain(|visual| !visual.nodes.is_empty());
     }
@@ -1186,6 +1315,18 @@ impl<State, U, V, M: Send + 'static> AppRuntime<State, U, V, M> {
 
     fn shutdown(&mut self) {
         self.should_quit = true;
+        if let Some(tree) = self
+            .cached_tree
+            .take()
+            .or_else(|| self.previous_tree.take())
+        {
+            unmount_widget_states(tree.as_ref(), &mut self.store);
+        }
+        self.exiting_visuals.clear();
+        *self.animation_store.borrow_mut() = AnimationStore::new();
+        self.focus.clear();
+        self.pointer_capture = None;
+        self.next_animation_at = None;
         let active: Vec<_> = self
             .tasks
             .iter()
@@ -1395,19 +1536,12 @@ where
 
         self.sync_theme();
 
-        // Rebuild widget tree from current state
-        let tree = (self.view_fn)(&self.state);
-
-        // Rebuild focus chain
-        self.focus.rebuild(tree.as_ref());
-
+        self.ensure_tree();
+        let tree = self.cached_tree.as_ref().unwrap();
+        sync_widget_states(tree.as_ref(), &mut self.store);
         let render_now = self.animation_now();
-        if let Some(previous_tree) = self.presence_previous_tree.take() {
-            let previous_geometry = std::mem::take(&mut self.presence_previous_geometry);
-            self.start_exit_visuals(previous_tree, previous_geometry, render_now);
-        }
-
-        self.retain_state_for_live_and_exiting_paths();
+        self.prune_completed_exit_visuals(render_now);
+        let tree = self.cached_tree.as_ref().unwrap();
 
         // Render
         let focused_path = self.focus.current_path();
@@ -1429,12 +1563,8 @@ where
         );
         tree.render(&mut chunk, &ctx);
         self.render_exiting_visuals(&mut chunk, &ctx, render_now);
-        self.prune_completed_exit_visuals(render_now);
-        self.retain_state_for_live_and_exiting_paths();
+        self.prune_live_animations();
         self.render_frame = self.render_frame.wrapping_add(1);
-
-        // Cache tree for event handling in on_events()
-        self.cached_tree = Some(tree);
 
         Ok(size)
     }
@@ -1447,7 +1577,7 @@ where
     M: Clone + std::fmt::Debug + Send + 'static,
 {
     pub(crate) fn run_terminal(
-        self,
+        mut self,
         mouse_capture: bool,
         inline_mouse_mode: InlineMouseMode,
     ) -> WidgetResult<()> {
@@ -1458,17 +1588,13 @@ where
             inline_available_height(height, inline_mouse_mode.force_follows_viewport());
 
         let (buffer_height, initial_used_height) = if inline_mode {
-            let layout = (self.view_fn)(&self.state);
+            self.sync_theme();
+            self.ensure_tree();
+            let layout = self.cached_tree.as_ref().unwrap();
             let buffer_height = inline_max_height.min(inline_available_height);
-            let measure_store = WidgetStore::new();
-            let measure_theme = self
-                .theme_resolver
-                .as_ref()
-                .map(|resolver| resolver(&self.state))
-                .unwrap_or_else(|| self.theme.clone());
             let measure_ctx = MeasureCtx::with_runtime(
-                &measure_store,
-                &measure_theme,
+                &self.store,
+                &self.theme,
                 self.clock.now(),
                 0,
                 self.visual_capabilities,
@@ -1572,14 +1698,8 @@ where
     }
 
     fn on_events(&mut self, events: &[Event]) -> Result<(), DrawErr> {
-        // Reset TextInputState.modified_this_batch so we sync from parent when value differs
-        self.store
-            .for_each_state_mut::<TextInputState, _>(|_, s| s.modified_this_batch = false);
-        self.store
-            .for_each_state_mut::<TextAreaState, _>(|_, s| s.modified_this_batch = false);
-
-        // Ensure we have a tree (may be missing on first frame before draw)
         self.ensure_tree();
+        sync_widget_states(self.cached_tree.as_ref().unwrap().as_ref(), &mut self.store);
 
         let tree = self.cached_tree.as_ref().unwrap();
         let geometry = self.geometry.borrow();
@@ -1729,11 +1849,11 @@ where
         self.prune_finished_tasks();
 
         if processed_messages {
-            // Preserve the last rendered tree so draw() can play exit presence
-            // for widgets that disappear from the next view tree.
-            if self.presence_previous_tree.is_none() {
-                self.presence_previous_tree = self.cached_tree.take();
-                self.presence_previous_geometry = self.geometry.borrow().clone();
+            // Keep the previous description and geometry for lifecycle matching
+            // and exit rendering when ensure_tree() reconciles the next view.
+            if self.previous_tree.is_none() {
+                self.previous_tree = self.cached_tree.take();
+                self.previous_geometry = self.geometry.borrow().clone();
             } else {
                 self.cached_tree = None;
             }

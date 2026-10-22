@@ -9,7 +9,7 @@ use crate::focus::FocusConfig;
 use crate::layout::border_renderer;
 use crate::layout::{ensure_item_visible, Constraints, LayoutStyle};
 use crate::style::{BorderStyle, Style, Theme};
-use crate::widget::{EventCtx, EventPhase, RenderCtx, Widget};
+use crate::widget::{EventCtx, EventPhase, Lifecycle, RenderCtx, StateCtx, Widget};
 use crate::widgets::VariantWidget;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -24,7 +24,6 @@ pub struct TextAreaState {
     pub cursor_position: usize,
     pub scroll_offset: usize,
     pub value: Option<String>,
-    pub modified_this_batch: bool,
 }
 
 pub struct TextArea<M = ()> {
@@ -158,6 +157,27 @@ impl<M> Default for TextArea<M> {
 }
 
 impl<M: 'static> Widget<M> for TextArea<M> {
+    fn lifecycle(&self, ctx: &mut StateCtx) {
+        if ctx.lifecycle() == Lifecycle::Unmount {
+            return;
+        }
+        let state = ctx.state_mut::<TextAreaState>();
+        if state.value.as_deref() != Some(self.value.as_str()) {
+            state.value = Some(self.value.clone());
+        }
+        state.cursor_position = state.cursor_position.min(self.value.len());
+        while !self.value.is_char_boundary(state.cursor_position) {
+            state.cursor_position -= 1;
+        }
+        let (line, _) = line_col_for_byte(&self.value, state.cursor_position);
+        let visible_rows = match self.variant {
+            TextAreaVariant::Default => self.height.saturating_sub(2),
+            TextAreaVariant::Borderless => self.height,
+        };
+        state.scroll_offset =
+            ensure_item_visible(state.scroll_offset, line, visible_rows.max(1) as usize);
+    }
+
     fn render(&self, chunk: &mut render::chunk::Chunk, ctx: &RenderCtx) {
         let area = chunk.area();
         if area.width() == 0 || area.height() == 0 {
@@ -256,9 +276,9 @@ impl<M: 'static> Widget<M> for TextArea<M> {
         let mut msg_to_emit = None;
         {
             let state = ctx.state_mut::<TextAreaState>();
-            if !state.modified_this_batch && state.value.as_deref() != Some(self.value.as_str()) {
+            // Fallback for manually constructed EventCtx; runtime syncs before input.
+            if state.value.is_none() {
                 state.value = Some(self.value.clone());
-                state.cursor_position = state.cursor_position.min(self.value.len());
             }
 
             let value = state.value.as_deref().unwrap_or(self.value.as_str());
@@ -344,7 +364,6 @@ impl<M: 'static> Widget<M> for TextArea<M> {
                 state.scroll_offset =
                     ensure_item_visible(state.scroll_offset, line, visible_rows.max(1));
                 state.value = Some(updated.clone());
-                state.modified_this_batch = true;
                 if let Some(handler) = self.on_change.as_ref() {
                     msg_to_emit = Some(handler(updated));
                 }

@@ -1120,6 +1120,36 @@ impl AnimationStore {
         Self::default()
     }
 
+    /// Move the frozen channels needed by a logically removed subtree into its
+    /// exit renderer. New components reusing an identity start independently.
+    pub(crate) fn extract(
+        &mut self,
+        ids: &std::collections::HashSet<WidgetId>,
+        paths: &[WidgetPath],
+    ) -> Self {
+        let mut extracted = Self::new();
+        macro_rules! move_channels {
+            ($field:ident, $matches:expr) => {
+                let keys: Vec<_> = self.$field.keys().filter($matches).cloned().collect();
+                for key in keys {
+                    extracted
+                        .$field
+                        .insert(key.clone(), self.$field.remove(&key).unwrap());
+                }
+            };
+        }
+        move_channels!(values, |key: &&AnimationKey| ids.contains(&key.id));
+        move_channels!(pulses, |key: &&AnimationKey| ids.contains(&key.id));
+        move_channels!(styles, |key: &&AnimationKey| ids.contains(&key.id));
+        move_channels!(layouts, |key: &&AnimationKey| ids.contains(&key.id));
+        move_channels!(timelines, |key: &&TimelineKey| paths
+            .iter()
+            .any(|path| key.path.starts_with(path)));
+        // Exit rendering reads the last displayed channels. Only its explicit
+        // exit timeline advances; pulses and unfinished enters cannot keep it alive.
+        extracted
+    }
+
     pub fn value(&self, id: impl Into<WidgetId>, channel: &str) -> Option<f64> {
         let id = id.into();
         let key = AnimationKey::new(&id, channel);

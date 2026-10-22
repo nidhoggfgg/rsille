@@ -184,6 +184,9 @@ impl<M> Animated<M> {
     }
 
     fn enter_frames(&self, ctx: &RenderCtx) -> Vec<TimelineFrame> {
+        if ctx.is_exit_render() {
+            return Vec::new();
+        }
         let Some(timeline) = self.presence.enter.clone() else {
             return Vec::new();
         };

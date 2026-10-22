@@ -13,6 +13,7 @@ use super::panel::{container_constraints, render_children_vertical};
 pub struct Collapsible<M = ()> {
     title: String,
     expanded: bool,
+    retain_state: bool,
     disabled: bool,
     children: Vec<Box<dyn Widget<M>>>,
     padding: Padding,
@@ -42,6 +43,7 @@ impl<M> Collapsible<M> {
         Self {
             title: title.into(),
             expanded: false,
+            retain_state: false,
             disabled: false,
             children: Vec::new(),
             padding: Padding::ZERO,
@@ -60,6 +62,15 @@ impl<M> Collapsible<M> {
 
     pub fn expanded(mut self, expanded: bool) -> Self {
         self.expanded = expanded;
+        self
+    }
+
+    /// Keep described children mounted while collapsed. They are excluded from
+    /// layout, focus, input and animation updates. Default: unmount on collapse.
+    /// Retained resources are bounded by the children in this description and
+    /// released when this container or the children are removed.
+    pub fn retain_state(mut self, retain: bool) -> Self {
+        self.retain_state = retain;
         self
     }
 
@@ -202,6 +213,14 @@ impl<M> Widget<M> for Collapsible<M> {
 
     fn key(&self) -> Option<&str> {
         self.widget_key.as_deref()
+    }
+
+    fn retained_children(&self) -> &[Box<dyn Widget<M>>] {
+        if !self.expanded && self.retain_state {
+            &self.children
+        } else {
+            &[]
+        }
     }
 }
 

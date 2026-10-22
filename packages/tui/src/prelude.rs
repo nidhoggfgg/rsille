@@ -36,8 +36,8 @@ pub use crate::shell::{
 pub use crate::state::{Derived, FormState, Store, StoreKey};
 pub use crate::style::{BorderStyle, Color, EffectSlot, Padding, Style, Theme, ThemeEffects};
 pub use crate::widget::{
-    EventCtx, EventPhase, FocusRequest, IntoWidget, MeasureCtx, RenderCtx, Widget, WidgetId,
-    WidgetKey, WidgetPath, WidgetStore,
+    EventCtx, EventPhase, FocusRequest, IntoWidget, Lifecycle, MeasureCtx, RenderCtx, StateCtx,
+    Widget, WidgetId, WidgetKey, WidgetPath, WidgetStore,
 };
 pub use crate::widgets::{
     animate, button, calendar, canvas, checkbox, code_viewer, collapsible, command_palette,

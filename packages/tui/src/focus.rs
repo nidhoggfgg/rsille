@@ -116,10 +116,9 @@ impl FocusAnalysis {
         analysis.live_paths.insert(path.clone());
         analysis.live_ids.insert(id.clone());
         analysis.id_by_path.insert(path.clone(), id.clone());
-        analysis
-            .path_by_id
-            .entry(id.clone())
-            .or_insert(path.clone());
+        if let Some(previous) = analysis.path_by_id.insert(id.clone(), path.clone()) {
+            panic!("Duplicate widget key/identity {id:?}: paths {previous:?} and {path:?}. Keys must be unique within the nearest keyed ancestor.");
+        }
 
         match widget.focus_config() {
             FocusConfig::Leaf | FocusConfig::Composite => {
@@ -224,6 +223,15 @@ pub struct FocusManager {
 impl FocusManager {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// A replaced component must not inherit focus or scope restoration memory.
+    pub(crate) fn forget(&mut self, id: &WidgetId) {
+        if self.focused_id.as_ref() == Some(id) {
+            self.focused_id = None;
+        }
+        self.scope_memory
+            .retain(|scope, target| scope != id && target != id);
     }
 
     pub fn rebuild<M>(&mut self, root: &dyn Widget<M>) {
