@@ -12,12 +12,14 @@ use crate::runtime::{
 };
 use crate::shell::{CommandRouter, Hotkey, HotkeyRegistry};
 use crate::style::Theme;
+use crate::subscription::Subscription;
 use crate::widget::Widget;
 use crate::widgets::visual::TerminalVisualCapabilities;
 use crate::WidgetResult;
 
 pub type EventHandler<M> = Box<dyn Fn() -> M>;
 pub type FrameHandler<M> = Box<dyn Fn(FrameInfo) -> M>;
+pub type SubscriptionResolver<State, M> = Box<dyn Fn(&State) -> Subscription<M>>;
 pub type ThemeResolver<State> = Box<dyn Fn(&State) -> Theme>;
 
 pub(crate) struct TickConfig<M> {
@@ -61,6 +63,7 @@ pub struct App<State, M = ()> {
     pub(crate) state: State,
     pub(crate) theme: Theme,
     pub(crate) theme_resolver: Option<ThemeResolver<State>>,
+    pub(crate) subscriptions: Option<SubscriptionResolver<State, M>>,
     pub(crate) global_key_handlers: HashMap<KeyCode, EventHandler<M>>,
     pub(crate) hotkeys: HotkeyRegistry<M>,
     pub(crate) command_router: Option<CommandRouter<M>>,
@@ -90,6 +93,7 @@ impl<State, M: Clone + std::fmt::Debug + Send + 'static> App<State, M> {
             state,
             theme: Theme::dark(),
             theme_resolver: None,
+            subscriptions: None,
             global_key_handlers: HashMap::new(),
             hotkeys: HotkeyRegistry::new(),
             command_router: None,
@@ -103,6 +107,13 @@ impl<State, M: Clone + std::fmt::Debug + Send + 'static> App<State, M> {
             clock: Arc::new(SystemClock),
             executor: Arc::new(ThreadExecutor),
         }
+    }
+
+    /// Declare continuous event sources from current state. Stable scoped keys
+    /// keep producers running across view rebuilds; removal cancels them.
+    pub fn subscriptions(mut self, resolver: impl Fn(&State) -> Subscription<M> + 'static) -> Self {
+        self.subscriptions = Some(Box::new(resolver));
+        self
     }
 
     /// Configure the theme used for rendering.

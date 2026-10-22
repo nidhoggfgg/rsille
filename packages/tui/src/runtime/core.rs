@@ -21,8 +21,10 @@ use crate::effect::{
 use crate::event::{KeyCode, KeyModifiers, MouseButton, MouseEventKind};
 use crate::focus::FocusManager;
 use crate::layout::{AxisLimit, SizeProposal};
+use crate::scope::{ResourceKey, Scope};
 use crate::shell::{CommandRouter, HotkeyRegistry};
 use crate::style::Theme;
+use crate::subscription::Subscription;
 use crate::widget::{
     EventCtx, EventPhase, FocusRequest, HitRegion, Lifecycle, MeasureCtx, RenderCtx, StateCtx,
     Widget, WidgetId, WidgetKey, WidgetPath, WidgetStore,
@@ -30,7 +32,9 @@ use crate::widget::{
 use crate::widgets::visual::TerminalVisualCapabilities;
 use crate::WidgetResult;
 
-use crate::app::{App, EventHandler, FrameHandler, FrameInfo, QuitBehavior, ThemeResolver};
+use crate::app::{
+    App, EventHandler, FrameHandler, FrameInfo, QuitBehavior, SubscriptionResolver, ThemeResolver,
+};
 
 struct TickRuntime<M> {
     interval: Duration,
@@ -282,14 +286,31 @@ impl<State, M: Clone + std::fmt::Debug + Send + 'static> Runtime<State, M> {
 
 struct TaskRecord<M> {
     status: TaskStatus,
+    lease: ScopeLease,
+    accept_results: bool,
     cancellation: CancellationToken,
     task: Task<M>,
     deadline: Option<Instant>,
     retry_at: Option<Instant>,
 }
 
+#[derive(Clone)]
+struct ScopeLease {
+    scope: Scope,
+    generation: u64,
+}
+
+struct MountedScope {
+    owner: WidgetId,
+    generation: u64,
+}
+
 enum QueuedMessage<M> {
     Plain(M),
+    Scoped {
+        lease: ScopeLease,
+        message: M,
+    },
     Task {
         id: TaskId,
         attempt: u32,
@@ -305,6 +326,9 @@ impl<M> MessageQueue<M> {
     }
     fn push_back(&mut self, message: M) {
         self.0.push_back(QueuedMessage::Plain(message));
+    }
+    fn push_scoped(&mut self, lease: ScopeLease, message: M) {
+        self.0.push_back(QueuedMessage::Scoped { lease, message });
     }
     fn extend(&mut self, messages: impl IntoIterator<Item = M>) {
         self.0
@@ -327,6 +351,10 @@ pub(crate) struct AppRuntime<State, U, V, M> {
     state: State,
     theme: Theme,
     theme_resolver: Option<ThemeResolver<State>>,
+    subscriptions: Option<SubscriptionResolver<State, M>>,
+    subscription_tasks: HashMap<ResourceKey, TaskId>,
+    scopes: HashMap<Scope, MountedScope>,
+    next_scope_generation: u64,
     update_fn: U,
     view_fn: V,
     store: WidgetStore,
@@ -357,15 +385,15 @@ pub(crate) struct AppRuntime<State, U, V, M> {
     inline_max_height: u16,
     task_sender: TaskEventSender<M>,
     task_receiver: Receiver<TaskEvent<M>>,
-    debounces: HashMap<String, (Instant, M)>,
-    timers: Vec<(Instant, M)>,
+    debounces: HashMap<ResourceKey, (Instant, ScopeLease, M)>,
+    timers: Vec<(Instant, ScopeLease, M)>,
     wake: render::WakeHandle,
     clock: Arc<dyn Clock>,
     executor: Arc<dyn Executor>,
     next_animation_at: Option<Instant>,
     next_task_id: u64,
     tasks: HashMap<TaskId, TaskRecord<M>>,
-    task_keys: HashMap<String, TaskId>,
+    task_keys: HashMap<ResourceKey, TaskId>,
     task_order: Vec<TaskId>,
 }
 
@@ -422,8 +450,19 @@ fn visit_widgets<M>(
 }
 
 fn sync_widget_states<M: 'static>(widget: &(dyn Widget<M> + 'static), store: &mut WidgetStore) {
+    reconcile_widget_states(widget, store, true);
+}
+
+fn reconcile_widget_states<M: 'static>(
+    widget: &(dyn Widget<M> + 'static),
+    store: &mut WidgetStore,
+    sync_existing: bool,
+) {
     visit_widgets(widget, &mut |widget, path, id| {
         let lifecycle = store.mount(id, widget.widget_type());
+        if lifecycle == Lifecycle::Sync && !sync_existing {
+            return;
+        }
         widget.lifecycle(&mut StateCtx::new(
             store,
             path.clone(),
@@ -542,6 +581,7 @@ impl<State, U, V, M: Send + 'static> AppRuntime<State, U, V, M> {
             state,
             theme,
             theme_resolver,
+            subscriptions,
             global_key_handlers,
             hotkeys,
             command_router,
@@ -565,6 +605,10 @@ impl<State, U, V, M: Send + 'static> AppRuntime<State, U, V, M> {
             state,
             theme,
             theme_resolver,
+            subscriptions,
+            subscription_tasks: HashMap::new(),
+            scopes: HashMap::new(),
+            next_scope_generation: 0,
             update_fn: update,
             view_fn: view,
             store: WidgetStore::new(),
@@ -624,6 +668,13 @@ impl<State, U, V, M: Send + 'static> AppRuntime<State, U, V, M> {
     where
         V: Fn(&State) -> Box<dyn Widget<M>>,
     {
+        self.ensure_tree_with_sync(true);
+    }
+
+    fn ensure_tree_with_sync(&mut self, sync_existing: bool)
+    where
+        V: Fn(&State) -> Box<dyn Widget<M>>,
+    {
         if self.cached_tree.is_some() {
             return;
         }
@@ -639,11 +690,12 @@ impl<State, U, V, M: Send + 'static> AppRuntime<State, U, V, M> {
             }
         });
 
+        let mut removed = HashSet::new();
+        let mut root_key_changed = false;
         if let Some(previous) = self.previous_tree.take() {
-            let mut removed = HashSet::new();
             // The root always uses WidgetId::root(); its explicit key still
             // defines a lifetime boundary for the entire application view.
-            let root_key_changed = previous.key() != tree.key();
+            root_key_changed = previous.key() != tree.key();
             visit_widgets(previous.as_ref(), &mut |widget, path, id| {
                 if root_key_changed
                     || mounted.get(id).map(|(_, ty)| *ty) != Some(widget.widget_type())
@@ -676,8 +728,9 @@ impl<State, U, V, M: Send + 'static> AppRuntime<State, U, V, M> {
             let geometry = std::mem::take(&mut self.previous_geometry);
             self.start_exit_visuals(previous, geometry, &removed, self.animation_time());
         }
+        self.reconcile_scopes(tree.as_ref(), &removed, root_key_changed);
         self.store.retain_active(|id| mounted.contains_key(id));
-        sync_widget_states(tree.as_ref(), &mut self.store);
+        reconcile_widget_states(tree.as_ref(), &mut self.store, sync_existing);
         self.focus.rebuild(tree.as_ref());
         if self
             .pointer_capture
@@ -687,7 +740,160 @@ impl<State, U, V, M: Send + 'static> AppRuntime<State, U, V, M> {
             self.pointer_capture = None;
         }
         self.cached_tree = Some(tree);
+        self.reconcile_subscriptions();
         self.prune_live_animations();
+    }
+
+    fn lease(&self, scope: &Scope) -> Option<ScopeLease> {
+        if *scope == Scope::root() {
+            Some(ScopeLease {
+                scope: scope.clone(),
+                generation: 0,
+            })
+        } else {
+            self.scopes.get(scope).map(|s| ScopeLease {
+                scope: scope.clone(),
+                generation: s.generation,
+            })
+        }
+    }
+
+    fn lease_is_live(&self, lease: &ScopeLease) -> bool {
+        lease.scope == Scope::root()
+            || self
+                .scopes
+                .get(&lease.scope)
+                .is_some_and(|live| live.generation == lease.generation)
+    }
+
+    fn reconcile_scopes(
+        &mut self,
+        tree: &(dyn Widget<M> + 'static),
+        removed: &HashSet<WidgetId>,
+        reset: bool,
+    ) {
+        let mut paths = HashMap::<WidgetPath, Scope>::new();
+        let mut next = HashMap::new();
+        visit_widgets(tree, &mut |widget, path, id| {
+            let mut parent = path.clone();
+            parent.pop();
+            let mut scope = if path.is_empty() {
+                Scope::root()
+            } else {
+                paths[&parent].clone()
+            };
+            if let Some(name) = widget.resource_scope() {
+                let parent_continues = self.scopes.get(&scope).map(|s| s.generation)
+                    == next.get(&scope).map(|s: &MountedScope| s.generation);
+                scope = scope.child(name);
+                let generation = self
+                    .scopes
+                    .get(&scope)
+                    .filter(|s| {
+                        !reset && parent_continues && s.owner == *id && !removed.contains(id)
+                    })
+                    .map(|s| s.generation)
+                    .unwrap_or_else(|| {
+                        self.next_scope_generation += 1;
+                        self.next_scope_generation
+                    });
+                if next
+                    .insert(
+                        scope.clone(),
+                        MountedScope {
+                            owner: id.clone(),
+                            generation,
+                        },
+                    )
+                    .is_some()
+                {
+                    panic!("Duplicate resource scope {scope} at widget path {path:?}");
+                }
+            }
+            paths.insert(path.clone(), scope);
+        });
+        self.scopes = next;
+        let stale: Vec<_> = self
+            .tasks
+            .iter()
+            .filter(|(_, r)| !self.lease_is_live(&r.lease))
+            .map(|(&id, _)| id)
+            .collect();
+        for id in stale {
+            self.cancel_task(id);
+        }
+        let scopes = &self.scopes;
+        let live = |lease: &ScopeLease| {
+            lease.scope == Scope::root()
+                || scopes
+                    .get(&lease.scope)
+                    .is_some_and(|s| s.generation == lease.generation)
+        };
+        self.timers.retain(|(_, lease, _)| live(lease));
+        self.debounces.retain(|_, (_, lease, _)| live(lease));
+    }
+
+    fn reconcile_subscriptions(&mut self) {
+        fn collect<M>(
+            source: Subscription<M>,
+            scope: Scope,
+            out: &mut Vec<(ResourceKey, Task<M>)>,
+        ) {
+            match source {
+                Subscription::None => {}
+                Subscription::Batch(sources) => {
+                    for source in sources {
+                        collect(source, scope.clone(), out);
+                    }
+                }
+                Subscription::Run { key, mut task } => {
+                    // Subscription identity is tracked separately from task keys.
+                    task.key = None;
+                    out.push((ResourceKey::new(scope, key), task));
+                }
+                Subscription::Scoped(inner, source) => collect(*source, scope.join(&inner), out),
+            }
+        }
+        let Some(resolver) = &self.subscriptions else {
+            return;
+        };
+        let mut desired = Vec::new();
+        collect(resolver(&self.state), Scope::root(), &mut desired);
+        let mut keys = HashSet::new();
+        for (key, _) in &desired {
+            assert!(
+                keys.insert(key.clone()),
+                "Duplicate subscription key {:?} in scope {}",
+                key.key,
+                key.scope
+            );
+        }
+        let stale: Vec<_> = self
+            .subscription_tasks
+            .iter()
+            .filter(|(key, id)| {
+                !keys.contains(*key)
+                    || self
+                        .tasks
+                        .get(id)
+                        .is_none_or(|r| !self.lease_is_live(&r.lease))
+            })
+            .map(|(key, id)| (key.clone(), *id))
+            .collect();
+        for (key, id) in stale {
+            self.subscription_tasks.remove(&key);
+            self.cancel_task(id);
+        }
+        for (key, task) in desired {
+            if self.subscription_tasks.contains_key(&key) {
+                continue;
+            }
+            if let Some(lease) = self.lease(&key.scope) {
+                // Subscription IDs and one-shot task keys are separate namespaces.
+                let id = self.spawn_task(task, lease);
+                self.subscription_tasks.insert(key, id);
+            }
+        }
     }
 
     fn prune_live_animations(&mut self) {
@@ -1238,7 +1444,7 @@ impl<State, U, V, M: Send + 'static> AppRuntime<State, U, V, M> {
 
         if let Some(handler) = record.task.status_handler.as_ref() {
             if let Some(message) = handler(status) {
-                self.messages.push_back(message);
+                self.messages.push_scoped(record.lease.clone(), message);
             }
         }
     }
@@ -1294,22 +1500,27 @@ impl<State, U, V, M: Send + 'static> AppRuntime<State, U, V, M> {
 
     fn accepts_attempt(&self, id: TaskId, attempt: u32) -> bool {
         self.tasks.get(&id).is_some_and(|record| {
-            record.status.attempt == attempt && record.status.state == TaskState::Running
+            record.accept_results
+                && record.status.attempt == attempt
+                && record.status.state == TaskState::Running
+                && self.lease_is_live(&record.lease)
         })
     }
 
     fn accepts_task_message(&self, id: TaskId, attempt: u32) -> bool {
         self.tasks.get(&id).is_some_and(|record| {
-            record.status.attempt == attempt
+            record.accept_results
+                && self.lease_is_live(&record.lease)
+                && record.status.attempt == attempt
                 && !matches!(
                     record.status.state,
                     TaskState::Cancelled | TaskState::Cancelling | TaskState::TimedOut
                 )
-                && record
-                    .status
-                    .key
-                    .as_ref()
-                    .is_none_or(|key| self.task_keys.get(key) == Some(&id))
+                && record.status.key.as_ref().is_none_or(|key| {
+                    self.task_keys
+                        .get(&ResourceKey::new(record.lease.scope.clone(), key))
+                        == Some(&id)
+                })
         })
     }
 
@@ -1338,6 +1549,8 @@ impl<State, U, V, M: Send + 'static> AppRuntime<State, U, V, M> {
         }
         self.timers.clear();
         self.debounces.clear();
+        self.subscription_tasks.clear();
+        self.scopes.clear();
         self.messages.0.clear();
         self.wake.wake();
     }
@@ -1357,13 +1570,14 @@ impl<State, U, V, M: Send + 'static> AppRuntime<State, U, V, M> {
     }
 
     fn cancel_task(&mut self, id: TaskId) {
-        let Some(record) = self.tasks.get(&id) else {
+        let Some(record) = self.tasks.get_mut(&id) else {
             return;
         };
+        record.accept_results = false;
+        record.cancellation.cancel();
         if record.status.state.is_terminal() {
             return;
         }
-        record.cancellation.cancel();
         self.set_task_state(id, TaskState::Cancelling);
         // Cancellation stops accepting results immediately. Blocking jobs must
         // cooperate with their token; the UI never waits for an arbitrary thread.
@@ -1374,23 +1588,23 @@ impl<State, U, V, M: Send + 'static> AppRuntime<State, U, V, M> {
         let now = self.clock.now();
         let mut pending = Vec::new();
         let mut waiting = Vec::new();
-        for (at, message) in self.timers.drain(..) {
+        for (at, lease, message) in self.timers.drain(..) {
             if at <= now {
-                self.messages.push_back(message);
+                self.messages.push_scoped(lease, message);
             } else {
-                waiting.push((at, message));
+                waiting.push((at, lease, message));
             }
         }
         self.timers = waiting;
         let keys: Vec<_> = self
             .debounces
             .iter()
-            .filter(|(_, (at, _))| *at <= now)
+            .filter(|(_, (at, _, _))| *at <= now)
             .map(|(key, _)| key.clone())
             .collect();
         for key in keys {
-            if let Some((_, message)) = self.debounces.remove(&key) {
-                self.messages.push_back(message);
+            if let Some((_, lease, message)) = self.debounces.remove(&key) {
+                self.messages.push_scoped(lease, message);
             }
         }
         for (&id, record) in &self.tasks {
@@ -1411,7 +1625,7 @@ impl<State, U, V, M: Send + 'static> AppRuntime<State, U, V, M> {
         }
     }
 
-    fn cancel_task_key(&mut self, key: &str) {
+    fn cancel_task_key(&mut self, key: &ResourceKey) {
         if let Some(task_id) = self.task_keys.get(key).copied() {
             self.cancel_task(task_id);
         }
@@ -1423,7 +1637,9 @@ impl<State, U, V, M: Send + 'static> AppRuntime<State, U, V, M> {
                 self.tasks
                     .get(task_id)
                     .map(|record| {
-                        record.status.state.is_terminal() && !self.messages.contains_task(*task_id)
+                        record.status.state.is_terminal()
+                            && !self.messages.contains_task(*task_id)
+                            && !self.subscription_tasks.values().any(|id| id == task_id)
                     })
                     .unwrap_or(false)
             }) else {
@@ -1433,6 +1649,7 @@ impl<State, U, V, M: Send + 'static> AppRuntime<State, U, V, M> {
             let task_id = self.task_order.remove(index);
             if let Some(record) = self.tasks.remove(&task_id) {
                 if let Some(key) = record.status.key {
+                    let key = ResourceKey::new(record.lease.scope, key);
                     if self.task_keys.get(&key) == Some(&task_id) {
                         self.task_keys.remove(&key);
                     }
@@ -1441,9 +1658,9 @@ impl<State, U, V, M: Send + 'static> AppRuntime<State, U, V, M> {
         }
     }
 
-    fn spawn_task(&mut self, task: Task<M>) {
+    fn spawn_task(&mut self, task: Task<M>, lease: ScopeLease) -> TaskId {
         if let Some(key) = task.key.as_deref() {
-            self.cancel_task_key(key);
+            self.cancel_task_key(&ResourceKey::new(lease.scope.clone(), key));
         }
         let id = TaskId(self.next_task_id);
         self.next_task_id = self.next_task_id.wrapping_add(1);
@@ -1458,14 +1675,18 @@ impl<State, U, V, M: Send + 'static> AppRuntime<State, U, V, M> {
             now,
         );
         status.updated_at = now;
+        status.scope = lease.scope.clone();
         if let Some(key) = task.key.as_ref() {
-            self.task_keys.insert(key.clone(), id);
+            self.task_keys
+                .insert(ResourceKey::new(lease.scope.clone(), key), id);
         }
         self.task_order.push(id);
         self.tasks.insert(
             id,
             TaskRecord {
                 status: status.clone(),
+                lease,
+                accept_results: true,
                 cancellation: CancellationToken::new(),
                 task,
                 deadline: None,
@@ -1475,6 +1696,7 @@ impl<State, U, V, M: Send + 'static> AppRuntime<State, U, V, M> {
         self.record_task_status(status);
         self.start_task_attempt(id);
         self.prune_finished_tasks();
+        id
     }
 
     fn start_task_attempt(&mut self, id: TaskId) {
@@ -1496,30 +1718,49 @@ impl<State, U, V, M: Send + 'static> AppRuntime<State, U, V, M> {
     }
 
     fn apply_effect(&mut self, effect: Effect<M>) {
+        self.apply_scoped_effect(effect, Scope::root());
+    }
+
+    fn apply_scoped_effect(&mut self, effect: Effect<M>, scope: Scope) {
+        let Some(lease) = self.lease(&scope) else {
+            return;
+        };
         match effect {
             Effect::None => {}
-            Effect::Message(message) => self.messages.push_back(message),
+            Effect::Message(message) => self.messages.push_scoped(lease, message),
             Effect::Batch(effects) => {
                 for effect in effects {
-                    self.apply_effect(effect);
+                    self.apply_scoped_effect(effect, scope.clone());
                 }
             }
-            Effect::Spawn(task) => self.spawn_task(task),
-            Effect::CancelTask(task_id) => self.cancel_task(task_id),
-            Effect::CancelTaskKey(key) => self.cancel_task_key(&key),
+            Effect::Scoped(inner, effect) => self.apply_scoped_effect(*effect, scope.join(&inner)),
+            Effect::Spawn(task) => {
+                self.spawn_task(task, lease);
+            }
+            Effect::CancelTask(id) => {
+                if scope == Scope::root()
+                    || self.tasks.get(&id).is_some_and(|r| r.lease.scope == scope)
+                {
+                    self.cancel_task(id);
+                }
+            }
+            Effect::CancelTaskKey(key) => self.cancel_task_key(&ResourceKey::new(scope, key)),
             Effect::After(duration, message) => {
-                self.timers.push((self.clock.now() + duration, message));
+                self.timers
+                    .push((self.clock.now() + duration, lease, message))
             }
             Effect::Debounce {
                 key,
                 duration,
                 message,
             } => {
-                self.debounces
-                    .insert(key, (self.clock.now() + duration, message));
+                self.debounces.insert(
+                    ResourceKey::new(scope, key),
+                    (self.clock.now() + duration, lease, message),
+                );
             }
             Effect::CancelDebounce(key) => {
-                self.debounces.remove(&key);
+                self.debounces.remove(&ResourceKey::new(scope, key));
             }
         }
     }
@@ -1685,8 +1926,8 @@ where
         self.tick_handlers
             .iter()
             .map(|tick| tick.next_fire_at)
-            .chain(self.timers.iter().map(|(at, _)| *at))
-            .chain(self.debounces.values().map(|(at, _)| *at))
+            .chain(self.timers.iter().map(|(at, _, _)| *at))
+            .chain(self.debounces.values().map(|(at, _, _)| *at))
             .chain(
                 self.tasks
                     .values()
@@ -1822,6 +2063,12 @@ where
             };
             let message = match message {
                 QueuedMessage::Plain(message) => message,
+                QueuedMessage::Scoped { lease, message } => {
+                    if !self.lease_is_live(&lease) {
+                        continue;
+                    }
+                    message
+                }
                 QueuedMessage::Task {
                     id,
                     attempt,
@@ -1842,25 +2089,29 @@ where
                 let mut ctx = UpdateCtx::new(&mut effects, statuses, task_keys, now);
                 self.update_fn.handle(&mut self.state, message, &mut ctx);
             }
-            for effect in effects {
-                self.apply_effect(effect);
-            }
-        }
-        self.prune_finished_tasks();
-
-        if processed_messages {
-            // Keep the previous description and geometry for lifecycle matching
-            // and exit rendering when ensure_tree() reconciles the next view.
+            // Reconcile each update before accepting the next queued result.
+            // An unmount in this batch must invalidate messages immediately.
             if self.previous_tree.is_none() {
                 self.previous_tree = self.cached_tree.take();
                 self.previous_geometry = self.geometry.borrow().clone();
             } else {
                 self.cached_tree = None;
             }
+            self.ensure_tree_with_sync(false);
+            for effect in effects {
+                self.apply_effect(effect);
+            }
         }
+        self.prune_finished_tasks();
 
         self.sync_theme();
         self.ensure_tree();
+        if processed_messages {
+            // Controlled values synchronize once per input batch, after its
+            // final app value is known. Mount/unmount and resource cancellation
+            // still occur between messages.
+            sync_widget_states(self.cached_tree.as_ref().unwrap().as_ref(), &mut self.store);
+        }
         let needs_animation_frame = self.animate_widgets();
         self.next_animation_at =
             needs_animation_frame.then(|| self.clock.now() + Self::FRAME_INTERVAL);

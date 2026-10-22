@@ -174,3 +174,7 @@ path = "examples/widgets/textarea.rs"
 [[example]]
 name = "tree"
 path = "examples/widgets/tree.rs"
+
+[[example]]
+name = "composition"
+path = "examples/basics/composition.rs"

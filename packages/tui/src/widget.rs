@@ -1,3 +1,6 @@
+mod composition;
+pub use composition::{MappedWidget, ScopedWidget, WidgetExt};
+
 use std::any::{Any, TypeId};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -499,6 +502,12 @@ pub trait Widget<M> {
     fn key(&self) -> Option<&str> {
         None
     }
+
+    /// Optional resource namespace owned by this node's mounted lifetime.
+    /// Usually supplied through `WidgetExt::scope`.
+    fn resource_scope(&self) -> Option<&str> {
+        None
+    }
 }
 
 impl<M> Widget<M> for Box<dyn Widget<M>> {
@@ -567,6 +576,10 @@ impl<M> Widget<M> for Box<dyn Widget<M>> {
 
     fn key(&self) -> Option<&str> {
         (**self).key()
+    }
+
+    fn resource_scope(&self) -> Option<&str> {
+        (**self).resource_scope()
     }
 }
 
@@ -1325,6 +1338,34 @@ impl<'a, M> EventCtx<'a, M> {
             frame,
             visual_capabilities,
         }
+    }
+
+    fn map_messages<C>(&mut self, handle: impl FnOnce(&mut EventCtx<C>), map: impl Fn(C) -> M) {
+        let mut messages = Vec::new();
+        let mut child = EventCtx {
+            store: &mut *self.store,
+            messages: &mut messages,
+            path: self.path.clone(),
+            id: self.id.clone(),
+            stable_scope_id: self.stable_scope_id.clone(),
+            focused_path: self.focused_path.clone(),
+            geometry: self.geometry,
+            phase: self.phase,
+            already_handled: self.already_handled,
+            handled: self.handled,
+            stop_propagation: self.stop_propagation,
+            focus_request: self.focus_request.clone(),
+            theme: self.theme,
+            now: self.now,
+            frame: self.frame,
+            visual_capabilities: self.visual_capabilities,
+        };
+        handle(&mut child);
+        let outcome = child.finish();
+        self.handled = outcome.handled;
+        self.stop_propagation = outcome.stop_propagation;
+        self.focus_request = outcome.focus_request;
+        self.messages.extend(messages.into_iter().map(map));
     }
 
     /// Get or create mutable persistent state for this widget.

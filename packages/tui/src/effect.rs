@@ -1,3 +1,4 @@
+use crate::scope::{ResourceKey, Scope};
 use std::collections::HashMap;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -59,6 +60,8 @@ pub struct TaskStatus {
     pub id: TaskId,
     pub key: Option<String>,
     pub label: Option<String>,
+    /// Namespace of the owning component instance.
+    pub scope: Scope,
     pub state: TaskState,
     pub attempt: u32,
     pub max_attempts: u32,
@@ -80,6 +83,7 @@ impl TaskStatus {
             id,
             key,
             label,
+            scope: Scope::root(),
             state,
             attempt,
             max_attempts,
@@ -202,6 +206,7 @@ pub enum Effect<M> {
         message: M,
     },
     CancelDebounce(String),
+    Scoped(Scope, Box<Effect<M>>),
 }
 
 impl<M> Effect<M> {
@@ -243,6 +248,51 @@ impl<M> Effect<M> {
 
     pub fn cancel_debounce(key: impl Into<String>) -> Self {
         Self::CancelDebounce(key.into())
+    }
+    /// Attach resources and messages to a mounted widget scope.
+    pub fn scope(self, scope: impl Into<Scope>) -> Self {
+        Self::Scoped(scope.into(), Box::new(self))
+    }
+
+    pub fn map<N, F>(self, map: F) -> Effect<N>
+    where
+        M: Send + 'static,
+        N: Send + 'static,
+        F: Fn(M) -> N + Send + Sync + 'static,
+    {
+        self.map_shared(Arc::new(map))
+    }
+
+    fn map_shared<N>(self, map: Arc<dyn Fn(M) -> N + Send + Sync>) -> Effect<N>
+    where
+        M: Send + 'static,
+        N: Send + 'static,
+    {
+        match self {
+            Self::None => Effect::None,
+            Self::Message(m) => Effect::Message(map(m)),
+            Self::Batch(effects) => Effect::Batch(
+                effects
+                    .into_iter()
+                    .map(|e| e.map_shared(map.clone()))
+                    .collect(),
+            ),
+            Self::Spawn(task) => Effect::Spawn(task.map(move |m| map(m))),
+            Self::CancelTask(id) => Effect::CancelTask(id),
+            Self::CancelTaskKey(key) => Effect::CancelTaskKey(key),
+            Self::After(duration, m) => Effect::After(duration, map(m)),
+            Self::Debounce {
+                key,
+                duration,
+                message,
+            } => Effect::Debounce {
+                key,
+                duration,
+                message: map(message),
+            },
+            Self::CancelDebounce(key) => Effect::CancelDebounce(key),
+            Self::Scoped(scope, effect) => Effect::Scoped(scope, Box::new(effect.map_shared(map))),
+        }
     }
 }
 
@@ -307,6 +357,38 @@ impl<M> Task<M> {
     {
         self.status_handler = Some(Arc::new(handler));
         self
+    }
+    /// Maps emitted messages and all task/request status callbacks.
+    pub fn map<N, F>(self, map: F) -> Task<N>
+    where
+        M: Send + 'static,
+        N: Send + 'static,
+        F: Fn(M) -> N + Send + Sync + 'static,
+    {
+        let map = Arc::new(map);
+        let runner = self.runner;
+        let runner_map = map.clone();
+        Task {
+            key: self.key,
+            label: self.label,
+            timeout: self.timeout,
+            retry: self.retry,
+            status_handler: self.status_handler.map(|handler| {
+                Arc::new(move |status| handler(status).map(|m| map(m))) as StatusHandler<N>
+            }),
+            runner: Arc::new(move |ctx: TaskContext<N>| {
+                let id = ctx.task_id;
+                let attempt = ctx.attempt;
+                let cancellation = ctx.cancellation.clone();
+                let map = runner_map.clone();
+                runner(TaskContext {
+                    task_id: id,
+                    attempt,
+                    cancellation,
+                    sender: Arc::new(move |m| ctx.emit(map(m))),
+                })
+            }),
+        }
     }
 }
 
@@ -399,7 +481,7 @@ pub struct TaskContext<M> {
     task_id: TaskId,
     attempt: u32,
     cancellation: CancellationToken,
-    sender: TaskEventSender<M>,
+    sender: Arc<dyn Fn(M) + Send + Sync>,
 }
 
 impl<M> TaskContext<M> {
@@ -408,12 +490,15 @@ impl<M> TaskContext<M> {
         attempt: u32,
         cancellation: CancellationToken,
         sender: TaskEventSender<M>,
-    ) -> Self {
+    ) -> Self
+    where
+        M: Send + 'static,
+    {
         Self {
             task_id,
             attempt,
             cancellation,
-            sender,
+            sender: Arc::new(move |message| sender.send(TaskEvent::Message(message))),
         }
     }
 
@@ -426,7 +511,7 @@ impl<M> TaskContext<M> {
     }
 
     pub fn emit(&self, message: M) {
-        self.sender.send(TaskEvent::Message(message));
+        (self.sender)(message);
     }
 
     pub fn cancellation_token(&self) -> CancellationToken {
@@ -851,7 +936,7 @@ impl<T, E> Request<T, E> {
 pub struct UpdateCtx<'a, M> {
     effects: &'a mut Vec<Effect<M>>,
     task_statuses: Vec<TaskStatus>,
-    task_keys: HashMap<String, TaskId>,
+    task_keys: HashMap<ResourceKey, TaskId>,
     now: Instant,
 }
 
@@ -859,7 +944,7 @@ impl<'a, M> UpdateCtx<'a, M> {
     pub(crate) fn new(
         effects: &'a mut Vec<Effect<M>>,
         task_statuses: Vec<TaskStatus>,
-        task_keys: HashMap<String, TaskId>,
+        task_keys: HashMap<ResourceKey, TaskId>,
         now: Instant,
     ) -> Self {
         Self {
@@ -917,8 +1002,13 @@ impl<'a, M> UpdateCtx<'a, M> {
     }
 
     pub fn task_status_by_key(&self, key: &str) -> Option<&TaskStatus> {
-        let task_id = self.task_keys.get(key)?;
+        let task_id = self.task_keys.get(&ResourceKey::new(Scope::root(), key))?;
         self.task_status(*task_id)
+    }
+
+    pub fn task_status_in_scope(&self, scope: &Scope, key: &str) -> Option<&TaskStatus> {
+        let id = self.task_keys.get(&ResourceKey::new(scope.clone(), key))?;
+        self.task_status(*id)
     }
 
     pub fn is_task_active(&self, key: &str) -> bool {

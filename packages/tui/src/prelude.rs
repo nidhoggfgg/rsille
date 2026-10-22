@@ -8,8 +8,8 @@ pub use crate::animation::{
 pub use crate::app::{App, FrameInfo, QuitBehavior};
 pub use crate::effect::{
     CancellationToken, Effect, Request, RequestContext, RequestEvent, RequestId, RequestOutcome,
-    RequestPhase, RequestState, RetryPolicy, Task, TaskId, TaskOutcome, TaskState, TaskStatus,
-    UpdateCtx,
+    RequestPhase, RequestState, RetryPolicy, Task, TaskContext, TaskId, TaskOutcome, TaskState,
+    TaskStatus, UpdateCtx,
 };
 pub use crate::error::{WidgetError, WidgetResult};
 pub use crate::event::{
@@ -36,8 +36,8 @@ pub use crate::shell::{
 pub use crate::state::{Derived, FormState, Store, StoreKey};
 pub use crate::style::{BorderStyle, Color, EffectSlot, Padding, Style, Theme, ThemeEffects};
 pub use crate::widget::{
-    EventCtx, EventPhase, FocusRequest, IntoWidget, Lifecycle, MeasureCtx, RenderCtx, StateCtx,
-    Widget, WidgetId, WidgetKey, WidgetPath, WidgetStore,
+    EventCtx, EventPhase, FocusRequest, IntoWidget, Lifecycle, MappedWidget, MeasureCtx, RenderCtx,
+    ScopedWidget, StateCtx, Widget, WidgetExt, WidgetId, WidgetKey, WidgetPath, WidgetStore,
 };
 pub use crate::widgets::{
     animate, button, calendar, canvas, checkbox, code_viewer, collapsible, command_palette,
@@ -61,3 +61,6 @@ pub use crate::widgets::{
     VisualPerformanceConfig, VisualProfile, WaveAxis, WipeDirection, WipeMode,
 };
 pub use crate::InlineMouseMode;
+
+pub use crate::scope::Scope;
+pub use crate::subscription::Subscription;
