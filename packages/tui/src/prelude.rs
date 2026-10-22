@@ -25,6 +25,10 @@ pub use crate::layout::{
     ScrollbarOrientation, ScrollbarVisibility, SizeProposal, Split, SplitDirection, SplitSize,
     SplitState, Stack, VerticalAlign,
 };
+pub use crate::runtime::{
+    AppHandle, Clock, Executor, ManualClock, ManualExecutor, Runtime, StepResult, SystemClock,
+    ThreadExecutor,
+};
 pub use crate::shell::{
     CommandDescriptor, CommandRouter, Hotkey, HotkeyRegistry, ModalManager, Navigator,
     Notification, NotificationCenter, NotificationId, NotificationLevel,

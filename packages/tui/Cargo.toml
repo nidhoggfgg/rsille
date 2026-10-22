@@ -20,6 +20,14 @@ name = "hello"
 path = "examples/basics/hello.rs"
 
 [[example]]
+name = "headless"
+path = "examples/basics/headless.rs"
+
+[[example]]
+name = "background"
+path = "examples/basics/background.rs"
+
+[[example]]
 name = "flex"
 path = "examples/layout/flex.rs"
 

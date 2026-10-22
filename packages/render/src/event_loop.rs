@@ -11,11 +11,11 @@ use crossterm::{
         size as terminal_size, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen,
     },
 };
-use futures::{FutureExt, StreamExt};
+use futures::StreamExt;
 use log::{error, info, warn};
 use tokio::time::Instant as TokioInstant;
 
-use crate::{area::Size, Builder, DrawErr, DrawUpdate, InlineMouseMode, Render};
+use crate::{area::Size, Builder, DrawErr, DrawUpdate, InlineMouseMode, Render, WakeHandle};
 
 struct TerminalGuard {
     hide_cursor: bool,
@@ -230,6 +230,7 @@ where
         let mut pending_initial_frame = true;
         let mut next_frame_at = Instant::now();
         let mut reader = EventStream::new();
+        let wake = self.render.thing().wake_handle();
 
         loop {
             let mut stop_after_iteration = false;
@@ -238,8 +239,12 @@ where
             match wait_for_frame_or_event(
                 &mut reader,
                 self.exit_code,
-                frame_interval,
-                next_frame_at,
+                if wake.is_some() {
+                    self.render.thing().next_update_at()
+                } else {
+                    frame_interval.map(|_| next_frame_at)
+                },
+                wake.as_ref(),
                 pending_initial_frame,
             )
             .await
@@ -261,7 +266,9 @@ where
                 self.exit_code,
                 &mut events,
                 self.max_event_per_frame,
-            ) {
+            )
+            .await
+            {
                 DrainOutcome::Continue => {}
                 DrainOutcome::ExitRequested => {
                     info!(
@@ -437,90 +444,85 @@ enum DrainOutcome {
     ExitRequested,
 }
 
-async fn wait_for_frame_or_event(
-    reader: &mut EventStream,
+async fn wait_for_frame_or_event<S>(
+    reader: &mut S,
     exit_code: Option<KeyEvent>,
-    frame_interval: Option<Duration>,
-    next_frame_at: Instant,
+    deadline: Option<Instant>,
+    wake: Option<&WakeHandle>,
     pending_initial_frame: bool,
-) -> WaitOutcome {
+) -> WaitOutcome
+where
+    S: futures::Stream<Item = std::io::Result<Event>> + Unpin,
+{
     if pending_initial_frame {
         return WaitOutcome::Timeout;
     }
 
     loop {
-        if frame_interval.is_some() {
-            let event = reader.next();
-            tokio::pin!(event);
-
-            let sleep = tokio::time::sleep_until(TokioInstant::from_std(next_frame_at));
-            tokio::pin!(sleep);
-
-            match tokio::select! {
-                maybe_event = &mut event => Some(maybe_event),
-                _ = &mut sleep => None,
-            } {
-                Some(Some(Ok(event))) => {
-                    if is_exit_event(&event, exit_code) {
-                        return WaitOutcome::ExitRequested;
-                    }
-                    return WaitOutcome::Event(event);
+        let result = tokio::select! {
+            event = reader.next() => event,
+            _ = wait_for_deadline(deadline) => return WaitOutcome::Timeout,
+            _ = wait_for_wake(wake) => return WaitOutcome::Timeout,
+        };
+        match result {
+            Some(Ok(event)) => {
+                if is_exit_event(&event, exit_code) {
+                    return WaitOutcome::ExitRequested;
                 }
-                Some(Some(Err(e))) => {
-                    error!("Error reading event: {}", e);
-                }
-                Some(None) => {
-                    warn!("Event stream ended");
-                    return WaitOutcome::Disconnected;
-                }
-                None => return WaitOutcome::Timeout,
+                return WaitOutcome::Event(event);
             }
-        } else {
-            match reader.next().await {
-                Some(Ok(event)) => {
-                    if is_exit_event(&event, exit_code) {
-                        return WaitOutcome::ExitRequested;
-                    }
-                    return WaitOutcome::Event(event);
-                }
-                Some(Err(e)) => {
-                    error!("Error reading event: {}", e);
-                }
-                None => {
-                    warn!("Event stream ended");
-                    return WaitOutcome::Disconnected;
-                }
-            }
+            Some(Err(e)) => error!("Error reading event: {}", e),
+            None => return WaitOutcome::Disconnected,
         }
     }
 }
 
-fn drain_pending_events(
-    reader: &mut EventStream,
+async fn wait_for_deadline(deadline: Option<Instant>) {
+    match deadline {
+        Some(deadline) => tokio::time::sleep_until(TokioInstant::from_std(deadline)).await,
+        None => std::future::pending().await,
+    }
+}
+
+async fn wait_for_wake(wake: Option<&WakeHandle>) {
+    match wake {
+        Some(wake) => wake.notified().await,
+        None => std::future::pending().await,
+    }
+}
+
+async fn drain_pending_events<S>(
+    reader: &mut S,
     exit_code: Option<KeyEvent>,
     events: &mut Vec<Event>,
     max_event_per_frame: usize,
-) -> DrainOutcome {
-    while events.len() < max_event_per_frame {
-        match reader.next().now_or_never() {
-            Some(Some(Ok(event))) => {
-                if is_exit_event(&event, exit_code) {
-                    return DrainOutcome::ExitRequested;
+) -> DrainOutcome
+where
+    S: futures::Stream<Item = std::io::Result<Event>> + Unpin,
+{
+    // Poll with the event loop's actual task waker. `now_or_never()` installs a
+    // noop waker; EventStream can retain that waker while its reader thread is
+    // blocked, losing the next keyboard wake when there is no frame timer.
+    futures::future::poll_fn(|cx| {
+        while events.len() < max_event_per_frame {
+            match reader.poll_next_unpin(cx) {
+                std::task::Poll::Ready(Some(Ok(event))) => {
+                    if is_exit_event(&event, exit_code) {
+                        return std::task::Poll::Ready(DrainOutcome::ExitRequested);
+                    }
+                    events.push(event);
                 }
-                events.push(event);
+                std::task::Poll::Ready(Some(Err(e))) => error!("Error reading event: {}", e),
+                std::task::Poll::Ready(None) => {
+                    warn!("Event stream ended");
+                    return std::task::Poll::Ready(DrainOutcome::Disconnected);
+                }
+                std::task::Poll::Pending => break,
             }
-            Some(Some(Err(e))) => {
-                error!("Error reading event: {}", e);
-            }
-            Some(None) => {
-                warn!("Event stream ended");
-                return DrainOutcome::Disconnected;
-            }
-            None => break,
         }
-    }
-
-    DrainOutcome::Continue
+        std::task::Poll::Ready(DrainOutcome::Continue)
+    })
+    .await
 }
 
 fn is_exit_event(event: &Event, exit_code: Option<KeyEvent>) -> bool {
@@ -533,9 +535,110 @@ fn is_exit_event(event: &Event, exit_code: Option<KeyEvent>) -> bool {
 #[cfg(test)]
 mod tests {
     use crossterm::event::{KeyModifiers, MouseButton, MouseEventKind};
+    use futures::FutureExt;
 
     use super::*;
     use crate::{area::Size, chunk::Chunk, Draw, Update};
+
+    #[tokio::test]
+    async fn idle_wait_stays_pending_until_a_producer_wakes_it() {
+        let mut input = futures::stream::pending();
+        let wake = WakeHandle::new();
+        assert!(
+            wait_for_frame_or_event(&mut input, None, None, Some(&wake), false)
+                .now_or_never()
+                .is_none()
+        );
+
+        // Enqueue-before-wait is the important race: the permit must survive.
+        wake.wake();
+        assert!(matches!(
+            wait_for_frame_or_event(&mut input, None, None, Some(&wake), false).await,
+            WaitOutcome::Timeout
+        ));
+        assert!(
+            wait_for_frame_or_event(&mut input, None, None, Some(&wake), false)
+                .now_or_never()
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn scheduled_deadline_wakes_without_terminal_input() {
+        let mut input = futures::stream::pending();
+        assert!(matches!(
+            wait_for_frame_or_event(&mut input, None, Some(Instant::now()), None, false).await,
+            WaitOutcome::Timeout
+        ));
+    }
+
+    #[tokio::test]
+    async fn input_and_exit_keys_work_without_periodic_frames() {
+        let key = KeyEvent::new(crossterm::event::KeyCode::Char('a'), KeyModifiers::empty());
+        let mut input = futures::stream::iter([Ok(Event::Key(key))]);
+        assert!(matches!(
+            wait_for_frame_or_event(&mut input, None, None, None, false).await,
+            WaitOutcome::Event(Event::Key(event)) if event == key
+        ));
+        let mut input = futures::stream::iter([Ok(Event::Key(key))]);
+        assert!(matches!(
+            wait_for_frame_or_event(&mut input, Some(key), None, None, false).await,
+            WaitOutcome::ExitRequested
+        ));
+    }
+
+    #[tokio::test]
+    async fn draining_input_preserves_the_waker_used_by_a_background_reader() {
+        use std::sync::{Arc, Mutex};
+        use std::task::{Poll, Waker};
+
+        #[derive(Default)]
+        struct InputState {
+            event: Option<Event>,
+            waker: Option<Waker>,
+        }
+        // Like EventStream's blocked reader, retain the first registered waker
+        // until an event arrives instead of replacing it on every poll.
+        struct Input(Arc<Mutex<InputState>>);
+        impl futures::Stream for Input {
+            type Item = std::io::Result<Event>;
+            fn poll_next(
+                self: std::pin::Pin<&mut Self>,
+                cx: &mut std::task::Context<'_>,
+            ) -> Poll<Option<Self::Item>> {
+                let mut state = self.0.lock().unwrap();
+                if let Some(event) = state.event.take() {
+                    Poll::Ready(Some(Ok(event)))
+                } else {
+                    state.waker.get_or_insert_with(|| cx.waker().clone());
+                    Poll::Pending
+                }
+            }
+        }
+
+        let state = Arc::new(Mutex::new(InputState::default()));
+        let mut input = Input(state.clone());
+        let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+        let reader = tokio::spawn(async move {
+            let mut events = Vec::new();
+            drain_pending_events(&mut input, None, &mut events, 10).await;
+            ready_tx.send(()).unwrap();
+            matches!(
+                wait_for_frame_or_event(&mut input, None, None, None, false).await,
+                WaitOutcome::Event(Event::Key(_))
+            )
+        });
+        ready_rx.await.unwrap();
+        {
+            let mut state = state.lock().unwrap();
+            state.event = Some(Event::Key(crossterm::event::KeyCode::Esc.into()));
+            state.waker.take().unwrap().wake();
+        }
+        assert!(tokio::time::timeout(Duration::from_secs(1), reader)
+            .await
+            .unwrap()
+            .unwrap());
+    }
 
     struct Noop;
 

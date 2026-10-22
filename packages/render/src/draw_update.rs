@@ -9,6 +9,18 @@ pub trait Draw {
 /// core trait for EventLoop
 /// in every frame, call on_events -> update -> required_size -> Render.render(draw)
 pub trait Update {
+    /// Opt into event-driven scheduling. Producers must wake after enqueueing work.
+    /// Implementations returning `None` retain the builder's frame polling behavior.
+    fn wake_handle(&self) -> Option<crate::WakeHandle> {
+        None
+    }
+
+    /// Next scheduled update for an event-driven application, in real clock time.
+    /// `None` means wait for input or a wake signal without a periodic poll.
+    fn next_update_at(&self) -> Option<std::time::Instant> {
+        None
+    }
+
     fn on_events(&mut self, events: &[crossterm::event::Event]) -> Result<(), DrawErr>;
     /// Advance application state.
     ///

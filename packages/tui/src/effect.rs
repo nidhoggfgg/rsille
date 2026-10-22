@@ -84,7 +84,7 @@ impl TaskStatus {
             attempt,
             max_attempts,
             created_at,
-            updated_at: Instant::now(),
+            updated_at: created_at,
         }
     }
 
@@ -321,29 +321,78 @@ impl<M> std::fmt::Debug for Task<M> {
     }
 }
 
-pub(crate) struct TaskEventSender<M>(Sender<TaskEvent<M>>);
+pub(crate) struct TaskEventSender<M> {
+    sender: Sender<TaskEvent<M>>,
+    wake: render::WakeHandle,
+    origin: Option<(TaskId, u32)>,
+}
 
 impl<M> Clone for TaskEventSender<M> {
     fn clone(&self) -> Self {
-        Self(self.0.clone())
+        Self {
+            sender: self.sender.clone(),
+            wake: self.wake.clone(),
+            origin: self.origin,
+        }
     }
 }
 
 impl<M> TaskEventSender<M> {
-    pub(crate) fn new(sender: Sender<TaskEvent<M>>) -> Self {
-        Self(sender)
+    pub(crate) fn new(sender: Sender<TaskEvent<M>>, wake: render::WakeHandle) -> Self {
+        Self {
+            sender,
+            wake,
+            origin: None,
+        }
+    }
+
+    pub(crate) fn for_attempt(&self, id: TaskId, attempt: u32) -> Self {
+        let mut sender = self.clone();
+        sender.origin = Some((id, attempt));
+        sender
+    }
+
+    pub(crate) fn send_message(&self, message: M) -> Result<(), std::sync::mpsc::SendError<M>> {
+        self.sender
+            .send(TaskEvent::Message(message))
+            .map_err(|error| {
+                let TaskEvent::Message(message) = error.0 else {
+                    unreachable!()
+                };
+                std::sync::mpsc::SendError(message)
+            })?;
+        self.wake.wake();
+        Ok(())
     }
 
     pub(crate) fn send(&self, event: TaskEvent<M>) {
-        let _ = self.0.send(event);
+        let event = match (self.origin, event) {
+            (Some((id, attempt)), TaskEvent::Message(message)) => TaskEvent::TaskMessage {
+                id,
+                attempt,
+                message,
+            },
+            (_, event) => event,
+        };
+        if self.sender.send(event).is_ok() {
+            self.wake.wake();
+        }
     }
 }
 
 #[derive(Debug)]
 pub(crate) enum TaskEvent<M> {
     Message(M),
-    Status(TaskStatus),
-    Debounced { key: String, nonce: u64, message: M },
+    TaskMessage {
+        id: TaskId,
+        attempt: u32,
+        message: M,
+    },
+    Finished {
+        id: TaskId,
+        attempt: u32,
+        state: TaskState,
+    },
 }
 
 pub struct TaskContext<M> {
@@ -899,67 +948,21 @@ impl<'a, M> UpdateCtx<'a, M> {
 }
 
 pub(crate) fn run_task_attempt<M: Send + 'static>(
-    task_id: TaskId,
-    key: Option<String>,
-    label: Option<String>,
-    created_at: Instant,
-    attempt: u32,
-    retry: RetryPolicy,
-    timeout: Option<Duration>,
-    cancellation: CancellationToken,
-    sender: TaskEventSender<M>,
+    context: TaskContext<M>,
     runner: TaskRunner<M>,
 ) -> TaskState {
-    sender.send(TaskEvent::Status(TaskStatus::new(
-        task_id,
-        key.clone(),
-        label.clone(),
-        TaskState::Running,
-        attempt,
-        retry.max_attempts(),
-        created_at,
-    )));
-
-    let timed_out = Arc::new(AtomicBool::new(false));
-    let attempt_finished = Arc::new(AtomicBool::new(false));
-
-    if let Some(timeout) = timeout {
-        let cancellation = cancellation.clone();
-        let timed_out = timed_out.clone();
-        let attempt_finished = attempt_finished.clone();
-        thread::spawn(move || {
-            thread::sleep(timeout);
-            if !attempt_finished.load(Ordering::SeqCst) {
-                timed_out.store(true, Ordering::SeqCst);
-                cancellation.cancel();
-            }
-        });
+    if context.is_cancelled() {
+        return TaskState::Cancelled;
     }
-
-    let outcome = catch_unwind(AssertUnwindSafe(|| {
-        runner(TaskContext::new(
-            task_id,
-            attempt,
-            cancellation.clone(),
-            sender.clone(),
-        ))
-    }));
-
-    attempt_finished.store(true, Ordering::SeqCst);
-
-    if timed_out.load(Ordering::SeqCst) {
-        return TaskState::TimedOut;
-    }
-
+    let cancellation = context.cancellation_token();
+    let outcome = catch_unwind(AssertUnwindSafe(|| runner(context)));
     if cancellation.is_cancelled() {
         return TaskState::Cancelled;
     }
-
     match outcome {
         Ok(TaskOutcome::Complete) => TaskState::Completed,
         Ok(TaskOutcome::Cancelled) => TaskState::Cancelled,
-        Ok(TaskOutcome::Retry) if retry.can_retry(attempt) => TaskState::RetryScheduled,
-        Ok(TaskOutcome::Retry) => TaskState::Failed,
+        Ok(TaskOutcome::Retry) => TaskState::RetryScheduled,
         Err(_) => TaskState::Panicked,
     }
 }
