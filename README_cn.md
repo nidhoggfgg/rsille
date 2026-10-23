@@ -48,6 +48,7 @@ cargo run --manifest-path examples/tui-showcase/Cargo.toml
 cargo run --manifest-path examples/rsille-showcase/Cargo.toml
 cargo run --release --manifest-path examples/neon-observatory/Cargo.toml
 cargo run --release --manifest-path examples/folded-harbor/Cargo.toml
+cargo run --release --manifest-path examples/minecraft/Cargo.toml
 ```
 
 `workflow` 使用同一套应用逻辑验证 Unicode 粘贴、debounce、后台保存、键盘焦点和退出，
@@ -62,6 +63,9 @@ cargo run --release --manifest-path examples/folded-harbor/Cargo.toml
 [折叠星港](examples/folded-harbor/README.md) 把视角变成解谜机关：旋转立体悬浮建筑，
 让不同深度的通道口在投影中重合，再折叠跨越。包含三章九道机关、光照与光晕、
 跟随三维位置的可点击组件、章节溶解、键鼠观察和完整自动演示。
+
+[Minecraft 方块世界](examples/minecraft/README.md) 是一个第一人称终端沙盒：草地、橡树、湖泊和小木屋，
+加上准星、快捷栏、挖掘放置、碰撞跳跃、飞行与昼夜切换，直接运行即可游玩。
 
 对外只发布 **`rsille`**，使用以下三个公开模块：
 

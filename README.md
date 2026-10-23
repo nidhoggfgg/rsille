@@ -53,6 +53,7 @@ cargo run --manifest-path examples/tui-showcase/Cargo.toml
 cargo run --manifest-path examples/rsille-showcase/Cargo.toml
 cargo run --release --manifest-path examples/neon-observatory/Cargo.toml
 cargo run --release --manifest-path examples/folded-harbor/Cargo.toml
+cargo run --release --manifest-path examples/minecraft/Cargo.toml
 ```
 
 The workflow example uses the same application for interactive editing and a
@@ -65,6 +66,10 @@ content viewers, layouts, animation, themes and modal interactions into one gall
 orbit floating architecture, align doorways at different depths, and cross the fold.
 Three chapters combine lit braille geometry, bloom, TUI buttons anchored in 3D,
 chapter dissolves, mouse orbiting and a complete auto-play journey.
+
+[Minecraft](examples/minecraft/README.md) is a small first-person voxel sandbox:
+explore grass, oak trees, a lake and a cabin, then mine and place blocks with a
+classic hotbar, collision, jumping, flight and a day/night toggle.
 
 Only **`rsille`** is published. Use its three public modules:
 
