@@ -18,7 +18,7 @@ cargo run --release --manifest-path examples/minecraft/Cargo.toml
 
 | 按键 / 鼠标 | 功能 |
 | --- | --- |
-| `W A S D` | 前后左右平滑走动，支持长按重复 |
+| `W A S D` | 前后左右平滑走动，支持按住和组合方向 |
 | 方向键 | 平滑转头、抬头、低头 |
 | `Space` | 跳跃；飞行时上升 |
 | `F` / `C` | 开关飞行 / 飞行时下降 |
@@ -38,10 +38,16 @@ cargo run --release --manifest-path examples/minecraft/Cargo.toml
 羊是可挖掘的静态方块造型。世界为固定种子的 **64 × 32 × 64** 有限地图，
 本次修改在退出时结束；没有合成、战斗或存档。
 
-键盘移动和转向由 demo 按每帧时间平滑推进，单次输入约 150 ms 内完成 94%，
-重复事件之间也会继续运动。待执行动作有上限，暂停、手册、切换飞行或回到出生点会清空，
-鼠标拖动视角保持直接响应。当前仍使用传统终端按键重复，长按开始前的系统延迟与
-多键同时按住的限制仍存在；本例没有启用增强键盘协议或修改 rsille 框架。
+示例会自动检测并请求增强键盘协议。在支持完整上报的终端中，WASD、方向键、
+飞行升降独立维护按住状态，每帧按秒计算速度，可以一边走一边转头。
+斜向走动不会加速，反向键互相抵消，松开只停止对应动作；系统按键重复频率不影响速度。
+暂停、手册、失焦、切换飞行和回到出生点会清空动作，恢复后需要松开并重新按下相关键。
+鼠标拖动直接响应，并取消当前键盘转向，移动仍可继续。
+
+不支持协议或检测失败时，保留传统终端的有限动作平滑：单次输入约 150 ms 内完成 94%，
+待执行动作有上限，不会无限积压。这条兼容路径仍受系统首次重复延迟和重复频率影响，
+无法保证独立多键按住或准确松手停止。启动提示和操作手册会显示所用输入模式。
+Windows 使用 crossterm 原生按键事件；终端、平台及 tmux / SSH 组合仍需分别验证。
 
 ## 实现
 
@@ -56,6 +62,8 @@ cargo run --release --manifest-path examples/minecraft/Cargo.toml
 | 源码 | 用途 |
 | --- | --- |
 | `src/main.rs` | 应用、键盘映射、暂停与手册 |
+| `src/input.rs` | 按住状态、重复去重、组合方向与按秒计算速度 |
+| `src/input_tests.rs` | 增强输入的无 TTY 回归测试 |
 | `src/world.rs` | 地形、建筑、方块、射线拾取、碰撞、跳跃和编辑 |
 | `src/scene.rs` | 三维画面、像素材质、HUD、鼠标与快捷栏 |
 | `src/verify.rs` | 真实运行时验证、SVG 帧导出和 CPU 帧耗时 |
@@ -66,6 +74,8 @@ cargo run --release --manifest-path examples/minecraft/Cargo.toml
 cargo test --manifest-path examples/minecraft/Cargo.toml
 cargo clippy --manifest-path examples/minecraft/Cargo.toml --all-targets -- -D warnings
 cargo run --release --manifest-path examples/minecraft/Cargo.toml -- --headless
+cargo run --release --manifest-path examples/minecraft/Cargo.toml -- --input-log /tmp/rsille-minecraft-input.log
+python3 scripts/check-terminal-input.py
 cargo run --release --manifest-path examples/minecraft/Cargo.toml -- --benchmark
 cargo run --release --manifest-path examples/minecraft/Cargo.toml -- --snapshot /tmp/minecraft.svg
 cargo run --release --manifest-path examples/minecraft/Cargo.toml -- --snapshot /tmp/minecraft-night.svg --night
@@ -73,6 +83,12 @@ cargo run --release --manifest-path examples/minecraft/Cargo.toml -- --snapshot 
 
 测试覆盖射线命中面与距离、挖掘放置、基岩保护、玩家碰撞、跳跃落地、暂停冻结、
 真实键鼠输入、快捷栏、弹窗焦点、飞行、昼夜、回到出生点、极小窗口与退出，
-以及不同帧率下的输入平滑、重复事件之间的连续运动、积压上限和暂停后清空动作。
+以及增强输入的多键组合、部分松开、反向抵消、重复去重、不同帧率、失焦和菜单恢复，
+并保留兼容路径的平滑、积压上限和暂停后清空测试。
+`--input-log FILE` 运行正常游戏并记录输入能力及原始事件，用于真实终端验证；
+请在记录时复现 `W` + `→`、交换按键顺序、分别松开及失焦恢复。
+`check-terminal-input.py` 在 Unix PTY 中模拟增强、传统和无查询响应的终端，
+验证协议协商、字符与方向键事件、焦点、粘贴和退出恢复；它不代替真实终端按键验收。
+使用 `--output-dir DIR` 可保留 PTY 的事件日志与 ANSI 输出。
 `--snapshot` 导出实际 rsille Buffer；`--benchmark` 测量 144 × 44 下的 CPU 更新与绘制，
 不含终端 I/O，实际显示帧率还取决于终端处理真彩色输出的速度。

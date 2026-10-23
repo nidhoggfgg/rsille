@@ -1,7 +1,7 @@
 use std::fmt;
 use std::time::{Duration, Instant};
 
-use crate::tui::event::{KeyCode, KeyEvent, KeyModifiers};
+use crate::tui::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Hotkey {
@@ -423,7 +423,9 @@ impl<Route> Navigator<Route> {
 }
 
 pub(crate) fn hotkey_matches(expected: &KeyEvent, actual: &KeyEvent) -> bool {
-    expected.code == actual.code && expected.modifiers == actual.modifiers
+    actual.kind != KeyEventKind::Release
+        && expected.code == actual.code
+        && expected.modifiers == actual.modifiers
 }
 
 pub(crate) fn hotkey_label(key_event: &KeyEvent) -> String {

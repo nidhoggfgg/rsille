@@ -35,6 +35,18 @@ and inspect `state()`, `frame()`, focus, widget state, tasks and layout geometry
 Use `runtime.into_exit()` to recover the final state. Testing clocks and executors
 are explicit imports from `rsille::tui::runtime`.
 
+For held-key controls, opt into `.keyboard_mode(KeyboardMode::Auto)` and
+`.focus_events(true)`, then install `.on_input(|input| /* Option<Message> */)`.
+`InputEvent::Capabilities` reports the input features enabled at terminal startup;
+`InputEvent::Terminal` preserves Press, Repeat, Release and focus events before
+widgets or shortcuts consume them. Keep held state only when `key_releases` is
+true, clear it on focus loss, and integrate movement using `FrameInfo.delta`.
+Unsupported terminals retain legacy input, where precise releases and independent
+multi-key holds are unavailable. Legacy mode remains the framework default.
+Headless tests can use `runtime.set_input_capabilities(...)` without probing a TTY.
+`on_key` still accepts Press and Repeat; Release never activates built-in actions,
+hotkeys, focus navigation or quit. Buttons and boolean toggles activate on Press.
+
 Inside an existing Tokio runtime with I/O and time enabled, use
 `.update(update).view(view).run_async().await`. The synchronous entry creates its
 own runtime and reports an error if called inside Tokio. UI state and callbacks

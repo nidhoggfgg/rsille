@@ -1,8 +1,10 @@
 mod builder;
 mod draw_err;
 mod draw_update;
+mod input;
 #[path = "render.rs"]
 mod renderer;
+mod terminal;
 mod wake;
 
 pub mod area;
@@ -14,5 +16,6 @@ pub mod text;
 pub use builder::{Builder, InlineMouseMode};
 pub use draw_err::DrawErr;
 pub use draw_update::*;
+pub use input::{InputCapabilities, KeyboardMode};
 pub use renderer::Render;
 pub use wake::WakeHandle;

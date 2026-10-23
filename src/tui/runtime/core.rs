@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use crate::render::area::Size;
 use crate::render::chunk::Chunk;
-use crate::render::{Draw, DrawErr, InlineMouseMode, Update};
+use crate::render::{Draw, DrawErr, InlineMouseMode, InputCapabilities, KeyboardMode, Update};
 use crossterm::event::Event;
 
 use super::{Clock, Executor};
@@ -18,7 +18,9 @@ use crate::tui::effect::{
     run_task_attempt, CancellationToken, Effect, Task, TaskContext, TaskEvent, TaskEventSender,
     TaskId, TaskState, TaskStatus, UpdateCtx,
 };
-use crate::tui::event::{KeyCode, KeyModifiers, MouseButton, MouseEventKind};
+use crate::tui::event::{
+    InputEvent, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind,
+};
 use crate::tui::focus::FocusManager;
 use crate::tui::layout::{
     AxisLimit, Invalidation, LayoutCache, LayoutGeometry, LayoutStats, SizeProposal,
@@ -35,8 +37,8 @@ use crate::tui::widgets::visual::TerminalVisualCapabilities;
 use crate::tui::WidgetResult;
 
 use crate::tui::app::{
-    App, AppExit, EventHandler, ExitReason, FrameHandler, FrameInfo, Mode, QuitBehavior,
-    SubscriptionResolver, ThemeResolver,
+    App, AppExit, EventHandler, ExitReason, FrameHandler, FrameInfo, InputHandler, Mode,
+    QuitBehavior, SubscriptionResolver, ThemeResolver,
 };
 
 struct TickRuntime<M> {
@@ -262,6 +264,12 @@ impl<State, M: Send + 'static> Runtime<State, M> {
         self.core.wake.clone()
     }
 
+    /// Supply a simulated input backend's capabilities for headless testing.
+    /// Delivers the same startup notification as terminal setup, on the next step.
+    pub fn set_input_capabilities(&mut self, capabilities: InputCapabilities) {
+        self.core.on_input_capabilities(capabilities);
+    }
+
     /// Stop timers and signal cancellation without waiting for blocking jobs.
     pub fn shutdown(&mut self) {
         self.core.shutdown();
@@ -415,6 +423,9 @@ pub(crate) struct AppRuntime<State, U, V, M> {
     exit_reason: Option<ExitReason>,
     quit_behavior: QuitBehavior,
     global_key_handlers: HashMap<KeyCode, Box<dyn Fn() -> M>>,
+    input_handler: Option<InputHandler<M>>,
+    keyboard_mode: KeyboardMode,
+    focus_events: bool,
     hotkeys: HotkeyRegistry<M>,
     command_router: Option<CommandRouter<M>>,
     tick_handlers: Vec<TickRuntime<M>>,
@@ -638,6 +649,9 @@ impl<State, U, V, M: Send + 'static> AppRuntime<State, U, V, M> {
             theme_resolver,
             subscriptions,
             global_key_handlers,
+            input_handler,
+            keyboard_mode,
+            focus_events,
             hotkeys,
             command_router,
             tick_handlers,
@@ -681,6 +695,9 @@ impl<State, U, V, M: Send + 'static> AppRuntime<State, U, V, M> {
             exit_reason: None,
             quit_behavior,
             global_key_handlers,
+            input_handler,
+            keyboard_mode,
+            focus_events,
             hotkeys,
             command_router,
             tick_handlers: tick_handlers
@@ -1976,6 +1993,8 @@ where
         let mut builder = crate::render::Builder::new();
         builder
             .enable_raw_mode()
+            .keyboard_mode(self.keyboard_mode)
+            .focus_events(self.focus_events)
             .clear(false)
             .append_newline(false)
             .enable_hide_cursor()
@@ -2039,6 +2058,16 @@ where
     V: Fn(&State) -> Box<dyn Widget<M>>,
     M: Send + 'static,
 {
+    fn on_input_capabilities(&mut self, capabilities: InputCapabilities) {
+        if let Some(message) = self
+            .input_handler
+            .as_ref()
+            .and_then(|handler| handler(InputEvent::Capabilities(capabilities)))
+        {
+            self.messages.push_back(message);
+        }
+    }
+
     fn wake_handle(&self) -> Option<crate::render::WakeHandle> {
         Some(self.wake.clone())
     }
@@ -2090,6 +2119,13 @@ where
         let hit_regions = self.hit_regions.borrow();
 
         for event in events {
+            if let Some(message) = self
+                .input_handler
+                .as_ref()
+                .and_then(|handler| handler(InputEvent::Terminal(event.clone())))
+            {
+                self.messages.push_back(message);
+            }
             if let Event::Resize(_, _) = event {
                 continue;
             }
@@ -2133,6 +2169,9 @@ where
                 Event::Key(k) => k,
                 _ => continue,
             };
+            if key_event.kind == KeyEventKind::Release {
+                continue;
+            }
 
             // 1. Tab / Shift+Tab → default focus navigation
             match key_event.code {

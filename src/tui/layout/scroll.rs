@@ -723,6 +723,9 @@ impl<M> Widget<M> for ScrollView<M> {
     }
 
     fn handle_event(&self, event: &Event, ctx: &mut EventCtx<M>) {
+        if crate::tui::event::is_key_release(event) {
+            return;
+        }
         if !matches!(ctx.phase(), EventPhase::Target | EventPhase::Bubble) {
             return;
         }

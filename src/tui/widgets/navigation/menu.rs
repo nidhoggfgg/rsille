@@ -288,6 +288,9 @@ impl<M: 'static> Widget<M> for Menu<M> {
     }
 
     fn handle_event(&self, event: &Event, ctx: &mut EventCtx<M>) {
+        if crate::tui::event::is_key_release(event) {
+            return;
+        }
         if ctx.phase() != EventPhase::Target || self.disabled {
             return;
         }

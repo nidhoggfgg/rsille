@@ -176,6 +176,9 @@ impl<M: 'static> Widget<M> for CodeViewer<M> {
     }
 
     fn handle_event(&self, event: &Event, ctx: &mut EventCtx<M>) {
+        if crate::tui::event::is_key_release(event) {
+            return;
+        }
         handle_scroll_event(event, ctx, self.code.lines().count(), self.height);
     }
 
@@ -286,6 +289,9 @@ impl<M: 'static> Widget<M> for LogViewer<M> {
     }
 
     fn handle_event(&self, event: &Event, ctx: &mut EventCtx<M>) {
+        if crate::tui::event::is_key_release(event) {
+            return;
+        }
         handle_scroll_event(event, ctx, self.lines.len(), self.height);
     }
 
@@ -447,6 +453,9 @@ impl<M: 'static> Widget<M> for MarkdownViewer<M> {
     }
 
     fn handle_event(&self, event: &Event, ctx: &mut EventCtx<M>) {
+        if crate::tui::event::is_key_release(event) {
+            return;
+        }
         handle_scroll_event(event, ctx, self.markdown.lines().count(), self.height);
     }
 
@@ -496,6 +505,9 @@ impl<M: 'static> Widget<M> for DiffViewer<M> {
     }
 
     fn handle_event(&self, event: &Event, ctx: &mut EventCtx<M>) {
+        if crate::tui::event::is_key_release(event) {
+            return;
+        }
         handle_scroll_event(event, ctx, self.diff.lines().count(), self.height);
     }
 

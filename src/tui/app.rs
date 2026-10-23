@@ -6,7 +6,7 @@ use crate::render::InlineMouseMode;
 
 use crate::tui::animation::MotionPolicy;
 use crate::tui::effect::UpdateCtx;
-use crate::tui::event::{KeyCode, KeyEvent};
+use crate::tui::event::{InputEvent, KeyCode, KeyEvent, KeyboardMode};
 use crate::tui::runtime::{
     AppRuntime, Clock, Executor, Runtime, SimpleUpdate, SystemClock, ThreadExecutor, UpdateDriver,
 };
@@ -19,6 +19,7 @@ use crate::tui::WidgetResult;
 
 pub type EventHandler<M> = Box<dyn Fn() -> M>;
 pub type FrameHandler<M> = Box<dyn Fn(FrameInfo) -> M>;
+pub type InputHandler<M> = Box<dyn Fn(InputEvent) -> Option<M>>;
 pub type SubscriptionResolver<State, M> = Box<dyn Fn(&State) -> Subscription<M>>;
 pub type ThemeResolver<State> = Box<dyn Fn(&State) -> Theme>;
 
@@ -67,6 +68,9 @@ pub struct App<State, M = ()> {
     pub(crate) theme_resolver: Option<ThemeResolver<State>>,
     pub(crate) subscriptions: Option<SubscriptionResolver<State, M>>,
     pub(crate) global_key_handlers: HashMap<KeyCode, EventHandler<M>>,
+    pub(crate) input_handler: Option<InputHandler<M>>,
+    pub(crate) keyboard_mode: KeyboardMode,
+    pub(crate) focus_events: bool,
     pub(crate) hotkeys: HotkeyRegistry<M>,
     pub(crate) command_router: Option<CommandRouter<M>>,
     pub(crate) tick_handlers: Vec<TickConfig<M>>,
@@ -98,6 +102,9 @@ impl<State, M> App<State, M> {
             theme_resolver: None,
             subscriptions: None,
             global_key_handlers: HashMap::new(),
+            input_handler: None,
+            keyboard_mode: KeyboardMode::Legacy,
+            focus_events: false,
             hotkeys: HotkeyRegistry::new(),
             command_router: None,
             tick_handlers: Vec::new(),
@@ -166,11 +173,34 @@ impl<State, M> App<State, M> {
     }
 
     /// Register a global keyboard shortcut.
+    /// Press and Repeat activate it; Release never does. Use `on_input` for
+    /// single-press actions or independent held-key state.
     pub fn on_key<F>(mut self, key: KeyCode, handler: F) -> Self
     where
         F: Fn() -> M + 'static,
     {
         self.global_key_handlers.insert(key, Box::new(handler));
+        self
+    }
+
+    /// Observe every terminal event before widgets or shortcuts can consume it.
+    /// Returned messages preserve event order, including Release and FocusLost.
+    /// This does not consume the event or suppress normal widget handling.
+    pub fn on_input(mut self, handler: impl Fn(InputEvent) -> Option<M> + 'static) -> Self {
+        self.input_handler = Some(Box::new(handler));
+        self
+    }
+
+    /// Opt into keyboard negotiation; inspect `InputEvent::Capabilities` before
+    /// treating Press as a held key. Unsupported terminals retain legacy input.
+    pub fn keyboard_mode(mut self, mode: KeyboardMode) -> Self {
+        self.keyboard_mode = mode;
+        self
+    }
+
+    /// Request focus events, including when mouse capture is disabled.
+    pub fn focus_events(mut self, enabled: bool) -> Self {
+        self.focus_events = enabled;
         self
     }
 

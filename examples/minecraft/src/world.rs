@@ -108,6 +108,7 @@ impl KeyboardMotion {
 
 #[derive(Clone)]
 pub struct World {
+    pub(crate) input: crate::input::GameInput,
     pub(crate) blocks: Arc<Vec<Block>>,
     pub(crate) motion: KeyboardMotion,
     /// Player's feet; eye height is added when casting rays.
@@ -138,6 +139,7 @@ pub fn terrain(x: i32, z: i32) -> i32 {
 impl Default for World {
     fn default() -> Self {
         let mut world = Self {
+            input: crate::input::GameInput::default(),
             blocks: Arc::new(vec![Block::Air; (SIZE * SIZE * HEIGHT) as usize]),
             motion: KeyboardMotion::default(),
             player: [24.5, 9.0, 10.5],
@@ -373,7 +375,7 @@ impl World {
     }
 
     pub fn active(&self) -> bool {
-        !self.paused && !self.help
+        !self.paused && !self.help && self.input.focused
     }
 
     pub fn say(&mut self, text: impl Into<String>) {
@@ -476,6 +478,7 @@ impl World {
 
     pub fn stop_input(&mut self) {
         self.motion = KeyboardMotion::default();
+        self.input.clear();
     }
 
     fn move_horizontal(&mut self, forward: f64, side: f64) {
@@ -531,6 +534,7 @@ impl World {
     pub fn look(&mut self, yaw: f64, pitch: f64) {
         if self.active() {
             self.motion.turn = [0.0; 2];
+            self.input.clear_turn();
             self.yaw += yaw;
             self.pitch = (self.pitch + pitch).clamp(-1.45, 1.45);
         }
@@ -544,7 +548,11 @@ impl World {
         self.time += delta;
         self.notice_time = (self.notice_time - delta).max(0.0);
         self.swing = (self.swing - delta * 4.0).max(0.0);
-        let (walk, turn, rise) = self.motion.take(delta);
+        let (walk, turn, rise) = if self.input.enhanced {
+            self.input.motion(delta)
+        } else {
+            self.motion.take(delta)
+        };
         self.yaw += turn[0];
         self.pitch = (self.pitch + turn[1]).clamp(-1.45, 1.45);
         // Consume input even when movement is blocked, so walls cannot store up

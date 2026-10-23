@@ -13,7 +13,8 @@ pub use crate::tui::effect::{
 };
 pub use crate::tui::error::{WidgetError, WidgetResult};
 pub use crate::tui::event::{
-    Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+    Event, InputCapabilities, InputEvent, KeyCode, KeyEvent, KeyEventKind, KeyModifiers,
+    KeyboardMode, MouseButton, MouseEvent, MouseEventKind,
 };
 pub use crate::tui::focus::{FocusConfig, FocusScope, ScopeEntry};
 pub use crate::tui::layout::{

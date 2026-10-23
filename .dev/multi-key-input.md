@@ -1,6 +1,6 @@
-# 待修复：游戏示例无法可靠处理多个键同时按住
+# 多键按住输入：实现与验收记录
 
-记录日期：2026-10-23。状态：待修复。
+记录日期：2026-10-23。状态：已实现，自动化验证通过；真实终端按键验收待补。
 
 ## 现象与复现
 
@@ -20,7 +20,7 @@ cargo run --release --manifest-path examples/minecraft/Cargo.toml
 期望：各键的按住状态独立维护，移动与转向由每帧时间统一计算；重复事件频率不影响速度，
 松开后停止对应动作，失焦和进入菜单时清空状态。
 
-## 当前实现与问题归属
+## 修复前实现与问题归属
 
 | 层级 | 当前情况 |
 | --- | --- |
@@ -32,7 +32,7 @@ cargo run --release --manifest-path examples/minecraft/Cargo.toml
 这不是只在示例里打开一个现有开关即可完成的功能。框架需要接入终端能力与事件语义，
 示例再维护按键状态；不支持松开事件的终端需要明确的降级行为。
 
-### 本次已做的缓解
+### 前期缓解
 
 仅在 demo 内将 WASD、方向键和飞行升降改为逐帧消耗有上限的待执行动作，
 减轻按键重复造成的位置、角度跳变。暂停、手册、切换飞行和回到出生点会清空剩余动作；
@@ -42,7 +42,7 @@ cargo run --release --manifest-path examples/minecraft/Cargo.toml
 鼠标接管及暂停后清空。**这些测试不表示多键按住已修复。**
 传统按键重复的首次延迟、重复频率影响速度、多键持续状态和准确松手停止仍待解决。
 
-## 建议修复范围
+## 修复范围
 
 1. 在框架配置中提供可选的增强键盘模式，检测终端能力后启用。
    检查 crossterm 的 `PushKeyboardEnhancementFlags` / `PopKeyboardEnhancementFlags`，
@@ -58,6 +58,54 @@ cargo run --release --manifest-path examples/minecraft/Cargo.toml
    也不要假定所有终端、平台或 tmux / SSH 组合都支持增强协议。
 
 鼠标回中、系统级鼠标控制不在本问题范围内；用户已决定暂不处理。
+
+## 已完成的实现
+
+- 框架默认保持 `KeyboardMode::Legacy`；`App` / `render::Builder` 可选 `Auto`。
+  终端 guard 已独立到 `src/render/terminal.rs`，在 raw mode 后、创建 `EventStream` 前
+  使用 crossterm 检测协议支持，成功时启用
+  `DISAMBIGUATE_ESCAPE_CODES | REPORT_EVENT_TYPES | REPORT_ALL_KEYS_AS_ESCAPE_CODES`。
+  检测失败或超时保留传统模式；Windows 使用 crossterm 原生按键松开事件。
+  `focus_events(true)` 独立请求焦点上报。guard 在退出、初始化失败和异常展开时恢复状态，
+  在离开备用屏幕之前弹出同屏幕的键盘模式。
+- `App::on_input` 接收 `InputEvent::Capabilities` 和完整的 `InputEvent::Terminal`，
+  在组件处理之前按顺序入队，即使事件随后被消费也不丢失按键松开和焦点消息。
+  `on_key` 保留 Press / Repeat，Release 不激活快捷键、Tab、退出或内置组件；
+  按钮、checkbox、switch、collapsible 只在 Press 时触发。
+  自定义组件仍可收到原始 Release，自己决定如何处理。
+- Minecraft 在 `src/input.rs` 维护物理按下集合和当前生效集合。
+  Press 加入、Release 移除，Repeat 不新增动作；原生重复 Press 也会去重。
+  WASD / 方向键 / 飞行升降按秒组合，平面斜向归一化，反向抵消。
+  按键字符统一大小写，松开时不依赖原来的修饰键组合；Ctrl / Alt 等组合不会误移动。
+- 暂停、手册、失焦、切换飞行、回到出生点均清空动作，松开和焦点消息在非活动状态仍处理。
+  恢复后需要松开再按下相关键，避免重复事件重新启动运动。
+  鼠标转向取消当前键盘转向，仍可保持键盘移动。
+- 传统模式保留原有有上限的动作平滑，启动提示和手册说明其多键、重复和松手限制。
+  `--input-log FILE` 可记录能力和原始事件；日志写入失败会正常退出并返回错误。
+
+## 自动化验证记录
+
+- Minecraft 共 16 个测试，包括新增 8 个增强输入测试和原有 headless 流程。
+  覆盖组合与顺序、部分 / 全部松开、反向键、不同重复频率、30 / 60 / 120 FPS、
+  修饰键变化、菜单 / 失焦恢复、鼠标接管及传统降级。
+- 框架新增 4 个输入集成测试、4 个终端生命周期测试和 1 个底层退出测试。
+  生命周期测试注入初始化和恢复失败，并验证异常展开及 pop / 离屏顺序。
+- `scripts/check-terminal-input.py` 在 macOS 27.0.1 arm64 的 Unix PTY 中，
+  模拟增强协议、传统协议及查询无响应三种环境，均通过协商、crossterm 解码、
+  焦点、粘贴、退出和原始 termios 恢复检查。
+  本机事件日志在 `.dev/input-verification/`。这不是支持协议的真实终端实测记录。
+- 工作区全量测试通过；Minecraft 严格 Clippy 通过。工作区严格 Clippy 仍被既有告警阻止；
+  普通 Clippy 已完成，与独立 HEAD 基线同为 140 条诊断，无新增告警。
+
+## 真实终端验收入口
+
+```bash
+cargo run --release --manifest-path examples/minecraft/Cargo.toml -- --input-log /tmp/rsille-input.log
+python3 scripts/check-terminal-input.py --output-dir /tmp/rsille-input-pty
+```
+
+真实终端仍需记录终端名称 / 版本、平台、是否经过 tmux / SSH，再执行下列验收。
+能力检测和模式启用不能替代对终端实际按键事件的验证；不保证协议不完整或有缺陷的终端行为。
 
 ## 验收
 

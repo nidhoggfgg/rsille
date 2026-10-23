@@ -111,6 +111,9 @@ impl<M> Widget<M> for Checkbox<M> {
     }
 
     fn handle_event(&self, event: &Event, ctx: &mut EventCtx<M>) {
+        if matches!(event, Event::Key(key) if key.kind != crate::tui::event::KeyEventKind::Press) {
+            return;
+        }
         if ctx.phase() != EventPhase::Target || self.disabled {
             return;
         }

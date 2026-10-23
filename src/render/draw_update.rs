@@ -9,6 +9,10 @@ pub trait Draw {
 /// core trait for EventLoop
 /// in every frame, call on_events -> update -> required_size -> Render.render(draw)
 pub trait Update {
+    /// Called after terminal setup, before input. Headless callers may inject
+    /// capabilities explicitly; no terminal probing happens during headless steps.
+    fn on_input_capabilities(&mut self, _capabilities: crate::render::InputCapabilities) {}
+
     /// Opt into event-driven scheduling. Producers must wake after enqueueing work.
     /// Implementations returning `None` retain the builder's frame polling behavior.
     fn wake_handle(&self) -> Option<crate::render::WakeHandle> {

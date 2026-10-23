@@ -4,90 +4,19 @@ use std::{
 };
 
 use crossterm::{
-    cursor::{position, Hide, MoveToNextLine, Show},
-    event::{
-        DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
-        Event, EventStream, KeyEvent, MouseEvent,
-    },
+    cursor::{position, MoveToNextLine},
+    event::{Event, EventStream, KeyEvent, KeyEventKind, MouseEvent},
     execute,
-    terminal::{
-        size as terminal_size, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen,
-    },
+    terminal::size as terminal_size,
 };
 use futures::StreamExt;
 use log::{error, info, warn};
 use tokio::time::Instant as TokioInstant;
 
 use crate::render::{
-    area::Size, Builder, DrawErr, DrawUpdate, InlineMouseMode, Render, WakeHandle,
+    area::Size, terminal::TerminalGuard, Builder, DrawErr, DrawUpdate, InlineMouseMode,
+    KeyboardMode, Render, WakeHandle,
 };
-
-struct TerminalGuard {
-    hide_cursor: bool,
-    mouse_capture: bool,
-    raw_mode: bool,
-    alt_screen: bool,
-    bracketed_paste: bool,
-}
-
-impl TerminalGuard {
-    /// Create and initialize terminal guard with the given settings
-    fn new(
-        alt_screen: bool,
-        raw_mode: bool,
-        mouse_capture: bool,
-        hide_cursor: bool,
-    ) -> Result<Self, DrawErr> {
-        // Keep the guard live during setup so partial failures roll back.
-        let mut guard = Self {
-            hide_cursor: false,
-            mouse_capture: false,
-            raw_mode: false,
-            alt_screen: false,
-            bracketed_paste: false,
-        };
-        if alt_screen {
-            execute!(stdout(), EnterAlternateScreen).map_err(DrawErr::TerminalSetup)?;
-            guard.alt_screen = true;
-            execute!(stdout(), Clear(ClearType::All)).map_err(DrawErr::TerminalSetup)?;
-        }
-        if raw_mode {
-            crossterm::terminal::enable_raw_mode().map_err(DrawErr::TerminalSetup)?;
-            guard.raw_mode = true;
-            execute!(stdout(), EnableBracketedPaste).map_err(DrawErr::TerminalSetup)?;
-            guard.bracketed_paste = true;
-        }
-        if mouse_capture {
-            execute!(stdout(), EnableMouseCapture).map_err(DrawErr::TerminalSetup)?;
-            guard.mouse_capture = true;
-        }
-        if hide_cursor {
-            execute!(stdout(), Hide).map_err(DrawErr::TerminalSetup)?;
-            guard.hide_cursor = true;
-        }
-        Ok(guard)
-    }
-}
-
-impl Drop for TerminalGuard {
-    fn drop(&mut self) {
-        if self.bracketed_paste {
-            let _ = execute!(stdout(), DisableBracketedPaste);
-        }
-        if self.hide_cursor {
-            let _ = execute!(stdout(), Show);
-        }
-        if self.mouse_capture {
-            let _ = execute!(stdout(), DisableMouseCapture);
-        }
-        if self.raw_mode {
-            let _ = crossterm::terminal::disable_raw_mode();
-        }
-        if self.alt_screen {
-            let _ = execute!(stdout(), LeaveAlternateScreen);
-        }
-    }
-}
 
 pub struct EventLoop<T> {
     render: Render<Stdout, T>,
@@ -98,6 +27,8 @@ pub struct EventLoop<T> {
     alt_screen: bool,
     mouse_capture: bool,
     hide_cursor: bool,
+    keyboard_mode: KeyboardMode,
+    focus_events: bool,
     inline_mode: bool,
     inline_max_height: u16,
     inline_mouse_mode: InlineMouseMode,
@@ -121,6 +52,8 @@ where
             alt_screen: builder.enable_alt_screen,
             mouse_capture: builder.enable_mouse_capture,
             hide_cursor: builder.enable_hide_cursor,
+            keyboard_mode: builder.keyboard_mode,
+            focus_events: builder.focus_events,
             inline_mode: builder.inline_mode,
             inline_max_height: builder.inline_max_height,
             inline_mouse_mode: builder.inline_mouse_mode,
@@ -218,12 +151,17 @@ where
 
     /// Run on the caller's runtime and return the application after cleanup.
     pub async fn run_async_returning(mut self) -> Result<T, DrawErr> {
-        let _guard = TerminalGuard::new(
+        let guard = TerminalGuard::new(
             self.alt_screen,
             self.raw_mode,
             self.mouse_capture,
             self.hide_cursor,
+            self.keyboard_mode,
+            self.focus_events,
         )?;
+        self.render
+            .thing_mut()
+            .on_input_capabilities(guard.input_capabilities());
 
         info!(
             target: "render::event_loop",
@@ -568,7 +506,10 @@ where
 fn is_exit_event(event: &Event, exit_code: Option<KeyEvent>) -> bool {
     matches!(
         (event, exit_code),
-        (Event::Key(key_event), Some(exit_key)) if *key_event == exit_key
+        (Event::Key(key_event), Some(exit_key))
+            if key_event.kind == KeyEventKind::Press
+                && key_event.code == exit_key.code
+                && key_event.modifiers == exit_key.modifiers
     )
 }
 
@@ -579,6 +520,27 @@ mod tests {
 
     use super::*;
     use crate::render::{area::Size, chunk::Chunk, Draw, Update};
+
+    #[test]
+    fn exit_ignores_releases_repeats_and_keyboard_state_bits() {
+        use crossterm::event::KeyEventState;
+        let exit = KeyEvent::new(crossterm::event::KeyCode::Esc, KeyModifiers::empty());
+        for kind in [
+            KeyEventKind::Press,
+            KeyEventKind::Repeat,
+            KeyEventKind::Release,
+        ] {
+            let event = Event::Key(KeyEvent {
+                kind,
+                state: KeyEventState::CAPS_LOCK,
+                ..exit
+            });
+            assert_eq!(
+                is_exit_event(&event, Some(exit)),
+                kind == KeyEventKind::Press
+            );
+        }
+    }
 
     #[tokio::test]
     async fn idle_wait_stays_pending_until_a_producer_wakes_it() {

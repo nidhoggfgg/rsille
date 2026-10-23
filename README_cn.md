@@ -32,6 +32,16 @@ fn main() -> WidgetResult<()> {
 `into_exit()` 结束运行并取回状态。测试工具从 `rsille::tui::runtime` 显式导入
 `ManualClock`、`ManualExecutor`，推进时间和执行任务后调用 `step(&[])`。
 
+需要独立按住多个键时，在 `.update()` 前设置 `.keyboard_mode(KeyboardMode::Auto)`、
+`.focus_events(true)` 和 `.on_input(...)`。输入回调先收到终端启动时的
+`InputEvent::Capabilities`，再收到保留 Press / Repeat / Release 和焦点变化的
+`InputEvent::Terminal`，不会因组件消费事件而漏报。只有 `key_releases` 为真时才维护
+持续按住状态，并在失焦时清空，按 `FrameInfo.delta` 推进动作。传统终端自动降级，
+无法保证准确松手和独立多键按住；框架默认仍为 Legacy 模式。
+无 TTY 测试可用 `runtime.set_input_capabilities(...)` 注入能力。
+`on_key` 保留 Press / Repeat 行为；内置组件、快捷键、焦点导航和退出不因 Release 激活，
+按钮和布尔开关只在 Press 时激活。
+
 嵌入已启用 I/O 和时间驱动的 Tokio 环境时使用 `.run_async().await`。同步 `.run()`
 自行创建 runtime，在 Tokio 内调用会返回错误。UI 状态与回调可留在当前线程，无需
 `Send`、`Clone` 或 `Debug`；消息因跨线程入口需要 `Send + 'static`，无需 `Clone` 或 `Debug`。

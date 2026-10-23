@@ -4,7 +4,7 @@ use log::info;
 use crate::render::{
     area::{Position, Size},
     event_loop::EventLoop,
-    Draw, DrawUpdate, Render,
+    Draw, DrawUpdate, KeyboardMode, Render,
 };
 
 /// Mouse handling policy for inline rendering.
@@ -32,6 +32,8 @@ pub struct Builder {
     pub(super) enable_alt_screen: bool,
     pub(super) enable_mouse_capture: bool,
     pub(super) enable_hide_cursor: bool,
+    pub(super) keyboard_mode: KeyboardMode,
+    pub(super) focus_events: bool,
     pub(super) exit_code: Option<KeyEvent>,
     pub(super) frame_limit: Option<u16>,
     pub(super) max_event_per_frame: usize,
@@ -53,6 +55,8 @@ impl Builder {
             enable_alt_screen: false,
             enable_mouse_capture: false,
             enable_hide_cursor: false,
+            keyboard_mode: KeyboardMode::Legacy,
+            focus_events: false,
             exit_code: Some(KeyCode::Esc.into()),
             frame_limit: None,
             max_event_per_frame: 10,
@@ -69,6 +73,18 @@ impl Builder {
         self.enable_alt_screen();
         self.enable_mouse_capture();
         self.enable_hide_cursor();
+        self
+    }
+
+    /// Select keyboard negotiation. `Auto` requires raw mode and may fall back.
+    pub fn keyboard_mode(&mut self, mode: KeyboardMode) -> &mut Self {
+        self.keyboard_mode = mode;
+        self
+    }
+
+    /// Request terminal focus gained/lost events independently of mouse capture.
+    pub fn focus_events(&mut self, enabled: bool) -> &mut Self {
+        self.focus_events = enabled;
         self
     }
 
