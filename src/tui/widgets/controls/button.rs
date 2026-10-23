@@ -20,11 +20,13 @@ pub enum ButtonVariant {
 
 /// Interactive button widget.
 ///
-/// Focusable. Activated by Enter or Space when focused.
+/// Focusable by default. Activated by Enter or Space when focused. Use
+/// `.focusable(false)` for mouse-only buttons with separate keyboard shortcuts.
 pub struct Button<M = ()> {
     label: String,
     variant: ButtonVariant,
     disabled: bool,
+    focusable: bool,
     on_click: Option<Box<dyn Fn() -> M>>,
     widget_key: Option<String>,
 }
@@ -35,6 +37,7 @@ impl<M> std::fmt::Debug for Button<M> {
             .field("label", &self.label)
             .field("variant", &self.variant)
             .field("disabled", &self.disabled)
+            .field("focusable", &self.focusable)
             .field("on_click", &self.on_click.is_some())
             .finish()
     }
@@ -46,6 +49,7 @@ impl<M> Button<M> {
             label: label.into(),
             variant: ButtonVariant::default(),
             disabled: false,
+            focusable: true,
             on_click: None,
             widget_key: None,
         }
@@ -58,6 +62,13 @@ impl<M> Button<M> {
 
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
+        self
+    }
+
+    /// Set keyboard focus participation. A non-focusable button still accepts
+    /// mouse clicks, but is skipped by Tab and cannot receive keyboard focus.
+    pub fn focusable(mut self, focusable: bool) -> Self {
+        self.focusable = focusable;
         self
     }
 
@@ -130,7 +141,7 @@ impl<M> Widget<M> for Button<M> {
             return;
         }
 
-        let is_focused = !self.disabled && ctx.is_focused();
+        let is_focused = self.focusable && !self.disabled && ctx.is_focused();
         let theme = ctx.theme();
         let style = self.compute_style(theme, is_focused);
         let render_style = style.to_render_style();
@@ -188,7 +199,7 @@ impl<M> Widget<M> for Button<M> {
             return;
         }
         match event {
-            Event::Key(key_event) => {
+            Event::Key(key_event) if self.focusable => {
                 if matches!(key_event.code, KeyCode::Enter | KeyCode::Char(' ')) {
                     if let Some(ref handler) = self.on_click {
                         ctx.emit(handler());
@@ -225,7 +236,7 @@ impl<M> Widget<M> for Button<M> {
     }
 
     fn focus_config(&self) -> FocusConfig {
-        if self.disabled {
+        if self.disabled || !self.focusable {
             FocusConfig::None
         } else {
             FocusConfig::Leaf
@@ -273,6 +284,48 @@ mod tests {
     use crate::tui::widget::{WidgetPath, WidgetStore};
     use std::cell::RefCell;
     use std::collections::HashMap;
+
+    #[test]
+    fn mouse_only_button_accepts_clicks_without_stealing_keyboard_focus() {
+        use crate::tui::prelude::*;
+        let mut app = App::new(Vec::new())
+            .update(|clicks, message, _| clicks.push(message))
+            .view(|_| {
+                row()
+                    .child(
+                        button("Mouse")
+                            .key("mouse")
+                            .focusable(false)
+                            .on_click(|| "mouse"),
+                    )
+                    .child(button("Keyboard").key("keyboard").on_click(|| "keyboard"))
+            })
+            .build()
+            .size(40, 1);
+        app.step(&[]).unwrap();
+        assert_eq!(app.focused_key(), Some("keyboard"));
+        app.step(&[Event::Mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 1,
+            row: 0,
+            modifiers: KeyModifiers::empty(),
+        })])
+        .unwrap();
+        assert_eq!(app.state(), &["mouse"]);
+        assert_eq!(app.focused_key(), Some("keyboard"));
+        app.step(&[Event::Key(KeyEvent::new(
+            KeyCode::Tab,
+            KeyModifiers::empty(),
+        ))])
+        .unwrap();
+        assert_eq!(app.focused_key(), Some("keyboard"));
+        app.step(&[Event::Key(KeyEvent::new(
+            KeyCode::Enter,
+            KeyModifiers::empty(),
+        ))])
+        .unwrap();
+        assert_eq!(app.state(), &["mouse", "keyboard"]);
+    }
 
     #[test]
     fn focused_solid_button_renders_structural_markers() {

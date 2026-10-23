@@ -123,9 +123,10 @@ pub(crate) fn with_reused_offscreen<R>(
 
     if cached.buffer.size() != size {
         cached.buffer.resize(size);
-    } else if key.is_some() {
-        cached.buffer.clear();
     } else {
+        // The destination is repainted independently on each render. Keeping
+        // source history would let dirty-only blits omit unchanged content from
+        // a fresh destination, and also miss changes to effect parameters.
         cached.buffer.clear_content();
     }
 

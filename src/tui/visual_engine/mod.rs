@@ -772,7 +772,7 @@ mod tests {
     }
 
     #[test]
-    fn dirty_only_is_used_only_for_static_effects() {
+    fn cached_visuals_repaint_unchanged_content_into_fresh_frames() {
         let static_profiles = Arc::new(Mutex::new(Vec::<VisualProfile>::new()));
         let static_sink = Arc::clone(&static_profiles);
         let static_widget = visual(label::<()>("dirty"))
@@ -785,9 +785,12 @@ mod tests {
             ))
             .profile(move |profile| static_sink.lock().unwrap().push(profile));
 
-        let _ = render_widget(&static_widget, 8, 1);
-        let _ = render_widget(&static_widget, 8, 1);
-        assert!(static_profiles.lock().unwrap()[1].clean_cells_skipped > 0);
+        let first = render_widget(&static_widget, 8, 1);
+        let second = render_widget(&static_widget, 8, 1);
+        assert_eq!(cell_char(&first, 0, 0), Some('d'));
+        assert_eq!(cell_char(&second, 0, 0), Some('d'));
+        assert_eq!(first.content(), second.content());
+        assert_eq!(static_profiles.lock().unwrap()[1].clean_cells_skipped, 0);
 
         let animated_profiles = Arc::new(Mutex::new(Vec::<VisualProfile>::new()));
         let animated_sink = Arc::clone(&animated_profiles);

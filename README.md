@@ -50,6 +50,7 @@ cargo run -p tui --example workflow
 cargo run -p tui --example workflow -- --headless
 cargo run -p tui --example composition
 cargo run --manifest-path examples/rsille-showcase/Cargo.toml
+cargo run --release --manifest-path examples/neon-observatory/Cargo.toml
 ```
 
 The workflow example uses the same application for interactive editing and a
