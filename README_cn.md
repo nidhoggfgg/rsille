@@ -46,6 +46,7 @@ cargo run -p tui --example workflow -- --headless
 cargo run -p tui --example composition
 cargo run --manifest-path examples/rsille-showcase/Cargo.toml
 cargo run --release --manifest-path examples/neon-observatory/Cargo.toml
+cargo run --release --manifest-path examples/folded-harbor/Cargo.toml
 ```
 
 `workflow` 使用同一套应用逻辑验证 Unicode 粘贴、debounce、后台保存、键盘焦点和退出，
@@ -53,6 +54,10 @@ cargo run --release --manifest-path examples/neon-observatory/Cargo.toml
 
 [霓虹观测站](examples/neon-observatory/README.md) 以 inline 模式展示环形行星、光子隧道、霓虹山谷、星系、金属环面和极光，
 包含渐变与揭幕特效、键鼠控制和按窗口尺寸调整的布局，并附框架能力评估与无 TTY 验证入口。
+
+[折叠星港](examples/folded-harbor/README.md) 把视角变成解谜机关：旋转立体悬浮建筑，
+让不同深度的通道口在投影中重合，再折叠跨越。包含三章九道机关、光照与光晕、
+跟随三维位置的可点击组件、章节溶解、键鼠观察和完整自动演示。
 
 对外只发布 **`rsille`**，使用以下三个公开模块：
 

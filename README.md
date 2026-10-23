@@ -51,11 +51,17 @@ cargo run -p tui --example workflow -- --headless
 cargo run -p tui --example composition
 cargo run --manifest-path examples/rsille-showcase/Cargo.toml
 cargo run --release --manifest-path examples/neon-observatory/Cargo.toml
+cargo run --release --manifest-path examples/folded-harbor/Cargo.toml
 ```
 
 The workflow example uses the same application for interactive editing and a
 headless Unicode paste → debounce → background save → exit check, without sleeps.
 See [widget examples and runtime contracts](packages/tui/examples/README.md).
+
+[Folded Harbor](examples/folded-harbor/README.md) turns perspective into a puzzle:
+orbit floating architecture, align doorways at different depths, and cross the fold.
+Three chapters combine lit braille geometry, bloom, TUI buttons anchored in 3D,
+chapter dissolves, mouse orbiting and a complete auto-play journey.
 
 Only **`rsille`** is published. Use its three public modules:
 
