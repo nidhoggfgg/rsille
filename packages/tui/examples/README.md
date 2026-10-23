@@ -5,6 +5,12 @@ widget or one framework feature, including its common variants. Larger app-like
 showcases belong in the repository-level `examples/` directory as separate
 projects.
 
+For a combined component gallery, run
+`cargo run --manifest-path examples/tui-showcase/Cargo.toml` from the repository
+root. Its seven pages cover controls, data, content, layout, motion and themes,
+with command-palette navigation and focus-trapped dialogs. See the
+[showcase guide](../../../examples/tui-showcase/README.md) for controls and headless verification.
+
 ## Unified Application Entry
 
 Use `App::new(state).mode(Mode::Inline).update(update).view(view).run()`.

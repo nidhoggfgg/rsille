@@ -44,6 +44,7 @@ cargo run -p tui --example hello
 cargo run -p tui --example workflow
 cargo run -p tui --example workflow -- --headless
 cargo run -p tui --example composition
+cargo run --manifest-path examples/tui-showcase/Cargo.toml
 cargo run --manifest-path examples/rsille-showcase/Cargo.toml
 cargo run --release --manifest-path examples/neon-observatory/Cargo.toml
 cargo run --release --manifest-path examples/folded-harbor/Cargo.toml
@@ -51,6 +52,9 @@ cargo run --release --manifest-path examples/folded-harbor/Cargo.toml
 
 `workflow` 使用同一套应用逻辑验证 Unicode 粘贴、debounce、后台保存、键盘焦点和退出，
 无 TTY 模式不使用真实睡眠。[完整示例和框架契约](packages/tui/examples/README.md)。
+
+[TUI 综合组件展厅](examples/tui-showcase/README.md) 在七个页面中集中展示表单、数据组件、
+内容查看器、布局、动画和五套主题，并提供命令面板与对话框交互。
 
 [霓虹观测站](examples/neon-observatory/README.md) 以 inline 模式展示环形行星、光子隧道、霓虹山谷、星系、金属环面和极光，
 包含渐变与揭幕特效、键鼠控制和按窗口尺寸调整的布局，并附框架能力评估与无 TTY 验证入口。

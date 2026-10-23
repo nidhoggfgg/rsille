@@ -49,6 +49,7 @@ cargo run -p tui --example hello
 cargo run -p tui --example workflow
 cargo run -p tui --example workflow -- --headless
 cargo run -p tui --example composition
+cargo run --manifest-path examples/tui-showcase/Cargo.toml
 cargo run --manifest-path examples/rsille-showcase/Cargo.toml
 cargo run --release --manifest-path examples/neon-observatory/Cargo.toml
 cargo run --release --manifest-path examples/folded-harbor/Cargo.toml
@@ -57,6 +58,8 @@ cargo run --release --manifest-path examples/folded-harbor/Cargo.toml
 The workflow example uses the same application for interactive editing and a
 headless Unicode paste → debounce → background save → exit check, without sleeps.
 See [widget examples and runtime contracts](packages/tui/examples/README.md).
+The [TUI showcase](examples/tui-showcase/README.md) combines controls, data widgets,
+content viewers, layouts, animation, themes and modal interactions into one gallery.
 
 [Folded Harbor](examples/folded-harbor/README.md) turns perspective into a puzzle:
 orbit floating architecture, align doorways at different depths, and cross the fold.
