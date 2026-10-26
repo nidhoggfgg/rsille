@@ -29,8 +29,8 @@ pub use crate::tui::layout::{
 };
 pub use crate::tui::runtime::{AppHandle, Runtime, StepResult};
 pub use crate::tui::shell::{
-    CommandDescriptor, CommandRouter, Hotkey, HotkeyRegistry, ModalManager, Navigator,
-    Notification, NotificationCenter, NotificationId, NotificationLevel,
+    CommandDescriptor, CommandMatch, CommandRouter, Hotkey, HotkeyRegistry, ModalManager,
+    Navigator, Notification, NotificationCenter, NotificationId, NotificationLevel,
 };
 pub use crate::tui::state::{Derived, FormState, Store, StoreKey};
 pub use crate::tui::style::{BorderStyle, Color, EffectSlot, Padding, Style, Theme, ThemeEffects};
@@ -65,3 +65,9 @@ pub use crate::tui::scope::Scope;
 pub use crate::tui::subscription::Subscription;
 
 pub use crate::tui::text::{AmbiguousWidth, EditBuffer, Line, Span, Text, TextMetrics};
+
+pub use crate::tui::layout::{portal, Portal, PortalLayer};
+pub use crate::tui::widgets::{
+    CanvasPoint, CanvasPointer, CanvasViewport, DataSource, RowData, VirtualList,
+    VirtualListConfig, VirtualListState, WorldCanvas,
+};

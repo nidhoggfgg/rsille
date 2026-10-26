@@ -32,3 +32,6 @@ pub use taffy::style::{AlignItems, JustifyContent, JustifyItems};
 mod result;
 pub(crate) use result::LayoutCache;
 pub use result::{ChildLayout, Invalidation, Layout, LayoutGeometry, LayoutStats};
+
+pub mod portal;
+pub use portal::{portal, Portal, PortalLayer};

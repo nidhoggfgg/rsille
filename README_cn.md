@@ -55,6 +55,7 @@ cargo run -p tui --example workflow
 cargo run -p tui --example workflow -- --headless
 cargo run -p tui --example composition
 cargo run --manifest-path examples/tui-showcase/Cargo.toml
+cargo run -p tui --example extensions -- --headless
 cargo run --manifest-path examples/rsille-showcase/Cargo.toml
 cargo run --release --manifest-path examples/neon-observatory/Cargo.toml
 cargo run --release --manifest-path examples/folded-harbor/Cargo.toml
@@ -62,7 +63,8 @@ cargo run --release --manifest-path examples/minecraft/Cargo.toml
 ```
 
 `workflow` 使用同一套应用逻辑验证 Unicode 粘贴、debounce、后台保存、键盘焦点和退出，
-无 TTY 模式不使用真实睡眠。[完整示例和框架契约](packages/tui/examples/README.md)。
+无 TTY 模式不使用真实睡眠。`extensions` 演示十万行虚拟日志、锚点模态命令面板，
+以及支持缩放、平移和指针交互的世界坐标 Canvas。[完整示例和框架契约](packages/tui/examples/README.md)。
 
 [TUI 综合组件展厅](examples/tui-showcase/README.md) 在七个页面中集中展示表单、数据组件、
 内容查看器、布局、动画和五套主题，并提供命令面板与对话框交互。

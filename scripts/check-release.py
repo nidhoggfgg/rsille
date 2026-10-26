@@ -89,6 +89,14 @@ fn check_canvas() {
             if args.offline:
                 command.append("--offline")
             subprocess.run([*command, "--", "--headless"], cwd=consumer, check=True)
+        extensions = (root / "packages/tui/examples/basics/extensions.rs").read_text()
+        (consumer / "src/main.rs").write_text(extensions.replace("use tui::", "use rsille::tui::"))
+        for features in ([], ["--all-features"]):
+            command = ["cargo", "run", "--manifest-path", str(consumer / "Cargo.toml"),
+                       "--target-dir", str(target / "release-check-build"), *features]
+            if args.offline:
+                command.append("--offline")
+            subprocess.run([*command, "--", "--headless"], cwd=consumer, check=True)
     print("The rsille archive, extracted tests and clean consumer passed with default/all features; nothing uploaded.")
 
 

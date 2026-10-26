@@ -5,3 +5,5 @@ pub mod file_explorer;
 pub mod list;
 pub mod selection;
 pub mod tree;
+
+pub mod virtual_list;

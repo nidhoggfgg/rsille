@@ -119,6 +119,29 @@ independent layout and paint invalidation. Custom widgets should implement
 `lifecycle`, `layout`, and context invalidation rather than relying on concrete
 runtime control hooks or the removed `modified_this_batch` input flag.
 
+## Collection, Portal, command and Canvas extensions
+
+`VirtualList` is an opt-in fixed-row collection backed by `DataSource`; existing
+`List`/`DataTable` APIs remain available. Its application-owned state preserves
+item keys and a scroll anchor; off-window row state has bounded overscan retention.
+`Portal` hosts floating layers at the viewport root, with identity-based anchors,
+edge avoidance, outside-click dismissal and nested modal focus restoration.
+Custom modal containers can implement `Widget::is_modal`; transparent adapters
+must forward this method. Modal input excludes background/global commands.
+
+`CommandRouter` descriptors now carry availability, scope and key sequences.
+Prefer `with_commands_from` and `palette_items` to share metadata between shortcuts
+and command palettes; `rebind` replaces defaults. Widgets retain input priority.
+Command shortcuts precede built-in quit handling after widget propagation.
+Existing Canvas draw callbacks remain valid. Add a `CanvasViewport`, use
+`ctx.world(surface)` for clipped world primitives, and `on_pointer` for transformed
+mouse messages. `CanvasContext` now has floating-point viewport data and implements
+`PartialEq` rather than `Eq`.
+
+See [extension contracts](packages/tui/examples/README.md#virtual-collections-portal-commands-and-world-canvas)
+and `cargo run -p tui --example extensions -- --headless`. The release consumer
+also runs this scenario against the extracted public package.
+
 ## Release validation
 
 Run from the repository root with Python 3.12+ and Cargo:
@@ -129,6 +152,7 @@ cargo test --workspace
 cargo test --workspace --all-features
 cargo check --workspace --all-targets --all-features
 cargo run -p tui --example workflow -- --headless
+cargo run -p tui --example extensions -- --headless
 cargo check --manifest-path examples/rsille-showcase/Cargo.toml
 python3 scripts/check-release.py --offline
 # Linux terminal protocol and restoration smoke check:

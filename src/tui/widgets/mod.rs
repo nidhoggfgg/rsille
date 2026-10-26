@@ -18,9 +18,12 @@ pub use navigation::{command_palette, menu, tabs};
 pub use animated::{animate, Animated};
 pub use button::{button, Button, ButtonVariant};
 pub use calendar::{calendar, Calendar, CalendarDate, CalendarState};
-pub use canvas::{canvas, CanvasContext, CanvasWidget};
+pub use canvas::{canvas, CanvasContext, CanvasPointer, CanvasWidget};
 pub use checkbox::{checkbox, Checkbox};
 pub use collapsible::{collapsible, Collapsible};
+pub use collections::virtual_list::{
+    DataSource, RowData, VirtualList, VirtualListConfig, VirtualListState,
+};
 pub use command_palette::{command_palette, CommandItem, CommandPalette, CommandPaletteState};
 pub use content::{
     code_viewer, diff_viewer, log_viewer, markdown_viewer, CodeViewer, ContentViewerState,
@@ -31,6 +34,7 @@ pub use data_table::{
     DataTableSortDirection, DataTableState, TableAlign,
 };
 pub use dialog::{dialog, Dialog};
+pub use display::world_canvas::{CanvasPoint, CanvasViewport, WorldCanvas};
 pub use divider::{divider, Divider, DividerDirection, DividerTextPosition, DividerVariant};
 pub use file_explorer::{
     file_explorer, FileExplorer, FileExplorerItem, FileExplorerItemKind, FileExplorerState,

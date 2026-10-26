@@ -511,6 +511,12 @@ pub trait Widget<M> {
         FocusConfig::None
     }
 
+    /// A modal subtree isolates keyboard, pointer and global command input.
+    /// The last modal in tree order is active, and focus is restored on removal.
+    fn is_modal(&self) -> bool {
+        false
+    }
+
     /// Return child widgets (for containers like Flex/Grid).
     /// Leaf widgets return the default empty slice.
     fn children(&self) -> &[Box<dyn Widget<M>>] {
@@ -604,6 +610,10 @@ impl<M> Widget<M> for Box<dyn Widget<M>> {
 
     fn focus_config(&self) -> FocusConfig {
         (**self).focus_config()
+    }
+
+    fn is_modal(&self) -> bool {
+        (**self).is_modal()
     }
 
     fn children(&self) -> &[Box<dyn Widget<M>>] {
@@ -1246,8 +1256,23 @@ impl<'a> RenderCtx<'a> {
         &self.current_id
     }
 
+    /// Visible screen bounds recorded earlier in this paint, addressed by stable identity.
+    /// This follows scrolling and displayed animation geometry.
+    pub fn bounds_for_id(&self, id: &WidgetId) -> Option<Area> {
+        self.store
+            .rendered_ids
+            .borrow()
+            .get(id)
+            .and_then(|path| self.geometry.borrow().get(path).copied())
+            .filter(|area| area.width() > 0 && area.height() > 0)
+    }
+
     /// Record the rendered bounds for the current widget.
     pub fn record_bounds(&self, area: Area) {
+        self.store
+            .rendered_ids
+            .borrow_mut()
+            .insert(self.current_id.clone(), self.current_path.clone());
         self.record_bounds_for(&self.current_path, area);
     }
 
@@ -1740,6 +1765,7 @@ pub struct WidgetStore {
     component_types: HashMap<WidgetId, TypeId>,
     pub(crate) invalidation: Invalidation,
     pub(crate) layout_geometry: RefCell<HashMap<WidgetPath, LayoutGeometry>>,
+    pub(crate) rendered_ids: RefCell<HashMap<WidgetId, WidgetPath>>,
 }
 
 impl WidgetStore {

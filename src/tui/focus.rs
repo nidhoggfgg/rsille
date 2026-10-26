@@ -94,6 +94,7 @@ pub struct FocusAnalysis {
     focus_target_ids: FxHashSet<WidgetId>,
     scopes_by_path: FxHashMap<WidgetPath, ScopeNode>,
     scopes_by_id: FxHashMap<WidgetId, ScopeNode>,
+    modals: Vec<FocusTarget>,
 }
 
 impl FocusAnalysis {
@@ -120,6 +121,12 @@ impl FocusAnalysis {
             panic!("Duplicate widget key/identity {id:?}: paths {previous:?} and {path:?}. Keys must be unique within the nearest keyed ancestor.");
         }
 
+        if widget.is_modal() {
+            analysis.modals.push(FocusTarget {
+                id: id.clone(),
+                path: path.clone(),
+            });
+        }
         match widget.focus_config() {
             FocusConfig::Leaf | FocusConfig::Composite => {
                 analysis.focus_target_ids.insert(id.clone());
@@ -218,6 +225,7 @@ pub struct FocusManager {
     analysis: FocusAnalysis,
     focused_id: Option<WidgetId>,
     scope_memory: FxHashMap<WidgetId, WidgetId>,
+    modal_history: Vec<(WidgetId, Option<WidgetId>)>,
 }
 
 impl FocusManager {
@@ -235,8 +243,25 @@ impl FocusManager {
     }
 
     pub fn rebuild<M>(&mut self, root: &dyn Widget<M>) {
-        let old_focus = self.focused_id.clone();
+        let mut old_focus = self.focused_id.clone();
         self.analysis = FocusAnalysis::analyze(root);
+        while self
+            .modal_history
+            .last()
+            .is_some_and(|(id, _)| !self.analysis.modals.iter().any(|modal| &modal.id == id))
+        {
+            old_focus = self.modal_history.pop().unwrap().1;
+        }
+        for modal in &self.analysis.modals {
+            if !self.modal_history.iter().any(|(id, _)| id == &modal.id) {
+                self.modal_history
+                    .push((modal.id.clone(), old_focus.clone()));
+                old_focus = self
+                    .analysis
+                    .first_descendant_target(&modal.path)
+                    .map(|target| target.id.clone());
+            }
+        }
         self.prune_scope_memory();
 
         self.focused_id = old_focus
@@ -250,9 +275,29 @@ impl FocusManager {
                     .map(|target| target.id.clone())
             });
 
+        if let Some(modal) = self.modal_path().cloned() {
+            if !self
+                .current_path()
+                .is_some_and(|path| path.starts_with(&modal))
+            {
+                self.focused_id = self
+                    .analysis
+                    .first_descendant_target(&modal)
+                    .map(|target| target.id.clone());
+            }
+        }
         if let Some(focused) = self.focused_id.clone() {
             self.remember_focus(&focused);
         }
+    }
+
+    /// Topmost modal subtree, if any.
+    pub fn modal_path(&self) -> Option<&WidgetPath> {
+        self.analysis.modals.last().map(|target| &target.path)
+    }
+
+    pub(crate) fn analysis_id(&self, path: &WidgetPath) -> Option<&WidgetId> {
+        self.analysis.id_for_path(path)
     }
 
     pub fn current_id(&self) -> Option<&WidgetId> {
@@ -278,15 +323,35 @@ impl FocusManager {
             return false;
         };
 
+        if self
+            .modal_path()
+            .is_some_and(|modal| !next.path.starts_with(modal))
+        {
+            return false;
+        }
         self.set_focus(Some(next.id))
     }
 
     pub fn clear(&mut self) -> bool {
+        if self.modal_path().is_some() {
+            return false;
+        }
         self.set_focus(None)
     }
 
+    fn constrain_to_modal(&self, scope: Option<WidgetPath>) -> Option<WidgetPath> {
+        match self.modal_path() {
+            Some(modal) => Some(
+                scope
+                    .filter(|scope| scope.starts_with(modal))
+                    .unwrap_or_else(|| modal.clone()),
+            ),
+            None => scope,
+        }
+    }
+
     pub fn next(&mut self) {
-        if let Some(scope) = self.active_trapping_scope() {
+        if let Some(scope) = self.constrain_to_modal(self.active_trapping_scope()) {
             self.move_within_scope(&scope, true);
         } else {
             self.move_global(true);
@@ -294,7 +359,7 @@ impl FocusManager {
     }
 
     pub fn prev(&mut self) {
-        if let Some(scope) = self.active_trapping_scope() {
+        if let Some(scope) = self.constrain_to_modal(self.active_trapping_scope()) {
             self.move_within_scope(&scope, false);
         } else {
             self.move_global(false);
@@ -302,7 +367,7 @@ impl FocusManager {
     }
 
     pub fn next_in_scope(&mut self, scope: Option<&WidgetPath>) {
-        if let Some(scope_path) = self.resolve_scope_path(scope) {
+        if let Some(scope_path) = self.constrain_to_modal(self.resolve_scope_path(scope)) {
             self.move_within_scope(&scope_path, true);
         } else {
             self.move_global(true);
@@ -310,7 +375,7 @@ impl FocusManager {
     }
 
     pub fn prev_in_scope(&mut self, scope: Option<&WidgetPath>) {
-        if let Some(scope_path) = self.resolve_scope_path(scope) {
+        if let Some(scope_path) = self.constrain_to_modal(self.resolve_scope_path(scope)) {
             self.move_within_scope(&scope_path, false);
         } else {
             self.move_global(false);

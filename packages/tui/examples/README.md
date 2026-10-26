@@ -429,3 +429,124 @@ observations, not thresholds:
 | --- | ---: | ---: | ---: | ---: |
 | Paint only | 0 | 0 | 256 | 183.2 |
 | Layout + paint | 320 | 73 | 3,115 | 851.3 |
+
+## Virtual collections, Portal, commands and world Canvas
+
+`cargo run -p tui --example extensions` combines a generated 100,000-row log,
+retryable custom rows, a modal command palette and a world-coordinate canvas.
+Use `-- --headless` to exercise the same view/update flow without a terminal.
+Regression coverage lives in `packages/tui/tests/extensions.rs`.
+
+### Fixed-height data sources
+
+Implement `DataSource` with `len`, stable unique `key`, `index_of`, and `get`.
+`get` returns `RowData::Ready`, `Loading`, or `Failed`; the row builder can return
+ordinary widgets, including buttons that emit pagination/retry messages. Loading
+and failed rows occupy an index and remain navigable. A source may generate rows,
+read a page cache, or hold `Arc` payloads; the collection need not own all data.
+Keep `index_of` efficient (an index/map rather than a full scan).
+
+```rust,ignore
+VirtualList::new(source.clone(), &state.list,
+    VirtualListConfig { height: 12, row_height: 1, overscan: 2 },
+    |index, data, selected| render_row(index, data, selected))
+    .key("logs")
+    .on_change(Msg::ListChanged)
+```
+
+The viewport and row height are explicit terminal-cell sizes. The builder reads
+and constructs at most `ceil(height / row_height) + 2 * overscan` rows, regardless
+of collection length. Only viewport rows join layout/focus/input. Overscan rows
+are retained through the normal hidden-state lifecycle; rows leaving that bounded
+window unmount, releasing local state and scoped tasks/subscriptions. Each row
+creates an identity/resource scope using its item key. Custom interactive row
+widgets keep their ordinary event handlers; unhandled arrows bubble to the list.
+
+`VirtualListState` is application-owned: store `on_change` messages in update.
+Without a handler the list is a read-only viewport. Keyboard navigation selects
+by key and brings the selected row into view; wheel scrolling moves the anchor
+without changing selection. The builder reconciles a copy for display. When
+replacing/filtering/sorting the source, also call `state.list.reconcile(&source,
+visible_rows)` in update to persist reconciliation. Existing selected and anchor
+keys follow their items, including after sorting or insertion. A removed selection
+clears; a removed anchor falls back to the previous index clamped to a full page.
+An existing anchor is preserved even if that leaves a partial page at the end.
+Changing the fixed viewport config reconstructs the bounded window. Variable
+heights and automatic pagination policies remain application-specific.
+
+### Portal and modal input
+
+Place `portal(base)` at the viewport root and add `PortalLayer`s in paint order:
+
+```rust,ignore
+portal(base).layer(PortalLayer::new(popup)
+    .key("search-popup")
+    .anchor(WidgetId::root().child("search"))
+    .size(30, 8)
+    .modal(true)
+    .on_dismiss(|| Msg::Close))
+```
+
+The anchor uses stable identity, including named ancestors/scopes. Layers use
+this frame's displayed and clipped anchor bounds, so scrolling, resizing and
+layout animation are reflected immediately. Content escapes the anchor's parent
+clip and is constrained by the Portal host. Placement prefers below the anchor,
+flips above when that fits, then clamps to the host. A missing/offscreen anchor
+falls back to centered placement; omit `anchor` for an always-centered layer.
+Layers can anchor to earlier layers, but not later ones.
+
+The base resolves layout before paint; layer placement runs after its anchors
+paint, and child allocations use the same framework layout cache, identity,
+animation and hit geometry. A passive layer intercepts only its content. A
+layer with `on_dismiss` consumes outside clicks and requests dismissal on Escape.
+Dismissal is a message: remove the layer in update. No background click is replayed.
+
+`Widget::is_modal` is a generic input boundary, forwarded through boxing and
+message mapping. The last modal in tree order receives focus and traps Tab,
+blocks background pointer capture and global hotkeys/quit, and restores previous
+focus when removed. Nested modal closure restores each prior level. Empty modals
+still isolate input. Commands explicitly scoped inside the modal remain available;
+unhandled modal input never falls through to application-global handlers.
+
+### Shared commands and rebinding
+
+`CommandRouter` supplies both routing and `palette_items(focused_id)`. Descriptors
+include id, title, description, availability, scope, single shortcuts and sequences.
+Use `with_commands_from(|state| commands(state))` for availability derived from
+application state; the same resolver can populate a palette in view. Rebuilding
+the router on a state update cancels any partially typed sequence. Explicit
+`dispatch(id)` validates availability; callers remain responsible for deciding
+whether an id-based invocation belongs to the current UI context.
+
+`CommandEntry::scope(WidgetId)` restricts keyboard/palette availability to that
+focused identity subtree. Deeper scopes take priority; ties use registration
+order. `enabled(false)` and `set_enabled` affect routing and palette together.
+`rebind(id, Vec<Vec<KeyEvent>>)` replaces every default shortcut for a command;
+an empty outer list unbinds it, and empty sequences are rejected. IDs must be
+unique. `sequence([first, second])` supports multi-key bindings.
+
+Widgets handle input first. Unhandled shortcuts then reach the router, before
+legacy global hotkeys. Prefixes consume input; an exact match runs immediately,
+so a binding that is also a longer sequence's prefix shadows that longer binding
+at equal priority. A mismatch can start a new shortcut with its final key. Focus
+changes cancel pending prefixes. The default one-second timeout uses the injected
+runtime clock and is evaluated on the next shortcut event; no timer thread or
+periodic redraw is needed. Release events never dispatch commands.
+
+### World-space Canvas
+
+Existing `canvas(|surface, ctx| ...)` dot-coordinate drawing remains available.
+Attach `.viewport(CanvasViewport::new(x, y, width, height))` and draw through
+`ctx.world(surface)` for `point`, `line`, `rect`, and `circle`. Bounds are finite
+Cartesian extents, with y increasing upwards. Points and lines clip before
+rasterization, so far-offscreen geometry does not allocate an enormous pixel grid.
+Circle tessellation is bounded by the viewport resolution. Optional `color(Colors)`
+uses the underlying Canvas color model.
+
+`world_to_dot`, `dot_to_world`, and `cell_to_world` share the rendering transform.
+`on_pointer` emits `CanvasPointer` with mouse kind, modifiers, and the world
+coordinate at the terminal cell's center; framework clipping/scroll translation
+also applies. Use `CanvasViewport::contains` for rectangular world hit tests.
+Store a viewport in application state and update it with `pan(dx, dy)` or
+`zoom_at(factor, pointer.position)` to implement drag and wheel interactions.
+A factor greater than one zooms in while preserving the anchor's screen position.

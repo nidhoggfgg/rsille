@@ -21,6 +21,7 @@ pub type EventHandler<M> = Box<dyn Fn() -> M>;
 pub type FrameHandler<M> = Box<dyn Fn(FrameInfo) -> M>;
 pub type InputHandler<M> = Box<dyn Fn(InputEvent) -> Option<M>>;
 pub type SubscriptionResolver<State, M> = Box<dyn Fn(&State) -> Subscription<M>>;
+pub type CommandResolver<State, M> = Box<dyn Fn(&State) -> CommandRouter<M>>;
 pub type ThemeResolver<State> = Box<dyn Fn(&State) -> Theme>;
 
 pub(crate) struct TickConfig<M> {
@@ -73,6 +74,7 @@ pub struct App<State, M = ()> {
     pub(crate) focus_events: bool,
     pub(crate) hotkeys: HotkeyRegistry<M>,
     pub(crate) command_router: Option<CommandRouter<M>>,
+    pub(crate) command_resolver: Option<CommandResolver<State, M>>,
     pub(crate) tick_handlers: Vec<TickConfig<M>>,
     pub(crate) frame_handlers: Vec<FrameConfig<M>>,
     pub(crate) quit_behavior: QuitBehavior,
@@ -107,6 +109,7 @@ impl<State, M> App<State, M> {
             focus_events: false,
             hotkeys: HotkeyRegistry::new(),
             command_router: None,
+            command_resolver: None,
             tick_handlers: Vec::new(),
             frame_handlers: Vec::new(),
             quit_behavior: QuitBehavior::default(),
@@ -219,8 +222,20 @@ impl<State, M> App<State, M> {
         self
     }
 
+    /// Rebuild available commands from application state after each update.
+    /// Use the same resolver in your view to populate a CommandPalette.
+    pub fn with_commands_from(
+        mut self,
+        resolver: impl Fn(&State) -> CommandRouter<M> + 'static,
+    ) -> Self {
+        self.command_router = None;
+        self.command_resolver = Some(Box::new(resolver));
+        self
+    }
+
     /// Install a command router that can dispatch commands from hotkeys.
     pub fn with_command_router(mut self, command_router: CommandRouter<M>) -> Self {
+        self.command_resolver = None;
         self.command_router = Some(command_router);
         self
     }

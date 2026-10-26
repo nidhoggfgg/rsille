@@ -6,3 +6,5 @@ pub mod divider;
 pub mod label;
 pub mod progress;
 pub mod spacer;
+
+pub mod world_canvas;

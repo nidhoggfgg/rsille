@@ -123,6 +123,9 @@ impl<M: 'static, N: 'static> Widget<N> for MappedWidget<M, N> {
     fn measure(&self, proposal: SizeProposal, ctx: &MeasureCtx) -> MeasuredSize {
         self.inner().measure(proposal, ctx)
     }
+    fn is_modal(&self) -> bool {
+        self.inner().is_modal()
+    }
     fn focus_config(&self) -> FocusConfig {
         self.inner().focus_config()
     }

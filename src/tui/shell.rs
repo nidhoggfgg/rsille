@@ -2,6 +2,7 @@ use std::fmt;
 use std::time::{Duration, Instant};
 
 use crate::tui::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crate::tui::widget::WidgetId;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Hotkey {
@@ -104,11 +105,13 @@ pub struct CommandDescriptor {
     pub title: String,
     pub description: Option<String>,
     pub hotkeys: Vec<KeyEvent>,
+    pub sequences: Vec<Vec<KeyEvent>>,
+    pub enabled: bool,
+    pub scope: Option<WidgetId>,
 }
 
 pub struct CommandEntry<M> {
     descriptor: CommandDescriptor,
-    enabled: bool,
     handler: Box<dyn Fn() -> M>,
 }
 
@@ -124,7 +127,20 @@ impl<M> CommandEntry<M> {
     }
 
     pub fn enabled(&mut self, enabled: bool) -> &mut Self {
-        self.enabled = enabled;
+        self.descriptor.enabled = enabled;
+        self
+    }
+
+    /// Restrict the command to focus within this identity subtree. Deeper scopes win.
+    pub fn scope(&mut self, scope: WidgetId) -> &mut Self {
+        self.descriptor.scope = Some(scope);
+        self
+    }
+
+    pub fn sequence(&mut self, keys: impl IntoIterator<Item = KeyEvent>) -> &mut Self {
+        let keys: Vec<_> = keys.into_iter().collect();
+        assert!(!keys.is_empty(), "a command sequence cannot be empty");
+        self.descriptor.sequences.push(keys);
         self
     }
 
@@ -133,14 +149,30 @@ impl<M> CommandEntry<M> {
     }
 }
 
+/// Result of a shortcut/sequence lookup. A prefix consumes input until it
+/// completes, mismatches, changes focus, or expires before the next key.
+pub enum CommandMatch<M> {
+    Ignored,
+    Pending,
+    Message(M),
+}
+
 pub struct CommandRouter<M> {
     commands: Vec<CommandEntry<M>>,
+    pending: Vec<KeyEvent>,
+    pending_focus: Option<WidgetId>,
+    deadline: Option<Instant>,
+    sequence_timeout: Duration,
 }
 
 impl<M> Default for CommandRouter<M> {
     fn default() -> Self {
         Self {
             commands: Vec::new(),
+            pending: Vec::new(),
+            pending_focus: None,
+            deadline: None,
+            sequence_timeout: Duration::from_secs(1),
         }
     }
 }
@@ -159,14 +191,21 @@ impl<M> CommandRouter<M> {
     where
         F: Fn() -> M + 'static,
     {
+        let id = id.into();
+        assert!(
+            !self.commands.iter().any(|entry| entry.descriptor.id == id),
+            "duplicate command id: {id}"
+        );
         self.commands.push(CommandEntry {
             descriptor: CommandDescriptor {
-                id: id.into(),
+                id,
                 title: title.into(),
                 description: None,
                 hotkeys: Vec::new(),
+                sequences: Vec::new(),
+                enabled: true,
+                scope: None,
             },
-            enabled: true,
             handler: Box::new(handler),
         });
         self.commands.last_mut().expect("command was just inserted")
@@ -175,22 +214,196 @@ impl<M> CommandRouter<M> {
     pub fn dispatch(&self, id: &str) -> Option<M> {
         self.commands
             .iter()
-            .find(|command| command.enabled && command.descriptor.id == id)
+            .find(|command| command.descriptor.enabled && command.descriptor.id == id)
             .map(|command| (command.handler)())
     }
 
+    /// Resolve a global single-key shortcut, including user rebindings.
+    /// Use `handle_key` for focus scopes and multi-key sequences.
     pub fn dispatch_hotkey(&self, key_event: &KeyEvent) -> Option<M> {
+        if key_event.kind == KeyEventKind::Release {
+            return None;
+        }
         self.commands
             .iter()
-            .find(|command| {
-                command.enabled
-                    && command
-                        .descriptor
-                        .hotkeys
+            .find(|entry| {
+                let d = &entry.descriptor;
+                d.enabled
+                    && d.scope.is_none()
+                    && d.hotkeys
                         .iter()
-                        .any(|candidate| hotkey_matches(candidate, key_event))
+                        .map(std::slice::from_ref)
+                        .chain(d.sequences.iter().map(Vec::as_slice))
+                        .any(|sequence| {
+                            sequence.len() == 1 && hotkey_matches(&sequence[0], key_event)
+                        })
             })
-            .map(|command| (command.handler)())
+            .map(|entry| (entry.handler)())
+    }
+
+    pub fn cancel_pending(&mut self) {
+        self.pending.clear();
+        self.deadline = None;
+        self.pending_focus = None;
+    }
+
+    pub(crate) fn sync_focus(&mut self, focused: Option<&WidgetId>) {
+        if self.pending_focus.as_ref() != focused {
+            self.cancel_pending();
+        }
+    }
+
+    /// Replace all default shortcuts for a command; an empty list unbinds it.
+    pub fn rebind(&mut self, id: &str, sequences: Vec<Vec<KeyEvent>>) -> bool {
+        if sequences.iter().any(Vec::is_empty) {
+            return false;
+        }
+        let Some(entry) = self
+            .commands
+            .iter_mut()
+            .find(|entry| entry.descriptor.id == id)
+        else {
+            return false;
+        };
+        entry.descriptor.hotkeys.clear();
+        entry.descriptor.sequences = sequences;
+        self.pending.clear();
+        true
+    }
+
+    pub fn set_enabled(&mut self, id: &str, enabled: bool) -> bool {
+        let Some(entry) = self
+            .commands
+            .iter_mut()
+            .find(|entry| entry.descriptor.id == id)
+        else {
+            return false;
+        };
+        entry.enabled(enabled);
+        self.pending.clear();
+        true
+    }
+
+    pub fn sequence_timeout(&mut self, timeout: Duration) -> &mut Self {
+        self.sequence_timeout = timeout;
+        self
+    }
+
+    /// Palette entries and shortcut routing share availability and metadata.
+    pub fn palette_items(
+        &self,
+        focused: Option<&WidgetId>,
+    ) -> Vec<crate::tui::widgets::CommandItem> {
+        self.commands
+            .iter()
+            .map(|entry| {
+                let d = &entry.descriptor;
+                let available = d.enabled
+                    && d.scope
+                        .as_ref()
+                        .is_none_or(|scope| focused.is_some_and(|id| id.starts_with(scope)));
+                let mut item =
+                    crate::tui::widgets::CommandItem::new(&d.id, &d.title).disabled(!available);
+                if let Some(description) = &d.description {
+                    item = item.keyword(description);
+                }
+                item
+            })
+            .collect()
+    }
+
+    pub fn handle_key(
+        &mut self,
+        key: &KeyEvent,
+        focused: Option<&WidgetId>,
+        now: Instant,
+    ) -> CommandMatch<M> {
+        self.handle_key_in(key, focused, None, now)
+    }
+
+    /// A modal boundary excludes global commands and commands outside that subtree.
+    pub fn handle_key_in(
+        &mut self,
+        key: &KeyEvent,
+        focused: Option<&WidgetId>,
+        modal: Option<&WidgetId>,
+        now: Instant,
+    ) -> CommandMatch<M> {
+        if key.kind == KeyEventKind::Release {
+            return CommandMatch::Ignored;
+        }
+        if self.deadline.is_some_and(|deadline| now >= deadline)
+            || self.pending_focus.as_ref() != focused
+        {
+            self.pending.clear();
+        }
+        self.pending_focus = focused.cloned();
+        self.pending.push(*key);
+        // On a mismatch the final key can start a new shortcut.
+        for attempt in 0..2 {
+            let mut candidates: Vec<_> = self
+                .commands
+                .iter()
+                .filter(|entry| {
+                    let d = &entry.descriptor;
+                    d.enabled
+                        && d.scope
+                            .as_ref()
+                            .is_none_or(|scope| focused.is_some_and(|id| id.starts_with(scope)))
+                        && modal.is_none_or(|modal| {
+                            d.scope
+                                .as_ref()
+                                .is_some_and(|scope| scope.starts_with(modal))
+                        })
+                })
+                .collect();
+            candidates.sort_by_key(|entry| {
+                std::cmp::Reverse(
+                    entry
+                        .descriptor
+                        .scope
+                        .as_ref()
+                        .map_or(0, |scope| scope.len() + 1),
+                )
+            });
+            for entry in candidates {
+                let d = &entry.descriptor;
+                let shortcuts = d
+                    .hotkeys
+                    .iter()
+                    .map(std::slice::from_ref)
+                    .chain(d.sequences.iter().map(Vec::as_slice));
+                let mut prefix = false;
+                for sequence in shortcuts {
+                    if sequence.len() >= self.pending.len()
+                        && sequence
+                            .iter()
+                            .zip(&self.pending)
+                            .all(|(a, b)| hotkey_matches(a, b))
+                    {
+                        if sequence.len() == self.pending.len() {
+                            self.pending.clear();
+                            self.deadline = None;
+                            return CommandMatch::Message((entry.handler)());
+                        }
+                        prefix = true;
+                    }
+                }
+                if prefix {
+                    self.deadline = Some(now + self.sequence_timeout);
+                    return CommandMatch::Pending;
+                }
+            }
+            if attempt == 0 && self.pending.len() > 1 {
+                self.pending.clear();
+                self.pending.push(*key);
+            } else {
+                break;
+            }
+        }
+        self.pending.clear();
+        self.deadline = None;
+        CommandMatch::Ignored
     }
 
     pub fn commands(&self) -> Vec<CommandDescriptor> {

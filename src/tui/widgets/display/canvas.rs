@@ -4,15 +4,19 @@ use std::fmt;
 
 use crate::render::Draw;
 
-use crate::tui::event::Event;
+use super::world_canvas::{CanvasPoint, CanvasViewport, WorldCanvas};
+use crate::tui::event::{Event, KeyModifiers, MouseEventKind};
+use crate::tui::focus::FocusConfig;
 use crate::tui::layout::Constraints;
+use crate::tui::widget::EventPhase;
 use crate::tui::widget::{EventCtx, RenderCtx, Widget};
 
 /// Dimensions passed to a [`CanvasWidget`] draw callback.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CanvasContext {
     cell_width: u16,
     cell_height: u16,
+    viewport: Option<CanvasViewport>,
 }
 
 impl CanvasContext {
@@ -20,7 +24,66 @@ impl CanvasContext {
         Self {
             cell_width,
             cell_height,
+            viewport: None,
         }
+    }
+
+    pub fn with_viewport(mut self, viewport: CanvasViewport) -> Self {
+        self.viewport = Some(viewport);
+        self
+    }
+    pub fn viewport(self) -> CanvasViewport {
+        self.viewport.unwrap_or_else(|| {
+            CanvasViewport::new(
+                0.0,
+                0.0,
+                (self.dot_width() - 1).max(1) as f64,
+                (self.dot_height() - 1).max(1) as f64,
+            )
+        })
+    }
+    pub fn world_to_dot(self, point: CanvasPoint) -> Option<CanvasPoint> {
+        if self.cell_width == 0
+            || self.cell_height == 0
+            || !point.x.is_finite()
+            || !point.y.is_finite()
+        {
+            return None;
+        }
+        let v = self.viewport();
+        let point = CanvasPoint::new(
+            (point.x - v.x()) / v.width() * (self.dot_width() - 1) as f64,
+            (point.y - v.y()) / v.height() * (self.dot_height() - 1) as f64,
+        );
+        (point.x.is_finite() && point.y.is_finite()).then_some(point)
+    }
+    pub fn dot_to_world(self, point: CanvasPoint) -> Option<CanvasPoint> {
+        if self.cell_width == 0
+            || self.cell_height == 0
+            || !point.x.is_finite()
+            || !point.y.is_finite()
+        {
+            return None;
+        }
+        let v = self.viewport();
+        let point = CanvasPoint::new(
+            v.x() + point.x / (self.dot_width() - 1) as f64 * v.width(),
+            v.y() + point.y / (self.dot_height() - 1) as f64 * v.height(),
+        );
+        (point.x.is_finite() && point.y.is_finite()).then_some(point)
+    }
+    /// Terminal-cell center in world coordinates, accounting for the terminal's downward y axis.
+    pub fn cell_to_world(self, x: u16, y: u16) -> Option<CanvasPoint> {
+        if x >= self.cell_width || y >= self.cell_height {
+            return None;
+        }
+        self.dot_to_world(CanvasPoint::new(
+            f64::from(x) * 2.0 + 0.5,
+            f64::from(self.dot_height()) - f64::from(y) * 4.0 - 2.5,
+        ))
+    }
+    pub fn world<'a>(self, canvas: &'a mut crate::canvas::Canvas) -> WorldCanvas<'a> {
+        WorldCanvas::new(canvas, self)
     }
 
     /// Width of the widget area in terminal cells.
@@ -44,6 +107,14 @@ impl CanvasContext {
     }
 }
 
+/// A pointer event translated through the same viewport used for drawing.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CanvasPointer {
+    pub position: CanvasPoint,
+    pub kind: MouseEventKind,
+    pub modifiers: KeyModifiers,
+}
+
 /// Widget for drawing into a fixed-size braille canvas.
 ///
 /// The draw callback receives a fresh [`crate::canvas::Canvas`] every render.
@@ -54,6 +125,8 @@ pub struct CanvasWidget<M = (), F = fn(&mut crate::canvas::Canvas, CanvasContext
     draw: F,
     constraints: Constraints,
     widget_key: Option<String>,
+    viewport: Option<CanvasViewport>,
+    on_pointer: Option<Box<dyn Fn(CanvasPointer) -> M>>,
     _phantom: std::marker::PhantomData<M>,
 }
 
@@ -81,8 +154,20 @@ where
                 flex: Some(1.0),
             },
             widget_key: None,
+            viewport: None,
+            on_pointer: None,
             _phantom: std::marker::PhantomData,
         }
+    }
+
+    pub fn viewport(mut self, viewport: CanvasViewport) -> Self {
+        self.viewport = Some(viewport);
+        self
+    }
+    /// Use pointer messages to implement application-controlled panning, wheel zoom and hit testing.
+    pub fn on_pointer(mut self, handler: impl Fn(CanvasPointer) -> M + 'static) -> Self {
+        self.on_pointer = Some(Box::new(handler));
+        self
     }
 
     pub fn key(mut self, name: impl Into<String>) -> Self {
@@ -134,7 +219,10 @@ where
             return;
         }
 
-        let canvas_ctx = CanvasContext::new(area.width(), area.height());
+        let mut canvas_ctx = CanvasContext::new(area.width(), area.height());
+        if let Some(viewport) = self.viewport {
+            canvas_ctx = canvas_ctx.with_viewport(viewport);
+        }
         let mut canvas = crate::canvas::Canvas::new();
         canvas.set_bound(
             (0, area.width().saturating_sub(1) as i32),
@@ -149,7 +237,39 @@ where
         }
     }
 
-    fn handle_event(&self, _event: &Event, _ctx: &mut EventCtx<M>) {}
+    fn handle_event(&self, event: &Event, ctx: &mut EventCtx<M>) {
+        if ctx.phase() != EventPhase::Target {
+            return;
+        }
+        let (Some(handler), Event::Mouse(mouse)) = (&self.on_pointer, event) else {
+            return;
+        };
+        let Some((x, y)) = ctx.local_mouse_position(event) else {
+            return;
+        };
+        let Some(area) = ctx.bounds() else {
+            return;
+        };
+        let mut context = CanvasContext::new(area.width(), area.height());
+        if let Some(viewport) = self.viewport {
+            context = context.with_viewport(viewport);
+        }
+        if let Some(position) = context.cell_to_world(x, y) {
+            ctx.emit(handler(CanvasPointer {
+                position,
+                kind: mouse.kind,
+                modifiers: mouse.modifiers,
+            }));
+            ctx.set_handled();
+        }
+    }
+    fn focus_config(&self) -> FocusConfig {
+        if self.on_pointer.is_some() {
+            FocusConfig::Leaf
+        } else {
+            FocusConfig::None
+        }
+    }
 
     fn constraints(&self) -> Constraints {
         self.constraints

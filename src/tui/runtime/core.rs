@@ -26,7 +26,7 @@ use crate::tui::layout::{
     AxisLimit, Invalidation, LayoutCache, LayoutGeometry, LayoutStats, SizeProposal,
 };
 use crate::tui::scope::{ResourceKey, Scope};
-use crate::tui::shell::{CommandRouter, HotkeyRegistry};
+use crate::tui::shell::{CommandMatch, CommandRouter, HotkeyRegistry};
 use crate::tui::style::Theme;
 use crate::tui::subscription::Subscription;
 use crate::tui::widget::{
@@ -308,6 +308,10 @@ impl<State, M: Send + 'static> Runtime<State, M> {
             rendered = true;
         }
         for event in events {
+            if matches!(event, Event::Key(key) if key.kind == crate::tui::event::KeyEventKind::Release)
+            {
+                continue;
+            }
             if let Event::Resize(width, height) = event {
                 self.resize((*width, *height).into());
             }
@@ -428,6 +432,7 @@ pub(crate) struct AppRuntime<State, U, V, M> {
     focus_events: bool,
     hotkeys: HotkeyRegistry<M>,
     command_router: Option<CommandRouter<M>>,
+    command_resolver: Option<crate::tui::app::CommandResolver<State, M>>,
     tick_handlers: Vec<TickRuntime<M>>,
     frame_handlers: Vec<FrameHandler<M>>,
     frame_runtime: FrameRuntime,
@@ -654,6 +659,7 @@ impl<State, U, V, M: Send + 'static> AppRuntime<State, U, V, M> {
             focus_events,
             hotkeys,
             command_router,
+            command_resolver,
             tick_handlers,
             frame_handlers,
             quit_behavior,
@@ -700,6 +706,7 @@ impl<State, U, V, M: Send + 'static> AppRuntime<State, U, V, M> {
             focus_events,
             hotkeys,
             command_router,
+            command_resolver,
             tick_handlers: tick_handlers
                 .into_iter()
                 .map(|tick| TickRuntime {
@@ -753,6 +760,9 @@ impl<State, U, V, M: Send + 'static> AppRuntime<State, U, V, M> {
             return;
         }
         self.layouts.clear();
+        if let Some(resolver) = &self.command_resolver {
+            self.command_router = Some(resolver(self.state.as_ref().expect("runtime state")));
+        }
         let tree = (self.view_fn)(self.state.as_ref().expect("runtime state"));
         // Validate before modifying state: even keys below separate unkeyed
         // wrappers share the nearest named ancestor's namespace.
@@ -807,6 +817,9 @@ impl<State, U, V, M: Send + 'static> AppRuntime<State, U, V, M> {
         self.store.retain_active(|id| mounted.contains_key(id));
         reconcile_widget_states(tree.as_ref(), &mut self.store, sync_existing);
         self.focus.rebuild(tree.as_ref());
+        if let Some(router) = self.command_router.as_mut() {
+            router.sync_focus(self.focus.current_id());
+        }
         if self
             .pointer_capture
             .as_ref()
@@ -1208,11 +1221,22 @@ impl<State, U, V, M: Send + 'static> AppRuntime<State, U, V, M> {
         frame: u64,
         visual_capabilities: TerminalVisualCapabilities,
     ) -> bool {
-        let target_path = match mouse_position(event) {
+        let mut target_path = match mouse_position(event) {
             Some(_) => mouse_target_path(event, hit_regions, pointer_capture),
             None => focus.current_path().cloned(),
         };
-        let route = Self::build_event_route(tree, target_path.as_ref());
+        if let Some(modal) = focus.modal_path() {
+            if !target_path
+                .as_ref()
+                .is_some_and(|path| path.starts_with(modal))
+            {
+                target_path = Some(modal.clone());
+            }
+        }
+        let mut route = Self::build_event_route(tree, target_path.as_ref());
+        if let Some(modal) = focus.modal_path() {
+            route.retain(|(path, _, _, _)| path.starts_with(modal));
+        }
         let mut handled = false;
         let focused_snapshot = focus.current_path().cloned();
         let ancestor_len = route.len().saturating_sub(1);
@@ -1916,6 +1940,7 @@ where
 
         // Paint and record displayed/clipped hit geometry from those allocations.
         self.store.layout_geometry.borrow_mut().clear();
+        self.store.rendered_ids.borrow_mut().clear();
         let focused_path = self.focus.current_path();
         let focused_id = self.focus.current_id().cloned();
         self.geometry.borrow_mut().clear();
@@ -2161,6 +2186,11 @@ where
                 self.render_frame,
                 self.visual_capabilities,
             ) {
+                if matches!(event, Event::Key(_)) {
+                    if let Some(router) = self.command_router.as_mut() {
+                        router.cancel_pending();
+                    }
+                }
                 continue;
             }
 
@@ -2177,13 +2207,43 @@ where
             match key_event.code {
                 KeyCode::Tab if key_event.modifiers.contains(KeyModifiers::SHIFT) => {
                     self.focus.prev();
+                    if let Some(router) = self.command_router.as_mut() {
+                        router.cancel_pending();
+                    }
                     continue;
                 }
                 KeyCode::Tab => {
                     self.focus.next();
+                    if let Some(router) = self.command_router.as_mut() {
+                        router.cancel_pending();
+                    }
                     continue;
                 }
                 _ => {}
+            }
+
+            // Scoped command sequences use the runtime's injected clock.
+            if let Some(router) = self.command_router.as_mut() {
+                let modal = self
+                    .focus
+                    .modal_path()
+                    .and_then(|path| self.focus.analysis_id(path));
+                match router.handle_key_in(
+                    key_event,
+                    self.focus.current_id(),
+                    modal,
+                    self.clock.now(),
+                ) {
+                    CommandMatch::Message(message) => {
+                        self.messages.push_back(message);
+                        continue;
+                    }
+                    CommandMatch::Pending => continue,
+                    CommandMatch::Ignored => {}
+                }
+            }
+            if self.focus.modal_path().is_some() {
+                continue;
             }
 
             // 2. Quit key
@@ -2203,14 +2263,6 @@ where
                 self.exit_reason = Some(ExitReason::QuitKey);
                 self.should_quit = true;
                 return Ok(());
-            }
-
-            // 3. Command router
-            if let Some(router) = self.command_router.as_ref() {
-                if let Some(message) = router.dispatch_hotkey(key_event) {
-                    self.messages.push_back(message);
-                    continue;
-                }
             }
 
             // 4. Rich hotkey registry
