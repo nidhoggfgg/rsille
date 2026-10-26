@@ -2,7 +2,7 @@
 
 use crate::render::{area::Area, chunk::Chunk};
 use crate::tui::{
-    event::{Event, KeyCode, MouseButton, MouseEventKind},
+    event::{Event, KeyCode, KeyEventKind, MouseButton, MouseEventKind},
     focus::FocusConfig,
     layout::{ChildLayout, Constraints, Layout},
     widget::{
@@ -213,6 +213,9 @@ impl<M: 'static, S: DataSource + ?Sized + 'static> Widget<M> for VirtualList<M, 
     }
     fn handle_event(&self, event: &Event, ctx: &mut EventCtx<M>) {
         if self.on_change.is_none() || ctx.phase() == EventPhase::Capture || ctx.was_handled() {
+            return;
+        }
+        if matches!(event, Event::Key(key) if key.kind == KeyEventKind::Release) {
             return;
         }
         let rows = ctx

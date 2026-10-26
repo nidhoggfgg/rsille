@@ -1,7 +1,7 @@
 //! Root-hosted floating surfaces anchored to displayed widget identities.
 use crate::render::{area::Area, chunk::Chunk};
 use crate::tui::{
-    event::{Event, KeyCode, MouseButton, MouseEventKind},
+    event::{Event, KeyCode, KeyEventKind, MouseButton, MouseEventKind},
     focus::{FocusConfig, FocusScope},
     layout::{ChildLayout, Constraints, Layout, MeasuredSize, SizeProposal},
     widget::{
@@ -173,7 +173,11 @@ impl<M> Widget<M> for PortalLayer<M> {
             return;
         }
         let dismiss = match event {
-            Event::Key(key) => key.code == KeyCode::Esc && ctx.phase() != EventPhase::Capture,
+            Event::Key(key) => {
+                key.kind == KeyEventKind::Press
+                    && key.code == KeyCode::Esc
+                    && ctx.phase() != EventPhase::Capture
+            }
             Event::Mouse(mouse) if mouse.kind == MouseEventKind::Down(MouseButton::Left) => {
                 let path = ctx
                     .path()

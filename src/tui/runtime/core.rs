@@ -308,10 +308,6 @@ impl<State, M: Send + 'static> Runtime<State, M> {
             rendered = true;
         }
         for event in events {
-            if matches!(event, Event::Key(key) if key.kind == crate::tui::event::KeyEventKind::Release)
-            {
-                continue;
-            }
             if let Event::Resize(width, height) = event {
                 self.resize((*width, *height).into());
             }

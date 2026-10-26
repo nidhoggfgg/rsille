@@ -60,6 +60,71 @@ enum LogsMsg {
     Source(Arc<Logs>),
 }
 #[test]
+fn virtual_list_ignores_releases_but_preserves_repeats_and_raw_input() {
+    #[derive(Default)]
+    struct State {
+        window: VirtualListState,
+        changes: usize,
+        releases: usize,
+    }
+    enum Msg {
+        Window(VirtualListState),
+        Released,
+    }
+    let source = Arc::new(Logs {
+        len: 100,
+        start: 0,
+        reversed: false,
+        reads: Arc::new(AtomicUsize::new(0)),
+    });
+    let mut app = App::new(State::default())
+        .on_input(|input| {
+            matches!(input, InputEvent::Terminal(Event::Key(key)) if key.kind == KeyEventKind::Release)
+                .then_some(Msg::Released)
+        })
+        .update(|state, msg, _| match msg {
+            Msg::Window(window) => {
+                state.window = window;
+                state.changes += 1;
+            }
+            Msg::Released => state.releases += 1,
+        })
+        .view(move |state| {
+            VirtualList::new(
+                source.clone(),
+                &state.window,
+                VirtualListConfig {
+                    height: 3,
+                    ..Default::default()
+                },
+                |_, row, _| label(format!("{row:?}")),
+            )
+            .on_change(Msg::Window)
+        })
+        .build()
+        .size(20, 3);
+    app.step(&[key(KeyCode::Down)]).unwrap();
+    assert_eq!(app.state().window.selected.as_deref(), Some("0"));
+    app.step(&[Event::Key(KeyEvent::new_with_kind(
+        KeyCode::Down,
+        KeyModifiers::empty(),
+        KeyEventKind::Release,
+    ))])
+    .unwrap();
+    assert_eq!(app.state().releases, 1);
+    assert_eq!(app.state().changes, 1);
+    assert_eq!(app.state().window.selected.as_deref(), Some("0"));
+    app.step(&[Event::Key(KeyEvent::new_with_kind(
+        KeyCode::Down,
+        KeyModifiers::empty(),
+        KeyEventKind::Repeat,
+    ))])
+    .unwrap();
+    assert_eq!(app.state().changes, 2);
+    assert_eq!(app.state().window.selected.as_deref(), Some("1"));
+}
+
+#[test]
 fn hundred_thousand_rows_build_only_window_and_preserve_keys_on_data_changes() {
     let reads = Arc::new(AtomicUsize::new(0));
     let builds = Rc::new(Cell::new(0));
@@ -725,6 +790,10 @@ fn a_nested_modal_routes_escape_to_its_own_boundary_before_ancestor_dismissal() 
         .build(
             |depth, next| *depth = next,
             |depth| {
+                let root = portal(button("background").key("background"));
+                if *depth == 0 {
+                    return root;
+                }
                 let mut content = portal(button("outer action").key("outer-action"));
                 if *depth == 2 {
                     content = content.layer(
@@ -735,7 +804,7 @@ fn a_nested_modal_routes_escape_to_its_own_boundary_before_ancestor_dismissal() 
                             .on_dismiss(|| 1),
                     );
                 }
-                portal(button("background").key("background")).layer(
+                root.layer(
                     PortalLayer::new(content)
                         .key("outer")
                         .modal(true)
@@ -747,9 +816,32 @@ fn a_nested_modal_routes_escape_to_its_own_boundary_before_ancestor_dismissal() 
         .size(30, 10);
     app.step(&[]).unwrap();
     assert_eq!(app.focused_key(), Some("inner-action"));
+    for kind in [KeyEventKind::Release, KeyEventKind::Repeat] {
+        app.step(&[Event::Key(KeyEvent::new_with_kind(
+            KeyCode::Esc,
+            KeyModifiers::empty(),
+            kind,
+        ))])
+        .unwrap();
+        assert_eq!(*app.state(), 2);
+        assert_eq!(app.focused_key(), Some("inner-action"));
+    }
     app.step(&[key(KeyCode::Esc)]).unwrap();
     assert_eq!(*app.state(), 1);
     assert_eq!(app.focused_key(), Some("outer-action"));
+    for kind in [KeyEventKind::Release, KeyEventKind::Repeat] {
+        app.step(&[Event::Key(KeyEvent::new_with_kind(
+            KeyCode::Esc,
+            KeyModifiers::empty(),
+            kind,
+        ))])
+        .unwrap();
+        assert_eq!(*app.state(), 1);
+        assert_eq!(app.focused_key(), Some("outer-action"));
+    }
+    app.step(&[key(KeyCode::Esc)]).unwrap();
+    assert_eq!(*app.state(), 0);
+    assert_eq!(app.focused_key(), Some("background"));
 }
 
 #[test]
