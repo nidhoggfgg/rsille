@@ -16,12 +16,12 @@ pub(crate) fn draw_scene(
     a: Color,
     b: Color,
 ) {
-    if dimensions.dot_width() < 2 || dimensions.dot_height() < 2 {
+    if dimensions.sample_width() < 2 || dimensions.sample_height() < 2 {
         return;
     }
     let mut image = Raster::new(
-        dimensions.dot_width() as usize,
-        dimensions.dot_height() as usize,
+        dimensions.sample_width() as usize,
+        dimensions.sample_height() as usize,
         BG,
     );
     let (a, b) = (Light::emission(a), Light::emission(b));

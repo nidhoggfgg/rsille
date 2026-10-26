@@ -3,7 +3,11 @@ use crate::{
     world::{Block, Hit, Vec3, World, HOTBAR},
     Msg,
 };
-use rsille::{render::chunk::Chunk, tui::prelude::*};
+use rsille::{
+    canvas::Canvas,
+    render::{chunk::Chunk, Draw},
+    tui::prelude::*,
+};
 
 pub const BG: Color = Color::Rgb(28, 30, 26);
 pub const TEXT: Color = Color::Rgb(236, 236, 219);
@@ -346,14 +350,16 @@ fn draw(chunk: &mut Chunk, world: &World) {
         }
     }
     tool(&mut pixels, w, ph, world.swing);
-    for y in 0..rows {
+    let mut canvas = Canvas::with_encoding(Encoding::HalfBlock);
+    canvas.set_bound((0, w as i32 - 1), (0, rows as i32 - 1));
+    canvas.fixed_bound(true);
+    for y in 0..ph {
         for x in 0..w {
-            let style = Style::default()
-                .fg(color(pixels[y * 2 * w + x]))
-                .bg(color(pixels[(y * 2 + 1) * w + x]))
-                .to_render_style();
-            let _ = chunk.set_char(x as u16, (y + 1) as u16, '▀', style);
+            canvas.set_color(x as i32, (ph - 1 - y) as i32, color(pixels[y * w + x]));
         }
+    }
+    if let Ok(view) = chunk.shrink(1, 6, 0, 0) {
+        let _ = canvas.draw(view);
     }
     let cross = Style::default()
         .fg(Color::Rgb(255, 255, 240))

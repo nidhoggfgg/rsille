@@ -1,102 +1,112 @@
-use std::cmp;
 use std::collections::HashMap;
 use std::io::Write;
 
-use crate::canvas::bound::Bound;
-use crate::canvas::braille::{Pixel, PixelOp};
-use crate::canvas::tile::Tile;
-use crate::canvas::utils::round;
+use crossterm::{
+    cursor::MoveToNextLine,
+    queue,
+    style::{Color, Print, ResetColor},
+};
 
-use crate::render::area::Size;
-use crate::render::chunk::Chunk;
-use crate::render::{Draw, DrawErr};
-use crossterm::cursor::MoveToNextLine;
-use crossterm::queue;
-use crossterm::style::Print;
-
-use crate::canvas::color::Colored;
-use crossterm::style::Colors;
+use super::bound::Bound;
+use super::encoder::encode;
+use super::sample::{Sample, Samples};
+use super::tile::Tile;
+use super::Encoding;
+use crate::render::{area::Size, chunk::Chunk, style::Stylized, Draw, DrawErr};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PaintErr;
 
-/// Implement this for painting on [`Canvas`](struct.Canvas.html)
+/// Implement this for painting on a [`Canvas`], independently of its encoding.
 pub trait Paint: Send + 'static {
-    /// Paint the object on the canvas
     fn paint<T>(&self, canvas: &mut Canvas, x: T, y: T) -> Result<(), PaintErr>
     where
         T: Into<f64>;
 }
 
-// this is just for err: "Box<T> not impl Paint" xd
 impl<T: Paint + ?Sized> Paint for Box<T> {
     fn paint<N>(&self, canvas: &mut Canvas, x: N, y: N) -> Result<(), PaintErr>
     where
         N: Into<f64>,
     {
-        // in canvas.paint, it will call Paint.paint
-        // but this won't fall into
-        // Paint.paint -> canvas.paint -> Paint.paint -> canvas.paint ...
-        //                                +-- not this function, it's that one upon there
-        canvas.paint(self, x, y)
+        (**self).paint(canvas, x, y)
     }
 }
 
+/// A sparse, Cartesian sample canvas encoded into terminal cells when drawn.
+///
+/// Coordinates grow right and upwards and are rounded to the nearest sample.
+/// Bounds and [`get_size`](Self::get_size) use terminal cells. Each cell holds
+/// 2×4 samples in [`Encoding::Braille`] or 1×2 in [`Encoding::HalfBlock`]. Colors
+/// remain attached to individual samples until encoding; empty samples expose
+/// the canvas background, or the destination background when none is specified.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Canvas {
     bound: Bound,
-    pixels: HashMap<Tile, Colored>,
+    encoding: Encoding,
+    samples: HashMap<Tile, Samples>,
+    background: Option<Color>,
 }
 
 impl Canvas {
-    /// Creates a new empty canvas with default settings.
-    ///
-    /// The canvas starts with no pixels and an unbounded drawing area.
-    #[inline]
+    /// Creates an empty, automatically expanding Braille canvas.
     #[must_use]
     pub fn new() -> Self {
-        let pixels = HashMap::new();
+        Self::default()
+    }
+
+    /// Selects the sample grid at construction. Encoding cannot change under an
+    /// existing drawing; construct a new canvas to render with another encoding.
+    #[must_use]
+    pub fn with_encoding(encoding: Encoding) -> Self {
         Self {
-            bound: Bound::new(),
-            pixels,
+            encoding,
+            ..Self::default()
         }
     }
 
-    /// Paints a target object on the canvas at the specified coordinates.
-    ///
-    /// This method delegates the actual painting to the target object's `paint` method.
-    pub fn paint<T, N>(&mut self, target: &T, x: N, y: N) -> Result<(), PaintErr>
-    where
-        T: Paint,
-        N: Into<f64>,
-    {
-        let (x, y) = (x.into(), y.into());
-        target.paint(self, x, y)?;
-        Ok(())
+    pub fn encoding(&self) -> Encoding {
+        self.encoding
     }
 
-    /// Prints the canvas content to stdout.
+    /// Sets the background for uncovered samples, including completely empty
+    /// cells inside the bounds.
+    /// This does not change any painted sample colors.
+    pub fn set_background(&mut self, color: impl Into<Color>) -> &mut Self {
+        self.background = Some(color.into());
+        self
+    }
+
+    /// Restores destination-background inheritance for uncovered samples.
+    pub fn clear_background(&mut self) -> &mut Self {
+        self.background = None;
+        self
+    }
+
+    pub fn paint<T: Paint, N: Into<f64>>(
+        &mut self,
+        target: &T,
+        x: N,
+        y: N,
+    ) -> Result<(), PaintErr> {
+        target.paint(self, x.into(), y.into())
+    }
+
+    /// Prints to stdout, using the terminal's current raw-mode setting.
     pub fn print(&self) {
         let is_raw = crossterm::terminal::is_raw_mode_enabled().unwrap_or(false);
-        let mut stdout = std::io::stdout();
-        self.print_on(&mut stdout, is_raw).unwrap();
+        self.print_on(&mut std::io::stdout(), is_raw).unwrap();
     }
 
-    /// Prints the canvas content to a specified writer.
-    ///
-    /// This method allows you to control where the canvas output goes and whether
-    /// to use raw terminal mode formatting.
-    pub fn print_on<W>(&self, w: &mut W, is_raw: bool) -> std::io::Result<()>
-    where
-        W: Write,
-    {
+    /// Prints the same encoded cells used by [`Draw`].
+    pub fn print_on<W: Write>(&self, w: &mut W, is_raw: bool) -> std::io::Result<()> {
         let ((minx, maxx), (miny, maxy)) = self.bound.get_bound();
         for row in (miny..=maxy).rev() {
             for col in minx..=maxx {
-                if let Some(pixel) = self.pixels.get(&Tile::from(col, row)) {
-                    pixel.queue(w)?;
-                } else {
-                    queue!(w, Print(Pixel::space()))?;
+                let cell = self.encode_cell(Tile::from(col, row));
+                cell.queue(w)?;
+                if cell.has_color() {
+                    queue!(w, ResetColor)?;
                 }
             }
             if is_raw {
@@ -105,165 +115,245 @@ impl Canvas {
                 queue!(w, Print("\n"))?;
             }
         }
-        w.flush()?;
-        Ok(())
+        w.flush()
     }
 
-    /// Clears all pixels from the canvas.
-    ///
-    /// This removes all drawn content but preserves the canvas boundary settings.
-    /// The canvas remains the same size but becomes empty.
+    /// Clears all samples, retaining bounds, encoding and background.
     pub fn clear(&mut self) {
-        self.pixels = HashMap::new();
+        self.samples.clear();
     }
 
-    /// Resets the canvas to its initial state.
-    ///
-    /// This clears all pixels and resets the boundary to default (unbounded).
-    /// The canvas will be completely empty and ready for new drawing.
+    /// Clears samples and restores automatically expanding bounds, retaining the
+    /// selected encoding and background.
     pub fn reset(&mut self) {
         self.bound = Bound::new();
         self.clear();
     }
 
-    /// Sets a pixel at the specified coordinates.
-    pub fn set<T>(&mut self, x: T, y: T) -> &mut Self
-    where
-        T: Into<f64> + Copy,
-    {
-        let tile = self.get_tile(x, y);
-        let (x, y) = (round(x), round(y));
-        if let Some(pixel) = self.pixels.get_mut(&tile) {
-            pixel.set(x, y);
-        } else {
-            let mut pixel = Colored::new();
-            pixel.set(x, y);
-            self.pixels.insert(tile, pixel);
-        }
-
-        self
+    /// Occupies a sample with the inherited foreground color.
+    pub fn set<T: Into<f64> + Copy>(&mut self, x: T, y: T) -> &mut Self {
+        self.set_sample(x, y, Sample { color: None })
     }
 
-    /// Sets a colored pixel at the specified coordinates.
-    pub fn set_colorful<T>(&mut self, x: T, y: T, colors: Colors) -> &mut Self
-    where
-        T: Into<f64> + Copy,
-    {
-        self.set(x, y);
-        let tile = Tile::from_xy(x, y);
-        if let Some(pixel) = self.pixels.get_mut(&tile) {
-            if let Some(foreground) = colors.foreground {
-                pixel.set_foregound_color(foreground);
-            }
-            if let Some(background) = colors.background {
-                pixel.set_background_color(background);
-            }
-        } else {
-            unreachable!("pixel not found")
-        }
-
-        self
-    }
-
-    /// Toggles a pixel at the specified coordinates.
+    /// Paints one sample, retaining its color until terminal-cell encoding.
     ///
-    /// This method toggles the state of a pixel at the given coordinates.
-    /// If a pixel exists, it will be toggled. If no pixel exists, a new one
-    /// will be created in the toggled state.
-    pub fn toggle<T>(&mut self, x: T, y: T) -> &mut Self
-    where
-        T: Into<f64> + Copy,
-    {
-        let tile = self.get_tile(x, y);
-        let (x, y) = (round(x), round(y));
-        if let Some(pixel) = self.pixels.get_mut(&tile) {
-            pixel.toggle(x, y);
-        } else {
-            let mut pixel = Colored::new();
-            pixel.toggle(x, y);
-            self.pixels.insert(tile, pixel);
-        }
+    /// Half-block preserves both sample colors exactly. Braille preserves the
+    /// coverage mask of partially painted cells and averages their ink colors;
+    /// fully colored cells fit their eight samples to two terminal colors.
+    /// Palette colors are preserved when possible; mixing uses the conventional
+    /// xterm palette. Use RGB colors when exact color fitting is needed.
+    pub fn set_color<T: Into<f64> + Copy>(
+        &mut self,
+        x: T,
+        y: T,
+        color: impl Into<Color>,
+    ) -> &mut Self {
+        self.set_sample(
+            x,
+            y,
+            Sample {
+                color: Some(color.into()),
+            },
+        )
+    }
 
+    fn set_sample<T: Into<f64> + Copy>(&mut self, x: T, y: T, sample: Sample) -> &mut Self {
+        if let Some((tile, index)) = self.location(x, y) {
+            self.bound.update(tile);
+            self.samples.entry(tile).or_default().0[index] = Some(sample);
+        }
         self
     }
 
-    /// Draws a line between two points.
-    pub fn line<T>(&mut self, xy1: (T, T), xy2: (T, T)) -> &mut Self
-    where
-        T: Into<f64>,
-    {
-        let (x1, y1) = (round(xy1.0), round(xy1.1));
-        let (x2, y2) = (round(xy2.0), round(xy2.1));
-        let d = |v1, v2| {
-            if v1 <= v2 {
-                (v2 - v1, 1.0)
-            } else {
-                (v1 - v2, -1.0)
+    /// Removes a sample without changing the canvas bounds.
+    pub fn unset<T: Into<f64> + Copy>(&mut self, x: T, y: T) -> &mut Self {
+        if let Some((tile, index)) = self.location(x, y) {
+            if let Some(samples) = self.samples.get_mut(&tile) {
+                samples.0[index] = None;
+                if samples.0.iter().all(Option::is_none) {
+                    self.samples.remove(&tile);
+                }
             }
-        };
-
-        let (xdiff, xdir) = d(x1, x2);
-        let (ydiff, ydif) = d(y1, y2);
-        let r = cmp::max(xdiff, ydiff);
-
-        for i in 0..=r {
-            let r = r as f64;
-            let i = i as f64;
-            let (xd, yd) = (xdiff as f64, ydiff as f64);
-            let x = x1 as f64 + i * xd / r * xdir;
-            let y = y1 as f64 + i * yd / r * ydif;
-            self.set(x, y);
         }
-
         self
     }
 
-    /// Gets the current size of the canvas.
+    /// Removes occupied samples, or sets empty samples with inherited foreground.
+    pub fn toggle<T: Into<f64> + Copy>(&mut self, x: T, y: T) -> &mut Self {
+        if let Some((tile, index)) = self.location(x, y) {
+            if self
+                .samples
+                .get(&tile)
+                .is_some_and(|s| s.0[index].is_some())
+            {
+                self.unset(x, y);
+            } else {
+                self.set(x, y);
+            }
+        }
+        self
+    }
+
+    /// Draws a line in sample coordinates. Non-finite coordinates are ignored;
+    /// fixed bounds clip the line before rasterization.
+    pub fn line<T: Into<f64>>(&mut self, from: (T, T), to: (T, T)) -> &mut Self {
+        let (mut x, mut y) = (from.0.into(), from.1.into());
+        let (end_x, end_y) = (to.0.into(), to.1.into());
+        if ![x, y, end_x, end_y].into_iter().all(f64::is_finite) {
+            return self;
+        }
+        x = x.round();
+        y = y.round();
+        let (end_x, end_y) = (end_x.round(), end_y.round());
+        let (dx, dy) = (end_x - x, end_y - y);
+        if !dx.is_finite() || !dy.is_finite() {
+            return self;
+        }
+        let (mut enter, mut leave) = (0.0_f64, 1.0_f64);
+        if self.bound.is_fixed() {
+            let ((minx, maxx), (miny, maxy)) = self.bound.get_bound();
+            let (w, h) = self.encoding.samples_per_cell();
+            let (w, h) = (f64::from(w), f64::from(h));
+            for (p, q) in [
+                (-dx, x - f64::from(minx) * w),
+                (dx, (f64::from(maxx) + 1.0) * w - 1.0 - x),
+                (-dy, y - f64::from(miny) * h),
+                (dy, (f64::from(maxy) + 1.0) * h - 1.0 - y),
+            ] {
+                if p == 0.0 {
+                    if q < 0.0 {
+                        return self;
+                    }
+                } else {
+                    let t = q / p;
+                    if p < 0.0 {
+                        enter = enter.max(t);
+                    } else {
+                        leave = leave.min(t);
+                    }
+                    if enter > leave {
+                        return self;
+                    }
+                }
+            }
+        }
+        let (end_x, end_y) = ((x + leave * dx).round(), (y + leave * dy).round());
+        x = (x + enter * dx).round();
+        y = (y + enter * dy).round();
+        if ![x, y, end_x, end_y]
+            .into_iter()
+            .all(|v| v >= f64::from(i32::MIN) && v <= f64::from(i32::MAX))
+        {
+            return self;
+        }
+        let steps = (end_x - x).abs().max((end_y - y).abs()) as usize;
+        if steps == 0 {
+            return self.set(x, y);
+        }
+        for i in 0..=steps {
+            let t = i as f64 / steps as f64;
+            self.set(x + (end_x - x) * t, y + (end_y - y) * t);
+        }
+        self
+    }
+
+    /// Current terminal-cell dimensions, independent of sample density.
     pub fn get_size(&self) -> (u32, u32) {
         let ((minx, maxx), (miny, maxy)) = self.bound.get_bound();
-        ((maxx - minx + 1) as u32, (maxy - miny + 1) as u32)
+        let size = |min: i32, max: i32| {
+            u32::try_from(i64::from(max) - i64::from(min) + 1).unwrap_or(u32::MAX)
+        };
+        (size(minx, maxx), size(miny, maxy))
     }
 
-    /// Sets the boundary of the canvas.
-    ///
-    /// By default, the canvas is unbounded and will automatically expand as new pixels are drawn.
-    /// However, during animations, this automatic expansion can cause the drawing to shift
-    /// as the canvas size changes, which is undesirable.
-    ///
-    /// Setting a fixed boundary prevents the canvas from growing beyond specified limits.
-    /// Note: Drawing outside the boundary will still cause the canvas to expand if needed.
-    ///
-    /// To make the boundary truly fixed (preventing any expansion), call [`fixed_bound`](Self::fixed_bound).
+    /// Sets inclusive bounds in terminal cells. These expand with drawing until
+    /// [`fixed_bound(true)`](Self::fixed_bound) is called.
     pub fn set_bound(&mut self, bound_x: (i32, i32), bound_y: (i32, i32)) {
+        assert!(
+            bound_x.0 <= bound_x.1 && bound_y.0 <= bound_y.1,
+            "invalid canvas bounds"
+        );
         self.bound.set_bound(bound_x, bound_y);
     }
 
-    /// Sets whether the canvas boundary is fixed.
-    ///
-    /// When `is_fixed` is true, the canvas boundary cannot be expanded beyond the current limits.
-    /// This is useful for creating fixed-size canvases that won't grow during drawing operations.
+    /// Fixed bounds reject out-of-bounds samples before allocating storage.
     pub fn fixed_bound(&mut self, is_fixed: bool) {
         self.bound.fixed_bound(is_fixed);
     }
 
-    fn get_tile<T>(&mut self, x: T, y: T) -> Tile
-    where
-        T: Into<f64> + Copy,
-    {
-        let tile = Tile::from_xy(x, y);
-        self.bound.update(tile);
-        tile
+    fn location<T: Into<f64> + Copy>(&self, x: T, y: T) -> Option<(Tile, usize)> {
+        let (x, y) = (x.into().round(), y.into().round());
+        if ![x, y]
+            .into_iter()
+            .all(|v| v.is_finite() && v >= f64::from(i32::MIN) && v <= f64::from(i32::MAX))
+        {
+            return None;
+        }
+        let (x, y) = (x as i32, y as i32);
+        let (w, h) = self.encoding.samples_per_cell();
+        let (w, h) = (i32::from(w), i32::from(h));
+        let tile = Tile::from(x.div_euclid(w), y.div_euclid(h));
+        if self.bound.is_fixed() && !self.bound.tile_inside(tile) {
+            return None;
+        }
+        Some((tile, (y.rem_euclid(h) * w + x.rem_euclid(w)) as usize))
+    }
+
+    fn encode_cell(&self, tile: Tile) -> Stylized {
+        encode(
+            self.encoding,
+            self.samples.get(&tile).unwrap_or(&Samples::default()),
+            self.background,
+        )
+    }
+
+    fn draw_cell(&self, chunk: &mut Chunk, x: u16, y: u16, tile: Tile) -> Result<(), DrawErr> {
+        let mut cell = self.encode_cell(tile);
+        // Block characters can be double-width under a CJK text policy. Use
+        // one-column Braille equivalents so graphics retain their cell geometry.
+        let width = cell.width_with(chunk.text_metrics(), x as usize);
+        if width != 1 {
+            let symbol = match cell.as_char() {
+                Some('▀') => '\u{281b}',
+                Some('▄') => '\u{28e4}',
+                Some('█') => '\u{28ff}',
+                _ => {
+                    return Err(DrawErr::content_too_wide(
+                        width as u16,
+                        chunk.area().width(),
+                        x,
+                    ))
+                }
+            };
+            cell.set_char(symbol);
+        }
+        chunk.set_forced(x, y, cell)?;
+        Ok(())
     }
 }
 
 impl Draw for Canvas {
     fn draw(&mut self, mut chunk: Chunk) -> Result<Size, DrawErr> {
-        for (t, p) in &self.pixels {
-            if let Some((x, y)) = self.bound.get_terminal_xy(*t) {
-                let x = x as u16;
-                let y = y as u16;
-                if chunk.is_inside(x, y) {
-                    chunk.set_forced(x, y, (*p).into())?;
+        if self.background.is_some() {
+            let ((minx, _), (_, maxy)) = self.bound.get_bound();
+            let (width, height) = self.get_size();
+            for y in 0..height.min(u32::from(chunk.area().height())) {
+                for x in 0..width.min(u32::from(chunk.area().width())) {
+                    let tile = Tile::from(
+                        (i64::from(minx) + i64::from(x)) as i32,
+                        (i64::from(maxy) - i64::from(y)) as i32,
+                    );
+                    self.draw_cell(&mut chunk, x as u16, y as u16, tile)?;
+                }
+            }
+        } else {
+            for tile in self.samples.keys() {
+                if let Some((x, y)) = self.bound.get_terminal_xy(*tile) {
+                    if let (Ok(x), Ok(y)) = (u16::try_from(x), u16::try_from(y)) {
+                        if chunk.is_inside(x, y) {
+                            self.draw_cell(&mut chunk, x, y, *tile)?;
+                        }
+                    }
                 }
             }
         }

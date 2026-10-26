@@ -4,7 +4,7 @@
 #[path = "render/api.rs"]
 pub mod render;
 
-/// Braille canvas, compiled from the internal canvas crate's sources.
+/// Sample-based canvas with Braille and Half-block terminal encoding.
 #[path = "canvas/api.rs"]
 pub mod canvas;
 

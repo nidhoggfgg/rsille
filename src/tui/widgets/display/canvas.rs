@@ -1,7 +1,8 @@
-//! Canvas widget — adapts the braille canvas crate into the TUI layout system.
+//! Canvas widget — sample-based drawing with selectable terminal encoding.
 
 use std::fmt;
 
+use crate::canvas::Encoding;
 use crate::render::Draw;
 
 use super::world_canvas::{CanvasPoint, CanvasViewport, WorldCanvas};
@@ -11,38 +12,54 @@ use crate::tui::layout::Constraints;
 use crate::tui::widget::EventPhase;
 use crate::tui::widget::{EventCtx, RenderCtx, Widget};
 
-/// Dimensions passed to a [`CanvasWidget`] draw callback.
+/// Dimensions and transforms passed to a [`CanvasWidget`] draw callback.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CanvasContext {
     cell_width: u16,
     cell_height: u16,
+    encoding: Encoding,
     viewport: Option<CanvasViewport>,
 }
 
 impl CanvasContext {
+    /// A context using the default Braille encoding.
     pub fn new(cell_width: u16, cell_height: u16) -> Self {
         Self {
             cell_width,
             cell_height,
+            encoding: Encoding::default(),
             viewport: None,
         }
+    }
+
+    pub fn with_encoding(mut self, encoding: Encoding) -> Self {
+        self.encoding = encoding;
+        self
+    }
+
+    pub fn encoding(self) -> Encoding {
+        self.encoding
     }
 
     pub fn with_viewport(mut self, viewport: CanvasViewport) -> Self {
         self.viewport = Some(viewport);
         self
     }
+
+    /// The default viewport follows sample dimensions. Set an explicit viewport
+    /// to retain world extents when changing encoding or terminal dimensions.
     pub fn viewport(self) -> CanvasViewport {
         self.viewport.unwrap_or_else(|| {
             CanvasViewport::new(
                 0.0,
                 0.0,
-                (self.dot_width() - 1).max(1) as f64,
-                (self.dot_height() - 1).max(1) as f64,
+                (self.sample_width() - 1).max(1) as f64,
+                (self.sample_height() - 1).max(1) as f64,
             )
         })
     }
-    pub fn world_to_dot(self, point: CanvasPoint) -> Option<CanvasPoint> {
+
+    pub fn world_to_sample(self, point: CanvasPoint) -> Option<CanvasPoint> {
         if self.cell_width == 0
             || self.cell_height == 0
             || !point.x.is_finite()
@@ -52,12 +69,14 @@ impl CanvasContext {
         }
         let v = self.viewport();
         let point = CanvasPoint::new(
-            (point.x - v.x()) / v.width() * (self.dot_width() - 1) as f64,
-            (point.y - v.y()) / v.height() * (self.dot_height() - 1) as f64,
+            (point.x - v.x()) / v.width() * (self.sample_width() - 1) as f64,
+            (point.y - v.y()) / v.height() * (self.sample_height() - 1) as f64,
         );
         (point.x.is_finite() && point.y.is_finite()).then_some(point)
     }
-    pub fn dot_to_world(self, point: CanvasPoint) -> Option<CanvasPoint> {
+
+    /// A one-sample axis maps to the midpoint of its world extent.
+    pub fn sample_to_world(self, point: CanvasPoint) -> Option<CanvasPoint> {
         if self.cell_width == 0
             || self.cell_height == 0
             || !point.x.is_finite()
@@ -66,22 +85,35 @@ impl CanvasContext {
             return None;
         }
         let v = self.viewport();
+        let fraction = |value: f64, count: i32| {
+            if count == 1 {
+                0.5
+            } else {
+                value / (count - 1) as f64
+            }
+        };
         let point = CanvasPoint::new(
-            v.x() + point.x / (self.dot_width() - 1) as f64 * v.width(),
-            v.y() + point.y / (self.dot_height() - 1) as f64 * v.height(),
+            v.x() + fraction(point.x, self.sample_width()) * v.width(),
+            v.y() + fraction(point.y, self.sample_height()) * v.height(),
         );
         (point.x.is_finite() && point.y.is_finite()).then_some(point)
     }
-    /// Terminal-cell center in world coordinates, accounting for the terminal's downward y axis.
+
+    /// Terminal-cell center in world coordinates, accounting for the downward
+    /// terminal y axis and this encoding's sample dimensions.
     pub fn cell_to_world(self, x: u16, y: u16) -> Option<CanvasPoint> {
         if x >= self.cell_width || y >= self.cell_height {
             return None;
         }
-        self.dot_to_world(CanvasPoint::new(
-            f64::from(x) * 2.0 + 0.5,
-            f64::from(self.dot_height()) - f64::from(y) * 4.0 - 2.5,
+        let (w, h) = self.encoding.samples_per_cell();
+        self.sample_to_world(CanvasPoint::new(
+            f64::from(x) * f64::from(w) + f64::from(w - 1) / 2.0,
+            f64::from(self.sample_height() - 1)
+                - f64::from(y) * f64::from(h)
+                - f64::from(h - 1) / 2.0,
         ))
     }
+
     pub fn world<'a>(self, canvas: &'a mut crate::canvas::Canvas) -> WorldCanvas<'a> {
         WorldCanvas::new(canvas, self)
     }
@@ -96,14 +128,14 @@ impl CanvasContext {
         self.cell_height
     }
 
-    /// Width of the drawable braille grid in dot coordinates.
-    pub fn dot_width(&self) -> i32 {
-        self.cell_width as i32 * 2
+    /// Width of the drawable grid in sample coordinates.
+    pub fn sample_width(&self) -> i32 {
+        i32::from(self.cell_width) * i32::from(self.encoding.samples_per_cell().0)
     }
 
-    /// Height of the drawable braille grid in dot coordinates.
-    pub fn dot_height(&self) -> i32 {
-        self.cell_height as i32 * 4
+    /// Height of the drawable grid in sample coordinates.
+    pub fn sample_height(&self) -> i32 {
+        i32::from(self.cell_height) * i32::from(self.encoding.samples_per_cell().1)
     }
 }
 
@@ -115,17 +147,18 @@ pub struct CanvasPointer {
     pub modifiers: KeyModifiers,
 }
 
-/// Widget for drawing into a fixed-size braille canvas.
+/// Widget for drawing into a fixed-size sample canvas. Braille is the default.
 ///
 /// The draw callback receives a fresh [`crate::canvas::Canvas`] every render.
 /// The widget sets the canvas bounds to the allocated terminal-cell area before
-/// calling the callback, so drawing can use dot coordinates from `0..dot_width`
-/// and `0..dot_height` without manually sizing the canvas.
+/// calling the callback, so drawing can use sample coordinates from `0..sample_width`
+/// and `0..sample_height` without manually sizing the canvas.
 pub struct CanvasWidget<M = (), F = fn(&mut crate::canvas::Canvas, CanvasContext)> {
     draw: F,
     constraints: Constraints,
     widget_key: Option<String>,
     viewport: Option<CanvasViewport>,
+    encoding: Encoding,
     on_pointer: Option<Box<dyn Fn(CanvasPointer) -> M>>,
     _phantom: std::marker::PhantomData<M>,
 }
@@ -133,6 +166,7 @@ pub struct CanvasWidget<M = (), F = fn(&mut crate::canvas::Canvas, CanvasContext
 impl<M, F> fmt::Debug for CanvasWidget<M, F> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("CanvasWidget")
+            .field("encoding", &self.encoding)
             .field("constraints", &self.constraints)
             .field("widget_key", &self.widget_key)
             .finish_non_exhaustive()
@@ -155,9 +189,16 @@ where
             },
             widget_key: None,
             viewport: None,
+            encoding: Encoding::default(),
             on_pointer: None,
             _phantom: std::marker::PhantomData,
         }
+    }
+
+    /// Select the encoding used by drawing dimensions and pointer transforms.
+    pub fn encoding(mut self, encoding: Encoding) -> Self {
+        self.encoding = encoding;
+        self
     }
 
     pub fn viewport(mut self, viewport: CanvasViewport) -> Self {
@@ -219,11 +260,12 @@ where
             return;
         }
 
-        let mut canvas_ctx = CanvasContext::new(area.width(), area.height());
+        let mut canvas_ctx =
+            CanvasContext::new(area.width(), area.height()).with_encoding(self.encoding);
         if let Some(viewport) = self.viewport {
             canvas_ctx = canvas_ctx.with_viewport(viewport);
         }
-        let mut canvas = crate::canvas::Canvas::new();
+        let mut canvas = crate::canvas::Canvas::with_encoding(self.encoding);
         canvas.set_bound(
             (0, area.width().saturating_sub(1) as i32),
             (0, area.height().saturating_sub(1) as i32),
@@ -250,7 +292,8 @@ where
         let Some(area) = ctx.bounds() else {
             return;
         };
-        let mut context = CanvasContext::new(area.width(), area.height());
+        let mut context =
+            CanvasContext::new(area.width(), area.height()).with_encoding(self.encoding);
         if let Some(viewport) = self.viewport {
             context = context.with_viewport(viewport);
         }
@@ -303,7 +346,7 @@ mod tests {
     use std::collections::HashMap;
 
     #[test]
-    fn canvas_widget_passes_cell_and_dot_dimensions() {
+    fn canvas_widget_passes_cell_and_sample_dimensions() {
         let seen = RefCell::new(None);
         let widget = canvas::<(), _>(|canvas, ctx| {
             *seen.borrow_mut() = Some(ctx);
@@ -314,8 +357,8 @@ mod tests {
 
         assert_eq!(*seen.borrow(), Some(CanvasContext::new(5, 3)));
         let ctx = seen.borrow().unwrap();
-        assert_eq!(ctx.dot_width(), 10);
-        assert_eq!(ctx.dot_height(), 12);
+        assert_eq!(ctx.sample_width(), 10);
+        assert_eq!(ctx.sample_height(), 12);
     }
 
     #[test]
@@ -332,14 +375,7 @@ mod tests {
     #[test]
     fn canvas_widget_preserves_canvas_colors() {
         let widget = canvas::<(), _>(|canvas, _ctx| {
-            canvas.set_colorful(
-                0,
-                0,
-                Colors {
-                    foreground: Some(Color::Red),
-                    background: None,
-                },
-            );
+            canvas.set_color(0, 0, Color::Red);
         });
 
         let buffer = render_widget(&widget, 2, 1);
@@ -369,6 +405,53 @@ mod tests {
             style.colors.and_then(|colors| colors.background),
             Some(Color::Blue)
         );
+    }
+
+    #[test]
+    fn half_block_widget_shares_encoding_dimensions_and_world_colors() {
+        let widget = canvas::<(), _>(|surface, ctx| {
+            assert_eq!(surface.encoding(), ctx.encoding());
+            assert_eq!((ctx.sample_width(), ctx.sample_height()), (2, 2));
+            let world = ctx.world(surface);
+            world
+                .color(crate::tui::style::Color::Rgb(255, 0, 0))
+                .point(CanvasPoint::new(0.0, 1.0));
+            ctx.world(surface)
+                .color(Color::Blue)
+                .point(CanvasPoint::new(0.0, 0.0));
+        })
+        .encoding(Encoding::HalfBlock)
+        .fixed(2, 1);
+        let buffer = render_widget(&widget, 2, 1);
+        assert_eq!(cell_char(&buffer, 0, 0), Some('▀'));
+        let colors = buffer.content()[0].content.style.colors.unwrap();
+        assert_eq!(colors.foreground, Some(Color::Rgb { r: 255, g: 0, b: 0 }));
+        assert_eq!(colors.background, Some(Color::Blue));
+    }
+
+    #[test]
+    fn one_column_half_block_maps_to_world_midpoint_without_division_by_zero() {
+        let ctx = CanvasContext::new(1, 1)
+            .with_encoding(Encoding::HalfBlock)
+            .with_viewport(CanvasViewport::new(-10.0, -20.0, 20.0, 40.0));
+        assert_eq!(
+            ctx.world_to_sample(CanvasPoint::new(7.0, 20.0)),
+            Some(CanvasPoint::new(0.0, 1.0))
+        );
+        assert_eq!(
+            ctx.sample_to_world(CanvasPoint::new(0.0, 1.0)),
+            Some(CanvasPoint::new(0.0, 20.0))
+        );
+        assert_eq!(ctx.cell_to_world(0, 0), Some(CanvasPoint::new(0.0, 0.0)));
+        assert!(ctx.cell_to_world(1, 0).is_none());
+        let widget = canvas::<(), _>(|surface, ctx| {
+            ctx.world(surface)
+                .line(CanvasPoint::new(-1e6, 0.0), CanvasPoint::new(1e6, 0.0));
+        })
+        .encoding(Encoding::HalfBlock)
+        .viewport(ctx.viewport())
+        .fixed(1, 1);
+        assert_ne!(cell_char(&render_widget(&widget, 1, 1), 0, 0), Some(' '));
     }
 
     fn render_widget<F>(widget: &CanvasWidget<(), F>, width: u16, height: u16) -> Buffer

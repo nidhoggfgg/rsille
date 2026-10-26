@@ -1,7 +1,7 @@
 # rsille v3
 
 A Rust terminal application framework with composable widgets, Unicode editing,
-layout, animation, background tasks, and braille graphics. v3 is under development;
+layout, animation, background tasks, and sample-based terminal graphics. v3 is under development;
 this branch uses the API below. [中文](README_cn.md) · [Migration](MIGRATION_V3.md)
 
 ```toml
@@ -92,7 +92,7 @@ Only **`rsille`** is published. Use its three public modules:
 | --- | --- |
 | `rsille::tui` | Application, widgets, layout and effects |
 | `rsille::render` | Terminal buffers, Unicode text and rendering |
-| `rsille::canvas` | Braille graphics, including `Canvas` |
+| `rsille::canvas` | Sample graphics with Braille and Half-block encoding |
 
 The repository retains private `tui`, `render` and `canvas` workspace crates for
 independent development and testing. All three have `publish = false`. Their thin
@@ -118,6 +118,31 @@ render::Builder::new().size((80, 10)).append_newline(true)
     .build_render(canvas, std::io::stdout()).render()?;
 # Ok::<(), std::io::Error>(())
 ```
+
+`Canvas::new()` defaults to Braille (2×4 samples per cell). Use
+`Canvas::with_encoding(Encoding::HalfBlock)` for two vertically stacked color
+samples per cell. `set_color(x, y, color)` retains each sample's color until
+encoding; `set_background(color)` fills uncovered samples and empty cells inside
+the bounds. Both accept crossterm colors and TUI colors. Bounds and `get_size()`
+use terminal cells; drawing coordinates use samples, with y increasing upwards.
+
+TUI canvases share the same API and world primitives:
+
+```rust
+use rsille::tui::prelude::*;
+
+let widget = canvas::<(), _>(|surface, ctx| {
+    ctx.world(surface).color(Color::Rgb(90, 210, 255))
+        .line(CanvasPoint::new(-1.0, -1.0), CanvasPoint::new(1.0, 1.0));
+})
+.encoding(Encoding::HalfBlock)
+.viewport(CanvasViewport::new(-1.0, -1.0, 2.0, 2.0));
+```
+
+`ctx.sample_width()` / `sample_height()` follow the selected encoding. Use an
+explicit viewport to preserve world extents when switching encodings; drawing
+and pointer messages use the same transform. Run `cargo run -p tui --example canvas`
+to compare the two encodings.
 
 Validate the workspace and publish archives:
 

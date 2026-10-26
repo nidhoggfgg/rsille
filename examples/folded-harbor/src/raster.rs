@@ -1,7 +1,7 @@
-//! A small CPU light buffer, resolved through the public braille Canvas API.
+//! A small CPU light buffer, resolved through the public sample-based Canvas API.
 use std::ops::{Add, AddAssign, Mul};
 
-use crossterm::style::{Color as TerminalColor, Colors};
+use crossterm::style::Color as TerminalColor;
 use rsille::{canvas::Canvas, tui::prelude::Color};
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -30,10 +30,6 @@ impl Light {
 
     fn energy(self) -> f64 {
         self.0 * 0.2126 + self.1 * 0.7152 + self.2 * 0.0722
-    }
-
-    fn distance(self, other: Self) -> f64 {
-        (self.0 - other.0).powi(2) + (self.1 - other.1).powi(2) + (self.2 - other.2).powi(2)
     }
 
     fn exposed(self) -> Self {
@@ -171,55 +167,14 @@ impl Raster {
     }
 
     pub fn resolve(&self, canvas: &mut Canvas) {
-        // A braille cell has one foreground AND one background. Fit both to its
-        // eight samples, instead of letting the last dot overwrite every color.
-        for cy in 0..self.height / 4 {
-            for cx in 0..self.width / 2 {
-                let samples: [Light; 8] = std::array::from_fn(|i| {
-                    self.pixels[(cy * 4 + i / 2) * self.width + cx * 2 + i % 2].exposed()
-                });
-                let mut low = samples[0];
-                let mut high = samples[0];
-                for sample in samples {
-                    if sample.energy() < low.energy() {
-                        low = sample;
-                    }
-                    if sample.energy() > high.energy() {
-                        high = sample;
-                    }
-                }
-                for _ in 0..2 {
-                    let (mut dark, mut bright) = (Light::default(), Light::default());
-                    let (mut dark_count, mut bright_count) = (0, 0);
-                    for sample in samples {
-                        if sample.distance(low) < sample.distance(high) {
-                            dark += sample;
-                            dark_count += 1;
-                        } else {
-                            bright += sample;
-                            bright_count += 1;
-                        }
-                    }
-                    if dark_count > 0 {
-                        low = dark * (1.0 / dark_count as f64);
-                    }
-                    if bright_count > 0 {
-                        high = bright * (1.0 / bright_count as f64);
-                    }
-                }
-                let colors = Colors {
-                    foreground: Some(high.terminal()),
-                    background: Some(low.terminal()),
-                };
-                for (i, sample) in samples.into_iter().enumerate() {
-                    if sample.distance(high) <= sample.distance(low) {
-                        canvas.set_colorful(
-                            (cx * 2 + i % 2) as f64,
-                            (self.height - 1 - (cy * 4 + i / 2)) as f64,
-                            colors,
-                        );
-                    }
-                }
+        // Keep sample colors intact; Canvas owns terminal-cell color fitting.
+        for y in 0..self.height {
+            for x in 0..self.width {
+                canvas.set_color(
+                    x as f64,
+                    (self.height - 1 - y) as f64,
+                    self.pixels[y * self.width + x].exposed().terminal(),
+                );
             }
         }
     }

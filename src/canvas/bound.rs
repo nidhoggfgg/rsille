@@ -38,7 +38,7 @@ impl Bound {
 
         let (x, y) = tile.get();
         // reverse the y-axis, because the y-axis is reversed in the terminal
-        Some((x - self.minx, self.maxy - y))
+        Some((x.checked_sub(self.minx)?, self.maxy.checked_sub(y)?))
     }
 
     #[inline]
@@ -69,5 +69,9 @@ impl Bound {
     #[inline]
     pub(crate) fn fixed_bound(&mut self, is_fixed: bool) {
         self.fixed = is_fixed;
+    }
+
+    pub(crate) fn is_fixed(&self) -> bool {
+        self.fixed
     }
 }

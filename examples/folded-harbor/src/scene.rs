@@ -207,8 +207,8 @@ impl Painter<'_> {
 
 pub fn draw(canvas: &mut Canvas, dimensions: CanvasContext, world: &World) {
     let (w, h) = (
-        dimensions.dot_width() as usize,
-        dimensions.dot_height() as usize,
+        dimensions.sample_width() as usize,
+        dimensions.sample_height() as usize,
     );
     if w < 2 || h < 4 {
         return;

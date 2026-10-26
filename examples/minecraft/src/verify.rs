@@ -46,7 +46,7 @@ pub fn smoke() -> Result<(), Box<dyn std::error::Error>> {
             .frame()
             .content()
             .iter()
-            .filter(|c| c.content.as_char() == Some('▀'))
+            .filter(|c| matches!(c.content.as_char(), Some('▀' | '▄' | '█')))
             .count()
             > 2500
     );
@@ -237,10 +237,13 @@ fn svg(buffer: &Buffer) -> String {
             output,
             "<rect x=\"{x}\" y=\"{y}\" width=\"10\" height=\"20\" fill=\"{bg}\"/>"
         );
-        if cell.content.as_char() == Some('▀') {
+        if let Some(symbol @ ('▀' | '▄' | '█')) = cell.content.as_char() {
+            let top = if symbol == '▄' { &bg } else { &fg };
+            let bottom = if symbol == '▀' { &bg } else { &fg };
             let _ = write!(
                 output,
-                "<rect x=\"{x}\" y=\"{y}\" width=\"10\" height=\"10\" fill=\"{fg}\"/>"
+                "<rect x=\"{x}\" y=\"{y}\" width=\"10\" height=\"10\" fill=\"{top}\"/><rect x=\"{x}\" y=\"{}\" width=\"10\" height=\"10\" fill=\"{bottom}\"/>",
+                y + 10
             );
         } else {
             let glyph = cell

@@ -1,7 +1,7 @@
-//! World-space braille drawing. All primitives clip before rasterization.
+//! World-space sample drawing with selectable terminal encoding. All primitives clip before rasterization.
 use super::canvas::CanvasContext;
 use crate::canvas::Canvas;
-use crossterm::style::Colors;
+use crossterm::style::Color;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CanvasPoint {
@@ -86,38 +86,43 @@ impl CanvasViewport {
 }
 
 /// Drawing adapter obtained from `CanvasContext::world`. The raw Canvas API is
-/// still available in the original callback for existing dot-coordinate drawings.
+/// still available in the original callback for sample-coordinate drawings.
 pub struct WorldCanvas<'a> {
     canvas: &'a mut Canvas,
     ctx: CanvasContext,
-    color: Option<Colors>,
+    color: Option<Color>,
 }
 impl<'a> WorldCanvas<'a> {
     pub(crate) fn new(canvas: &'a mut Canvas, ctx: CanvasContext) -> Self {
+        assert_eq!(
+            canvas.encoding(),
+            ctx.encoding(),
+            "canvas/context encoding mismatch"
+        );
         Self {
             canvas,
             ctx,
             color: None,
         }
     }
-    pub fn color(mut self, color: Colors) -> Self {
-        self.color = Some(color);
+    pub fn color(mut self, color: impl Into<Color>) -> Self {
+        self.color = Some(color.into());
         self
     }
-    fn dot(&mut self, p: CanvasPoint) {
+    fn sample(&mut self, p: CanvasPoint) {
         if !p.finite() {
             return;
         }
         if let Some(color) = self.color {
-            self.canvas.set_colorful(p.x, p.y, color);
+            self.canvas.set_color(p.x, p.y, color);
         } else {
             self.canvas.set(p.x, p.y);
         }
     }
     pub fn point(&mut self, point: CanvasPoint) -> &mut Self {
         if self.ctx.viewport().contains(point) {
-            if let Some(dot) = self.ctx.world_to_dot(point) {
-                self.dot(dot);
+            if let Some(dot) = self.ctx.world_to_sample(point) {
+                self.sample(dot);
             }
         }
         self
@@ -157,10 +162,10 @@ impl<'a> WorldCanvas<'a> {
         }
         let a = self
             .ctx
-            .world_to_dot(CanvasPoint::new(from.x + enter * dx, from.y + enter * dy));
+            .world_to_sample(CanvasPoint::new(from.x + enter * dx, from.y + enter * dy));
         let b = self
             .ctx
-            .world_to_dot(CanvasPoint::new(from.x + leave * dx, from.y + leave * dy));
+            .world_to_sample(CanvasPoint::new(from.x + leave * dx, from.y + leave * dy));
         if let (Some(a), Some(b)) = (a, b) {
             let steps = (b.x - a.x).abs().max((b.y - a.y).abs()).ceil() as usize;
             for i in 0..=steps {
@@ -169,7 +174,7 @@ impl<'a> WorldCanvas<'a> {
                 } else {
                     i as f64 / steps as f64
                 };
-                self.dot(CanvasPoint::new(
+                self.sample(CanvasPoint::new(
                     a.x + (b.x - a.x) * t,
                     a.y + (b.y - a.y) * t,
                 ));
@@ -188,7 +193,8 @@ impl<'a> WorldCanvas<'a> {
         if !center.finite() || !radius.is_finite() || radius <= 0.0 {
             return self;
         }
-        let steps = (self.ctx.dot_width().max(self.ctx.dot_height()) as usize * 2).clamp(12, 4096);
+        let steps =
+            (self.ctx.sample_width().max(self.ctx.sample_height()) as usize * 2).clamp(12, 4096);
         let mut previous = CanvasPoint::new(center.x + radius, center.y);
         for i in 1..=steps {
             let angle = std::f64::consts::TAU * i as f64 / steps as f64;

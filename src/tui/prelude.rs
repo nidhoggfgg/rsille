@@ -1,5 +1,7 @@
 //! Prelude — import everything you need with `use rsille::tui::prelude::*;`
 
+pub use crate::canvas::Encoding;
+
 pub use crate::tui::animation::{
     AnimationSpec, AnimationTheme, AreaF, ClipMode, Direction as AnimationDirection, Easing,
     HitTestMode, InitialAnimation, LayoutSnapshot, LayoutTransition, MotionPolicy, Presence,

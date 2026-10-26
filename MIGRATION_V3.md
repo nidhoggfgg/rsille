@@ -133,10 +133,58 @@ must forward this method. Modal input excludes background/global commands.
 Prefer `with_commands_from` and `palette_items` to share metadata between shortcuts
 and command palettes; `rebind` replaces defaults. Widgets retain input priority.
 Command shortcuts precede built-in quit handling after widget propagation.
-Existing Canvas draw callbacks remain valid. Add a `CanvasViewport`, use
+Uncolored Canvas draw callbacks keep the same drawing operations. Add a `CanvasViewport`, use
 `ctx.world(surface)` for clipped world primitives, and `on_pointer` for transformed
 mouse messages. `CanvasContext` now has floating-point viewport data and implements
 `PartialEq` rather than `Eq`.
+
+### Canvas sample model and encoding
+
+`Canvas` now retains coverage and color for each sample and encodes terminal
+characters only when drawn or printed. `Canvas::new()` defaults to Braille;
+`Canvas::with_encoding(Encoding::HalfBlock)` selects two vertical samples per
+cell. TUI widgets select the same encoding with `canvas(...).encoding(...)`.
+`Encoding` is available from `rsille::canvas` and the TUI prelude. There is one
+concrete `Canvas` type, shared by `Paint`, `CanvasWidget`, and `WorldCanvas`.
+
+| Earlier API | Sample-based API |
+| --- | --- |
+| `set_colorful(x, y, Colors { ... })` | `set_color(x, y, color)` and canvas-wide `set_background(color)` |
+| `ctx.dot_width()` / `dot_height()` | `ctx.sample_width()` / `sample_height()` |
+| `world_to_dot` / `dot_to_world` | `world_to_sample` / `sample_to_world` |
+| `ctx.world(surface).color(Colors)` | `.color(color)` |
+| `canvas::color::Colored` | Paint samples through `Canvas`; terminal styles belong to `render` |
+
+Sample and background colors accept both crossterm colors and TUI colors.
+`clear_background()` restores destination-background inheritance. `unset(x, y)`
+removes a sample and its color; `toggle` restores inherited foreground when
+turning a sample on. `clear` preserves encoding, bounds and background; `reset`
+also restores automatic bounds while retaining encoding and background.
+
+Bounds and `get_size()` use inclusive terminal-cell coordinates, while drawing
+uses samples with y increasing upwards. `Encoding::samples_per_cell()` returns
+2×4 for Braille and 1×2 for Half-block. Fixed bounds reject offscreen samples
+before storing them. Encoding is chosen at construction, so an existing drawing
+cannot silently change resolution. For standalone world drawing, construct
+`CanvasContext::new(width, height).with_encoding(surface.encoding())`.
+
+An explicit viewport preserves world extents across encoding changes. Raw sample
+coordinates depend on the encoding. Rendering and pointer transforms use the
+same dimensions; a one-sample axis maps back to the world extent's midpoint.
+
+Half-block preserves its two sample colors exactly. Partially painted Braille
+cells retain their coverage mask and average explicit ink colors into one
+foreground; fully colored cells fit eight samples to foreground/background
+colors. Uncolored samples use inherited foreground. Uncovered samples expose the
+canvas/destination background. Mixed palette colors use conventional xterm RGB
+values for fitting; use RGB colors when exact fitting is needed.
+When the configured text policy treats block characters as double-width,
+Half-block output uses one-column Braille half-cell equivalents to preserve layout.
+
+Image producers should write every source sample with `set_color`, rather than
+precomputing Braille masks and terminal foreground/background colors. The neon
+and harbor examples now share the built-in fitting; Minecraft uses the built-in
+Half-block encoding. Run `cargo run -p tui --example canvas` for a comparison.
 
 See [extension contracts](packages/tui/examples/README.md#virtual-collections-portal-commands-and-world-canvas)
 and `cargo run -p tui --example extensions -- --headless`. The release consumer

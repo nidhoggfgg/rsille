@@ -535,15 +535,20 @@ periodic redraw is needed. Release events never dispatch commands.
 
 ### World-space Canvas
 
-Existing `canvas(|surface, ctx| ...)` dot-coordinate drawing remains available.
+`canvas(|surface, ctx| ...)` draws in sample coordinates. Braille is the default;
+`.encoding(Encoding::HalfBlock)` selects two vertical samples per terminal cell.
+`ctx.sample_width()` and `sample_height()` follow the selected encoding.
 Attach `.viewport(CanvasViewport::new(x, y, width, height))` and draw through
 `ctx.world(surface)` for `point`, `line`, `rect`, and `circle`. Bounds are finite
 Cartesian extents, with y increasing upwards. Points and lines clip before
 rasterization, so far-offscreen geometry does not allocate an enormous pixel grid.
-Circle tessellation is bounded by the viewport resolution. Optional `color(Colors)`
-uses the underlying Canvas color model.
+Circle tessellation is bounded by the viewport resolution. Optional `color(color)`
+sets sample ink, accepting either TUI or crossterm colors. Canvas retains each
+sample's color and fits terminal colors during output; `surface.set_background(color)`
+sets the background for uncovered samples. An explicit viewport keeps world
+extents stable when changing encoding.
 
-`world_to_dot`, `dot_to_world`, and `cell_to_world` share the rendering transform.
+`world_to_sample`, `sample_to_world`, and `cell_to_world` share the rendering transform.
 `on_pointer` emits `CanvasPointer` with mouse kind, modifiers, and the world
 coordinate at the terminal cell's center; framework clipping/scroll translation
 also applies. Use `CanvasViewport::contains` for rectangular world hit tests.

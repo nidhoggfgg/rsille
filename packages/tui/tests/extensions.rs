@@ -503,44 +503,54 @@ fn runtime_commands_follow_state_and_use_injected_time_for_sequences() {
 
 #[test]
 fn canvas_world_transforms_zoom_clipping_and_pointer_hit_use_the_same_coordinates() {
-    let viewport = CanvasViewport::new(-10.0, -5.0, 20.0, 10.0);
-    let context = CanvasContext::new(20, 10).with_viewport(viewport);
-    let point = CanvasPoint::new(2.0, 1.0);
-    let roundtrip = context
-        .dot_to_world(context.world_to_dot(point).unwrap())
-        .unwrap();
-    assert!((roundtrip.x - point.x).abs() < 1e-10 && (roundtrip.y - point.y).abs() < 1e-10);
-    let zoomed = CanvasContext::new(20, 10).with_viewport(viewport.zoom_at(2.0, point));
-    assert_eq!(context.world_to_dot(point), zoomed.world_to_dot(point));
-    assert_eq!(viewport.pan(3.0, 4.0).x(), -7.0);
-    let mut app = App::new(Vec::new())
-        .build(
-            |points, p| points.push(p),
-            move |_| {
-                canvas(move |surface, ctx| {
-                    ctx.world(surface)
-                        .line(CanvasPoint::new(-1e6, 0.0), CanvasPoint::new(1e6, 0.0))
-                        .rect(CanvasViewport::new(-2.0, -2.0, 4.0, 4.0))
-                        .circle(CanvasPoint::new(0.0, 0.0), 2.0)
-                        .point(CanvasPoint::new(f64::NAN, 0.0));
-                })
-                .viewport(viewport)
-                .on_pointer(|p| p)
-                .fixed(20, 10)
-            },
-        )
-        .size(20, 10);
-    app.step(&[]).unwrap();
-    assert!(app
-        .frame()
-        .content()
-        .iter()
-        .any(|cell| cell.content.as_char().is_some_and(|c| c != ' ')));
-    app.step(&[click(10, 4)]).unwrap();
-    let expected = context.cell_to_world(10, 4).unwrap();
-    assert_eq!(app.state()[0].position, expected);
-    assert!(viewport.contains(expected));
-    assert!(CanvasContext::new(0, 0).world_to_dot(point).is_none());
+    for encoding in [Encoding::Braille, Encoding::HalfBlock] {
+        let viewport = CanvasViewport::new(-10.0, -5.0, 20.0, 10.0);
+        let context = CanvasContext::new(20, 10)
+            .with_encoding(encoding)
+            .with_viewport(viewport);
+        let point = CanvasPoint::new(2.0, 1.0);
+        let roundtrip = context
+            .sample_to_world(context.world_to_sample(point).unwrap())
+            .unwrap();
+        assert!((roundtrip.x - point.x).abs() < 1e-10 && (roundtrip.y - point.y).abs() < 1e-10);
+        let zoomed = CanvasContext::new(20, 10)
+            .with_encoding(encoding)
+            .with_viewport(viewport.zoom_at(2.0, point));
+        assert_eq!(
+            context.world_to_sample(point),
+            zoomed.world_to_sample(point)
+        );
+        assert_eq!(viewport.pan(3.0, 4.0).x(), -7.0);
+        let mut app = App::new(Vec::new())
+            .build(
+                |points, p| points.push(p),
+                move |_| {
+                    canvas(move |surface, ctx| {
+                        ctx.world(surface)
+                            .line(CanvasPoint::new(-1e6, 0.0), CanvasPoint::new(1e6, 0.0))
+                            .rect(CanvasViewport::new(-2.0, -2.0, 4.0, 4.0))
+                            .circle(CanvasPoint::new(0.0, 0.0), 2.0)
+                            .point(CanvasPoint::new(f64::NAN, 0.0));
+                    })
+                    .encoding(encoding)
+                    .viewport(viewport)
+                    .on_pointer(|p| p)
+                    .fixed(20, 10)
+                },
+            )
+            .size(20, 10);
+        app.step(&[]).unwrap();
+        assert!(app
+            .frame()
+            .content()
+            .iter()
+            .any(|cell| cell.content.as_char().is_some_and(|c| c != ' ')));
+        app.step(&[click(10, 4)]).unwrap();
+        let expected = context.cell_to_world(10, 4).unwrap();
+        assert_eq!(app.state()[0].position, expected);
+        assert!(viewport.contains(expected));
+        assert!(CanvasContext::new(0, 0).world_to_sample(point).is_none());
+    }
 }
 
 #[test]

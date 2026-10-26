@@ -298,6 +298,13 @@ fn color_to_crossterm(color: Color) -> crossterm::style::Color {
     }
 }
 
+/// Allows TUI colors to be used by Canvas sample and background painting APIs.
+impl From<Color> for crossterm::style::Color {
+    fn from(color: Color) -> Self {
+        color_to_crossterm(color)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

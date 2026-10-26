@@ -14,21 +14,29 @@ fn main() -> WidgetResult<()> {
 }
 
 fn view(_: &()) -> impl Widget<()> {
-    panel()
-        .title("Canvas")
-        .padding(Padding::uniform(1))
+    col()
         .gap(1)
-        .child(
-            canvas::<(), _>(|surface, ctx| {
-                let width = ctx.dot_width().max(1);
-                let height = ctx.dot_height().max(1);
-                let mid = height as f64 / 2.0;
+        .child(scene("Braille: curves and points", Encoding::Braille))
+        .child(scene(
+            "Half-block: solid color samples",
+            Encoding::HalfBlock,
+        ))
+}
 
-                for x in 0..width {
-                    let y = mid + (x as f64 * 0.18).sin() * mid * 0.6;
-                    surface.set(x as f64, y);
-                }
-            })
-            .fixed(48, 12),
-        )
+fn scene(title: &str, encoding: Encoding) -> impl Widget<()> {
+    panel().title(title).padding(Padding::uniform(1)).child(
+        canvas::<(), _>(|surface, ctx| {
+            // Both encodings display the same world extent at their native
+            // sample resolutions. Color is shared with the TUI style API.
+            let mut world = ctx.world(surface).color(Color::Rgb(90, 210, 255));
+            for step in 0..160 {
+                let x = step as f64 / 10.0;
+                world.point(CanvasPoint::new(x, x.sin()));
+            }
+            world.line(CanvasPoint::new(0.0, -1.3), CanvasPoint::new(16.0, -1.3));
+        })
+        .encoding(encoding)
+        .viewport(CanvasViewport::new(0.0, -1.5, 16.0, 3.0))
+        .fixed(48, 8),
+    )
 }

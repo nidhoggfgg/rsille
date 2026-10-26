@@ -50,6 +50,10 @@ def main():
         assert not (source / "packages").exists(), "archive must not contain workspace crate manifests"
         for filename in ("README.md", "LICENCE", "MIGRATION_V3.md", "src/render/api.rs", "src/canvas/api.rs", "src/tui/api.rs"):
             assert (source / filename).is_file(), filename
+        # Cargo archives normalize file timestamps. A reused target directory
+        # can otherwise consider an older build of this version up to date.
+        cargo("clean", "--manifest-path", str(manifest), "-p", "rsille",
+              "--target-dir", str(target / "release-check-build"), cwd=source)
         for features in ([], ["--all-features"]):
             cargo("test", "--manifest-path", str(manifest),
                   "--target-dir", str(target / "release-check-build"), *features, cwd=source)
@@ -80,6 +84,20 @@ fn check_canvas() {
     app.step(&[]).unwrap();
     let frame: &rsille::render::buffer::Buffer = app.frame();
     assert!(frame.content().iter().any(|cell| matches!(cell.content.as_char(), Some('⠁'..='⣿'))));
+    let mut app = App::new(())
+        .update(|_, (), _| {})
+        .view(|_| canvas(|surface, ctx| {
+            assert_eq!(ctx.encoding(), Encoding::HalfBlock);
+            surface.set_color(0, 0, Color::Rgb(0, 0, 255));
+            surface.set_color(0, 1, Color::Rgb(255, 0, 0));
+        }).encoding(Encoding::HalfBlock))
+        .build().size(1, 1);
+    app.step(&[]).unwrap();
+    let cell = &app.frame().content()[0].content;
+    assert_eq!(cell.as_char(), Some('▀'));
+    let colors = cell.style.colors.unwrap();
+    assert_eq!(colors.foreground, Some(Color::Rgb(255, 0, 0).into()));
+    assert_eq!(colors.background, Some(Color::Rgb(0, 0, 255).into()));
 }
 '''
         (consumer / "src/main.rs").write_text(program)

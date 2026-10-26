@@ -123,7 +123,8 @@ fn main() -> WidgetResult<()> {
         .mode(Mode::Inline)
         .update(|state, msg, _ctx| update(state, msg))
         .view(view)
-        .run().map(|_| ())
+        .run()
+        .map(|_| ())
 }
 
 fn update(state: &mut State, msg: Msg) {
@@ -1375,12 +1376,7 @@ impl<'a> SceneCanvas<'a> {
         let x = x.into() + self.offset_x as f64;
         let y = y.into() + self.offset_y as f64;
         let row = self.row_for_dot_y(y);
-        let style = Style::default().fg(canvas_row_color(row)).to_render_style();
-        if let Some(colors) = style.colors {
-            self.surface.set_colorful(x, y, colors);
-        } else {
-            self.surface.set(x, y);
-        }
+        self.surface.set_color(x, y, canvas_row_color(row));
         self
     }
 

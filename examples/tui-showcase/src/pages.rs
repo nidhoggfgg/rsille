@@ -568,8 +568,8 @@ fn motion(state: &State) -> impl Widget<Msg> {
             card("Canvas / animated braille signals")
                 .child(
                     canvas(move |surface, ctx| {
-                        let width = ctx.dot_width().max(1);
-                        let height = ctx.dot_height().max(1) as f64;
+                        let width = ctx.sample_width().max(1);
+                        let height = ctx.sample_height().max(1) as f64;
                         for x in 0..width {
                             let x = x as f64;
                             surface.set(x, height * (0.5 + 0.32 * (x * 0.09 + time * 2.0).sin()));
