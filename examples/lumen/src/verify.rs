@@ -164,8 +164,11 @@ pub(super) fn run() -> Result {
     })])?;
     advance(&mut rt, &clock, 6)?;
     assert!(
-        rt.hovered_path().is_none(),
-        "Paint-only modal backgrounds must not hover"
+        rt.hovered_path().is_some_and(|path| path
+            .as_slice()
+            .iter()
+            .any(|key| matches!(key, WidgetKey::Named(name) if name=="lumen-modal"))),
+        "The modal layer owns backdrop hit testing"
     );
     let theme = rt.state().theme;
     rt.step(&[Event::Mouse(MouseEvent {
@@ -302,12 +305,12 @@ fn desktop_interactions() -> Result {
     advance(&mut rt, &clock, 12)?;
     focus(&mut rt, "lens-title")?;
     let title = focused_bounds(&rt);
-    let original = rt.state().desk.windows[0];
+    let original = rt.state().desk.windows[0].rect;
     let (x, y) = (title.x() + 5, title.y());
     rt.step(&[mouse(MouseEventKind::Down(MouseButton::Left), x, y)])?;
     rt.step(&[mouse(MouseEventKind::Drag(MouseButton::Left), x + 9, y + 3)])?;
-    assert_eq!(rt.state().desk.windows[0].x, original.x + 9);
-    assert_eq!(rt.state().desk.windows[0].y, original.y + 3);
+    assert_eq!(rt.state().desk.windows[0].rect.x, original.x + 9);
+    assert_eq!(rt.state().desk.windows[0].rect.y, original.y + 3);
     let moved = focused_bounds(&rt);
     assert_eq!(
         (moved.x(), moved.y()),
@@ -318,7 +321,10 @@ fn desktop_interactions() -> Result {
     rt.step(&[mouse(MouseEventKind::Drag(MouseButton::Left), 0, 0)])?;
     rt.step(&[mouse(MouseEventKind::Up(MouseButton::Left), 0, 0)])?;
     assert_eq!(
-        (rt.state().desk.windows[0].x, rt.state().desk.windows[0].y),
+        (
+            rt.state().desk.windows[0].rect.x,
+            rt.state().desk.windows[0].rect.y
+        ),
         (0, 0)
     );
     let corner = rt.frame().content()[0].content.symbol();
@@ -348,30 +354,33 @@ fn desktop_interactions() -> Result {
     )])?;
     focus(&mut rt, "lens-resize")?;
     let grip = focused_bounds(&rt);
-    let original = rt.state().desk.windows[0];
+    let original = rt.state().desk.windows[0].rect;
     let (x, y) = (grip.x() + grip.width() - 2, grip.y());
     rt.step(&[mouse(MouseEventKind::Down(MouseButton::Left), x, y)])?;
     rt.step(&[mouse(MouseEventKind::Drag(MouseButton::Left), x + 7, y + 3)])?;
     assert_eq!(
         (
-            rt.state().desk.windows[0].width,
-            rt.state().desk.windows[0].height
+            rt.state().desk.windows[0].rect.width,
+            rt.state().desk.windows[0].rect.height
         ),
         (original.width + 7, original.height + 3)
     );
     rt.step(&[mouse(MouseEventKind::Up(MouseButton::Left), x + 7, y + 3)])?;
     // Keyboard movement and resizing are available on the title too.
     focus(&mut rt, "lens-title")?;
-    let before = rt.state().desk.windows[0];
+    let before = rt.state().desk.windows[0].rect;
     rt.step(&[key(KeyCode::Left)])?;
     rt.step(&[Event::Key(KeyEvent::new(
         KeyCode::Right,
         KeyModifiers::SHIFT,
     ))])?;
-    assert_eq!(rt.state().desk.windows[0].x, before.x - 2);
-    assert_eq!(rt.state().desk.windows[0].width, before.width + 2);
+    assert_eq!(rt.state().desk.windows[0].rect.x, before.x - 2);
+    assert_eq!(rt.state().desk.windows[0].rect.width, before.width + 2);
     rt.step(&[key(KeyCode::Enter)])?;
-    assert!(rt.state().desk.windows[0].folded);
+    assert_eq!(
+        rt.state().desk.windows[0].visibility,
+        WindowVisibility::Collapsed
+    );
     for _ in 0..35 {
         rt.step(&[key(KeyCode::Tab)])?;
         assert!(
@@ -384,43 +393,52 @@ fn desktop_interactions() -> Result {
     }
     focus(&mut rt, "show-lens")?;
     rt.step(&[key(KeyCode::Enter)])?;
-    assert!(!rt.state().desk.windows[0].folded);
+    assert_eq!(
+        rt.state().desk.windows[0].visibility,
+        WindowVisibility::Expanded
+    );
     advance(&mut rt, &clock, 12)?;
 
     // Two overlapping windows must route the shared area to the front one.
     send(&mut rt, Msg::Desk(Action::Arrange))?;
-    send(&mut rt, Msg::Desk(Action::Nudge(1, -26, -7, false)))?;
-    send(&mut rt, Msg::Desk(Action::Raise(0)))?;
+    let signal = rt.state().desk.windows[1]
+        .rect
+        .translated(CellPoint::new(-26, -7));
+    send(&mut rt, Msg::Desk(Action::Rect(1, signal)))?;
+    send(
+        &mut rt,
+        Msg::Desk(Action::Active(Some("floating-0".into()))),
+    )?;
     advance(&mut rt, &clock, 12)?;
-    let signal = rt.state().desk.windows[1];
+    let signal = rt.state().desk.windows[1].rect;
     rt.step(&[mouse(
         MouseEventKind::Down(MouseButton::Left),
-        signal.x + 5,
-        signal.y + 1,
+        signal.x as u16 + 5,
+        signal.y as u16 + 1,
     )])?;
     assert_eq!(
-        rt.state().desk.front,
-        0,
+        rt.state().desk.active.as_deref(),
+        Some("floating-0"),
         "Covered signal title must not receive a click"
     );
     rt.step(&[mouse(
         MouseEventKind::Up(MouseButton::Left),
-        signal.x + 5,
-        signal.y + 1,
+        signal.x as u16 + 5,
+        signal.y as u16 + 1,
     )])?;
     // Click the exposed right border: the signal comes forward.
     rt.step(&[mouse(
         MouseEventKind::Down(MouseButton::Left),
-        signal.x + signal.width - 1,
-        signal.y + 3,
+        signal.x as u16 + signal.width - 1,
+        signal.y as u16 + 3,
     )])?;
-    assert_eq!(rt.state().desk.front, 1);
+    assert_eq!(rt.state().desk.active.as_deref(), Some("floating-1"));
     rt.step(&[mouse(
         MouseEventKind::Up(MouseButton::Left),
-        signal.x + signal.width - 1,
-        signal.y + 3,
+        signal.x as u16 + signal.width - 1,
+        signal.y as u16 + 3,
     )])?;
-    let cell = usize::from(signal.y) * 120 + usize::from(signal.x);
+    let cell = signal.y as usize * 120 + signal.x as usize;
     assert_eq!(
         rt.frame().content()[cell]
             .content
@@ -438,10 +456,10 @@ fn desktop_interactions() -> Result {
         title.x() + title.width() - 2,
         title.y(),
     )])?;
-    assert!(!rt.state().desk.windows[1].visible);
+    assert!(!rt.state().desk.windows[1].open);
     focus(&mut rt, "show-signal")?;
     rt.step(&[key(KeyCode::Enter)])?;
-    assert!(rt.state().desk.windows[1].visible);
+    assert!(rt.state().desk.windows[1].open);
 
     // A modal covers the complete desk, including floating controls and F5.
     rt.step(&[key(KeyCode::F(1))])?;
@@ -494,9 +512,9 @@ fn desktop_interactions() -> Result {
     // Resizing cancels capture and keeps both windows reachable, even in tiny TTYs.
     for (w, h) in [(80, 24), (40, 16), (20, 10), (120, 44)] {
         rt.step(&[Event::Resize(w, h)])?;
-        for window in rt.state().desk.windows {
-            assert!(window.x + window.width <= w);
-            assert!(window.y + window.height <= h);
+        for window in rt.state().desk.windows.map(|w| w.rect) {
+            assert!(window.x + i32::from(window.width) <= i32::from(w));
+            assert!(window.y + i32::from(window.height) <= i32::from(h));
         }
     }
     Ok(())

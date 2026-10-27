@@ -61,6 +61,7 @@ pub struct PortalLayer<M = ()> {
     anchor: Option<WidgetId>,
     size: Option<(u16, u16)>,
     modal: bool,
+    dismiss_on_outside_click: bool,
     on_dismiss: Option<Box<dyn Fn() -> M>>,
     key: Option<String>,
 }
@@ -71,6 +72,7 @@ impl<M> PortalLayer<M> {
             anchor: None,
             size: None,
             modal: false,
+            dismiss_on_outside_click: true,
             on_dismiss: None,
             key: None,
         }
@@ -85,6 +87,11 @@ impl<M> PortalLayer<M> {
     }
     pub fn modal(mut self, modal: bool) -> Self {
         self.modal = modal;
+        self
+    }
+    /// Keep Escape dismissal while optionally ignoring clicks on the backdrop.
+    pub fn dismiss_on_outside_click(mut self, dismiss: bool) -> Self {
+        self.dismiss_on_outside_click = dismiss;
         self
     }
     pub fn key(mut self, key: impl Into<String>) -> Self {
@@ -178,7 +185,10 @@ impl<M> Widget<M> for PortalLayer<M> {
                     && key.code == KeyCode::Esc
                     && ctx.phase() != EventPhase::Capture
             }
-            Event::Mouse(mouse) if mouse.kind == MouseEventKind::Down(MouseButton::Left) => {
+            Event::Mouse(mouse)
+                if self.dismiss_on_outside_click
+                    && mouse.kind == MouseEventKind::Down(MouseButton::Left) =>
+            {
                 let path = ctx
                     .path()
                     .child(WidgetKey::for_child(0, self.children[0].as_ref()));

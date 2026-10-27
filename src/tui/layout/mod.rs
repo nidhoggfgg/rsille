@@ -35,3 +35,6 @@ pub use result::{ChildLayout, Invalidation, Layout, LayoutGeometry, LayoutStats}
 
 pub mod portal;
 pub use portal::{portal, Portal, PortalLayer};
+
+pub mod window_host;
+pub use window_host::{window_host, WindowHost, WindowHostState};

@@ -7,7 +7,7 @@ use crate::tui::focus::FocusConfig;
 use crate::tui::layout::border_renderer;
 use crate::tui::layout::{ensure_item_visible, Constraints, LayoutStyle};
 use crate::tui::style::{BorderStyle, Style};
-use crate::tui::widget::{EventCtx, EventPhase, RenderCtx, Widget};
+use crate::tui::widget::{EventCtx, EventPhase, Lifecycle, RenderCtx, StateCtx, Widget};
 use crate::tui::widgets::pointer;
 
 use super::selection::{SelectionMode, SelectionState};
@@ -113,6 +113,12 @@ pub struct DataTableState {
     pub selection: SelectionState,
     pub column_widths: Vec<(String, u16)>,
     pub scroll_offset: usize,
+    #[doc(hidden)]
+    pub controlled_active: Option<Option<String>>,
+    #[doc(hidden)]
+    pub active_row_initialized: bool,
+    #[doc(hidden)]
+    pub controlled_selection: Option<Vec<String>>,
 }
 
 /// Data table sort direction.
@@ -162,6 +168,11 @@ pub struct DataTable<M = ()> {
     selection_mode: SelectionMode,
     custom_style: Option<Style>,
     custom_focus_style: Option<Style>,
+    active_row: Option<Option<String>>,
+    selected_ids: Option<Vec<String>>,
+    default_active_row: Option<Option<String>>,
+    default_selected_ids: Vec<String>,
+    on_active_row_change: Option<Box<dyn Fn(Option<String>) -> M>>,
     on_change: Option<Box<dyn Fn(String) -> M>>,
     on_submit: Option<Box<dyn Fn(String) -> M>>,
     on_cell_change: Option<Box<dyn Fn(String, String) -> M>>,
@@ -192,6 +203,194 @@ impl<M> std::fmt::Debug for DataTable<M> {
     }
 }
 
+impl<M: 'static> DataTable<M> {
+    fn handle_input(&self, event: &Event, ctx: &mut EventCtx<M>) {
+        if crate::tui::event::is_key_release(event) {
+            return;
+        }
+        if ctx.phase() != EventPhase::Target {
+            return;
+        }
+        if self.disabled || matches!(event, Event::FocusLost) {
+            ctx.state_mut::<DataTableState>().resizing_column = None;
+            return;
+        }
+        if matches!(event, Event::Mouse(_)) {
+            self.handle_pointer(event, ctx);
+            return;
+        }
+        if !self.has_enabled_rows() {
+            return;
+        }
+        let Event::Key(key_event) = event else {
+            return;
+        };
+
+        let visible_rows = pointer::visible_rows(
+            ctx,
+            self.border.is_some(),
+            self.height,
+            if self.sticky_header { 2 } else { 0 },
+        )
+        .max(1);
+        let mut moved = false;
+        let mut emit_submit = None;
+        let mut emit_cell_change = None;
+
+        let next_active_id = {
+            let state = ctx.state_mut::<DataTableState>();
+            sync_state_aliases(state);
+            let visible_indices = self.visible_row_indices();
+            let visible_columns = self.visible_columns();
+            let Some(mut active_position) = self.navigation_index(state, &visible_indices) else {
+                return;
+            };
+            if visible_columns.is_empty() {
+                return;
+            }
+            state.active_column = state
+                .active_column
+                .min(visible_columns.len().saturating_sub(1));
+
+            let empty_cursor = state.active_row.is_none()
+                && (self.active_row.is_some() || state.active_row_initialized);
+            match key_event.code {
+                KeyCode::Down if empty_cursor => {
+                    active_position = self.navigation_index(state, &visible_indices).unwrap();
+                    moved = true;
+                }
+                KeyCode::Up if empty_cursor => {
+                    active_position = visible_indices
+                        .iter()
+                        .rposition(|i| !self.rows[*i].disabled)
+                        .unwrap();
+                    moved = true;
+                }
+                KeyCode::Enter | KeyCode::Char(' ') if empty_cursor => return,
+                KeyCode::Up => {
+                    if let Some(position) = (0..active_position)
+                        .rev()
+                        .find(|i| !self.rows[visible_indices[*i]].disabled)
+                    {
+                        active_position = position;
+                        moved = true;
+                    }
+                }
+                KeyCode::Down => {
+                    if let Some(position) = (active_position + 1..visible_indices.len())
+                        .find(|i| !self.rows[visible_indices[*i]].disabled)
+                    {
+                        active_position = position;
+                        moved = true;
+                    }
+                }
+                KeyCode::Left if self.navigation_mode == DataTableNavigationMode::Cell => {
+                    if key_event.modifiers.contains(KeyModifiers::CONTROL) {
+                        let column = visible_columns[state.active_column].1;
+                        let current_width = Self::column_width_override(state, &column.id)
+                            .map(|(_, width)| *width)
+                            .unwrap_or(column.width);
+                        Self::set_column_width(state, &column.id, current_width.saturating_sub(1));
+                    } else if state.active_column > 0 {
+                        state.active_column -= 1;
+                        moved = true;
+                    }
+                }
+                KeyCode::Right if self.navigation_mode == DataTableNavigationMode::Cell => {
+                    if key_event.modifiers.contains(KeyModifiers::CONTROL) {
+                        let column = visible_columns[state.active_column].1;
+                        let current_width = Self::column_width_override(state, &column.id)
+                            .map(|(_, width)| *width)
+                            .unwrap_or(column.width);
+                        Self::set_column_width(state, &column.id, current_width.saturating_add(1));
+                    } else if state.active_column + 1 < visible_columns.len() {
+                        state.active_column += 1;
+                        moved = true;
+                    }
+                }
+                KeyCode::Home => {
+                    active_position = visible_indices
+                        .iter()
+                        .position(|i| !self.rows[*i].disabled)
+                        .unwrap();
+                    moved = true;
+                }
+                KeyCode::End => {
+                    active_position = visible_indices
+                        .iter()
+                        .rposition(|i| !self.rows[*i].disabled)
+                        .unwrap();
+                    moved = true;
+                }
+                KeyCode::PageUp => {
+                    active_position = active_position.saturating_sub(visible_rows);
+                    moved = true;
+                }
+                KeyCode::PageDown => {
+                    active_position = (active_position + visible_rows)
+                        .min(visible_indices.len().saturating_sub(1));
+                    moved = true;
+                }
+                KeyCode::Enter => {
+                    let active_id = self.rows[visible_indices[active_position]].id.clone();
+                    if self.selection_mode == SelectionMode::Single {
+                        state.selection.replace_selection(active_id.clone());
+                    }
+                    if let Some(ref handler) = self.on_submit {
+                        emit_submit = Some(handler(active_id));
+                    }
+                    ctx.set_handled();
+                    if let Some(message) = emit_submit {
+                        ctx.emit(message);
+                    }
+                    return;
+                }
+                KeyCode::Char(' ') if self.selection_mode.is_multiple() => {
+                    let active_id = self.rows[visible_indices[active_position]].id.clone();
+                    state.selection.toggle(&active_id);
+                    ctx.set_handled();
+                    return;
+                }
+                _ => return,
+            }
+
+            if self.rows[visible_indices[active_position]].disabled {
+                active_position = (active_position..visible_indices.len())
+                    .find(|i| !self.rows[visible_indices[*i]].disabled)
+                    .or_else(|| {
+                        (0..active_position)
+                            .rev()
+                            .find(|i| !self.rows[visible_indices[*i]].disabled)
+                    })
+                    .unwrap();
+            }
+            let active_id = self.rows[visible_indices[active_position]].id.clone();
+            set_active_row(state, active_id);
+            state.scroll_offset =
+                ensure_item_visible(state.scroll_offset, active_position, visible_rows);
+            if moved && self.navigation_mode == DataTableNavigationMode::Cell {
+                let row_id = self.rows[visible_indices[active_position]].id.clone();
+                let column_id = visible_columns[state.active_column].1.id.clone();
+                emit_cell_change = self
+                    .on_cell_change
+                    .as_ref()
+                    .map(|handler| handler(row_id, column_id));
+            }
+            active_row_id(state)
+        };
+
+        if moved {
+            ctx.set_handled();
+            if let (Some(active_id), Some(handler)) = (next_active_id, self.on_change.as_ref()) {
+                ctx.emit(handler(active_id));
+            }
+            if let Some(message) = emit_cell_change {
+                ctx.emit(message);
+            }
+        }
+    }
+}
+
 impl<M> DataTable<M> {
     pub fn new() -> Self {
         Self {
@@ -209,6 +408,11 @@ impl<M> DataTable<M> {
             selection_mode: SelectionMode::Single,
             custom_style: None,
             custom_focus_style: None,
+            active_row: None,
+            selected_ids: None,
+            default_active_row: None,
+            default_selected_ids: Vec::new(),
+            on_active_row_change: None,
             on_change: None,
             on_submit: None,
             on_cell_change: None,
@@ -342,6 +546,39 @@ impl<M> DataTable<M> {
         self
     }
 
+    /// Bind the logical current row. `None` explicitly clears the cursor.
+    /// Hidden or invalid ids are retained; navigation falls back to the first
+    /// enabled visible row. With no cursor, Down/Up chooses the first/last row
+    /// and Enter does nothing. Sync never emits change callbacks.
+    pub fn active_row(mut self, id: Option<String>) -> Self {
+        self.active_row = Some(id);
+        self
+    }
+
+    pub fn default_active_row(mut self, id: Option<String>) -> Self {
+        self.default_active_row = Some(id);
+        self
+    }
+
+    /// Bind selection independently of the current row. Unknown and filtered
+    /// ids survive user edits; duplicates are removed in first-occurrence order.
+    pub fn selected_ids(mut self, ids: impl IntoIterator<Item = String>) -> Self {
+        self.selected_ids = Some(ids.into_iter().collect());
+        self
+    }
+
+    pub fn default_selected_ids(mut self, ids: impl IntoIterator<Item = String>) -> Self {
+        self.default_selected_ids = ids.into_iter().collect();
+        self
+    }
+
+    /// Emitted only for semantic user changes. The legacy `on_change` retains
+    /// its notification timing; when both are set, both receive row changes.
+    pub fn on_active_row_change(mut self, handler: impl Fn(Option<String>) -> M + 'static) -> Self {
+        self.on_active_row_change = Some(Box::new(handler));
+        self
+    }
+
     pub fn on_change<F>(mut self, handler: F) -> Self
     where
         F: Fn(String) -> M + 'static,
@@ -445,12 +682,11 @@ impl<M> DataTable<M> {
         if visible == 0 {
             return;
         }
-        let mut selection_message = None;
         let (id, column_id) = {
             let state = ctx.state_mut::<DataTableState>();
             sync_state_aliases(state);
             let rows = self.visible_row_indices();
-            let Some(active) = self.active_index_from_state(state, &rows) else {
+            let Some(active) = self.navigation_index(state, &rows) else {
                 return;
             };
             let index = if let Some(delta) = pointer::wheel_delta(event) {
@@ -490,19 +726,38 @@ impl<M> DataTable<M> {
                 }
                 state.active_column = column;
                 state.scroll_offset = offset;
+                if self.rows[rows[index]].disabled {
+                    return;
+                }
                 let id = &self.rows[rows[index]].id;
                 if self.selection_mode.is_multiple() {
                     state.selection.toggle(id);
-                    selection_message = self
-                        .on_selection_change
-                        .as_ref()
-                        .map(|handler| handler(state.selection.selected.clone()));
                 } else {
                     state.selection.replace_selection(id.clone());
                 }
                 index
             } else {
                 return;
+            };
+            let index = if self.rows[rows[index]].disabled {
+                let Some(enabled) = rows
+                    .iter()
+                    .enumerate()
+                    .skip(index)
+                    .find(|(_, i)| !self.rows[**i].disabled)
+                    .or_else(|| {
+                        rows.iter()
+                            .enumerate()
+                            .take(index)
+                            .rev()
+                            .find(|(_, i)| !self.rows[**i].disabled)
+                    })
+                else {
+                    return;
+                };
+                enabled.0
+            } else {
+                index
             };
             let id = self.rows[rows[index]].id.clone();
             set_active_row(state, id.clone());
@@ -518,13 +773,12 @@ impl<M> DataTable<M> {
                 ctx.emit(handler(id, column_id));
             }
         }
-        if let Some(message) = selection_message {
-            ctx.emit(message);
-        }
     }
 
     fn has_enabled_rows(&self) -> bool {
-        self.rows.iter().any(|row| !row.disabled)
+        self.visible_row_indices()
+            .iter()
+            .any(|i| !self.rows[*i].disabled)
     }
 
     fn active_index_from_state(
@@ -539,7 +793,18 @@ impl<M> DataTable<M> {
                     .iter()
                     .position(|index| self.rows[*index].id == id && !self.rows[*index].disabled)
             })
-            .or_else(|| visible_indices.first().copied().map(|_| 0))
+            .or_else(|| {
+                (self.active_row.is_none()
+                    && state.active_row.is_none()
+                    && !state.active_row_initialized)
+                    .then(|| visible_indices.iter().position(|i| !self.rows[*i].disabled))
+                    .flatten()
+            })
+    }
+
+    fn navigation_index(&self, state: &DataTableState, rows: &[usize]) -> Option<usize> {
+        self.active_index_from_state(state, rows)
+            .or_else(|| rows.iter().position(|i| !self.rows[*i].disabled))
     }
 
     fn pad_cell(
@@ -738,7 +1003,6 @@ impl<M> DataTable<M> {
             .rows
             .iter()
             .enumerate()
-            .filter(|(_, row)| !row.disabled)
             .filter(|(_, row)| {
                 let Some(query) = normalized_query.as_deref() else {
                     return true;
@@ -967,161 +1231,74 @@ impl<M: 'static> Widget<M> for DataTable<M> {
         }
     }
 
-    fn handle_event(&self, event: &Event, ctx: &mut EventCtx<M>) {
-        if crate::tui::event::is_key_release(event) {
+    fn lifecycle(&self, ctx: &mut StateCtx) {
+        if ctx.lifecycle() == Lifecycle::Unmount {
             return;
         }
+        let mount = ctx.lifecycle() == Lifecycle::Mount;
+        let state = ctx.state_mut::<DataTableState>();
+        if mount {
+            if let Some(value) = &self.default_active_row {
+                state.active_row = value.clone();
+                state.active_row_initialized = true;
+            }
+            state
+                .selection
+                .set_selected_ids(self.default_selected_ids.clone());
+        }
+        if let Some(value) = &self.active_row {
+            state.active_row = value.clone();
+            state.active_row_initialized = true;
+        } else if let Some(value) = state.controlled_active.take() {
+            state.active_row = value;
+            state.active_row_initialized = true;
+        } else if state
+            .active_row
+            .as_ref()
+            .is_some_and(|id| !self.rows.iter().any(|r| &r.id == id))
+        {
+            state.active_row = self
+                .visible_row_indices()
+                .iter()
+                .find(|i| !self.rows[**i].disabled)
+                .map(|i| self.rows[*i].id.clone());
+        }
+        if let Some(ids) = &self.selected_ids {
+            state.selection.set_selected_ids(ids.clone());
+        } else if let Some(ids) = state.controlled_selection.take() {
+            state.selection.set_selected_ids(ids);
+        } else {
+            state
+                .selection
+                .selected
+                .retain(|id| self.rows.iter().any(|r| &r.id == id));
+        }
+        if self.selection_mode == SelectionMode::Single {
+            state.selection.selected.truncate(1);
+        }
+        state.selection.cursor = state.active_row.clone();
+        state.controlled_active = self.active_row.clone();
+        state.controlled_selection = self
+            .selected_ids
+            .as_ref()
+            .map(|_| state.selection.selected.clone());
+    }
+
+    fn handle_event(&self, event: &Event, ctx: &mut EventCtx<M>) {
         if ctx.phase() != EventPhase::Target {
             return;
         }
-        if self.disabled || matches!(event, Event::FocusLost) {
-            ctx.state_mut::<DataTableState>().resizing_column = None;
-            return;
+        let before = ctx.state_mut::<DataTableState>().clone();
+        self.handle_input(event, ctx);
+        let after = ctx.state_mut::<DataTableState>().clone();
+        if before.active_row != after.active_row {
+            if let Some(handler) = &self.on_active_row_change {
+                ctx.emit(handler(after.active_row));
+            }
         }
-        if matches!(event, Event::Mouse(_)) {
-            self.handle_pointer(event, ctx);
-            return;
-        }
-        if !self.has_enabled_rows() {
-            return;
-        }
-        let Event::Key(key_event) = event else {
-            return;
-        };
-
-        let visible_rows = pointer::visible_rows(
-            ctx,
-            self.border.is_some(),
-            self.height,
-            if self.sticky_header { 2 } else { 0 },
-        )
-        .max(1);
-        let mut moved = false;
-        let mut emit_submit = None;
-        let mut emit_cell_change = None;
-
-        let next_active_id = {
-            let state = ctx.state_mut::<DataTableState>();
-            sync_state_aliases(state);
-            let visible_indices = self.visible_row_indices();
-            let visible_columns = self.visible_columns();
-            let Some(mut active_position) = self.active_index_from_state(state, &visible_indices)
-            else {
-                return;
-            };
-            if visible_columns.is_empty() {
-                return;
-            }
-            state.active_column = state
-                .active_column
-                .min(visible_columns.len().saturating_sub(1));
-
-            match key_event.code {
-                KeyCode::Up => {
-                    if active_position > 0 {
-                        active_position -= 1;
-                        moved = true;
-                    }
-                }
-                KeyCode::Down => {
-                    if active_position + 1 < visible_indices.len() {
-                        active_position += 1;
-                        moved = true;
-                    }
-                }
-                KeyCode::Left if self.navigation_mode == DataTableNavigationMode::Cell => {
-                    if key_event.modifiers.contains(KeyModifiers::CONTROL) {
-                        let column = visible_columns[state.active_column].1;
-                        let current_width = Self::column_width_override(state, &column.id)
-                            .map(|(_, width)| *width)
-                            .unwrap_or(column.width);
-                        Self::set_column_width(state, &column.id, current_width.saturating_sub(1));
-                    } else if state.active_column > 0 {
-                        state.active_column -= 1;
-                        moved = true;
-                    }
-                }
-                KeyCode::Right if self.navigation_mode == DataTableNavigationMode::Cell => {
-                    if key_event.modifiers.contains(KeyModifiers::CONTROL) {
-                        let column = visible_columns[state.active_column].1;
-                        let current_width = Self::column_width_override(state, &column.id)
-                            .map(|(_, width)| *width)
-                            .unwrap_or(column.width);
-                        Self::set_column_width(state, &column.id, current_width.saturating_add(1));
-                    } else if state.active_column + 1 < visible_columns.len() {
-                        state.active_column += 1;
-                        moved = true;
-                    }
-                }
-                KeyCode::Home => {
-                    active_position = 0;
-                    moved = true;
-                }
-                KeyCode::End => {
-                    active_position = visible_indices.len().saturating_sub(1);
-                    moved = true;
-                }
-                KeyCode::PageUp => {
-                    active_position = active_position.saturating_sub(visible_rows);
-                    moved = true;
-                }
-                KeyCode::PageDown => {
-                    active_position = (active_position + visible_rows)
-                        .min(visible_indices.len().saturating_sub(1));
-                    moved = true;
-                }
-                KeyCode::Enter => {
-                    let active_id = self.rows[visible_indices[active_position]].id.clone();
-                    if self.selection_mode == SelectionMode::Single {
-                        state.selection.replace_selection(active_id.clone());
-                    }
-                    if let Some(ref handler) = self.on_submit {
-                        emit_submit = Some(handler(active_id));
-                    }
-                    ctx.set_handled();
-                    if let Some(message) = emit_submit {
-                        ctx.emit(message);
-                    }
-                    return;
-                }
-                KeyCode::Char(' ') if self.selection_mode.is_multiple() => {
-                    let active_id = self.rows[visible_indices[active_position]].id.clone();
-                    state.selection.toggle(&active_id);
-                    let emit_selection = self
-                        .on_selection_change
-                        .as_ref()
-                        .map(|handler| handler(state.selection.selected.clone()));
-                    ctx.set_handled();
-                    if let Some(message) = emit_selection {
-                        ctx.emit(message);
-                    }
-                    return;
-                }
-                _ => return,
-            }
-
-            let active_id = self.rows[visible_indices[active_position]].id.clone();
-            set_active_row(state, active_id);
-            state.scroll_offset =
-                ensure_item_visible(state.scroll_offset, active_position, visible_rows);
-            if moved && self.navigation_mode == DataTableNavigationMode::Cell {
-                let row_id = self.rows[visible_indices[active_position]].id.clone();
-                let column_id = visible_columns[state.active_column].1.id.clone();
-                emit_cell_change = self
-                    .on_cell_change
-                    .as_ref()
-                    .map(|handler| handler(row_id, column_id));
-            }
-            active_row_id(state)
-        };
-
-        if moved {
-            ctx.set_handled();
-            if let (Some(active_id), Some(handler)) = (next_active_id, self.on_change.as_ref()) {
-                ctx.emit(handler(active_id));
-            }
-            if let Some(message) = emit_cell_change {
-                ctx.emit(message);
+        if before.selection.selected != after.selection.selected {
+            if let Some(handler) = &self.on_selection_change {
+                ctx.emit(handler(after.selection.selected));
             }
         }
     }
@@ -1169,24 +1346,17 @@ pub fn data_table<M>() -> DataTable<M> {
 }
 
 fn active_row_id(state: &DataTableState) -> Option<String> {
-    state
-        .selection
-        .cursor
-        .clone()
-        .or_else(|| state.active_row.clone())
+    state.active_row.clone()
 }
 
 fn set_active_row(state: &mut DataTableState, id: String) {
+    state.active_row_initialized = true;
     state.active_row = Some(id.clone());
     state.selection.set_cursor(Some(id));
 }
 
 fn sync_state_aliases(state: &mut DataTableState) {
-    if state.selection.cursor.is_none() {
-        state.selection.cursor = state.active_row.clone();
-    } else if state.active_row.is_none() {
-        state.active_row = state.selection.cursor.clone();
-    }
+    state.selection.cursor = state.active_row.clone();
 }
 
 impl<M> DataTable<M> {

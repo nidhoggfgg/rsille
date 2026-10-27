@@ -205,3 +205,7 @@ harness = false
 [[example]]
 name = "extensions"
 path = "examples/basics/extensions.rs"
+
+[[example]]
+name = "windows"
+path = "examples/layout/windows.rs"

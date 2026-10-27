@@ -65,6 +65,12 @@ pub use visual::{
     VisualProfile, WaveAxis, WipeDirection, WipeMode,
 };
 
+pub use layout::drag_region::{drag_region, DragRegion};
+
+pub use layout::floating_window::{
+    floating_window, FloatingWindow, FloatingWindowState, WindowVisibility,
+};
+
 #[cfg(test)]
 mod tests {
     use super::*;

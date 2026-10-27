@@ -22,6 +22,7 @@ use crate::tui::event::{
     InputEvent, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind,
 };
 use crate::tui::focus::FocusManager;
+use crate::tui::gesture::DragCancelReason;
 use crate::tui::layout::{
     AxisLimit, Invalidation, LayoutCache, LayoutGeometry, LayoutStats, SizeProposal,
 };
@@ -40,6 +41,13 @@ use crate::tui::app::{
     App, AppExit, EventHandler, ExitReason, FrameHandler, FrameInfo, InputHandler, Mode,
     QuitBehavior, SubscriptionResolver, ThemeResolver,
 };
+
+type PointerSpace = Vec<((i32, i32), u16, u16)>;
+enum WidgetInput<'a> {
+    Terminal(&'a Event),
+    PointerCancel(DragCancelReason),
+    FocusEnter,
+}
 
 struct TickRuntime<M> {
     interval: Duration,
@@ -441,6 +449,9 @@ pub(crate) struct AppRuntime<State, U, V, M> {
     animation_frame: u64,
     render_frame: u64,
     pointer_capture: Option<WidgetPath>,
+    pointer_space: Option<PointerSpace>,
+    input_viewport: Option<((u16, u16), Size)>,
+    inline_pointer_origin: Option<(u16, u16)>,
     motion_policy: MotionPolicy,
     visual_capabilities: TerminalVisualCapabilities,
     inline_mode: bool,
@@ -740,6 +751,9 @@ impl<State, U, V, M: Send + 'static> AppRuntime<State, U, V, M> {
             animation_frame: 0,
             render_frame: 0,
             pointer_capture: None,
+            pointer_space: None,
+            input_viewport: None,
+            inline_pointer_origin: None,
             motion_policy,
             visual_capabilities,
             inline_mode,
@@ -836,14 +850,8 @@ impl<State, U, V, M: Send + 'static> AppRuntime<State, U, V, M> {
         if let Some(router) = self.command_router.as_mut() {
             router.sync_focus(self.focus.current_id());
         }
-        if self
-            .pointer_capture
-            .as_ref()
-            .is_some_and(|path| !self.focus.live_paths().contains(path))
-        {
-            self.pointer_capture = None;
-        }
         self.cached_tree = Some(tree);
+        self.reconcile_pointer_capture();
         self.reconcile_subscriptions();
         self.prune_live_animations();
     }
@@ -1118,6 +1126,7 @@ impl<State, U, V, M: Send + 'static> AppRuntime<State, U, V, M> {
     fn build_event_route<'a>(
         tree: &'a dyn Widget<M>,
         target_path: Option<&WidgetPath>,
+        include_retained: bool,
     ) -> Vec<(WidgetPath, WidgetId, WidgetId, &'a dyn Widget<M>)> {
         let mut route = vec![(WidgetPath::root(), WidgetId::root(), WidgetId::root(), tree)];
         let Some(target_path) = target_path else {
@@ -1130,13 +1139,20 @@ impl<State, U, V, M: Send + 'static> AppRuntime<State, U, V, M> {
         let mut stable_scope_id = WidgetId::root();
 
         for key in target_path.as_slice() {
-            let children = current_widget.children();
+            let children = current_widget.children().iter().chain(if include_retained {
+                current_widget.retained_children()
+            } else {
+                &[]
+            });
             let next = match key {
-                WidgetKey::Index(idx) => children.get(*idx).map(|child| child.as_ref()),
+                WidgetKey::Index(index) => children
+                    .enumerate()
+                    .find(|(i, _)| i == index)
+                    .map(|(_, c)| c.as_ref()),
                 WidgetKey::Named(name) => children
-                    .iter()
-                    .find(|child| child.key() == Some(name.as_str()))
-                    .map(|child| child.as_ref()),
+                    .filter(|c| c.key() == Some(name.as_str()))
+                    .map(|c| c.as_ref())
+                    .next(),
             };
 
             let Some(next_widget) = next else {
@@ -1162,7 +1178,7 @@ impl<State, U, V, M: Send + 'static> AppRuntime<State, U, V, M> {
 
     fn dispatch_to_widget(
         widget: &dyn Widget<M>,
-        event: &Event,
+        input: WidgetInput<'_>,
         store: &mut WidgetStore,
         messages: &mut MessageQueue<M>,
         path: WidgetPath,
@@ -1193,10 +1209,127 @@ impl<State, U, V, M: Send + 'static> AppRuntime<State, U, V, M> {
             frame,
             visual_capabilities,
         );
-        widget.handle_event(event, &mut ctx);
+        match input {
+            WidgetInput::Terminal(event) => widget.handle_event(event, &mut ctx),
+            WidgetInput::PointerCancel(reason) => widget.pointer_cancel(reason, &mut ctx),
+            WidgetInput::FocusEnter => widget.focus_enter(&mut ctx),
+        }
         let outcome = ctx.finish();
         messages.extend(emitted);
         outcome
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn cancel_capture(
+        tree: &dyn Widget<M>,
+        path: &WidgetPath,
+        reason: DragCancelReason,
+        store: &mut WidgetStore,
+        messages: &mut MessageQueue<M>,
+        focus: &mut FocusManager,
+        geometry: &HashMap<WidgetPath, crate::render::area::Area>,
+        theme: &Theme,
+        now: Instant,
+        frame: u64,
+        caps: TerminalVisualCapabilities,
+    ) -> bool {
+        let route = Self::build_event_route(tree, Some(path), true);
+        let Some((owner_path, id, scope, widget)) = route.last().filter(|(p, _, _, _)| p == path)
+        else {
+            return false;
+        };
+        let outcome = Self::dispatch_to_widget(
+            *widget,
+            WidgetInput::PointerCancel(reason),
+            store,
+            messages,
+            owner_path.clone(),
+            id.clone(),
+            scope.clone(),
+            focus.current_path().cloned(),
+            geometry,
+            EventPhase::Target,
+            false,
+            theme,
+            now,
+            frame,
+            caps,
+        );
+        Self::apply_focus_request(focus, outcome.focus_request);
+        outcome.handled
+    }
+
+    fn pointer_space(store: &WidgetStore, path: &WidgetPath) -> PointerSpace {
+        let geometry = store.layout_geometry.borrow();
+        path.ancestors_inclusive()
+            .iter()
+            .filter_map(|p| {
+                geometry.get(p).map(|n| {
+                    let (w, h) = if p == path {
+                        (0, 0)
+                    } else {
+                        (n.display.width(), n.display.height())
+                    };
+                    (n.coordinate_offset, w, h)
+                })
+            })
+            .collect()
+    }
+
+    fn reconcile_pointer_capture(&mut self) {
+        let Some(path) = self.pointer_capture.clone() else {
+            self.store.pointer_cancel_request = None;
+            return;
+        };
+        let tree = self.cached_tree.as_ref().expect("mounted tree");
+        let route = Self::build_event_route(tree.as_ref(), Some(&path), false);
+        let enabled = route
+            .last()
+            .is_some_and(|(p, _, _, w)| p == &path && w.pointer_enabled());
+        let requested = self
+            .store
+            .pointer_cancel_request
+            .take()
+            .filter(|(p, _)| path.starts_with(p))
+            .map(|(_, r)| r);
+        let reason = requested.or_else(|| {
+            if self
+                .focus
+                .modal_path()
+                .is_some_and(|m| !path.starts_with(m))
+            {
+                Some(DragCancelReason::ModalChanged)
+            } else if !self.focus.live_paths().contains(&path) {
+                Some(DragCancelReason::Hidden)
+            } else if !enabled {
+                Some(DragCancelReason::Disabled)
+            } else if self
+                .pointer_space
+                .as_ref()
+                .is_some_and(|basis| *basis != Self::pointer_space(&self.store, &path))
+            {
+                Some(DragCancelReason::CoordinateSpaceChanged)
+            } else {
+                None
+            }
+        });
+        if let Some(reason) = reason {
+            Self::cancel_capture(
+                tree.as_ref(),
+                &path,
+                reason,
+                &mut self.store,
+                &mut self.messages,
+                &mut self.focus,
+                &self.geometry.borrow(),
+                &self.theme,
+                self.clock.now(),
+                self.render_frame,
+                self.visual_capabilities,
+            );
+            self.pointer_capture = None;
+            self.pointer_space = None;
+        }
     }
 
     fn apply_focus_request(focus: &mut FocusManager, request: Option<FocusRequest>) {
@@ -1249,7 +1382,8 @@ impl<State, U, V, M: Send + 'static> AppRuntime<State, U, V, M> {
                 target_path = Some(modal.clone());
             }
         }
-        let mut route = Self::build_event_route(tree, target_path.as_ref());
+        store.event_target = target_path.clone();
+        let mut route = Self::build_event_route(tree, target_path.as_ref(), false);
         if let Some(modal) = focus.modal_path() {
             route.retain(|(path, _, _, _)| path.starts_with(modal));
         }
@@ -1260,7 +1394,7 @@ impl<State, U, V, M: Send + 'static> AppRuntime<State, U, V, M> {
         for (path, id, stable_scope_id, widget) in route.iter().take(ancestor_len) {
             let outcome = Self::dispatch_to_widget(
                 *widget,
-                event,
+                WidgetInput::Terminal(event),
                 store,
                 messages,
                 path.clone(),
@@ -1285,7 +1419,7 @@ impl<State, U, V, M: Send + 'static> AppRuntime<State, U, V, M> {
         if let Some((path, id, stable_scope_id, widget)) = route.last() {
             let outcome = Self::dispatch_to_widget(
                 *widget,
-                event,
+                WidgetInput::Terminal(event),
                 store,
                 messages,
                 path.clone(),
@@ -1310,7 +1444,7 @@ impl<State, U, V, M: Send + 'static> AppRuntime<State, U, V, M> {
         for (path, id, stable_scope_id, widget) in route.iter().take(ancestor_len).rev() {
             let outcome = Self::dispatch_to_widget(
                 *widget,
-                event,
+                WidgetInput::Terminal(event),
                 store,
                 messages,
                 path.clone(),
@@ -1333,6 +1467,46 @@ impl<State, U, V, M: Send + 'static> AppRuntime<State, U, V, M> {
         }
 
         handled
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn notify_focus_enter(
+        tree: &dyn Widget<M>,
+        store: &mut WidgetStore,
+        messages: &mut MessageQueue<M>,
+        focus: &mut FocusManager,
+        geometry: &HashMap<WidgetPath, crate::render::area::Area>,
+        theme: &Theme,
+        now: Instant,
+        frame: u64,
+        caps: TerminalVisualCapabilities,
+    ) {
+        let focused = focus.current_path().cloned();
+        let route = Self::build_event_route(tree, focused.as_ref(), false);
+        for (index, (path, id, scope, widget)) in route.iter().enumerate() {
+            let outcome = Self::dispatch_to_widget(
+                *widget,
+                WidgetInput::FocusEnter,
+                store,
+                messages,
+                path.clone(),
+                id.clone(),
+                scope.clone(),
+                focused.clone(),
+                geometry,
+                if index + 1 == route.len() {
+                    EventPhase::Target
+                } else {
+                    EventPhase::Capture
+                },
+                false,
+                theme,
+                now,
+                frame,
+                caps,
+            );
+            Self::apply_focus_request(focus, outcome.focus_request);
+        }
     }
 
     fn animate_widget_tree(
@@ -1940,6 +2114,8 @@ where
         self.ensure_tree();
         let tree = self.cached_tree.as_ref().unwrap();
         sync_widget_states(tree.as_ref(), &mut self.store);
+        self.focus.rebuild(tree.as_ref());
+        self.reconcile_pointer_capture();
         if self.store.invalidation.layout {
             self.layouts.clear();
             self.store.invalidation.layout = false;
@@ -1959,6 +2135,7 @@ where
         );
         self.layouts
             .resolve(tree.as_ref(), chunk.area(), &measure_ctx);
+        self.focus.rebuild(tree.as_ref());
 
         // Paint and record displayed/clipped hit geometry from those allocations.
         self.store.layout_geometry.borrow_mut().clear();
@@ -2177,18 +2354,111 @@ where
             .min()
     }
 
+    fn on_events_in_viewport(
+        &mut self,
+        events: &[Event],
+        origin: (u16, u16),
+        viewport: Size,
+    ) -> Result<bool, DrawErr> {
+        if self
+            .inline_pointer_origin
+            .is_some_and(|previous| previous != origin)
+        {
+            if let Some(path) = self.pointer_capture.clone() {
+                self.store.pointer_cancel_request =
+                    Some((path, DragCancelReason::CoordinateSpaceChanged));
+            }
+        }
+        self.inline_pointer_origin = Some(origin);
+        self.input_viewport = Some((origin, viewport));
+        let result = self.on_events(events);
+        self.input_viewport = None;
+        result.map(|_| !events.is_empty())
+    }
+
     fn on_events(&mut self, events: &[Event]) -> Result<(), DrawErr> {
         self.ensure_tree();
         sync_widget_states(self.cached_tree.as_ref().unwrap().as_ref(), &mut self.store);
+        self.focus
+            .rebuild(self.cached_tree.as_ref().unwrap().as_ref());
+        self.reconcile_pointer_capture();
 
         let tree = self.cached_tree.as_ref().unwrap();
         let geometry = self.geometry.borrow();
         let hit_regions = self.hit_regions.borrow();
 
-        for event in events {
+        for raw_event in events {
+            self.store.event_pointer_position = None;
+            let mut outside = false;
+            let normalized;
+            let event = if let (Some((origin, viewport)), Event::Mouse(mouse)) =
+                (self.input_viewport, raw_event)
+            {
+                let x = i32::from(mouse.column) - i32::from(origin.0);
+                let y = i32::from(mouse.row) - i32::from(origin.1);
+                outside = x < 0
+                    || y < 0
+                    || x >= i32::from(viewport.width)
+                    || y >= i32::from(viewport.height);
+                if outside
+                    && !(self.pointer_capture.is_some()
+                        && matches!(mouse.kind, MouseEventKind::Drag(_) | MouseEventKind::Up(_)))
+                {
+                    self.store.pointer_position = None;
+                    if self.store.hovered_path.take().is_some() {
+                        self.store.invalidation.request_paint();
+                    }
+                    continue;
+                }
+                self.store.event_pointer_position = Some(crate::tui::gesture::CellPoint::new(x, y));
+                let mut mouse = *mouse;
+                mouse.column = x.clamp(0, u16::MAX.into()) as u16;
+                mouse.row = y.clamp(0, u16::MAX.into()) as u16;
+                normalized = Event::Mouse(mouse);
+                &normalized
+            } else {
+                raw_event
+            };
+            let cancel = match event {
+                Event::FocusLost => Some(DragCancelReason::FocusLost),
+                Event::Resize(_, _) => Some(DragCancelReason::CoordinateSpaceChanged),
+                Event::Key(key)
+                    if key.code == KeyCode::Esc && key.kind != KeyEventKind::Release =>
+                {
+                    Some(DragCancelReason::Escape)
+                }
+                Event::Mouse(mouse)
+                    if matches!(mouse.kind, MouseEventKind::Down(_))
+                        && self.pointer_capture.is_some() =>
+                {
+                    Some(DragCancelReason::CaptureTransferred)
+                }
+                _ => None,
+            };
+            if let Some((reason, path)) =
+                cancel.and_then(|reason| Some(reason).zip(self.pointer_capture.take()))
+            {
+                self.pointer_space = None;
+                let handled = Self::cancel_capture(
+                    tree.as_ref(),
+                    &path,
+                    reason,
+                    &mut self.store,
+                    &mut self.messages,
+                    &mut self.focus,
+                    &geometry,
+                    &self.theme,
+                    self.clock.now(),
+                    self.render_frame,
+                    self.visual_capabilities,
+                );
+                if handled && reason == DragCancelReason::Escape {
+                    continue;
+                }
+            }
             match event {
                 Event::Mouse(mouse) => {
-                    self.store.pointer_position = Some((mouse.column, mouse.row));
+                    self.store.pointer_position = (!outside).then_some((mouse.column, mouse.row));
                 }
                 Event::FocusLost | Event::Resize(_, _) => {
                     self.store.pointer_position = None;
@@ -2217,6 +2487,9 @@ where
                 match mouse_event.kind {
                     MouseEventKind::Down(MouseButton::Left) => {
                         self.pointer_capture = mouse_target.clone();
+                        self.pointer_space = mouse_target
+                            .as_ref()
+                            .map(|p| Self::pointer_space(&self.store, p));
                         if let Some(path) = mouse_target.as_ref() {
                             self.focus.request_focus(path);
                         }
@@ -2228,7 +2501,7 @@ where
                 }
             }
 
-            if Self::dispatch_widget_event(
+            let handled = Self::dispatch_widget_event(
                 tree.as_ref(),
                 event,
                 &mut self.store,
@@ -2241,7 +2514,59 @@ where
                 self.clock.now(),
                 self.render_frame,
                 self.visual_capabilities,
-            ) {
+            );
+            if let Some((path, capture)) = self.store.pointer_request.take() {
+                if capture {
+                    if let Some(previous) = self
+                        .pointer_capture
+                        .as_ref()
+                        .filter(|previous| **previous != path)
+                    {
+                        Self::cancel_capture(
+                            tree.as_ref(),
+                            previous,
+                            DragCancelReason::CaptureTransferred,
+                            &mut self.store,
+                            &mut self.messages,
+                            &mut self.focus,
+                            &geometry,
+                            &self.theme,
+                            self.clock.now(),
+                            self.render_frame,
+                            self.visual_capabilities,
+                        );
+                    }
+                    self.pointer_space = Some(Self::pointer_space(&self.store, &path));
+                    self.pointer_capture = Some(path);
+                } else if self.pointer_capture.as_ref() == Some(&path) {
+                    self.pointer_capture = None;
+                    self.pointer_space = None;
+                }
+            }
+            if let Some((owner, reason)) = self.store.pointer_cancel_request.take() {
+                if let Some(path) = self
+                    .pointer_capture
+                    .as_ref()
+                    .filter(|p| p.starts_with(&owner))
+                {
+                    Self::cancel_capture(
+                        tree.as_ref(),
+                        path,
+                        reason,
+                        &mut self.store,
+                        &mut self.messages,
+                        &mut self.focus,
+                        &geometry,
+                        &self.theme,
+                        self.clock.now(),
+                        self.render_frame,
+                        self.visual_capabilities,
+                    );
+                    self.pointer_capture = None;
+                    self.pointer_space = None;
+                }
+            }
+            if handled {
                 if matches!(event, Event::Key(_)) {
                     if let Some(router) = self.command_router.as_mut() {
                         router.cancel_pending();
@@ -2263,6 +2588,17 @@ where
             match key_event.code {
                 KeyCode::Tab if key_event.modifiers.contains(KeyModifiers::SHIFT) => {
                     self.focus.prev();
+                    Self::notify_focus_enter(
+                        tree.as_ref(),
+                        &mut self.store,
+                        &mut self.messages,
+                        &mut self.focus,
+                        &geometry,
+                        &self.theme,
+                        self.clock.now(),
+                        self.render_frame,
+                        self.visual_capabilities,
+                    );
                     if let Some(router) = self.command_router.as_mut() {
                         router.cancel_pending();
                     }
@@ -2270,6 +2606,17 @@ where
                 }
                 KeyCode::Tab => {
                     self.focus.next();
+                    Self::notify_focus_enter(
+                        tree.as_ref(),
+                        &mut self.store,
+                        &mut self.messages,
+                        &mut self.focus,
+                        &geometry,
+                        &self.theme,
+                        self.clock.now(),
+                        self.render_frame,
+                        self.visual_capabilities,
+                    );
                     if let Some(router) = self.command_router.as_mut() {
                         router.cancel_pending();
                     }
@@ -2333,6 +2680,7 @@ where
             }
         }
 
+        self.store.event_pointer_position = None;
         Ok(())
     }
 
@@ -2604,5 +2952,64 @@ mod tests {
             mouse_target_path(&event, &regions, Some(&captured)),
             Some(captured)
         );
+    }
+    #[test]
+    fn inline_capture_keeps_signed_outside_coordinates_and_origin_changes_cancel() {
+        use crate::tui::{
+            gesture::{CellPoint, DragCancelReason, DragEvent},
+            widgets::{drag_region, label},
+        };
+        let mouse = |kind, column, row| {
+            Event::Mouse(crossterm::event::MouseEvent {
+                kind,
+                column,
+                row,
+                modifiers: KeyModifiers::empty(),
+            })
+        };
+        let mut rt = App::new(Vec::<DragEvent>::new())
+            .with_motion_policy(MotionPolicy::disabled())
+            .build(
+                |events, event| events.push(event),
+                |_| drag_region(label("handle")).key("handle").on_drag(|e| e),
+            )
+            .size(20, 6);
+        rt.step(&[]).unwrap();
+        rt.core
+            .on_events_in_viewport(
+                &[
+                    mouse(MouseEventKind::Down(MouseButton::Left), 12, 9),
+                    mouse(MouseEventKind::Drag(MouseButton::Left), 8, 5),
+                    mouse(MouseEventKind::Up(MouseButton::Left), 8, 5),
+                ],
+                (10, 8),
+                (20, 6).into(),
+            )
+            .unwrap();
+        rt.step(&[]).unwrap();
+        assert!(
+            matches!(rt.state().last(),Some(DragEvent::End(u)) if u.position==CellPoint::new(-2,-3) && u.total_delta==CellPoint::new(-4,-4))
+        );
+        assert!(rt.core.pointer_capture.is_none());
+        rt.core
+            .on_events_in_viewport(
+                &[
+                    mouse(MouseEventKind::Down(MouseButton::Left), 12, 9),
+                    mouse(MouseEventKind::Drag(MouseButton::Left), 13, 9),
+                ],
+                (10, 8),
+                (20, 6).into(),
+            )
+            .unwrap();
+        rt.step(&[]).unwrap();
+        rt.core
+            .on_events_in_viewport(&[], (10, 6), (20, 6).into())
+            .unwrap();
+        rt.step(&[]).unwrap();
+        assert!(matches!(
+            rt.state().last(),
+            Some(DragEvent::Cancel(DragCancelReason::CoordinateSpaceChanged))
+        ));
+        assert!(rt.core.pointer_capture.is_none());
     }
 }

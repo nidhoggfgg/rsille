@@ -73,3 +73,15 @@ pub use crate::tui::widgets::{
     CanvasPoint, CanvasPointer, CanvasViewport, DataSource, RowData, VirtualList,
     VirtualListConfig, VirtualListState, WorldCanvas,
 };
+
+pub use crate::tui::gesture::{
+    CellDelta, CellPoint, DragAxis, DragCancelReason, DragEvent, DragState, DragUpdate, ResizeEdge,
+    WindowRect,
+};
+
+pub use crate::tui::widgets::{drag_region, DragRegion};
+
+pub use crate::tui::layout::{window_host, WindowHost, WindowHostState};
+pub use crate::tui::widgets::{
+    floating_window, FloatingWindow, FloatingWindowState, WindowVisibility,
+};

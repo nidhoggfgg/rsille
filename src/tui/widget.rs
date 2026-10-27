@@ -306,6 +306,10 @@ impl<'a> StateCtx<'a> {
         self.store.get_or_default(&self.id)
     }
 
+    pub fn cancel_pointer(&mut self, reason: crate::tui::gesture::DragCancelReason) {
+        self.store.pointer_cancel_request = Some((self.path.clone(), reason));
+    }
+
     /// Lifecycle synchronization that changes intrinsic size must invalidate layout.
     pub fn request_layout(&mut self) {
         self.store.invalidation.request_layout();
@@ -459,6 +463,25 @@ pub trait Widget<M> {
     /// `ctx.emit(msg)`, and request focus changes via the focus helpers.
     fn handle_event(&self, _event: &Event, _ctx: &mut EventCtx<M>) {}
 
+    /// Cancel pointer interaction without treating cancellation as a release.
+    /// Called only while the owner is mounted; unmount always releases capture.
+    fn pointer_cancel(
+        &self,
+        _reason: crate::tui::gesture::DragCancelReason,
+        ctx: &mut EventCtx<M>,
+    ) {
+        self.handle_event(&Event::FocusLost, ctx);
+    }
+
+    /// Whether this node can continue owning a pointer sequence after Sync.
+    fn pointer_enabled(&self) -> bool {
+        true
+    }
+
+    /// Observe keyboard focus entering this node/subtree. This is separate from
+    /// terminal focus events and does not consume the input that moved focus.
+    fn focus_enter(&self, _ctx: &mut EventCtx<M>) {}
+
     /// Advance component-level animation state for this widget.
     ///
     /// Prefer `AnimationCtx::request_paint`, `request_layout` and
@@ -570,6 +593,15 @@ impl<M> Widget<M> for Box<dyn Widget<M>> {
 
     fn handle_event(&self, event: &Event, ctx: &mut EventCtx<M>) {
         (**self).handle_event(event, ctx)
+    }
+    fn pointer_cancel(&self, reason: crate::tui::gesture::DragCancelReason, ctx: &mut EventCtx<M>) {
+        (**self).pointer_cancel(reason, ctx)
+    }
+    fn pointer_enabled(&self) -> bool {
+        (**self).pointer_enabled()
+    }
+    fn focus_enter(&self, ctx: &mut EventCtx<M>) {
+        (**self).focus_enter(ctx);
     }
 
     fn animate(&self, ctx: &mut AnimationCtx) -> bool {
@@ -1609,6 +1641,12 @@ impl<'a, M> EventCtx<'a, M> {
         self.handled = true;
     }
 
+    /// Publish an observation without consuming the routed input. Useful for
+    /// ancestor activation notifications that must still reach an editor.
+    pub fn emit_notification(&mut self, message: M) {
+        self.messages.push(message);
+    }
+
     /// The current widget path in the tree.
     pub fn path(&self) -> &WidgetPath {
         &self.path
@@ -1634,6 +1672,11 @@ impl<'a, M> EventCtx<'a, M> {
             frame: self.frame,
             visual_capabilities: self.visual_capabilities,
         })
+    }
+
+    /// Original target of this input, before capture and bubble routing.
+    pub fn target_path(&self) -> Option<&WidgetPath> {
+        self.store.event_target.as_ref()
     }
 
     /// The globally focused path.
@@ -1674,33 +1717,53 @@ impl<'a, M> EventCtx<'a, M> {
         }
     }
 
-    /// Mouse coordinates in the same layout space as `bounds()`. Offscreen
-    /// scroll content retains its complete allocation for correct local editing.
-    pub fn layout_mouse_position(&self, event: &Event) -> Option<(u16, u16)> {
-        let (x, y) = self.mouse_position(event)?;
+    /// Claim the runtime's single capture for this handle. Call in target or
+    /// unhandled bubble phase so nested controls keep their own interactions.
+    pub fn capture_pointer(&mut self) {
+        self.store.pointer_request = Some((self.path.clone(), true));
+    }
+    pub fn release_pointer(&mut self) {
+        self.store.pointer_request = Some((self.path.clone(), false));
+    }
+    pub fn cancel_pointer(&mut self) {
+        self.store.pointer_cancel_request = Some((
+            self.path.clone(),
+            crate::tui::gesture::DragCancelReason::Explicit,
+        ));
+    }
+    /// Signed layout-space pointer coordinates. Scrolling and Inline offsets
+    /// are converted exactly once; moving the handle never changes this basis.
+    pub fn cell_mouse_position(&self, event: &Event) -> Option<crate::tui::gesture::CellPoint> {
+        let position = self.store.event_pointer_position.or_else(|| {
+            self.mouse_position(event)
+                .map(|(x, y)| crate::tui::gesture::CellPoint::new(x.into(), y.into()))
+        })?;
+        let (x, y) = (position.x, position.y);
         let nodes = self.store.layout_geometry.borrow();
         let (dx, dy) = nodes
             .get(&self.path)
-            .map(|node| node.coordinate_offset)
+            .map(|n| n.coordinate_offset)
             .unwrap_or((0, 0));
+        Some(crate::tui::gesture::CellPoint::new(x - dx, y - dy))
+    }
+
+    /// Mouse coordinates in the same layout space as `bounds()`. Offscreen
+    /// scroll content retains its complete allocation for correct local editing.
+    pub fn layout_mouse_position(&self, event: &Event) -> Option<(u16, u16)> {
+        let point = self.cell_mouse_position(event)?;
         Some((
-            (x as i32 - dx).clamp(0, u16::MAX as i32) as u16,
-            (y as i32 - dy).clamp(0, u16::MAX as i32) as u16,
+            point.x.clamp(0, u16::MAX.into()) as u16,
+            point.y.clamp(0, u16::MAX.into()) as u16,
         ))
     }
 
     /// Signed widget-relative coordinates for captured drags outside the allocation.
     pub(crate) fn relative_mouse_position(&self, event: &Event) -> Option<(i32, i32)> {
-        let (x, y) = self.mouse_position(event)?;
+        let point = self.cell_mouse_position(event)?;
         let bounds = self.bounds()?;
-        let nodes = self.store.layout_geometry.borrow();
-        let (dx, dy) = nodes
-            .get(&self.path)
-            .map(|node| node.coordinate_offset)
-            .unwrap_or((0, 0));
         Some((
-            i32::from(x) - dx - i32::from(bounds.x()),
-            i32::from(y) - dy - i32::from(bounds.y()),
+            point.x - i32::from(bounds.x()),
+            point.y - i32::from(bounds.y()),
         ))
     }
 
@@ -1798,7 +1861,11 @@ pub struct WidgetStore {
     pub(crate) layout_geometry: RefCell<HashMap<WidgetPath, LayoutGeometry>>,
     pub(crate) rendered_ids: RefCell<HashMap<WidgetId, WidgetPath>>,
     pub(crate) pointer_position: Option<(u16, u16)>,
+    pub(crate) event_target: Option<WidgetPath>,
+    pub(crate) event_pointer_position: Option<crate::tui::gesture::CellPoint>,
     pub(crate) hovered_path: Option<WidgetPath>,
+    pub(crate) pointer_request: Option<(WidgetPath, bool)>,
+    pub(crate) pointer_cancel_request: Option<(WidgetPath, crate::tui::gesture::DragCancelReason)>,
 }
 
 impl WidgetStore {

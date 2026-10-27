@@ -608,3 +608,120 @@ also applies. Use `CanvasViewport::contains` for rectangular world hit tests.
 Store a viewport in application state and update it with `pan(dx, dy)` or
 `zoom_at(factor, pointer.position)` to implement drag and wheel interactions.
 A factor greater than one zooms in while preserving the anchor's screen position.
+
+### Floating windows, drag handles, and controlled tables
+
+Run `cargo run -p tui --example windows`, or add `-- --inline`. The example has
+an editable window, a second content window, and a drag handle independent of
+window management. Lumen uses the same APIs for its floating desk.
+
+```rust,ignore
+window_host(workspace)
+    .key("windows")
+    .active_window(state.active.clone())
+    .on_active_window_change(Msg::Activate)
+    .snap_distance(2)
+    .window(floating_window(editor)
+        .key("notes")
+        .title("Notes")
+        .rect(state.rect)
+        .on_rect_change(Msg::Rect)
+        .visibility(state.visibility)
+        .on_visibility_change(Msg::Visibility)
+        .min_size(20, 8)
+        .hideable(true)
+        .on_close(|| Msg::Close))
+```
+
+Window rectangles include borders and titles, in cells relative to the Host's
+padded content area. `WindowRect` uses signed positions; `constrained` applies
+minimum/maximum sizes and then gives viewport bounds priority. Host padding can
+reserve space for a dock. Stable window keys preserve child state while changing
+stack order. Windows do not trap Tab. Clicking an editor both activates its window
+and delivers the original click. Window scopes remember focus; collapse, hide,
+and removal exclude invisible editors from focus navigation.
+
+`WindowVisibility::{Expanded, Collapsed, Hidden}` controls presentation. Collapsed
+and hidden content stays mounted through `retained_children`: no paint, hit tests,
+focus targets, or animation updates. Existing scoped subscriptions and tasks stay
+alive while their scope is retained; removing the window releases its owned scope.
+Business work owned by the application continues independently. Very small hosts
+show compact title handles and restore content when there is room again.
+
+A close callback requests an application decision; remove the window description
+to close it. Without a callback there is no close button. Hidden windows can be
+restored with `visibility(Expanded)`. A closed window remounts with fresh local
+state if re-created. `title_actions(width, controls)` replaces title buttons with
+ordinary widget content. `movable`, `resizable`, `collapsible`, `hideable`,
+`border`, `style`, and `active_style` configure chrome and capabilities.
+
+Title arrows move; Shift+arrows resize; Enter folds; Delete requests close. Grip
+arrows resize. Editors retain their own keys. Dragging follows input immediately,
+starting from displayed geometry even during a layout transition. Automatic
+transitions and release-time snapping use the framework animation/motion policy.
+All window hit tests use displayed geometry. Escape cancels an active gesture and
+restores its starting rectangle; environmental cancellation preserves the last
+valid value. Ordinary Escape handling is unchanged.
+
+```rust,ignore
+drag_region(label("Drag here"))
+    .key("handle")
+    .axis(DragAxis::Both)
+    .threshold_cells(1)
+    .on_drag(Msg::Drag)
+```
+
+`DragEvent` delivers Begin once, Update on changed positions, and exactly one End
+or Cancel after Begin. Pending sequences below the threshold end silently. The
+threshold uses Chebyshev cell distance; zero starts on Down. `DragUpdate` includes
+signed layout-space `origin`, `position`, `total_delta`, per-input `delta`, and
+modifiers. Derive geometry from the starting snapshot plus total delta, using
+`WindowRect::translated` or `resized(delta, ResizeEdge)`. These cell coordinates
+are separate from Canvas world coordinates. Captured input continues outside the
+original handle. Axis constraints affect deltas; pointer positions remain raw.
+
+Capture is owned by stable widget identity and follows keyed reordering. Focus
+loss, coordinate mapping/ancestor-size changes, Escape, disable/hide, modal
+boundaries, capture transfer, explicit cancellation, and controlled rectangle
+replacement cancel interaction. Unmount/type replacement clears capture without
+sending a callback into the old lifetime. `EventCtx::{capture_pointer,
+release_pointer,cancel_pointer}` use the runtime's single capture; custom owners
+implement `Widget::pointer_cancel` for cleanup. Wrappers forward this protocol
+through `.map(...)` and `.scope(...)`. Handled child inputs do not start parent
+drags. Buttons still click on Down; wrapping a button does not defer its click.
+
+```rust,ignore
+data_table()
+    .rows(rows)
+    .active_row(state.current.clone())
+    .on_active_row_change(Msg::Current)
+    .selected_ids(state.selected.clone())
+    .on_selection_change(Msg::Selected)
+    .on_submit(Msg::Submit)
+```
+
+Each setter binds its field independently. Omitting it keeps local state;
+`default_active_row` and `default_selected_ids` initialize on mount only.
+`active_row(None)` explicitly clears the cursor; an empty `selected_ids` clears
+selection. User inputs generate candidate values, accumulated within an input
+batch. At the next Sync, parent properties are authoritative, including rejected
+updates. Releasing control continues from the last accepted parent value.
+Sync, rendering, sorting, and filtering never emit user change callbacks.
+
+Current row and selection are independent, keyed by row id. Hidden/unknown
+controlled ids are retained. Navigation falls back to the first enabled visible
+row; with an explicitly empty cursor Down/Up proposes the first/last enabled row,
+and Enter does nothing. Hidden or invalid nonempty cursors use the same
+visible fallback for navigation and submission.
+Disabled rows render but cannot acquire the cursor or new user selection. Filtered
+selection survives edits to visible rows; deleted uncontrolled ids are cleaned up.
+Selection deduplicates in first-occurrence order; Single mode keeps the first id.
+`on_active_row_change` and `on_selection_change` report semantic changes, including
+single selection. Legacy `on_change(String)` retains its prior notification timing;
+when both current-row callbacks are configured, both receive row changes. Submit
+remains independent. `selection.cursor` is a compatibility mirror of `active_row`.
+
+For modal surfaces, keep `portal(base)` and `PortalLayer::modal(true)`. A modal
+cancels background window gestures and restores focus on dismissal. Use
+`dismiss_on_outside_click(false)` to keep Escape dismissal while ignoring backdrop
+clicks; backdrop input remains isolated.

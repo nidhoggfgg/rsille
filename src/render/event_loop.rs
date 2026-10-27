@@ -1,3 +1,5 @@
+#[cfg(test)]
+use crossterm::event::MouseEvent;
 use std::{
     io::{stdout, Stdout},
     time::{Duration, Instant},
@@ -5,7 +7,7 @@ use std::{
 
 use crossterm::{
     cursor::{position, MoveToNextLine},
-    event::{Event, EventStream, KeyEvent, KeyEventKind, MouseEvent},
+    event::{Event, EventStream, KeyEvent, KeyEventKind},
     execute,
     terminal::size as terminal_size,
 };
@@ -367,39 +369,30 @@ where
     }
 
     fn dispatch_events(&mut self, events: Vec<Event>) -> bool {
-        let (events, pointer_outside) = self.normalize_inline_mouse_events(events);
-        if let Err(e) = self.render.on_events(&events) {
-            error!("Error processing events: {}", e);
-        }
-        if pointer_outside {
-            self.render.thing_mut().on_pointer_leave();
-        }
-        !events.is_empty()
-    }
-
-    fn normalize_inline_mouse_events(&self, events: Vec<Event>) -> (Vec<Event>, bool) {
-        if !self.inline_mode {
-            return (events, false);
-        }
-
-        // Hover depends on the final pointer position. Keep input in one batch
-        // (editors synchronize controlled values at the start of `on_events`),
-        // then notify a leave only if no later mouse event reentered the UI.
-        let mut pointer_outside = false;
-        let events = events
-            .into_iter()
-            .filter_map(|event| {
-                let is_mouse = matches!(event, Event::Mouse(_));
-                let normalized = self.normalize_inline_mouse_event(event);
-                if is_mouse {
-                    pointer_outside = normalized.is_none();
+        if self.inline_mode {
+            let origin = self.render.inline_origin();
+            let viewport =
+                Size::from((self.render.inline_width(), self.render.inline_used_height()));
+            match self.render.thing_mut().on_events_in_viewport(
+                &events,
+                (origin.x, origin.y),
+                viewport,
+            ) {
+                Ok(changed) => changed,
+                Err(e) => {
+                    error!("Error processing events: {}", e);
+                    false
                 }
-                normalized
-            })
-            .collect();
-        (events, pointer_outside)
+            }
+        } else {
+            if let Err(e) = self.render.on_events(&events) {
+                error!("Error processing events: {}", e);
+            }
+            !events.is_empty()
+        }
     }
 
+    #[cfg(test)]
     fn normalize_inline_mouse_event(&self, event: Event) -> Option<Event> {
         let Event::Mouse(mouse) = event else {
             return Some(event);

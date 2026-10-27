@@ -4,6 +4,7 @@ pub mod effect;
 pub mod error;
 pub mod event;
 pub mod focus;
+pub mod gesture;
 pub mod layout;
 pub(crate) mod offscreen;
 pub mod shell;

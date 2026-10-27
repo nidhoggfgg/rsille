@@ -27,6 +27,46 @@ pub trait Update {
 
     fn on_events(&mut self, events: &[crossterm::event::Event]) -> Result<(), DrawErr>;
 
+    /// Dispatch raw terminal events into an Inline viewport. The default drops
+    /// outside pointer input; capture-aware applications may retain signed
+    /// outside positions without splitting the input batch.
+    fn on_events_in_viewport(
+        &mut self,
+        events: &[crossterm::event::Event],
+        origin: (u16, u16),
+        viewport: Size,
+    ) -> Result<bool, DrawErr> {
+        use crossterm::event::Event;
+        let mut outside = false;
+        let events = events
+            .iter()
+            .filter_map(|event| match event {
+                Event::Mouse(mouse) => {
+                    let x = i32::from(mouse.column) - i32::from(origin.0);
+                    let y = i32::from(mouse.row) - i32::from(origin.1);
+                    outside = x < 0
+                        || y < 0
+                        || x >= i32::from(viewport.width)
+                        || y >= i32::from(viewport.height);
+                    if outside {
+                        None
+                    } else {
+                        let mut mouse = *mouse;
+                        mouse.column = x as u16;
+                        mouse.row = y as u16;
+                        Some(Event::Mouse(mouse))
+                    }
+                }
+                event => Some(event.clone()),
+            })
+            .collect::<Vec<_>>();
+        self.on_events(&events)?;
+        if outside {
+            self.on_pointer_leave();
+        }
+        Ok(!events.is_empty())
+    }
+
     /// Called after an input batch when its last mouse event was outside the
     /// inline rendering area. Clear pointer hover without changing keyboard focus.
     /// Outside mouse events are not forwarded to `on_events`.

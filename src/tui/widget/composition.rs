@@ -29,48 +29,43 @@ type MessageMap<M, N> = Rc<dyn Fn(M) -> N>;
 /// each exposes the corresponding mapped children for framework traversal.
 pub struct MappedWidget<M, N> {
     root: Rc<dyn Widget<M>>,
-    route: Vec<(bool, usize)>,
+    // Visible and retained children form one stable sequence. A container may
+    // move the prefix boundary during lifecycle synchronization (e.g. hide a
+    // window); adapters keep addressing the same combined child slots.
+    route: Vec<usize>,
     map: MessageMap<M, N>,
     children: Vec<Box<dyn Widget<N>>>,
-    retained: Vec<Box<dyn Widget<N>>>,
 }
 
 impl<M: 'static, N: 'static> MappedWidget<M, N> {
-    fn build(root: Rc<dyn Widget<M>>, route: Vec<(bool, usize)>, map: MessageMap<M, N>) -> Self {
+    fn build(root: Rc<dyn Widget<M>>, route: Vec<usize>, map: MessageMap<M, N>) -> Self {
         let mut result = Self {
             root,
             route,
             map,
             children: Vec::new(),
-            retained: Vec::new(),
         };
-        for retained in [false, true] {
-            let count = if retained {
-                result.inner().retained_children().len()
-            } else {
-                result.inner().children().len()
-            };
-            for index in 0..count {
-                let mut route = result.route.clone();
-                route.push((retained, index));
-                let child = Box::new(Self::build(result.root.clone(), route, result.map.clone()));
-                if retained {
-                    result.retained.push(child);
-                } else {
-                    result.children.push(child);
-                }
-            }
+        let count = result.inner().children().len() + result.inner().retained_children().len();
+        for index in 0..count {
+            let mut route = result.route.clone();
+            route.push(index);
+            result.children.push(Box::new(Self::build(
+                result.root.clone(),
+                route,
+                result.map.clone(),
+            )));
         }
         result
     }
 
     fn inner(&self) -> &(dyn Widget<M> + 'static) {
         let mut widget = self.root.as_ref();
-        for &(retained, index) in &self.route {
-            widget = if retained {
-                widget.retained_children()[index].as_ref()
-            } else {
+        for &index in &self.route {
+            let visible = widget.children().len();
+            widget = if index < visible {
                 widget.children()[index].as_ref()
+            } else {
+                widget.retained_children()[index - visible].as_ref()
             };
         }
         widget
@@ -95,6 +90,18 @@ impl<M: 'static, N: 'static> Widget<N> for MappedWidget<M, N> {
             |child| self.inner().handle_event(event, child),
             |m| (self.map)(m),
         );
+    }
+    fn pointer_cancel(&self, reason: crate::tui::gesture::DragCancelReason, ctx: &mut EventCtx<N>) {
+        ctx.map_messages(
+            |child| self.inner().pointer_cancel(reason, child),
+            |m| (self.map)(m),
+        );
+    }
+    fn focus_enter(&self, ctx: &mut EventCtx<N>) {
+        ctx.map_messages(|child| self.inner().focus_enter(child), |m| (self.map)(m));
+    }
+    fn pointer_enabled(&self) -> bool {
+        self.inner().pointer_enabled()
     }
     fn animate(&self, ctx: &mut AnimationCtx) -> bool {
         self.inner().animate(ctx)
@@ -130,10 +137,10 @@ impl<M: 'static, N: 'static> Widget<N> for MappedWidget<M, N> {
         self.inner().focus_config()
     }
     fn children(&self) -> &[Box<dyn Widget<N>>] {
-        &self.children
+        &self.children[..self.inner().children().len()]
     }
     fn retained_children(&self) -> &[Box<dyn Widget<N>>] {
-        &self.retained
+        &self.children[self.inner().children().len()..]
     }
     fn key(&self) -> Option<&str> {
         self.inner().key()

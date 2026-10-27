@@ -142,7 +142,6 @@ fn app(state: State) -> App<State, Msg> {
         )
         .on_input(|input| match input {
             InputEvent::Terminal(Event::Resize(w, h)) => Some(Msg::Resize(w, h)),
-            InputEvent::Terminal(Event::FocusLost) => Some(Msg::Desk(desktop::Action::End)),
             _ => None,
         })
         .on_tick(STEP, || Msg::Tick)
@@ -209,7 +208,6 @@ fn update(s: &mut State, msg: Msg, ctx: &mut UpdateCtx<Msg>) {
         Msg::Theme => s.theme = (s.theme + 1) % 3,
         Msg::Quiet(value) => s.quiet = value,
         Msg::Open(modal) => {
-            s.desk.cancel_drag();
             s.modal = Some(modal);
         }
         Msg::Close => s.modal = None,
@@ -322,7 +320,7 @@ fn update(s: &mut State, msg: Msg, ctx: &mut UpdateCtx<Msg>) {
             }
         }
         Msg::Desk(action) => {
-            if s.modal.is_none() || matches!(action, desktop::Action::End) {
+            if s.modal.is_none() {
                 s.desk.update(action, s.width, s.height);
             }
         }

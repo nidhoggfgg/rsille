@@ -270,11 +270,6 @@ pub(super) fn view(s: &State) -> impl Widget<Msg> {
         .child(layout)
         .child(footer);
     let workspace = desktop::layers(overlay(base).key("workspace"), s, p);
-    let workspace: Box<dyn Widget<Msg>> = if s.modal.is_some() {
-        Box::new(Backdrop(Box::new(workspace)))
-    } else {
-        Box::new(workspace)
-    };
     let mut root = overlay(workspace);
     if let Some((id, text)) = &s.toast {
         root = root.layer(
@@ -291,6 +286,7 @@ pub(super) fn view(s: &State) -> impl Widget<Msg> {
             .size(48.min(s.width.saturating_sub(4)), 5),
         );
     }
+    let mut root = portal(root);
     if let Some(modal) = s.modal {
         let (widget, height): (Box<dyn Widget<Msg>>, u16) = match modal {
             Modal::Commands => (
@@ -362,21 +358,22 @@ pub(super) fn view(s: &State) -> impl Widget<Msg> {
                 13,
             ),
         };
-        root = root
-            .layer(
-                OverlayLayer::new(enter(
-                    s,
-                    animate(widget).enter(Transition::new(
-                        TransitionEffect::ScaleFromCenter,
-                        motion_spec(s, 220),
-                    )),
-                    "modal",
-                    0,
-                ))
-                .floating(OverlayAnchor::Center)
-                .size(60.min(s.width.saturating_sub(2)), height.min(s.height)),
-            )
-            .trap_focus();
+        root = root.layer(
+            PortalLayer::new(enter(
+                s,
+                animate(widget).enter(Transition::new(
+                    TransitionEffect::ScaleFromCenter,
+                    motion_spec(s, 220),
+                )),
+                "modal",
+                0,
+            ))
+            .key("lumen-modal")
+            .modal(true)
+            .on_dismiss(|| Msg::Close)
+            .dismiss_on_outside_click(false)
+            .size(60.min(s.width.saturating_sub(2)), height.min(s.height)),
+        );
     }
     Viewport([Box::new(root)])
 }
@@ -652,10 +649,7 @@ fn flows(s: &State, p: Palette) -> impl Widget<Msg> {
                                 ),
                         )
                         .child(spacer().height(1))
-                        .child(ControlledTable {
-                            inner: table,
-                            active: s.inspected.clone(),
-                        })
+                        .child(table.active_row(Some(s.inspected.clone())))
                         .child(muted("↑ ↓ inspect  ·  Enter select", p)),
                     "flows",
                     0,
@@ -888,17 +882,6 @@ fn notes(s: &State, p: Palette) -> impl Widget<Msg> {
         )
 }
 
-// Hide the background from focus and event routing while preserving its render.
-struct Backdrop(Box<dyn Widget<Msg>>);
-impl Widget<Msg> for Backdrop {
-    fn constraints(&self) -> Constraints {
-        self.0.constraints()
-    }
-    fn render(&self, chunk: &mut rsille::render::chunk::Chunk, ctx: &RenderCtx) {
-        self.0.render(chunk, &ctx.child_ctx("preview"));
-    }
-    fn handle_event(&self, _: &Event, _: &mut EventCtx<Msg>) {}
-}
 struct Viewport([Box<dyn Widget<Msg>>; 1]);
 impl Widget<Msg> for Viewport {
     fn constraints(&self) -> Constraints {
@@ -1007,34 +990,3 @@ impl Widget<Msg> for NavLink {
 
 // Synchronize application selection through the public widget-state lifecycle.
 // Render and input still come from the built-in DataTable.
-struct ControlledTable {
-    inner: DataTable<Msg>,
-    active: String,
-}
-impl Widget<Msg> for ControlledTable {
-    fn key(&self) -> Option<&str> {
-        Widget::key(&self.inner)
-    }
-    fn lifecycle(&self, ctx: &mut StateCtx) {
-        if ctx.lifecycle() != Lifecycle::Unmount {
-            let state = ctx.state_mut::<DataTableState>();
-            state.active_row = Some(self.active.clone());
-            state.selection.set_cursor(Some(self.active.clone()));
-        }
-    }
-    fn constraints(&self) -> Constraints {
-        self.inner.constraints()
-    }
-    fn layout_style_with(&self, ctx: &MeasureCtx) -> LayoutStyle {
-        self.inner.layout_style_with(ctx)
-    }
-    fn focus_config(&self) -> FocusConfig {
-        self.inner.focus_config()
-    }
-    fn render(&self, chunk: &mut rsille::render::chunk::Chunk, ctx: &RenderCtx) {
-        self.inner.render(chunk, ctx);
-    }
-    fn handle_event(&self, event: &Event, ctx: &mut EventCtx<Msg>) {
-        self.inner.handle_event(event, ctx);
-    }
-}
