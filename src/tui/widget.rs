@@ -1689,6 +1689,21 @@ impl<'a, M> EventCtx<'a, M> {
         ))
     }
 
+    /// Signed widget-relative coordinates for captured drags outside the allocation.
+    pub(crate) fn relative_mouse_position(&self, event: &Event) -> Option<(i32, i32)> {
+        let (x, y) = self.mouse_position(event)?;
+        let bounds = self.bounds()?;
+        let nodes = self.store.layout_geometry.borrow();
+        let (dx, dy) = nodes
+            .get(&self.path)
+            .map(|node| node.coordinate_offset)
+            .unwrap_or((0, 0));
+        Some((
+            i32::from(x) - dx - i32::from(bounds.x()),
+            i32::from(y) - dy - i32::from(bounds.y()),
+        ))
+    }
+
     /// Mouse coordinates relative to the current widget bounds.
     pub fn local_mouse_position(&self, event: &Event) -> Option<(u16, u16)> {
         let (x, y) = self.layout_mouse_position(event)?;

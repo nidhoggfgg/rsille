@@ -10,7 +10,7 @@ use syntect::highlighting::{Style as SyntectStyle, ThemeSet};
 #[cfg(feature = "syntax-highlighting")]
 use syntect::parsing::SyntaxSet;
 
-use crate::tui::event::{Event, KeyCode};
+use crate::tui::event::{Event, KeyCode, MouseEventKind};
 use crate::tui::focus::FocusConfig;
 use crate::tui::layout::border_renderer;
 use crate::tui::layout::{ensure_item_visible, AxisLimit, Constraints, MeasuredSize, SizeProposal};
@@ -179,7 +179,13 @@ impl<M: 'static> Widget<M> for CodeViewer<M> {
         if crate::tui::event::is_key_release(event) {
             return;
         }
-        handle_scroll_event(event, ctx, self.code.lines().count(), self.height);
+        handle_scroll_event(
+            event,
+            ctx,
+            self.code.lines().count(),
+            self.height,
+            self.border.is_some(),
+        );
     }
 
     fn constraints(&self) -> Constraints {
@@ -292,7 +298,13 @@ impl<M: 'static> Widget<M> for LogViewer<M> {
         if crate::tui::event::is_key_release(event) {
             return;
         }
-        handle_scroll_event(event, ctx, self.lines.len(), self.height);
+        handle_scroll_event(
+            event,
+            ctx,
+            self.lines.len(),
+            self.height,
+            self.border.is_some(),
+        );
     }
 
     fn constraints(&self) -> Constraints {
@@ -456,7 +468,13 @@ impl<M: 'static> Widget<M> for MarkdownViewer<M> {
         if crate::tui::event::is_key_release(event) {
             return;
         }
-        handle_scroll_event(event, ctx, self.markdown.lines().count(), self.height);
+        handle_scroll_event(
+            event,
+            ctx,
+            self.markdown.lines().count(),
+            self.height,
+            self.border.is_some(),
+        );
     }
 
     fn constraints(&self) -> Constraints {
@@ -508,7 +526,13 @@ impl<M: 'static> Widget<M> for DiffViewer<M> {
         if crate::tui::event::is_key_release(event) {
             return;
         }
-        handle_scroll_event(event, ctx, self.diff.lines().count(), self.height);
+        handle_scroll_event(
+            event,
+            ctx,
+            self.diff.lines().count(),
+            self.height,
+            self.border.is_some(),
+        );
     }
 
     fn constraints(&self) -> Constraints {
@@ -708,31 +732,43 @@ fn content_area(
     }
 }
 
-fn handle_scroll_event<M>(event: &Event, ctx: &mut EventCtx<M>, total_lines: usize, height: u16) {
+fn handle_scroll_event<M>(
+    event: &Event,
+    ctx: &mut EventCtx<M>,
+    total_lines: usize,
+    height: u16,
+    border: bool,
+) {
     if ctx.phase() != EventPhase::Target || total_lines == 0 {
         return;
     }
-
-    let Event::Key(key_event) = event else {
+    let visible_rows = crate::tui::widgets::pointer::visible_rows(ctx, border, height, 0);
+    if visible_rows == 0 {
         return;
-    };
-
-    let visible_rows = height.max(1) as usize;
+    }
     let state = ctx.state_mut::<ContentViewerState>();
     let max_offset = total_lines.saturating_sub(visible_rows);
-    match key_event.code {
-        KeyCode::Up => state.scroll_offset = state.scroll_offset.saturating_sub(1),
-        KeyCode::Down => state.scroll_offset = (state.scroll_offset + 1).min(max_offset),
-        KeyCode::PageUp => state.scroll_offset = state.scroll_offset.saturating_sub(visible_rows),
-        KeyCode::PageDown => {
-            state.scroll_offset = (state.scroll_offset + visible_rows).min(max_offset);
-        }
-        KeyCode::Home => state.scroll_offset = 0,
-        KeyCode::End => state.scroll_offset = max_offset,
+    let old = state.scroll_offset.min(max_offset);
+    state.scroll_offset = match event {
+        Event::Key(key) => match key.code {
+            KeyCode::Up => old.saturating_sub(1),
+            KeyCode::Down => old.saturating_add(1).min(max_offset),
+            KeyCode::PageUp => old.saturating_sub(visible_rows),
+            KeyCode::PageDown => old.saturating_add(visible_rows).min(max_offset),
+            KeyCode::Home => 0,
+            KeyCode::End => max_offset,
+            _ => return,
+        },
+        Event::Mouse(mouse) => match mouse.kind {
+            MouseEventKind::ScrollUp => old.saturating_sub(3),
+            MouseEventKind::ScrollDown => old.saturating_add(3).min(max_offset),
+            _ => return,
+        },
         _ => return,
+    };
+    if state.scroll_offset != old || matches!(event, Event::Key(_)) {
+        ctx.set_handled();
     }
-
-    ctx.set_handled();
 }
 
 fn content_constraints(height: u16, border: Option<BorderStyle>, min_width: u16) -> Constraints {

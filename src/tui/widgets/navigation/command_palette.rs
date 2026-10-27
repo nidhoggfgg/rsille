@@ -2,12 +2,13 @@
 
 use crate::render::text::TextWidth;
 
-use crate::tui::event::{Event, KeyCode};
+use crate::tui::event::{Event, KeyCode, MouseButton, MouseEventKind};
 use crate::tui::focus::FocusConfig;
 use crate::tui::layout::border_renderer;
 use crate::tui::layout::{ensure_item_visible, Constraints, LayoutStyle};
 use crate::tui::style::{BorderStyle, Style};
 use crate::tui::widget::{EventCtx, EventPhase, RenderCtx, Widget};
+use crate::tui::widgets::pointer;
 
 use crate::tui::widgets::collections::selection::SelectionState;
 use crate::tui::widgets::controls::select::{match_search_score, SelectSearchMode};
@@ -427,6 +428,66 @@ impl<M: 'static> Widget<M> for CommandPalette<M> {
             return;
         }
 
+        if let Event::Mouse(mouse) = event {
+            let header = 2 + u16::from(self.title.is_some());
+            let visible = pointer::visible_rows(ctx, true, self.height, header);
+            if visible == 0 {
+                return;
+            }
+            let clicked = pointer::content_position(ctx, event, true, header);
+            let (id, submit) = {
+                let state = ctx.state_mut::<CommandPaletteState>();
+                let filtered = self.filtered_indices(&state.query);
+                let Some(active) = self.sync_cursor(state, &filtered) else {
+                    return;
+                };
+                let (offset, position, submit) = match mouse.kind {
+                    MouseEventKind::Down(MouseButton::Left) => {
+                        let Some((_, row)) = clicked else {
+                            return;
+                        };
+                        let offset = ensure_item_visible(
+                            state.scroll_offset.min(filtered.len() - 1),
+                            active,
+                            visible,
+                        );
+                        let position = offset + row;
+                        if position >= filtered.len() || self.items[filtered[position]].disabled {
+                            return;
+                        }
+                        (offset, position, true)
+                    }
+                    MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
+                        let Some((offset, position)) = pointer::scroll_cursor(
+                            state.scroll_offset,
+                            active,
+                            filtered.len(),
+                            visible,
+                            pointer::wheel_delta(event).unwrap(),
+                            |i| !self.items[filtered[i]].disabled,
+                        ) else {
+                            return;
+                        };
+                        (offset, position, false)
+                    }
+                    _ => return,
+                };
+                let id = self.items[filtered[position]].id.clone();
+                state.selection.set_cursor(Some(id.clone()));
+                state.scroll_offset = offset;
+                (id, submit)
+            };
+            ctx.set_handled();
+            if let Some(handler) = &self.on_change {
+                ctx.emit(handler(id.clone()));
+            }
+            if submit {
+                if let Some(handler) = &self.on_submit {
+                    ctx.emit(handler(id));
+                }
+            }
+            return;
+        }
         let Event::Key(key_event) = event else {
             return;
         };

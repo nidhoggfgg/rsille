@@ -5,12 +5,13 @@ use crate::tui::text::{
 };
 
 use crate::tui::animation::AnimationCtx;
-use crate::tui::event::{Event, MouseButton, MouseEventKind};
+use crate::tui::event::{Event, KeyModifiers, MouseButton, MouseEventKind};
 use crate::tui::focus::FocusConfig;
 use crate::tui::layout::border_renderer;
 use crate::tui::layout::{ensure_item_visible, Constraints, LayoutStyle};
 use crate::tui::style::{BorderStyle, Style, Theme};
 use crate::tui::widget::{EventCtx, EventPhase, Lifecycle, RenderCtx, StateCtx, Widget};
+use crate::tui::widgets::pointer::{self, EditorPointer};
 use crate::tui::widgets::VariantWidget;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -22,6 +23,10 @@ pub enum TextAreaVariant {
 
 #[derive(Debug, Clone, Default)]
 pub struct TextAreaState {
+    /// Keep the wheel-scrolled viewport independent of the caret until editing resumes.
+    pub viewport_scrolled: bool,
+    /// Whether a left-button selection gesture is in progress.
+    pub dragging: bool,
     pub cursor_position: usize,
     pub selection_anchor: Option<usize>,
     pub horizontal_offset: usize,
@@ -179,6 +184,8 @@ impl<M: 'static> Widget<M> for TextArea<M> {
         let state = ctx.state_mut::<TextAreaState>();
         if state.value.as_deref() != Some(self.value.as_str()) {
             state.value = Some(self.value.clone());
+            state.dragging = false;
+            state.viewport_scrolled = false;
         }
         state.cursor_position = floor_boundary(&self.value, state.cursor_position);
         state.selection_anchor = state
@@ -190,8 +197,10 @@ impl<M: 'static> Widget<M> for TextArea<M> {
             TextAreaVariant::Default => self.height.saturating_sub(2),
             TextAreaVariant::Borderless => self.height,
         };
-        state.scroll_offset =
-            ensure_item_visible(state.scroll_offset, line, visible_rows.max(1) as usize);
+        if !state.viewport_scrolled {
+            state.scroll_offset =
+                ensure_item_visible(state.scroll_offset, line, visible_rows.max(1) as usize);
+        }
     }
 
     fn render(&self, chunk: &mut crate::render::chunk::Chunk, ctx: &RenderCtx) {
@@ -245,7 +254,13 @@ impl<M: 'static> Widget<M> for TextArea<M> {
         let horizontal_offset =
             cursor_scroll(cursor_col, state.horizontal_offset, content_width as usize);
         let visible_rows = content_height as usize;
-        let scroll_offset = ensure_item_visible(state.scroll_offset, cursor_line, visible_rows);
+        let scroll_offset = if state.viewport_scrolled {
+            state
+                .scroll_offset
+                .min(self.value.split('\n').count().saturating_sub(visible_rows))
+        } else {
+            ensure_item_visible(state.scroll_offset, cursor_line, visible_rows)
+        };
 
         if self.value.is_empty() {
             if let Some(placeholder) = self.placeholder.as_ref() {
@@ -314,52 +329,135 @@ impl<M: 'static> Widget<M> for TextArea<M> {
         if crate::tui::event::is_key_release(event) {
             return;
         }
-        if ctx.phase() != EventPhase::Target || self.disabled {
+        if ctx.phase() != EventPhase::Target {
+            return;
+        }
+        if self.disabled || matches!(event, Event::FocusLost) {
+            ctx.state_mut::<TextAreaState>().dragging = false;
+            return;
+        }
+        let pointer_state = ctx.state_mut::<TextAreaState>();
+        if matches!(event, Event::Mouse(mouse) if mouse.kind == MouseEventKind::Down(MouseButton::Left))
+        {
+            pointer_state.dragging = false;
+        }
+        let mut pointer = EditorPointer {
+            anchor: pointer_state.dragging.then_some(
+                pointer_state
+                    .selection_anchor
+                    .unwrap_or(pointer_state.cursor_position),
+            ),
+            scrolled: pointer_state.viewport_scrolled,
+        };
+        if matches!(event, Event::Mouse(mouse) if mouse.kind == MouseEventKind::Up(MouseButton::Left))
+        {
+            if std::mem::take(&mut ctx.state_mut::<TextAreaState>().dragging) {
+                ctx.set_handled();
+            }
             return;
         }
         let metrics = ctx.text_metrics();
-        let local = ctx.local_mouse_position(event);
+        let local = ctx.relative_mouse_position(event);
         let bounds = ctx.bounds();
-        let inset = u16::from(self.variant == TextAreaVariant::Default);
+        let inset = i32::from(self.variant == TextAreaVariant::Default);
         let rows = bounds
             .map(|a| a.height())
             .unwrap_or(self.height)
-            .saturating_sub(inset * 2)
-            .max(1) as usize;
+            .saturating_sub(inset as u16 * 2) as usize;
         let columns = bounds
             .map(|a| a.width())
             .unwrap_or(20)
-            .saturating_sub(inset * 2)
-            .max(1) as usize;
+            .saturating_sub(inset as u16 * 2) as usize;
+        if rows == 0 || columns == 0 {
+            return;
+        }
         let state = ctx.state_mut::<TextAreaState>();
         let mut editor = EditBuffer::new(
             state.value.clone().unwrap_or_else(|| self.value.clone()),
             state.cursor_position,
             state.selection_anchor,
         );
-        let result = if let (Event::Mouse(mouse), Some((x, y))) = (event, local) {
-            if mouse.kind != MouseEventKind::Down(MouseButton::Left)
-                || x < inset
-                || y < inset
-                || x as usize >= columns + inset as usize
-                || y as usize >= rows + inset as usize
-            {
+        if let Some(delta) = pointer::wheel_delta(event) {
+            let max_offset = editor.value.split('\n').count().saturating_sub(rows);
+            let old = state.scroll_offset.min(max_offset);
+            let next = old.saturating_add_signed(delta).min(max_offset);
+            state.scroll_offset = next;
+            if next != old {
+                pointer.scrolled = true;
+                state.dragging = pointer.anchor.is_some();
+                state.viewport_scrolled = pointer.scrolled;
+                ctx.set_handled();
+            }
+            return;
+        }
+        let result = if let Event::Mouse(mouse) = event {
+            let Some((x, y)) = local else {
                 return;
+            };
+            let dragging = mouse.kind == MouseEventKind::Drag(MouseButton::Left);
+            match mouse.kind {
+                MouseEventKind::Down(MouseButton::Left)
+                    if x >= inset
+                        && y >= inset
+                        && x < columns as i32 + inset
+                        && y < rows as i32 + inset =>
+                {
+                    pointer.anchor = None;
+                }
+                MouseEventKind::Drag(MouseButton::Left) if pointer.anchor.is_some() => {}
+                _ => return,
             }
             let (line, col) = metrics.byte_to_line_column(&editor.value, editor.cursor);
-            let scroll = ensure_item_visible(state.scroll_offset, line, rows);
-            let horizontal = cursor_scroll(col, state.horizontal_offset, columns);
+            let mut scroll = if pointer.scrolled {
+                state
+                    .scroll_offset
+                    .min(editor.value.split('\n').count().saturating_sub(rows))
+            } else {
+                ensure_item_visible(state.scroll_offset, line, rows)
+            };
+            let mut horizontal = cursor_scroll(col, state.horizontal_offset, columns);
+            if dragging {
+                if y < inset {
+                    scroll = scroll.saturating_sub(1);
+                }
+                if y >= inset + rows as i32 {
+                    scroll = scroll
+                        .saturating_add(1)
+                        .min(editor.value.split('\n').count().saturating_sub(rows));
+                }
+                if x < inset {
+                    horizontal = horizontal.saturating_sub(1);
+                }
+                if x >= inset + columns as i32 {
+                    horizontal = horizontal.saturating_add(1);
+                }
+            }
+            let old_cursor = editor.cursor;
             editor.cursor = metrics.line_column_to_byte(
                 &editor.value,
-                scroll + (y - inset) as usize,
-                horizontal + (x - inset) as usize,
+                scroll + (y - inset).clamp(0, rows as i32 - 1) as usize,
+                horizontal + (x - inset).clamp(0, columns as i32 - 1) as usize,
             );
-            editor.anchor = None;
+            if dragging {
+                editor.anchor = pointer.anchor.map(|a| floor_boundary(&editor.value, a));
+            } else if mouse.modifiers.contains(KeyModifiers::SHIFT) {
+                let anchor = editor.anchor.unwrap_or(old_cursor);
+                editor.anchor = Some(anchor);
+                pointer.anchor = Some(anchor);
+            } else {
+                pointer.anchor = Some(editor.cursor);
+                editor.anchor = None;
+            }
+            pointer.scrolled = false;
+            state.scroll_offset = scroll;
+            state.horizontal_offset = horizontal;
             crate::tui::text::EditResult {
                 handled: true,
                 ..Default::default()
             }
         } else {
+            pointer.anchor = None;
+            pointer.scrolled = false;
             editor.handle(event, metrics, true)
         };
         if !result.handled {
@@ -378,6 +476,8 @@ impl<M: 'static> Widget<M> for TextArea<M> {
         state.scroll_offset = ensure_item_visible(state.scroll_offset, line, rows);
         state.horizontal_offset = cursor_scroll(col, state.horizontal_offset, columns);
         state.value = Some(editor.value);
+        state.dragging = pointer.anchor.is_some();
+        state.viewport_scrolled = pointer.scrolled;
         ctx.set_handled();
         if let Some(message) = message {
             ctx.emit(message);

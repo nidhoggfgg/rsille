@@ -2,12 +2,13 @@
 
 use crate::render::text::TextWidth;
 
-use crate::tui::event::{Event, KeyCode, KeyModifiers};
+use crate::tui::event::{Event, KeyCode, KeyModifiers, MouseButton, MouseEventKind};
 use crate::tui::focus::FocusConfig;
 use crate::tui::layout::border_renderer;
 use crate::tui::layout::{ensure_item_visible, Constraints, LayoutStyle};
 use crate::tui::style::{BorderStyle, Style};
 use crate::tui::widget::{EventCtx, EventPhase, RenderCtx, Widget};
+use crate::tui::widgets::pointer;
 
 use super::selection::{SelectionMode, SelectionState};
 
@@ -105,6 +106,8 @@ impl DataTableRow {
 /// Persistent data table state stored in the widget store.
 #[derive(Debug, Clone, Default)]
 pub struct DataTableState {
+    /// Active resize gesture: column id, initial pointer column, and initial width.
+    pub resizing_column: Option<(String, u16, u16)>,
     pub active_row: Option<String>,
     pub active_column: usize,
     pub selection: SelectionState,
@@ -371,16 +374,157 @@ impl<M> DataTable<M> {
         self
     }
 
-    fn has_enabled_rows(&self) -> bool {
-        self.rows.iter().any(|row| !row.disabled)
+    fn handle_pointer(&self, event: &Event, ctx: &mut EventCtx<M>) {
+        let Event::Mouse(mouse) = event else {
+            return;
+        };
+        if mouse.kind == MouseEventKind::Up(MouseButton::Left) {
+            if ctx
+                .state_mut::<DataTableState>()
+                .resizing_column
+                .take()
+                .is_some()
+            {
+                ctx.set_handled();
+            }
+            return;
+        }
+        if mouse.kind == MouseEventKind::Drag(MouseButton::Left) {
+            let drag = ctx.state_mut::<DataTableState>().resizing_column.clone();
+            if let (Some((id, start_x, width)), Some((x, _))) =
+                (drag, ctx.layout_mouse_position(event))
+            {
+                let width = (i32::from(width) + i32::from(x) - i32::from(start_x))
+                    .clamp(3, u16::MAX as i32) as u16;
+                Self::set_column_width(ctx.state_mut::<DataTableState>(), &id, width);
+                ctx.set_handled();
+            }
+            return;
+        }
+        let Some(bounds) = ctx.bounds() else {
+            return;
+        };
+        let border = self.border.is_some();
+        let header = if self.sticky_header { 2 } else { 0 };
+        let visible = pointer::visible_rows(ctx, border, self.height, header);
+        let columns = self.visible_columns();
+        if columns.is_empty() {
+            return;
+        }
+        let content_width = bounds.width().saturating_sub(u16::from(border) * 2);
+        let position = pointer::content_position(ctx, event, border, 0);
+        // The header's column separators serve as resize handles.
+        if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
+            ctx.state_mut::<DataTableState>().resizing_column = None;
+            if let Some((x, 0)) = position.filter(|_| self.sticky_header) {
+                let widths = self.compute_column_widths(
+                    &columns,
+                    content_width,
+                    ctx.state_mut::<DataTableState>(),
+                );
+                let mut edge = 0usize;
+                for (index, width) in widths
+                    .iter()
+                    .enumerate()
+                    .take(widths.len().saturating_sub(1))
+                {
+                    edge += *width as usize;
+                    if x == edge {
+                        let Some((start_x, _)) = ctx.layout_mouse_position(event) else {
+                            return;
+                        };
+                        ctx.state_mut::<DataTableState>().resizing_column =
+                            Some((columns[index].1.id.clone(), start_x, *width));
+                        ctx.set_handled();
+                        return;
+                    }
+                    edge += 1;
+                }
+            }
+        }
+        if visible == 0 {
+            return;
+        }
+        let mut selection_message = None;
+        let (id, column_id) = {
+            let state = ctx.state_mut::<DataTableState>();
+            sync_state_aliases(state);
+            let rows = self.visible_row_indices();
+            let Some(active) = self.active_index_from_state(state, &rows) else {
+                return;
+            };
+            let index = if let Some(delta) = pointer::wheel_delta(event) {
+                let Some((offset, index)) = pointer::scroll_cursor(
+                    state.scroll_offset,
+                    active,
+                    rows.len(),
+                    visible,
+                    delta,
+                    |_| true,
+                ) else {
+                    return;
+                };
+                state.scroll_offset = offset;
+                index
+            } else if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
+                let Some((x, y)) = position else {
+                    return;
+                };
+                let Some(row) = y.checked_sub(header as usize) else {
+                    return;
+                };
+                let widths = self.compute_column_widths(&columns, content_width, state);
+                let mut start = 0usize;
+                let Some(column) = widths.iter().position(|width| {
+                    let hit = x >= start && x < start + *width as usize;
+                    start += *width as usize + 1;
+                    hit
+                }) else {
+                    return;
+                };
+                let offset =
+                    ensure_item_visible(state.scroll_offset.min(rows.len() - 1), active, visible);
+                let index = offset + row;
+                if row >= visible || index >= rows.len() {
+                    return;
+                }
+                state.active_column = column;
+                state.scroll_offset = offset;
+                let id = &self.rows[rows[index]].id;
+                if self.selection_mode.is_multiple() {
+                    state.selection.toggle(id);
+                    selection_message = self
+                        .on_selection_change
+                        .as_ref()
+                        .map(|handler| handler(state.selection.selected.clone()));
+                } else {
+                    state.selection.replace_selection(id.clone());
+                }
+                index
+            } else {
+                return;
+            };
+            let id = self.rows[rows[index]].id.clone();
+            set_active_row(state, id.clone());
+            state.active_column = state.active_column.min(columns.len() - 1);
+            (id, columns[state.active_column].1.id.clone())
+        };
+        ctx.set_handled();
+        if let Some(handler) = &self.on_change {
+            ctx.emit(handler(id.clone()));
+        }
+        if self.navigation_mode == DataTableNavigationMode::Cell {
+            if let Some(handler) = &self.on_cell_change {
+                ctx.emit(handler(id, column_id));
+            }
+        }
+        if let Some(message) = selection_message {
+            ctx.emit(message);
+        }
     }
 
-    fn visible_rows(&self) -> usize {
-        let border_padding = usize::from(self.border.is_some()) * 2;
-        let header_rows = if self.sticky_header { 2 } else { 0 };
-        self.height
-            .saturating_sub(border_padding as u16)
-            .saturating_sub(header_rows) as usize
+    fn has_enabled_rows(&self) -> bool {
+        self.rows.iter().any(|row| !row.disabled)
     }
 
     fn active_index_from_state(
@@ -486,11 +630,15 @@ impl<M> DataTable<M> {
                     .max(3)
             })
             .collect();
-        let mut used = widths.iter().sum::<u16>();
+        let mut used = widths
+            .iter()
+            .map(|width| usize::from(*width))
+            .sum::<usize>();
+        let available = usize::from(available);
 
         if used < available {
             if let Some(last) = widths.last_mut() {
-                *last += available - used;
+                *last += (available - used) as u16;
             }
             return widths;
         }
@@ -823,15 +971,31 @@ impl<M: 'static> Widget<M> for DataTable<M> {
         if crate::tui::event::is_key_release(event) {
             return;
         }
-        if ctx.phase() != EventPhase::Target || self.disabled || !self.has_enabled_rows() {
+        if ctx.phase() != EventPhase::Target {
             return;
         }
-
+        if self.disabled || matches!(event, Event::FocusLost) {
+            ctx.state_mut::<DataTableState>().resizing_column = None;
+            return;
+        }
+        if matches!(event, Event::Mouse(_)) {
+            self.handle_pointer(event, ctx);
+            return;
+        }
+        if !self.has_enabled_rows() {
+            return;
+        }
         let Event::Key(key_event) = event else {
             return;
         };
 
-        let visible_rows = self.visible_rows().max(1);
+        let visible_rows = pointer::visible_rows(
+            ctx,
+            self.border.is_some(),
+            self.height,
+            if self.sticky_header { 2 } else { 0 },
+        )
+        .max(1);
         let mut moved = false;
         let mut emit_submit = None;
         let mut emit_cell_change = None;

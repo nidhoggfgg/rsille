@@ -5,7 +5,7 @@ use crate::tui::layout::Layout;
 
 use crate::render::text::TextWidth;
 
-use crate::tui::event::{Event, KeyCode};
+use crate::tui::event::{Event, KeyCode, MouseButton, MouseEventKind};
 use crate::tui::focus::FocusConfig;
 use crate::tui::layout::Constraints;
 use crate::tui::style::{Padding, Style};
@@ -178,11 +178,14 @@ impl<M> Widget<M> for Collapsible<M> {
             return;
         }
 
-        let Event::Key(key_event) = event else {
-            return;
+        let activate = match event {
+            Event::Key(key) => matches!(key.code, KeyCode::Enter | KeyCode::Char(' ')),
+            Event::Mouse(mouse) if mouse.kind == MouseEventKind::Down(MouseButton::Left) => {
+                matches!(ctx.local_mouse_position(event), Some((_, 0)))
+            }
+            _ => false,
         };
-
-        if matches!(key_event.code, KeyCode::Enter | KeyCode::Char(' ')) {
+        if activate {
             ctx.set_handled();
             if let Some(handler) = self.on_toggle.as_ref() {
                 ctx.emit(handler(!self.expanded));

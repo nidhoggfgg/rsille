@@ -3,12 +3,13 @@
 use crate::render::text::TextWidth;
 use rustc_hash::FxHashSet;
 
-use crate::tui::event::{Event, KeyCode};
+use crate::tui::event::{Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEventKind};
 use crate::tui::focus::FocusConfig;
 use crate::tui::layout::border_renderer;
 use crate::tui::layout::{ensure_item_visible, Constraints};
 use crate::tui::style::{BorderStyle, Style};
 use crate::tui::widget::{EventCtx, EventPhase, RenderCtx, Widget};
+use crate::tui::widgets::pointer;
 
 use super::selection::{SelectionMode, SelectionState};
 
@@ -240,11 +241,6 @@ impl<M> FileExplorer<M> {
         !item.disabled || item.children.iter().any(Self::has_enabled_in_subtree)
     }
 
-    fn visible_rows(&self) -> usize {
-        let border_padding = usize::from(self.border.is_some()) * 2;
-        self.height.saturating_sub(border_padding as u16) as usize
-    }
-
     fn flatten_visible_rows(&self, expanded: &FxHashSet<String>) -> Vec<VisibleFileRow> {
         let mut rows = Vec::new();
         for item in &self.items {
@@ -422,11 +418,94 @@ impl<M: 'static> Widget<M> for FileExplorer<M> {
             return;
         }
 
+        if let Event::Mouse(mouse) = event {
+            let visible = pointer::visible_rows(ctx, self.border.is_some(), self.height, 0);
+            if visible == 0 {
+                return;
+            }
+            let clicked = pointer::content_position(ctx, event, self.border.is_some(), 0);
+            let mut selection_message = None;
+            let (id, activate) = {
+                let state = ctx.state_mut::<FileExplorerState>();
+                let rows = self.flatten_visible_rows(&state.expanded_items);
+                let Some(active) = self.active_index_from_state(state, &rows) else {
+                    return;
+                };
+                let (offset, index, activate) = match mouse.kind {
+                    MouseEventKind::Down(MouseButton::Left) => {
+                        let Some((_, row)) = clicked else {
+                            return;
+                        };
+                        let offset = ensure_item_visible(
+                            state.scroll_offset.min(rows.len() - 1),
+                            active,
+                            visible,
+                        );
+                        let index = offset + row;
+                        if index >= rows.len() || rows[index].disabled {
+                            return;
+                        }
+                        (offset, index, true)
+                    }
+                    MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
+                        let Some((offset, index)) = pointer::scroll_cursor(
+                            state.scroll_offset,
+                            active,
+                            rows.len(),
+                            visible,
+                            pointer::wheel_delta(event).unwrap(),
+                            |i| !rows[i].disabled,
+                        ) else {
+                            return;
+                        };
+                        (offset, index, false)
+                    }
+                    _ => return,
+                };
+                let id = rows[index].id.clone();
+                state.active_item = Some(id.clone());
+                state.selection.set_cursor(Some(id.clone()));
+                state.scroll_offset = offset;
+                let branch = rows[index].kind != FileExplorerItemKind::File;
+                let marker = branch
+                    && clicked.is_some_and(|(x, _)| {
+                        x >= rows[index].depth * 2 && x < rows[index].depth * 2 + 2
+                    });
+                if activate && self.selection_mode.is_multiple() && !marker {
+                    state.selection.toggle(&id);
+                    selection_message = self
+                        .on_selection_change
+                        .as_ref()
+                        .map(|handler| handler(state.selection.selected.clone()));
+                }
+                let activate = activate && (!self.selection_mode.is_multiple() || marker);
+                let action = activate.then_some(if branch && rows[index].is_expanded {
+                    KeyCode::Left
+                } else {
+                    KeyCode::Enter
+                });
+                (id, action)
+            };
+            ctx.set_handled();
+            if let Some(handler) = &self.on_change {
+                ctx.emit(handler(id));
+            }
+            if let Some(message) = selection_message {
+                ctx.emit(message);
+            }
+            if let Some(action) = activate {
+                self.handle_event(
+                    &Event::Key(KeyEvent::new(action, KeyModifiers::empty())),
+                    ctx,
+                );
+            }
+            return;
+        }
         let Event::Key(key_event) = event else {
             return;
         };
 
-        let visible_rows = self.visible_rows().max(1);
+        let visible_rows = pointer::visible_rows(ctx, self.border.is_some(), self.height, 0).max(1);
         let mut moved = false;
         let mut emit_open = None;
         let mut emit_load = None;

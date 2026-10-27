@@ -73,6 +73,31 @@ same methods on `AnimationCtx`. The latter includes a container's descendants.
 Enable `App::focus_events(true)` to clear hover when the terminal reports focus loss;
 resize also clears the previous pointer position until the next mouse event.
 
+## Mouse interactions
+
+- Click a `Collapsible` title to expand or collapse it. Click calendar dates to select
+  them; the wheel moves between months and clamps the selected day at month end.
+- Trees and file explorers support row clicks and wheel scrolling. In multiple
+  selection mode, click labels to toggle selection and expansion markers to open
+  or close branches. Opening a lazy directory calls `on_load_children`.
+- Lists, menus, open selects, command palettes and data tables scroll three rows per
+  wheel tick. Scrolling keeps the active cursor visible without committing a
+  selection or activating an action. Click palette results to submit a command.
+- Click table rows or cells to select them. Drag a separator in the sticky header
+  to resize a column, including when the table has no rows.
+- Code, log, diff and Markdown viewers accept wheel scrolling. Text areas also
+  scroll without changing the caret or selection; keyboard editing reveals the
+  caret again.
+- Text inputs and text areas support click positioning, Shift-click to extend a
+  selection, and left-button drag selection. Positions snap to grapheme boundaries,
+  including wide characters and emoji. Drag beyond the field to scroll the text.
+- Click a `ScrollView` scrollbar track to page, or drag its thumb. Captured drags
+  continue outside the widget until release. At a scroll boundary, wheel events
+  can bubble to an enclosing scroll container.
+
+Disabled widgets ignore actions. Click hit testing excludes borders and uses the
+same content coordinates as rendering, including inside a scrolled container.
+
 ## Categories
 
 - `basics/`: minimal first-run examples.

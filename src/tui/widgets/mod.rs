@@ -6,6 +6,7 @@ pub mod display;
 pub mod layout;
 pub mod motion;
 pub mod navigation;
+pub(crate) mod pointer;
 mod variant;
 
 pub use collections::{data_table, file_explorer, list, selection, tree};

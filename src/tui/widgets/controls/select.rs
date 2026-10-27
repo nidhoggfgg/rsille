@@ -8,6 +8,7 @@ use crate::tui::layout::border_renderer;
 use crate::tui::layout::{ensure_item_visible, Constraints, LayoutStyle};
 use crate::tui::style::{BorderStyle, Style};
 use crate::tui::widget::{EventCtx, EventPhase, RenderCtx, Widget};
+use crate::tui::widgets::pointer;
 
 use crate::tui::widgets::collections::selection::SelectionState;
 
@@ -253,14 +254,6 @@ impl<M> Select<M> {
             0
         }
     }
-
-    fn visible_option_rows(&self) -> usize {
-        let border_padding = usize::from(self.border.is_some()) * 2;
-        let chrome = 2 + usize::from(self.searchable);
-        self.height
-            .saturating_sub(border_padding as u16)
-            .saturating_sub(chrome as u16) as usize
-    }
 }
 
 impl<M> Default for Select<M> {
@@ -447,15 +440,54 @@ impl<M: 'static> Widget<M> for Select<M> {
             return;
         }
 
+        if let Some(delta) = pointer::wheel_delta(event) {
+            let header = 2 + self.filter_row_offset();
+            let visible = pointer::visible_rows(ctx, self.border.is_some(), self.height, header);
+            let state = ctx.state_mut::<SelectState>();
+            if !state.is_open {
+                return;
+            }
+            sync_state_aliases(state);
+            let filtered = self.filtered_indices(state);
+            let Some(active) = self.active_index_from_state(state, &filtered) else {
+                return;
+            };
+            let Some(position) = filtered.iter().position(|&i| i == active) else {
+                return;
+            };
+            let Some((offset, position)) = pointer::scroll_cursor(
+                state.scroll_offset,
+                position,
+                filtered.len(),
+                visible,
+                delta,
+                |i| !self.options[filtered[i]].disabled,
+            ) else {
+                return;
+            };
+            state.scroll_offset = offset;
+            set_active_value(state, self.options[filtered[position]].value.clone());
+            ctx.set_handled();
+            return;
+        }
         let click_row = match event {
             Event::Mouse(mouse_event)
                 if matches!(mouse_event.kind, MouseEventKind::Down(MouseButton::Left)) =>
             {
-                ctx.local_mouse_position(event).map(|(_, row)| row)
+                pointer::content_position(ctx, event, self.border.is_some(), 0)
+                    .map(|(_, row)| row as u16 + u16::from(self.border.is_some()))
             }
             _ => None,
         };
-        let visible_rows = self.visible_option_rows().max(1);
+        let visible_rows = pointer::visible_rows(
+            ctx,
+            self.border.is_some(),
+            self.height,
+            2 + self.filter_row_offset(),
+        );
+        if visible_rows == 0 {
+            return;
+        }
         let mut emit_change = None;
         let mut did_handle = true;
 
@@ -614,7 +646,7 @@ impl<M: 'static> Widget<M> for Select<M> {
                     .iter()
                     .position(|index| *index == active_index)
                     .unwrap_or_default(),
-                self.visible_option_rows().max(1),
+                visible_rows,
             );
         }
 

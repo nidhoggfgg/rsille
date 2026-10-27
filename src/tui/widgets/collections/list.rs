@@ -6,6 +6,7 @@ use crate::tui::layout::border_renderer;
 use crate::tui::layout::{ensure_item_visible, Constraints, LayoutStyle};
 use crate::tui::style::{BorderStyle, Style};
 use crate::tui::widget::{EventCtx, EventPhase, RenderCtx, Widget};
+use crate::tui::widgets::pointer;
 
 use super::selection::{SelectionMode, SelectionState};
 
@@ -190,11 +191,6 @@ impl<M> List<M> {
         self.items.iter().any(|item| !item.disabled)
     }
 
-    fn visible_rows(&self) -> usize {
-        let border_padding = usize::from(self.border.is_some()) * 2;
-        self.height.saturating_sub(border_padding as u16) as usize
-    }
-
     fn first_enabled_index(&self) -> Option<usize> {
         self.items.iter().position(|item| !item.disabled)
     }
@@ -351,18 +347,41 @@ impl<M: 'static> Widget<M> for List<M> {
             return;
         }
 
-        let clicked_row = match event {
-            Event::Mouse(mouse_event)
-                if matches!(mouse_event.kind, MouseEventKind::Down(MouseButton::Left)) =>
-            {
-                ctx.local_mouse_position(event).and_then(|(_, row)| {
-                    row.checked_sub(u16::from(self.border.is_some()))
-                        .map(|row| row as usize)
-                })
+        if let Some(delta) = pointer::wheel_delta(event) {
+            let visible = pointer::visible_rows(ctx, self.border.is_some(), self.height, 0);
+            let state = ctx.state_mut::<ListState>();
+            let Some(active) = self.active_index_from_state(state) else {
+                return;
+            };
+            let Some((offset, index)) = pointer::scroll_cursor(
+                state.scroll_offset,
+                active,
+                self.items.len(),
+                visible,
+                delta,
+                |i| !self.items[i].disabled,
+            ) else {
+                return;
+            };
+            state.scroll_offset = offset;
+            state.active_item = Some(self.items[index].id.clone());
+            state.selection.set_cursor(state.active_item.clone());
+            let message = self
+                .on_change
+                .as_ref()
+                .map(|handler| handler(self.items[index].id.clone()));
+            if let Some(message) = message {
+                ctx.emit(message);
             }
-            _ => None,
-        };
-        let visible_rows = self.visible_rows().max(1);
+            ctx.set_handled();
+            return;
+        }
+        let clicked_row =
+            pointer::content_position(ctx, event, self.border.is_some(), 0).map(|(_, row)| row);
+        let visible_rows = pointer::visible_rows(ctx, self.border.is_some(), self.height, 0);
+        if visible_rows == 0 {
+            return;
+        }
         let mut emit_submit = None;
         let mut emit_selection = None;
         let mut moved = false;

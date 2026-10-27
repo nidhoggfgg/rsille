@@ -5,7 +5,7 @@ use crate::render::text::TextWidth;
 use crate::tui::layout::{ChildLayout, Layout};
 
 use super::border_renderer::{render_background, render_border};
-use crate::tui::event::{Event, KeyCode, MouseEventKind};
+use crate::tui::event::{Event, KeyCode, MouseButton, MouseEventKind};
 use crate::tui::focus::FocusConfig;
 use crate::tui::layout::{AxisLimit, Constraints, MeasuredSize, SizeProposal};
 use crate::tui::offscreen::{blit_region, render_to_offscreen, BlitOptions, BlitRegion};
@@ -45,6 +45,8 @@ pub enum ScrollbarVisibility {
 /// Persistent scroll position state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct ScrollState {
+    /// Active thumb gesture: axis and pointer offset within the thumb.
+    pub dragging: Option<(ScrollbarOrientation, usize)>,
     pub offset_x: usize,
     pub offset_y: usize,
 }
@@ -548,6 +550,99 @@ impl<M> ScrollView<M> {
         )
     }
 
+    fn handle_scrollbar_pointer(
+        &self,
+        event: &Event,
+        ctx: &mut EventCtx<M>,
+        metrics: &ScrollMetrics,
+    ) -> bool {
+        let Event::Mouse(mouse) = event else {
+            return false;
+        };
+        if mouse.kind == MouseEventKind::Up(MouseButton::Left) {
+            return ctx.state_mut::<ScrollState>().dragging.take().is_some();
+        }
+        let Some((x, y)) = ctx.layout_mouse_position(event) else {
+            return false;
+        };
+        let viewport = metrics.viewport;
+        let drag = ctx.state_mut::<ScrollState>().dragging;
+        let (orientation, grab, dragging) = match mouse.kind {
+            MouseEventKind::Down(MouseButton::Left) => {
+                ctx.state_mut::<ScrollState>().dragging = None;
+                if metrics.show_vertical_bar
+                    && x == viewport.x().saturating_add(viewport.width())
+                    && y >= viewport.y()
+                    && y < viewport.y().saturating_add(viewport.height())
+                {
+                    (ScrollbarOrientation::Vertical, 0, false)
+                } else if metrics.show_horizontal_bar
+                    && y == viewport.y().saturating_add(viewport.height())
+                    && x >= viewport.x()
+                    && x < viewport.x().saturating_add(viewport.width())
+                {
+                    (ScrollbarOrientation::Horizontal, 0, false)
+                } else {
+                    return false;
+                }
+            }
+            MouseEventKind::Drag(MouseButton::Left) => {
+                let Some((orientation, grab)) = drag else {
+                    return false;
+                };
+                (orientation, grab, true)
+            }
+            _ => return false,
+        };
+        let (position, track, content) = match orientation {
+            ScrollbarOrientation::Vertical => (
+                i32::from(y) - i32::from(viewport.y()),
+                viewport.height() as usize,
+                metrics.content_height,
+            ),
+            ScrollbarOrientation::Horizontal => (
+                i32::from(x) - i32::from(viewport.x()),
+                viewport.width() as usize,
+                metrics.content_width,
+            ),
+        };
+        let state = ctx.state_mut::<ScrollState>();
+        let offset = match orientation {
+            ScrollbarOrientation::Vertical => &mut state.offset_y,
+            ScrollbarOrientation::Horizontal => &mut state.offset_x,
+        };
+        let scrollbar = Scrollbar::new(orientation)
+            .content_size(content)
+            .viewport_size(track)
+            .offset(*offset);
+        let Some((thumb, length)) = scrollbar.metrics(track) else {
+            return true;
+        };
+        if dragging {
+            let travel = track.saturating_sub(length);
+            let position = (position - grab as i32).clamp(0, travel as i32) as usize;
+            *offset = if travel == 0 {
+                0
+            } else {
+                position * max_scroll_offset(content, track) / travel
+            };
+        } else {
+            let position = position as usize;
+            if position >= thumb && position < thumb + length {
+                ctx.state_mut::<ScrollState>().dragging = Some((orientation, position - thumb));
+            } else {
+                *offset = if position < thumb {
+                    offset.saturating_sub(track)
+                } else {
+                    offset
+                        .saturating_add(track)
+                        .min(max_scroll_offset(content, track))
+                };
+            }
+        }
+        true
+    }
+
     fn copy_visible_region(
         &self,
         target: &mut crate::render::chunk::Chunk,
@@ -733,6 +828,10 @@ impl<M> Widget<M> for ScrollView<M> {
             return;
         }
 
+        if matches!(event, Event::FocusLost) {
+            ctx.state_mut::<ScrollState>().dragging = None;
+            return;
+        }
         let Some(bounds) = ctx.bounds() else {
             return;
         };
@@ -744,6 +843,10 @@ impl<M> Widget<M> for ScrollView<M> {
             metrics
         };
 
+        if self.handle_scrollbar_pointer(event, ctx, &metrics) {
+            ctx.set_handled();
+            return;
+        }
         let viewport_width = metrics.viewport.width() as usize;
         let viewport_height = metrics.viewport.height() as usize;
         let line_step = self.scroll_step as isize;
@@ -757,6 +860,7 @@ impl<M> Widget<M> for ScrollView<M> {
             viewport_height,
         );
 
+        let previous = *state;
         let mut handled = false;
 
         match event {
@@ -909,7 +1013,7 @@ impl<M> Widget<M> for ScrollView<M> {
             _ => {}
         }
 
-        if handled {
+        if handled && (!matches!(event, Event::Mouse(_)) || *state != previous) {
             ctx.set_handled();
         }
     }

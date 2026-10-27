@@ -5,12 +5,13 @@ use crate::tui::text::{
 };
 
 use crate::tui::animation::AnimationCtx;
-use crate::tui::event::{Event, MouseButton, MouseEventKind};
+use crate::tui::event::{Event, KeyModifiers, MouseButton, MouseEventKind};
 use crate::tui::focus::FocusConfig;
 use crate::tui::layout::border_renderer;
 use crate::tui::layout::Constraints;
 use crate::tui::style::{BorderStyle, Style, Theme};
 use crate::tui::widget::{EventCtx, EventPhase, Lifecycle, RenderCtx, StateCtx, Widget};
+use crate::tui::widgets::pointer::EditorPointer;
 use crate::tui::widgets::VariantWidget;
 
 /// Text input style variants.
@@ -33,6 +34,8 @@ pub enum TextInputVariant {
 /// the cached tree.
 #[derive(Debug, Clone, Default)]
 pub struct TextInputState {
+    /// Whether a left-button selection gesture is in progress.
+    pub dragging: bool,
     pub cursor_position: usize,
     pub selection_anchor: Option<usize>,
     /// Horizontal viewport offset in terminal columns.
@@ -188,6 +191,7 @@ impl<M: 'static> Widget<M> for TextInput<M> {
         let state = ctx.state_mut::<TextInputState>();
         if state.value.as_deref() != Some(self.value.as_str()) {
             state.value = Some(self.value.clone());
+            state.dragging = false;
         }
         state.cursor_position = floor_boundary(&self.value, state.cursor_position);
         state.selection_anchor = state
@@ -308,11 +312,35 @@ impl<M: 'static> Widget<M> for TextInput<M> {
         if crate::tui::event::is_key_release(event) {
             return;
         }
-        if ctx.phase() != EventPhase::Target || self.disabled {
+        if ctx.phase() != EventPhase::Target {
+            return;
+        }
+        if self.disabled || matches!(event, Event::FocusLost) {
+            ctx.state_mut::<TextInputState>().dragging = false;
+            return;
+        }
+        let pointer_state = ctx.state_mut::<TextInputState>();
+        if matches!(event, Event::Mouse(mouse) if mouse.kind == MouseEventKind::Down(MouseButton::Left))
+        {
+            pointer_state.dragging = false;
+        }
+        let mut pointer = EditorPointer {
+            anchor: pointer_state.dragging.then_some(
+                pointer_state
+                    .selection_anchor
+                    .unwrap_or(pointer_state.cursor_position),
+            ),
+            scrolled: false,
+        };
+        if matches!(event, Event::Mouse(mouse) if mouse.kind == MouseEventKind::Up(MouseButton::Left))
+        {
+            if std::mem::take(&mut ctx.state_mut::<TextInputState>().dragging) {
+                ctx.set_handled();
+            }
             return;
         }
         let metrics = ctx.text_metrics();
-        let local = ctx.local_mouse_position(event);
+        let local = ctx.relative_mouse_position(event);
         let width = ctx.bounds().map(|a| a.width()).unwrap_or(24);
         let (start_x, available) = match self.variant {
             TextInputVariant::Borderless => (1, width.saturating_sub(2) as usize),
@@ -324,66 +352,94 @@ impl<M: 'static> Widget<M> for TextInput<M> {
             state.cursor_position,
             state.selection_anchor,
         );
-        if let (Event::Mouse(mouse), Some((x, y))) = (event, local) {
-            if mouse.kind == MouseEventKind::Down(MouseButton::Left)
-                && y == 1
-                && x >= start_x
-                && (x - start_x) < available as u16
-            {
-                let column = if self.variant == TextInputVariant::Password {
-                    editor.value[..editor.cursor].graphemes(true).count() * metrics.width("•")
-                } else {
-                    metrics.byte_to_column(&editor.value, editor.cursor)
-                };
-                let offset = cursor_scroll(column, state.horizontal_offset, available);
-                let column = offset + (x - start_x) as usize;
-                editor.cursor = if self.variant == TextInputVariant::Password {
-                    editor
-                        .value
-                        .grapheme_indices(true)
-                        .nth(column / metrics.width("•").max(1))
-                        .map(|(b, _)| b)
-                        .unwrap_or(editor.value.len())
-                } else {
-                    metrics.column_to_byte(&editor.value, column)
-                };
-                editor.anchor = None;
-            } else {
+        let result = if let Event::Mouse(mouse) = event {
+            let Some((x, y)) = local else {
                 return;
+            };
+            if available == 0 {
+                return;
+            }
+            let dragging = mouse.kind == MouseEventKind::Drag(MouseButton::Left);
+            match mouse.kind {
+                MouseEventKind::Down(MouseButton::Left)
+                    if y == 1 && x >= start_x && x < start_x + available as i32 =>
+                {
+                    pointer.anchor = None;
+                }
+                MouseEventKind::Drag(MouseButton::Left) if pointer.anchor.is_some() => {}
+                _ => return,
+            }
+            let cursor_column = if self.variant == TextInputVariant::Password {
+                editor.value[..editor.cursor].graphemes(true).count() * metrics.width("•")
+            } else {
+                metrics.byte_to_column(&editor.value, editor.cursor)
+            };
+            let mut offset = cursor_scroll(cursor_column, state.horizontal_offset, available);
+            if dragging {
+                if x < start_x {
+                    offset = offset.saturating_sub(1);
+                }
+                if x >= start_x + available as i32 {
+                    offset = offset.saturating_add(1);
+                }
+            }
+            let column = offset + (x - start_x).clamp(0, available as i32 - 1) as usize;
+            let old_cursor = editor.cursor;
+            editor.cursor = if self.variant == TextInputVariant::Password {
+                editor
+                    .value
+                    .grapheme_indices(true)
+                    .nth(column / metrics.width("•").max(1))
+                    .map(|(b, _)| b)
+                    .unwrap_or(editor.value.len())
+            } else {
+                metrics.column_to_byte(&editor.value, column)
+            };
+            if dragging {
+                editor.anchor = pointer.anchor.map(|a| floor_boundary(&editor.value, a));
+            } else if mouse.modifiers.contains(KeyModifiers::SHIFT) {
+                let anchor = editor.anchor.unwrap_or(old_cursor);
+                editor.anchor = Some(anchor);
+                pointer.anchor = Some(anchor);
+            } else {
+                pointer.anchor = Some(editor.cursor);
+                editor.anchor = None;
+            }
+            state.horizontal_offset = offset;
+            crate::tui::text::EditResult {
+                handled: true,
+                ..Default::default()
             }
         } else {
-            let result = editor.handle(event, metrics, false);
-            if !result.handled {
-                return;
-            }
-            let message = if result.changed {
-                self.on_change.as_ref().map(|f| f(editor.value.clone()))
-            } else if result.submit {
-                self.on_submit.as_ref().map(|f| f(editor.value.clone()))
-            } else {
-                None
-            };
-            state.cursor_position = editor.cursor;
-            state.selection_anchor = editor.anchor;
-            state.horizontal_offset = input_scroll(
-                &editor.value,
-                editor.cursor,
-                state.horizontal_offset,
-                available,
-                metrics,
-                self.variant,
-            );
-            state.value = Some(editor.value);
-            ctx.set_handled();
-            if let Some(message) = message {
-                ctx.emit(message);
-            }
+            pointer.anchor = None;
+            editor.handle(event, metrics, false)
+        };
+        if !result.handled {
             return;
         }
+        let message = if result.changed {
+            self.on_change.as_ref().map(|f| f(editor.value.clone()))
+        } else if result.submit {
+            self.on_submit.as_ref().map(|f| f(editor.value.clone()))
+        } else {
+            None
+        };
         state.cursor_position = editor.cursor;
         state.selection_anchor = editor.anchor;
+        state.horizontal_offset = input_scroll(
+            &editor.value,
+            editor.cursor,
+            state.horizontal_offset,
+            available,
+            metrics,
+            self.variant,
+        );
         state.value = Some(editor.value);
+        state.dragging = pointer.anchor.is_some();
         ctx.set_handled();
+        if let Some(message) = message {
+            ctx.emit(message);
+        }
     }
 
     fn constraints(&self) -> Constraints {

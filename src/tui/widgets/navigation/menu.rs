@@ -8,6 +8,7 @@ use crate::tui::layout::border_renderer;
 use crate::tui::layout::{ensure_item_visible, Constraints};
 use crate::tui::style::{BorderStyle, Style};
 use crate::tui::widget::{EventCtx, EventPhase, RenderCtx, Widget};
+use crate::tui::widgets::pointer;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MenuItem {
@@ -307,21 +308,33 @@ impl<M: 'static> Widget<M> for Menu<M> {
             return;
         }
 
-        let clicked_row = match event {
-            Event::Mouse(mouse_event)
-                if matches!(mouse_event.kind, MouseEventKind::Down(MouseButton::Left)) =>
-            {
-                ctx.local_mouse_position(event).and_then(|(_, row)| {
-                    row.checked_sub(u16::from(self.border.is_some()))
-                        .map(|row| row as usize)
-                })
-            }
-            _ => None,
-        };
-        let visible_rows = (self
-            .height
-            .saturating_sub(if self.border.is_some() { 2 } else { 0 }))
-        .max(1) as usize;
+        if let Some(delta) = pointer::wheel_delta(event) {
+            let visible = pointer::visible_rows(ctx, self.border.is_some(), self.height, 0);
+            let state = ctx.state_mut::<MenuState>();
+            let Some(active) = self.active_index_from_state(state) else {
+                return;
+            };
+            let Some((offset, index)) = pointer::scroll_cursor(
+                state.scroll_offset,
+                active,
+                self.items.len(),
+                visible,
+                delta,
+                |i| !self.items[i].disabled,
+            ) else {
+                return;
+            };
+            state.scroll_offset = offset;
+            state.active_item = Some(self.items[index].id.clone());
+            ctx.set_handled();
+            return;
+        }
+        let clicked_row =
+            pointer::content_position(ctx, event, self.border.is_some(), 0).map(|(_, row)| row);
+        let visible_rows = pointer::visible_rows(ctx, self.border.is_some(), self.height, 0);
+        if visible_rows == 0 {
+            return;
+        }
         let mut select_id = None;
         {
             let state = ctx.state_mut::<MenuState>();

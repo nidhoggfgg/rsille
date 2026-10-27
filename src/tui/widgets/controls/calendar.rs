@@ -1,6 +1,6 @@
 //! Calendar widget for date navigation and selection.
 
-use crate::tui::event::{Event, KeyCode};
+use crate::tui::event::{Event, KeyCode, MouseButton, MouseEventKind};
 use crate::tui::focus::FocusConfig;
 use crate::tui::layout::border_renderer;
 use crate::tui::layout::Constraints;
@@ -245,6 +245,52 @@ impl<M: 'static> Widget<M> for Calendar<M> {
             return;
         }
 
+        if let Event::Mouse(mouse) = event {
+            let inset = u16::from(self.border.is_some()) * 2;
+            if !ctx.bounds().is_some_and(|area| {
+                area.width().saturating_sub(inset) >= 20 && area.height().saturating_sub(inset) >= 8
+            }) {
+                return;
+            }
+            let clicked = crate::tui::widgets::pointer::content_position(
+                ctx,
+                event,
+                self.border.is_some(),
+                0,
+            );
+            let state = ctx.state_mut::<CalendarState>();
+            let selected = self.current_selection(Some(state));
+            let date = match mouse.kind {
+                MouseEventKind::ScrollUp => shift_month(selected, -1),
+                MouseEventKind::ScrollDown => shift_month(selected, 1),
+                MouseEventKind::Down(MouseButton::Left) => {
+                    let Some((x, y)) = clicked else {
+                        return;
+                    };
+                    if x >= 20 || !(2..8).contains(&y) || x % 3 == 2 {
+                        return;
+                    }
+                    let (year, month) = self.current_month(Some(state));
+                    add_days(
+                        CalendarDate {
+                            year,
+                            month,
+                            day: 1,
+                        },
+                        ((y - 2) * 7 + x / 3) as i32 - weekday(year, month, 1) as i32,
+                    )
+                }
+                _ => return,
+            };
+            state.selected_date = Some(date);
+            state.visible_year = Some(date.year);
+            state.visible_month = Some(date.month);
+            ctx.set_handled();
+            if let Some(handler) = &self.on_change {
+                ctx.emit(handler(date));
+            }
+            return;
+        }
         let Event::Key(key_event) = event else {
             return;
         };
