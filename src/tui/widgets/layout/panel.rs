@@ -1,6 +1,7 @@
 //! Panel container widget.
 
 use crate::render::area::Area;
+use crate::tui::animation::AnimationCtx;
 use crate::tui::layout::{ChildLayout, Layout};
 
 use crate::tui::event::Event;
@@ -18,6 +19,7 @@ pub struct Panel<M = ()> {
     padding: Padding,
     gap: u16,
     style: Style,
+    hover_border_style: Option<Style>,
     widget_key: Option<String>,
 }
 
@@ -30,6 +32,7 @@ impl<M> std::fmt::Debug for Panel<M> {
             .field("padding", &self.padding)
             .field("gap", &self.gap)
             .field("style", &self.style)
+            .field("hover_border_style", &self.hover_border_style)
             .finish()
     }
 }
@@ -43,6 +46,7 @@ impl<M> Panel<M> {
             padding: Padding::uniform(1),
             gap: 0,
             style: Style::default(),
+            hover_border_style: None,
             widget_key: None,
         }
     }
@@ -82,6 +86,13 @@ impl<M> Panel<M> {
         self
     }
 
+    /// Highlight the border and title while the pointer is over this panel or
+    /// its children. Colors ease using `Theme::animations.fast`; focus is unchanged.
+    pub fn hover_border_style(mut self, style: Style) -> Self {
+        self.hover_border_style = Some(style);
+        self
+    }
+
     pub fn child(mut self, widget: impl IntoWidget<M>) -> Self {
         self.children.push(widget.into_widget());
         self
@@ -105,6 +116,17 @@ impl<M> Default for Panel<M> {
 }
 
 impl<M> Widget<M> for Panel<M> {
+    fn animate(&self, ctx: &mut AnimationCtx) -> bool {
+        if self.hover_border_style.is_none() || self.border.is_none() {
+            return false;
+        }
+        ctx.track_value(
+            "panel-hover",
+            if ctx.is_hover_within() { 1.0 } else { 0.0 },
+            ctx.animation_theme().fast,
+        )
+    }
+
     fn render(&self, chunk: &mut crate::render::chunk::Chunk, ctx: &RenderCtx) {
         let area = chunk.area();
         if area.width() == 0 || area.height() == 0 {
@@ -114,7 +136,13 @@ impl<M> Widget<M> for Panel<M> {
         ctx.record_bounds(area);
 
         let surface_style = self.style.merge(ctx.theme().styles.surface_elevated);
-        let border_style = ctx.theme().styles.border.merge(surface_style);
+        let mut border_style = ctx.theme().styles.border.merge(surface_style);
+        if let Some(hover) = self.hover_border_style {
+            let progress = ctx
+                .animation_value("panel-hover")
+                .unwrap_or(if ctx.is_hover_within() { 1.0 } else { 0.0 });
+            border_style = border_style.interpolate(hover.merge(border_style), progress);
+        }
         let render_style = surface_style.to_render_style();
         let border_render_style = border_style.to_render_style();
         let _ = chunk.fill(0, 0, area.width(), area.height(), ' ', render_style);

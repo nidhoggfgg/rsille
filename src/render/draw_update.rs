@@ -26,6 +26,12 @@ pub trait Update {
     }
 
     fn on_events(&mut self, events: &[crossterm::event::Event]) -> Result<(), DrawErr>;
+
+    /// Called after an input batch when its last mouse event was outside the
+    /// inline rendering area. Clear pointer hover without changing keyboard focus.
+    /// Outside mouse events are not forwarded to `on_events`.
+    fn on_pointer_leave(&mut self) {}
+
     /// Advance application state.
     ///
     /// Return `true` when the new state should be rendered, `false` when no redraw is needed.

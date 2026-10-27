@@ -897,6 +897,22 @@ impl<'a> RenderCtx<'a> {
             .unwrap_or(false)
     }
 
+    /// Whether this widget is the topmost pointer target. Hover never moves
+    /// keyboard focus; use `is_hover_within` for a container and its children.
+    pub fn is_hovered(&self) -> bool {
+        !self.exit_render && self.store.hovered_path.as_ref() == Some(&self.current_path)
+    }
+
+    /// Whether the topmost pointer target belongs to this visible subtree.
+    pub fn is_hover_within(&self) -> bool {
+        !self.exit_render
+            && self
+                .store
+                .hovered_path
+                .as_ref()
+                .is_some_and(|path| path.starts_with(&self.current_path))
+    }
+
     /// Whether the currently focused widget is inside this subtree.
     pub fn is_focus_within(&self) -> bool {
         self.focused_path
@@ -1766,6 +1782,8 @@ pub struct WidgetStore {
     pub(crate) invalidation: Invalidation,
     pub(crate) layout_geometry: RefCell<HashMap<WidgetPath, LayoutGeometry>>,
     pub(crate) rendered_ids: RefCell<HashMap<WidgetId, WidgetPath>>,
+    pub(crate) pointer_position: Option<(u16, u16)>,
+    pub(crate) hovered_path: Option<WidgetPath>,
 }
 
 impl WidgetStore {

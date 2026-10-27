@@ -275,11 +275,7 @@ where
                 }
             }
 
-            let events = self.normalize_inline_mouse_events(events);
-
-            if let Err(e) = self.render.on_events(&events) {
-                error!("Error processing events: {}", e);
-            }
+            let has_events = self.dispatch_events(events);
             let needs_render = match self.render.update() {
                 Ok(needs_render) => needs_render,
                 Err(e) => {
@@ -308,10 +304,7 @@ where
             let force_inline_frame =
                 self.inline_mode && self.inline_mouse_mode.force_follows_viewport();
 
-            if !events.is_empty()
-                || needs_render
-                || self.render.has_pending_changes()
-                || force_inline_frame
+            if has_events || needs_render || self.render.has_pending_changes() || force_inline_frame
             {
                 if let Err(e) = self.render.render() {
                     error!("Error rendering: {}", e);
@@ -373,15 +366,38 @@ where
         }
     }
 
-    fn normalize_inline_mouse_events(&self, events: Vec<Event>) -> Vec<Event> {
+    fn dispatch_events(&mut self, events: Vec<Event>) -> bool {
+        let (events, pointer_outside) = self.normalize_inline_mouse_events(events);
+        if let Err(e) = self.render.on_events(&events) {
+            error!("Error processing events: {}", e);
+        }
+        if pointer_outside {
+            self.render.thing_mut().on_pointer_leave();
+        }
+        !events.is_empty()
+    }
+
+    fn normalize_inline_mouse_events(&self, events: Vec<Event>) -> (Vec<Event>, bool) {
         if !self.inline_mode {
-            return events;
+            return (events, false);
         }
 
-        events
+        // Hover depends on the final pointer position. Keep input in one batch
+        // (editors synchronize controlled values at the start of `on_events`),
+        // then notify a leave only if no later mouse event reentered the UI.
+        let mut pointer_outside = false;
+        let events = events
             .into_iter()
-            .filter_map(|event| self.normalize_inline_mouse_event(event))
-            .collect()
+            .filter_map(|event| {
+                let is_mouse = matches!(event, Event::Mouse(_));
+                let normalized = self.normalize_inline_mouse_event(event);
+                if is_mouse {
+                    pointer_outside = normalized.is_none();
+                }
+                normalized
+            })
+            .collect();
+        (events, pointer_outside)
     }
 
     fn normalize_inline_mouse_event(&self, event: Event) -> Option<Event> {
@@ -660,10 +676,10 @@ mod tests {
         }
     }
 
-    fn inline_loop() -> EventLoop<Noop> {
+    fn inline_loop<T: DrawUpdate>(thing: T) -> EventLoop<T> {
         let mut builder = Builder::new();
         builder.inline_mode(true).size((20, 5));
-        let mut event_loop = builder.build_event_loop(Noop);
+        let mut event_loop = builder.build_event_loop(thing);
         event_loop.render.pos = (2, 3).into();
         event_loop.render.set_used_height(4);
         event_loop
@@ -671,7 +687,7 @@ mod tests {
 
     #[test]
     fn inline_mouse_coordinates_are_translated_to_local_space() {
-        let event_loop = inline_loop();
+        let event_loop = inline_loop(Noop);
         let event = Event::Mouse(MouseEvent {
             kind: MouseEventKind::Down(MouseButton::Left),
             column: 7,
@@ -694,7 +710,7 @@ mod tests {
 
     #[test]
     fn inline_mouse_events_outside_rendered_area_are_dropped() {
-        let event_loop = inline_loop();
+        let event_loop = inline_loop(Noop);
         let event = Event::Mouse(MouseEvent {
             kind: MouseEventKind::Down(MouseButton::Left),
             column: 7,
@@ -703,5 +719,90 @@ mod tests {
         });
 
         assert_eq!(event_loop.normalize_inline_mouse_event(event), None);
+    }
+
+    #[derive(Default)]
+    struct PointerProbe {
+        events: Vec<Event>,
+        batches: usize,
+        pointer: Option<(u16, u16)>,
+        leaves: usize,
+    }
+
+    impl Draw for PointerProbe {
+        fn draw(&mut self, _chunk: Chunk) -> Result<Size, DrawErr> {
+            Ok((0, 0).into())
+        }
+    }
+
+    impl Update for PointerProbe {
+        fn on_events(&mut self, events: &[Event]) -> Result<(), DrawErr> {
+            self.batches += 1;
+            self.events.extend_from_slice(events);
+            for event in events {
+                if let Event::Mouse(mouse) = event {
+                    self.pointer = Some((mouse.column, mouse.row));
+                }
+            }
+            Ok(())
+        }
+
+        fn on_pointer_leave(&mut self) {
+            self.pointer = None;
+            self.leaves += 1;
+        }
+
+        fn update(&mut self) -> Result<bool, DrawErr> {
+            Ok(false)
+        }
+    }
+
+    fn moved(column: u16, row: u16) -> Event {
+        Event::Mouse(MouseEvent {
+            kind: MouseEventKind::Moved,
+            column,
+            row,
+            modifiers: KeyModifiers::empty(),
+        })
+    }
+
+    #[test]
+    fn inline_pointer_leave_clears_hover_at_each_edge_without_forwarding_outside_events() {
+        for (x, y) in [(1, 5), (7, 2), (22, 5), (7, 7)] {
+            let mut event_loop = inline_loop(PointerProbe::default());
+            let key = Event::Key(crossterm::event::KeyCode::Char('a').into());
+            assert!(event_loop.dispatch_events(vec![moved(7, 5), moved(x, y), key.clone()]));
+            let probe = event_loop.render.thing();
+            assert_eq!(probe.events, [moved(5, 2), key]);
+            assert_eq!(probe.batches, 1);
+            assert_eq!(probe.pointer, None);
+            assert_eq!(probe.leaves, 1);
+
+            // An outside-only batch must also notify the application, which
+            // decides whether clearing hover requires repainting.
+            assert!(!event_loop.dispatch_events(vec![moved(x, y)]));
+            assert_eq!(event_loop.render.thing().leaves, 2);
+        }
+    }
+
+    #[test]
+    fn inline_pointer_reentry_in_the_same_batch_keeps_the_final_inside_position() {
+        let mut event_loop = inline_loop(PointerProbe::default());
+        event_loop.dispatch_events(vec![moved(7, 5), moved(1, 5), moved(8, 6)]);
+        let probe = event_loop.render.thing();
+        assert_eq!(probe.events, [moved(5, 2), moved(6, 3)]);
+        assert_eq!(probe.batches, 1);
+        assert_eq!(probe.pointer, Some((6, 3)));
+        assert_eq!(probe.leaves, 0);
+    }
+
+    #[test]
+    fn fullscreen_mouse_dispatch_preserves_events_without_inline_leave_notifications() {
+        let mut event_loop = Builder::new().build_event_loop(PointerProbe::default());
+        event_loop.dispatch_events(vec![moved(90, 30)]);
+        let probe = event_loop.render.thing();
+        assert_eq!(probe.events, [moved(90, 30)]);
+        assert_eq!(probe.pointer, Some((90, 30)));
+        assert_eq!(probe.leaves, 0);
     }
 }

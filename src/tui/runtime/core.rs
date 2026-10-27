@@ -221,6 +221,11 @@ impl<State, M: Send + 'static> Runtime<State, M> {
         }
     }
 
+    /// The topmost visible pointer target, independent of keyboard focus.
+    pub fn hovered_path(&self) -> Option<&WidgetPath> {
+        self.core.store.hovered_path.as_ref()
+    }
+
     pub fn bounds(&self, path: &WidgetPath) -> Option<crate::render::area::Area> {
         self.core.geometry.borrow().get(path).copied()
     }
@@ -617,6 +622,21 @@ fn hit_test_path(hit_regions: &[HitRegion], x: u16, y: u16) -> Option<WidgetPath
         .rev()
         .find(|region| region.contains(x, y))
         .map(|region| region.path.clone())
+}
+
+fn hover_target_path(
+    hit_regions: &[HitRegion],
+    position: Option<(u16, u16)>,
+    focus: &FocusManager,
+) -> Option<WidgetPath> {
+    let (x, y) = position?;
+    hit_test_path(hit_regions, x, y)
+        .filter(|path| focus.analysis_id(path).is_some())
+        .filter(|path| {
+            focus
+                .modal_path()
+                .is_none_or(|modal| path.starts_with(modal))
+        })
 }
 
 fn mouse_target_path(
@@ -1322,6 +1342,7 @@ impl<State, U, V, M: Send + 'static> AppRuntime<State, U, V, M> {
         stable_scope_id: WidgetId,
         store: &mut AnimationStore,
         focused_id: Option<WidgetId>,
+        hovered_path: Option<&WidgetPath>,
         now: Instant,
         motion_policy: MotionPolicy,
         animation_theme: crate::tui::animation::AnimationTheme,
@@ -1335,7 +1356,8 @@ impl<State, U, V, M: Send + 'static> AppRuntime<State, U, V, M> {
                 now,
                 motion_policy,
                 animation_theme,
-            );
+            )
+            .with_hovered_path(hovered_path);
             let legacy = widget.animate(&mut ctx);
             let mut requests = ctx.invalidation();
             if legacy {
@@ -1357,6 +1379,7 @@ impl<State, U, V, M: Send + 'static> AppRuntime<State, U, V, M> {
                 child_stable_scope_id,
                 store,
                 focused_id.clone(),
+                hovered_path,
                 now,
                 motion_policy,
                 animation_theme,
@@ -1404,6 +1427,7 @@ impl<State, U, V, M: Send + 'static> AppRuntime<State, U, V, M> {
             WidgetId::root(),
             &mut store,
             focused_id,
+            self.store.hovered_path.as_ref(),
             now,
             self.motion_policy,
             animation_theme,
@@ -1663,6 +1687,8 @@ impl<State, U, V, M: Send + 'static> AppRuntime<State, U, V, M> {
         *self.animation_store.borrow_mut() = AnimationStore::new();
         self.focus.clear();
         self.pointer_capture = None;
+        self.store.pointer_position = None;
+        self.store.hovered_path = None;
         self.next_animation_at = None;
         let active: Vec<_> = self
             .tasks
@@ -1963,6 +1989,19 @@ where
         self.prune_live_animations();
         self.render_frame = self.render_frame.wrapping_add(1);
 
+        // Layout, scrolling and overlays can move the target beneath a stationary
+        // pointer. Reconcile against the displayed, clipped geometry just painted.
+        let hovered = hover_target_path(
+            &self.hit_regions.borrow(),
+            self.store.pointer_position,
+            &self.focus,
+        );
+        if self.store.hovered_path != hovered {
+            self.store.hovered_path = hovered;
+            self.store.invalidation.request_paint();
+            self.next_animation_at = Some(self.clock.now());
+        }
+
         Ok(size)
     }
 }
@@ -2093,6 +2132,13 @@ where
         Some(self.wake.clone())
     }
 
+    fn on_pointer_leave(&mut self) {
+        self.store.pointer_position = None;
+        if self.store.hovered_path.take().is_some() {
+            self.store.invalidation.request_paint();
+        }
+    }
+
     fn next_update_at(&self) -> Option<Instant> {
         if self.should_quit {
             return None;
@@ -2140,6 +2186,20 @@ where
         let hit_regions = self.hit_regions.borrow();
 
         for event in events {
+            match event {
+                Event::Mouse(mouse) => {
+                    self.store.pointer_position = Some((mouse.column, mouse.row));
+                }
+                Event::FocusLost | Event::Resize(_, _) => {
+                    self.store.pointer_position = None;
+                }
+                _ => {}
+            }
+            let hovered = hover_target_path(&hit_regions, self.store.pointer_position, &self.focus);
+            if self.store.hovered_path != hovered {
+                self.store.hovered_path = hovered;
+                self.store.invalidation.request_paint();
+            }
             if let Some(message) = self
                 .input_handler
                 .as_ref()
@@ -2469,6 +2529,61 @@ mod tests {
         let app = App::<(), ()>::new(());
 
         assert!(app.mouse_capture);
+    }
+
+    #[test]
+    fn pointer_leave_repaints_hover_without_moving_focus_or_emitting_input() {
+        use crate::tui::prelude::*;
+
+        let green = Color::Rgb(30, 220, 120);
+        let mut rt = App::new(0)
+            .with_motion_policy(MotionPolicy::disabled())
+            .on_input(|_| Some(()))
+            .update(|count, (), _| *count += 1)
+            .view(move |_| {
+                grid()
+                    .columns("20 20")
+                    .rows("5")
+                    .child(
+                        panel()
+                            .key("card")
+                            .hover_border_style(Style::default().fg(green)),
+                    )
+                    .child(button("Anchor").key("anchor"))
+            })
+            .build()
+            .size(40, 8);
+        let border_color = |rt: &Runtime<i32, ()>| {
+            rt.frame().content()[0]
+                .content
+                .style
+                .colors
+                .and_then(|colors| colors.foreground)
+        };
+        rt.step(&[]).unwrap();
+        let base = border_color(&rt);
+        rt.step(&[Event::Mouse(MouseEvent {
+            kind: MouseEventKind::Moved,
+            column: 3,
+            row: 1,
+            modifiers: KeyModifiers::empty(),
+        })])
+        .unwrap();
+        assert_eq!(border_color(&rt), Some(green.into()));
+        assert!(rt.hovered_path().is_some());
+        assert_eq!(rt.focused_key(), Some("anchor"));
+        assert_eq!(*rt.state(), 1);
+
+        rt.core.on_pointer_leave();
+        assert!(rt.hovered_path().is_none());
+        assert!(rt.core.store.pointer_position.is_none());
+        assert!(rt.step(&[]).unwrap().rendered);
+        assert_eq!(border_color(&rt), base);
+        assert_eq!(rt.focused_key(), Some("anchor"));
+        assert_eq!(*rt.state(), 1);
+        // Repainting must not recreate hover from the old pointer position.
+        rt.step(&[]).unwrap();
+        assert!(rt.hovered_path().is_none());
     }
 
     #[test]

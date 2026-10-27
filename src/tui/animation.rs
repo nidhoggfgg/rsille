@@ -1429,6 +1429,7 @@ pub struct AnimationCtx<'a> {
     path: WidgetPath,
     id: WidgetId,
     focused_id: Option<WidgetId>,
+    hovered_path: Option<WidgetPath>,
     now: Instant,
     motion_policy: MotionPolicy,
     animation_theme: AnimationTheme,
@@ -1490,6 +1491,7 @@ impl<'a> AnimationCtx<'a> {
             path,
             id,
             focused_id,
+            hovered_path: None,
             now,
             motion_policy,
             animation_theme,
@@ -1499,6 +1501,23 @@ impl<'a> AnimationCtx<'a> {
     /// Repaint without discarding layout or scheduling another update.
     pub fn request_paint(&mut self) {
         self.invalidation.request_paint();
+    }
+
+    pub(crate) fn with_hovered_path(mut self, path: Option<&WidgetPath>) -> Self {
+        self.hovered_path = path.cloned();
+        self
+    }
+
+    /// Whether this widget is the pointer target, independently of focus.
+    pub fn is_hovered(&self) -> bool {
+        self.hovered_path.as_ref() == Some(&self.path)
+    }
+
+    /// Whether the pointer target is this widget or one of its descendants.
+    pub fn is_hover_within(&self) -> bool {
+        self.hovered_path
+            .as_ref()
+            .is_some_and(|path| path.starts_with(&self.path))
     }
 
     /// Remeasure and lay out before the next paint.

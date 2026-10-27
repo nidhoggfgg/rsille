@@ -11,6 +11,10 @@ root. Its seven pages cover controls, data, content, layout, motion and themes,
 with command-palette navigation and focus-trapped dialogs. See the
 [showcase guide](../../../examples/tui-showcase/README.md) for controls and headless verification.
 
+For a complete app with soft palettes, interactive graphics, flow management,
+autosave and replayable motion, see [Lumen](../../../examples/lumen/README.md):
+`cargo run --release --manifest-path examples/lumen/Cargo.toml`.
+
 ## Unified Application Entry
 
 Use `App::new(state).mode(Mode::Inline).update(update).view(view).run()`.
@@ -44,6 +48,30 @@ without sleeping. `cargo test -p tui --test api` runs this exact flow.
 Default features are empty. For code highlighting, run
 `cargo run -p tui --features syntax-highlighting --example code_viewer`.
 The code viewer otherwise displays plain text with the same navigation.
+
+## Hover feedback
+
+Mouse capture is enabled by default. Hover follows the topmost visible hit target,
+including scroll clipping, displayed animation geometry, overlays and modal input
+isolation. Mouse movement never changes keyboard focus or activates actions.
+
+```rust
+use rsille::tui::prelude::*;
+
+let card: Panel<()> = panel()
+    .title("Hover me")
+    .hover_border_style(Style::default().fg(Color::Rgb(151, 220, 190)))
+    .child(label("The title and border brighten together."));
+```
+
+Panels opt in with `hover_border_style`. Buttons automatically use the theme's
+`*_action_hover` styles; ghost buttons and text editors also highlight their borders.
+Colors ease with `theme.animations.fast`, honoring the global motion policy.
+Custom widgets can query `RenderCtx::is_hovered()` / `is_hover_within()` and the
+same methods on `AnimationCtx`. The latter includes a container's descendants.
+`Runtime::hovered_path()` exposes the current target for headless verification.
+Enable `App::focus_events(true)` to clear hover when the terminal reports focus loss;
+resize also clears the previous pointer position until the next mouse event.
 
 ## Categories
 

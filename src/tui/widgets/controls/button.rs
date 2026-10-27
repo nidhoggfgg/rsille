@@ -1,5 +1,6 @@
 //! Button widget — focusable interactive button
 
+use crate::tui::animation::AnimationCtx;
 use crate::tui::event::{Event, KeyCode, MouseButton, MouseEventKind};
 use crate::tui::focus::FocusConfig;
 use crate::tui::layout::Constraints;
@@ -135,6 +136,18 @@ impl<M> VariantWidget for Button<M> {
 }
 
 impl<M> Widget<M> for Button<M> {
+    fn animate(&self, ctx: &mut AnimationCtx) -> bool {
+        ctx.track_value(
+            "button-hover",
+            if !self.disabled && ctx.is_hovered() {
+                1.0
+            } else {
+                0.0
+            },
+            ctx.animation_theme().fast,
+        )
+    }
+
     fn render(&self, chunk: &mut crate::render::chunk::Chunk, ctx: &RenderCtx) {
         let area = chunk.area();
         if area.width() == 0 || area.height() == 0 {
@@ -143,7 +156,23 @@ impl<M> Widget<M> for Button<M> {
 
         let is_focused = self.focusable && !self.disabled && ctx.is_focused();
         let theme = ctx.theme();
-        let style = self.compute_style(theme, is_focused);
+        let hover = if self.disabled {
+            0.0
+        } else {
+            ctx.animation_value("button-hover")
+                .unwrap_or(if ctx.is_hovered() { 1.0 } else { 0.0 })
+        };
+        let mut style = self.compute_style(theme, is_focused);
+        if !self.disabled && !is_focused {
+            let target = match self.variant {
+                ButtonVariant::Primary => theme.styles.primary_action_hover,
+                ButtonVariant::Secondary => theme.styles.secondary_action_hover,
+                ButtonVariant::Destructive => theme.styles.destructive_action_hover,
+                ButtonVariant::Ghost => theme.styles.interactive_focused,
+                ButtonVariant::Link => theme.styles.interactive_focused.underlined(),
+            };
+            style = style.interpolate(target, hover);
+        }
         let render_style = style.to_render_style();
 
         let width = area.width();
@@ -162,7 +191,11 @@ impl<M> Widget<M> for Button<M> {
             let border_style = if is_focused {
                 theme.styles.border_focused.to_render_style()
             } else {
-                theme.styles.border.to_render_style()
+                theme
+                    .styles
+                    .border
+                    .interpolate(theme.styles.border_focused, hover)
+                    .to_render_style()
             };
             use crate::tui::layout::border_renderer;
             use crate::tui::style::BorderStyle;

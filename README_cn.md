@@ -55,6 +55,7 @@ cargo run -p tui --example workflow
 cargo run -p tui --example workflow -- --headless
 cargo run -p tui --example composition
 cargo run --manifest-path examples/tui-showcase/Cargo.toml
+cargo run --release --manifest-path examples/lumen/Cargo.toml
 cargo run -p tui --example extensions -- --headless
 cargo run --manifest-path examples/rsille-showcase/Cargo.toml
 cargo run --release --manifest-path examples/neon-observatory/Cargo.toml
@@ -68,6 +69,14 @@ cargo run --release --manifest-path examples/minecraft/Cargo.toml
 
 [TUI 综合组件展厅](examples/tui-showcase/README.md) 在七个页面中集中展示表单、数据组件、
 内容查看器、布局、动画和五套主题，并提供命令面板与对话框交互。
+
+[Lumen 交互工作台](examples/lumen/README.md) 将轨道画布、鼠标涟漪、实时曲线、渐进入场、
+布局过渡和三套柔和配色结合到一个完整应用中，包含流程管理、命令面板、弹窗和自动保存笔记。
+
+卡片可通过 `.hover_border_style(Style::default().fg(Color::Rgb(151, 220, 190)))`
+开启鼠标悬停时的边框与标题渐亮。按钮、输入框提供悬停反馈；自定义组件可查询
+`RenderCtx::is_hovered()` / `is_hover_within()`，并使用 `AnimationCtx` 中的同名方法驱动动画。
+悬停独立于键盘焦点，遵循滚动裁剪、遮挡和模态输入隔离。
 
 [霓虹观测站](examples/neon-observatory/README.md) 以 inline 模式展示环形行星、光子隧道、霓虹山谷、星系、金属环面和极光，
 包含渐变与揭幕特效、键鼠控制和按窗口尺寸调整的布局，并附框架能力评估与无 TTY 验证入口。

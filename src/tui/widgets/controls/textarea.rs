@@ -4,6 +4,7 @@ use crate::tui::text::{
     cursor_scroll, floor_boundary, paint_editor_line, EditBuffer, TextMetrics, UnicodeSegmentation,
 };
 
+use crate::tui::animation::AnimationCtx;
 use crate::tui::event::{Event, MouseButton, MouseEventKind};
 use crate::tui::focus::FocusConfig;
 use crate::tui::layout::border_renderer;
@@ -159,6 +160,18 @@ impl<M> Default for TextArea<M> {
 }
 
 impl<M: 'static> Widget<M> for TextArea<M> {
+    fn animate(&self, ctx: &mut AnimationCtx) -> bool {
+        ctx.track_value(
+            "input-hover",
+            if !self.disabled && ctx.is_hovered() {
+                1.0
+            } else {
+                0.0
+            },
+            ctx.animation_theme().fast,
+        )
+    }
+
     fn lifecycle(&self, ctx: &mut StateCtx) {
         if ctx.lifecycle() == Lifecycle::Unmount {
             return;
@@ -194,7 +207,17 @@ impl<M: 'static> Widget<M> for TextArea<M> {
         let border_style = if is_focused {
             theme.styles.border_focused.to_render_style()
         } else {
-            theme.styles.border.to_render_style()
+            let hover = if self.disabled {
+                0.0
+            } else {
+                ctx.animation_value("input-hover")
+                    .unwrap_or(if ctx.is_hovered() { 1.0 } else { 0.0 })
+            };
+            theme
+                .styles
+                .border
+                .interpolate(theme.styles.border_focused, hover)
+                .to_render_style()
         };
         let placeholder_style = theme.styles.text_placeholder.to_render_style();
         let cursor_style = theme.styles.cursor.to_render_style();
