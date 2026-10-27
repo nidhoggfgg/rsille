@@ -1,5 +1,6 @@
 //! Lumen: a standalone, stateful rsille application using only public APIs.
 mod art;
+mod desktop;
 mod ui;
 mod verify;
 
@@ -7,11 +8,12 @@ use rsille::tui::prelude::*;
 use std::time::Duration;
 
 const STEP: Duration = Duration::from_millis(33);
-const PAGES: [(&str, &str); 4] = [
+const PAGES: [(&str, &str); 5] = [
     ("overview", "Overview"),
     ("flows", "Flows"),
     ("motion", "Motion lab"),
     ("notes", "Notebook"),
+    ("desk", "Spatial desk"),
 ];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -46,6 +48,7 @@ enum Msg {
     Pointer(CanvasPointer),
     Notify(String),
     Dismiss(u64),
+    Desk(desktop::Action),
 }
 
 #[derive(Clone)]
@@ -85,6 +88,7 @@ struct State {
     saved_revision: u64,
     saved_notes: String,
     logs: Vec<LogLine>,
+    desk: desktop::Desktop,
 }
 
 impl Default for State {
@@ -105,6 +109,7 @@ impl Default for State {
             notes: "# A little room for ideas\n\nMake useful things feel delightful.\nKeep the motion soft.\nLet the details feel intentional.\n\n- Try the orbit with your mouse\n- Run a flow, then explore\n  while it works in the background.\n- Open the command palette with F1\n\n中文、e\u{301} 和 👩🏽‍💻 都可以在这里编辑。".into(),
             revision: 0, saved_revision: 0, saved_notes: String::new(),
             logs: vec![LogLine::new(LogLevel::Info, "Workspace ready. Everything here runs locally.")],
+            desk: desktop::Desktop::default(),
         }
     }
 }
@@ -125,6 +130,7 @@ fn app(state: State) -> App<State, Msg> {
         .on_key(KeyCode::F(2), || Msg::Theme)
         .on_key(KeyCode::F(3), || Msg::Command("quiet".into()))
         .on_key(KeyCode::F(4), || Msg::Command("next".into()))
+        .on_key(KeyCode::F(5), || Msg::Desk(desktop::Action::Toggle))
         .on_key(KeyCode::Esc, || Msg::Escape)
         .on_hotkey(
             Hotkey::new(
@@ -136,6 +142,7 @@ fn app(state: State) -> App<State, Msg> {
         )
         .on_input(|input| match input {
             InputEvent::Terminal(Event::Resize(w, h)) => Some(Msg::Resize(w, h)),
+            InputEvent::Terminal(Event::FocusLost) => Some(Msg::Desk(desktop::Action::End)),
             _ => None,
         })
         .on_tick(STEP, || Msg::Tick)
@@ -160,10 +167,19 @@ fn update(s: &mut State, msg: Msg, ctx: &mut UpdateCtx<Msg>) {
     match msg {
         Msg::Tick => {
             s.age += STEP.as_secs_f64();
+            let target = s.desk.scene as f64;
+            s.desk.morph = if s.quiet {
+                target
+            } else {
+                s.desk.morph + (target - s.desk.morph) * 0.14
+            };
             if !s.quiet {
                 s.time += STEP.as_secs_f64();
                 s.effect_age += STEP.as_secs_f64();
                 s.ripple_age += STEP.as_secs_f64();
+                if !s.desk.paused {
+                    s.desk.time += STEP.as_secs_f64();
+                }
             }
             if s.running.is_some() {
                 s.progress = (s.progress + STEP.as_secs_f64() / 6.0).min(1.0);
@@ -180,15 +196,20 @@ fn update(s: &mut State, msg: Msg, ctx: &mut UpdateCtx<Msg>) {
         Msg::Resize(w, h) => {
             s.width = w;
             s.height = h;
+            s.desk.fit(w, h);
         }
         Msg::Page(page) => {
             if PAGES.iter().any(|(id, _)| *id == page) {
                 s.page = page;
+                if s.page == "desk" {
+                    s.desk.open(s.width, s.height);
+                }
             }
         }
         Msg::Theme => s.theme = (s.theme + 1) % 3,
         Msg::Quiet(value) => s.quiet = value,
         Msg::Open(modal) => {
+            s.desk.cancel_drag();
             s.modal = Some(modal);
         }
         Msg::Close => s.modal = None,
@@ -210,8 +231,9 @@ fn update(s: &mut State, msg: Msg, ctx: &mut UpdateCtx<Msg>) {
                 "run" => update(s, Msg::Run, ctx),
                 "next" => {
                     let index = PAGES.iter().position(|(id, _)| *id == s.page).unwrap_or(0);
-                    s.page = PAGES[(index + 1) % PAGES.len()].0.into();
+                    update(s, Msg::Page(PAGES[(index + 1) % PAGES.len()].0.into()), ctx);
                 }
+                "desk-windows" => update(s, Msg::Desk(desktop::Action::Toggle), ctx),
                 "quit" => ctx.exit(),
                 _ => update(s, Msg::Page(command), ctx),
             }
@@ -299,18 +321,23 @@ fn update(s: &mut State, msg: Msg, ctx: &mut UpdateCtx<Msg>) {
                 s.toast = None;
             }
         }
+        Msg::Desk(action) => {
+            if s.modal.is_none() || matches!(action, desktop::Action::End) {
+                s.desk.update(action, s.width, s.height);
+            }
+        }
     }
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args().skip(1).collect();
     if args.iter().any(|a| a == "--help" || a == "-h") {
-        println!("Lumen · an interactive rsille workspace\n\n  --inline           render in the normal terminal\n  --reduced-motion   start with decorative motion disabled\n  --headless         verify real interactions without a TTY\n  --snapshot FILE    export a deterministic 120x44 SVG frame\n  --page PAGE        overview / flows / motion / notes\n\nF1 / Ctrl+K commands · F2 palette · F3 motion · F4 next page\nTab / Shift+Tab focus · Enter activate · Esc close / exit · Ctrl+C exit");
+        println!("Lumen · an interactive rsille workspace\n\n  --inline           render in the normal terminal\n  --reduced-motion   start with decorative motion disabled\n  --headless         verify real interactions without a TTY\n  --snapshot FILE    export a deterministic 120x44 SVG frame\n  --page PAGE        overview / flows / motion / notes / desk\n\nF1 / Ctrl+K commands · F2 palette · F3 motion · F4 next page · F5 floating desk\nWindow title: arrows move · Shift+arrows resize · Enter fold · Delete close\nTab / Shift+Tab focus · Esc close / exit · Ctrl+C exit");
         return Ok(());
     }
     if args.iter().any(|a| a == "--headless") {
         verify::run()?;
-        println!("Lumen verified: navigation, mouse, flows, modals, autosave, effects, themes and resize.");
+        println!("Lumen verified: navigation, mouse, flows, modals, autosave, effects, floating windows, 3D scenes, themes and resize.");
         return Ok(());
     }
     let mut state = State {
@@ -320,9 +347,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(index) = args.iter().position(|a| a == "--page") {
         let page = args.get(index + 1).ok_or("--page needs a page name")?;
         if !PAGES.iter().any(|(id, _)| id == page) {
-            return Err("Unknown page; use overview, flows, motion or notes".into());
+            return Err("Unknown page; use overview, flows, motion, notes or desk".into());
         }
         state.page = page.clone();
+        if page == "desk" {
+            state.desk.open(state.width, state.height);
+        }
     }
     if let Some(index) = args.iter().position(|a| a == "--snapshot") {
         return verify::snapshot(
@@ -333,6 +363,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Ok((width, height)) = crossterm::terminal::size() {
         state.width = width;
         state.height = height;
+        state.desk.fit(width, height);
     }
     let mode = if args.iter().any(|a| a == "--inline") {
         Mode::Inline

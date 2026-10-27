@@ -268,6 +268,237 @@ pub(super) fn run() -> Result {
     assert!(!rt.step(&[key(KeyCode::Esc)])?.should_quit);
     assert!(rt.state().modal.is_none());
     assert!(rt.step(&[key(KeyCode::Esc)])?.should_quit);
+    desktop_interactions()?;
+    Ok(())
+}
+
+fn mouse(kind: MouseEventKind, x: u16, y: u16) -> Event {
+    Event::Mouse(MouseEvent {
+        kind,
+        column: x,
+        row: y,
+        modifiers: KeyModifiers::empty(),
+    })
+}
+fn focused_bounds(rt: &Runtime<State, Msg>) -> rsille::render::area::Area {
+    rt.bounds(rt.focused_path().unwrap()).unwrap()
+}
+
+fn desktop_interactions() -> Result {
+    use desktop::Action;
+    let clock = ManualClock::default();
+    let mut rt = app(State::default())
+        .with_clock(clock.clone())
+        .update(update)
+        .view(ui::view)
+        .build()
+        .size(120, 44);
+    rt.step(&[])?;
+    advance(&mut rt, &clock, 20)?;
+    // Launch through a real button; the workspace remains usable underneath.
+    focus(&mut rt, "float")?;
+    rt.step(&[key(KeyCode::Enter)])?;
+    assert!(rt.state().desk.enabled);
+    advance(&mut rt, &clock, 12)?;
+    focus(&mut rt, "lens-title")?;
+    let title = focused_bounds(&rt);
+    let original = rt.state().desk.windows[0];
+    let (x, y) = (title.x() + 5, title.y());
+    rt.step(&[mouse(MouseEventKind::Down(MouseButton::Left), x, y)])?;
+    rt.step(&[mouse(MouseEventKind::Drag(MouseButton::Left), x + 9, y + 3)])?;
+    assert_eq!(rt.state().desk.windows[0].x, original.x + 9);
+    assert_eq!(rt.state().desk.windows[0].y, original.y + 3);
+    let moved = focused_bounds(&rt);
+    assert_eq!(
+        (moved.x(), moved.y()),
+        (title.x() + 9, title.y() + 3),
+        "Captured movement must paint without lag"
+    );
+    // Capture survives leaving the title and clamps safely at the screen edge.
+    rt.step(&[mouse(MouseEventKind::Drag(MouseButton::Left), 0, 0)])?;
+    rt.step(&[mouse(MouseEventKind::Up(MouseButton::Left), 0, 0)])?;
+    assert_eq!(
+        (rt.state().desk.windows[0].x, rt.state().desk.windows[0].y),
+        (0, 0)
+    );
+    let corner = rt.frame().content()[0].content.symbol();
+    assert_eq!(
+        corner, "╭",
+        "The actual window border must follow its state"
+    );
+    // A released pointer cannot keep moving a window.
+    let released = rt.state().desk.windows[0];
+    rt.step(&[mouse(MouseEventKind::Drag(MouseButton::Left), 50, 30)])?;
+    assert_eq!(rt.state().desk.windows[0], released);
+
+    focus(&mut rt, "arrange-desk")?;
+    rt.step(&[key(KeyCode::Enter)])?;
+    advance(&mut rt, &clock, 12)?;
+    focus(&mut rt, "lens-title")?;
+    let title = focused_bounds(&rt);
+    rt.step(&[mouse(
+        MouseEventKind::Down(MouseButton::Left),
+        title.x() + 5,
+        title.y(),
+    )])?;
+    rt.step(&[mouse(
+        MouseEventKind::Up(MouseButton::Left),
+        title.x() + 5,
+        title.y(),
+    )])?;
+    focus(&mut rt, "lens-resize")?;
+    let grip = focused_bounds(&rt);
+    let original = rt.state().desk.windows[0];
+    let (x, y) = (grip.x() + grip.width() - 2, grip.y());
+    rt.step(&[mouse(MouseEventKind::Down(MouseButton::Left), x, y)])?;
+    rt.step(&[mouse(MouseEventKind::Drag(MouseButton::Left), x + 7, y + 3)])?;
+    assert_eq!(
+        (
+            rt.state().desk.windows[0].width,
+            rt.state().desk.windows[0].height
+        ),
+        (original.width + 7, original.height + 3)
+    );
+    rt.step(&[mouse(MouseEventKind::Up(MouseButton::Left), x + 7, y + 3)])?;
+    // Keyboard movement and resizing are available on the title too.
+    focus(&mut rt, "lens-title")?;
+    let before = rt.state().desk.windows[0];
+    rt.step(&[key(KeyCode::Left)])?;
+    rt.step(&[Event::Key(KeyEvent::new(
+        KeyCode::Right,
+        KeyModifiers::SHIFT,
+    ))])?;
+    assert_eq!(rt.state().desk.windows[0].x, before.x - 2);
+    assert_eq!(rt.state().desk.windows[0].width, before.width + 2);
+    rt.step(&[key(KeyCode::Enter)])?;
+    assert!(rt.state().desk.windows[0].folded);
+    for _ in 0..35 {
+        rt.step(&[key(KeyCode::Tab)])?;
+        assert!(
+            !matches!(
+                rt.focused_key(),
+                Some("desk-pause" | "desk-scene" | "lens-resize")
+            ),
+            "Folded content must leave the focus order"
+        );
+    }
+    focus(&mut rt, "show-lens")?;
+    rt.step(&[key(KeyCode::Enter)])?;
+    assert!(!rt.state().desk.windows[0].folded);
+    advance(&mut rt, &clock, 12)?;
+
+    // Two overlapping windows must route the shared area to the front one.
+    send(&mut rt, Msg::Desk(Action::Arrange))?;
+    send(&mut rt, Msg::Desk(Action::Nudge(1, -26, -7, false)))?;
+    send(&mut rt, Msg::Desk(Action::Raise(0)))?;
+    advance(&mut rt, &clock, 12)?;
+    let signal = rt.state().desk.windows[1];
+    rt.step(&[mouse(
+        MouseEventKind::Down(MouseButton::Left),
+        signal.x + 5,
+        signal.y + 1,
+    )])?;
+    assert_eq!(
+        rt.state().desk.front,
+        0,
+        "Covered signal title must not receive a click"
+    );
+    rt.step(&[mouse(
+        MouseEventKind::Up(MouseButton::Left),
+        signal.x + 5,
+        signal.y + 1,
+    )])?;
+    // Click the exposed right border: the signal comes forward.
+    rt.step(&[mouse(
+        MouseEventKind::Down(MouseButton::Left),
+        signal.x + signal.width - 1,
+        signal.y + 3,
+    )])?;
+    assert_eq!(rt.state().desk.front, 1);
+    rt.step(&[mouse(
+        MouseEventKind::Up(MouseButton::Left),
+        signal.x + signal.width - 1,
+        signal.y + 3,
+    )])?;
+    let cell = usize::from(signal.y) * 120 + usize::from(signal.x);
+    assert_eq!(
+        rt.frame().content()[cell]
+            .content
+            .style
+            .colors
+            .unwrap()
+            .foreground,
+        Some(ui::palette(0).mint.into())
+    );
+    focus(&mut rt, "signal-title")?;
+    advance(&mut rt, &clock, 12)?;
+    let title = focused_bounds(&rt);
+    rt.step(&[mouse(
+        MouseEventKind::Down(MouseButton::Left),
+        title.x() + title.width() - 2,
+        title.y(),
+    )])?;
+    assert!(!rt.state().desk.windows[1].visible);
+    focus(&mut rt, "show-signal")?;
+    rt.step(&[key(KeyCode::Enter)])?;
+    assert!(rt.state().desk.windows[1].visible);
+
+    // A modal covers the complete desk, including floating controls and F5.
+    rt.step(&[key(KeyCode::F(1))])?;
+    advance(&mut rt, &clock, 12)?;
+    let windows = rt.state().desk.windows;
+    rt.step(&[
+        mouse(MouseEventKind::Down(MouseButton::Left), 35, 12),
+        key(KeyCode::F(5)),
+    ])?;
+    assert_eq!(rt.state().desk.windows, windows);
+    assert!(rt.state().desk.enabled);
+    assert_eq!(rt.state().modal, Some(Modal::Commands));
+    rt.step(&[key(KeyCode::Esc)])?;
+    // Rearranging only affects placement, preserving the scene and its clock.
+    send(&mut rt, Msg::Desk(Action::Arrange))?;
+    advance(&mut rt, &clock, 12)?;
+    focus(&mut rt, "desk-scene")?;
+    rt.step(&[key(KeyCode::Enter)])?;
+    advance(&mut rt, &clock, 20)?;
+    assert_eq!(rt.state().desk.scene, 1);
+    assert!(rt.state().desk.morph > 0.9);
+    focus(&mut rt, "desk-pause")?;
+    rt.step(&[key(KeyCode::Enter)])?;
+    let time = rt.state().desk.time;
+    advance(&mut rt, &clock, 10)?;
+    assert_eq!(rt.state().desk.time, time);
+    rt.step(&[key(KeyCode::Enter)])?;
+    rt.step(&[key(KeyCode::F(3))])?;
+    advance(&mut rt, &clock, 10)?;
+    assert_eq!(
+        rt.state().desk.time,
+        time,
+        "Reduced motion freezes both canvases"
+    );
+    assert_eq!(rt.state().desk.morph, 1.0);
+    focus(&mut rt, "desk-run")?;
+    rt.step(&[key(KeyCode::Enter)])?;
+    send(&mut rt, Msg::Page("notes".into()))?;
+    advance(&mut rt, &clock, 185)?;
+    assert_eq!(
+        rt.state().completed,
+        1,
+        "Floating flow controls share application state"
+    );
+    assert!(rt.state().desk.enabled, "Windows persist across pages");
+    rt.step(&[key(KeyCode::F(5))])?;
+    assert!(!rt.state().desk.enabled);
+    rt.step(&[key(KeyCode::F(5))])?;
+    assert!(rt.state().desk.enabled);
+    // Resizing cancels capture and keeps both windows reachable, even in tiny TTYs.
+    for (w, h) in [(80, 24), (40, 16), (20, 10), (120, 44)] {
+        rt.step(&[Event::Resize(w, h)])?;
+        for window in rt.state().desk.windows {
+            assert!(window.x + window.width <= w);
+            assert!(window.y + window.height <= h);
+        }
+    }
     Ok(())
 }
 
@@ -275,6 +506,7 @@ pub(super) fn snapshot(path: &str, mut state: State) -> Result {
     state.time = 3.0;
     state.age = 3.0;
     state.effect_age = 3.0;
+    state.desk.time = 3.0;
     let clock = ManualClock::default();
     let mut rt = app(state)
         .with_clock(clock.clone())

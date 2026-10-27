@@ -144,7 +144,7 @@ fn sidebar(s: &State, p: Palette) -> impl Widget<Msg> {
         let id = id.to_string();
         navigation = navigation.child(NavLink {
             id: id.clone(),
-            title: format!("{}  {}", ["◉", "⇄", "✧", "≡"][index], title),
+            title: format!("{}  {}", ["◉", "⇄", "✧", "≡", "◇"][index], title),
             selected: s.page == id,
             quiet: s.quiet,
             palette: p,
@@ -179,6 +179,12 @@ pub(super) fn view(s: &State) -> impl Widget<Msg> {
         .child(label(format!("  studio  /  {title}")).fg(p.muted))
         .child(spacer().fill())
         .child(
+            button("◇ Float")
+                .key("float")
+                .variant(ButtonVariant::Ghost)
+                .on_click(|| Msg::Desk(desktop::Action::Toggle)),
+        )
+        .child(
             button("⌕  Commands")
                 .key("commands")
                 .variant(ButtonVariant::Ghost)
@@ -199,6 +205,7 @@ pub(super) fn view(s: &State) -> impl Widget<Msg> {
         "flows" => Box::new(flows(s, p)),
         "motion" => Box::new(motion_lab(s, p)),
         "notes" => Box::new(notes(s, p)),
+        "desk" => Box::new(desktop::page(s, p)),
         _ => Box::new(overview(s, p)),
     };
     // Fixed natural content dimensions keep every control reachable on small TTYs.
@@ -242,7 +249,7 @@ pub(super) fn view(s: &State) -> impl Widget<Msg> {
     };
     let footer = row()
         .child(muted(
-            "  F1 commands   F2 palette   F3 motion   F4 explore",
+            "  F1 commands  F2 palette  F3 motion  F4 explore  F5 float",
             p,
         ))
         .child(spacer().fill())
@@ -262,12 +269,13 @@ pub(super) fn view(s: &State) -> impl Widget<Msg> {
         .style(Style::default().bg(p.bg).fg(p.text))
         .child(layout)
         .child(footer);
-    let base: Box<dyn Widget<Msg>> = if s.modal.is_some() {
-        Box::new(Backdrop(Box::new(base)))
+    let workspace = desktop::layers(overlay(base).key("workspace"), s, p);
+    let workspace: Box<dyn Widget<Msg>> = if s.modal.is_some() {
+        Box::new(Backdrop(Box::new(workspace)))
     } else {
-        Box::new(base)
+        Box::new(workspace)
     };
-    let mut root = overlay(base);
+    let mut root = overlay(workspace);
     if let Some((id, text)) = &s.toast {
         root = root.layer(
             OverlayLayer::new(enter(
@@ -304,6 +312,10 @@ pub(super) fn view(s: &State) -> impl Widget<Msg> {
                                     CommandItem::new("run", "Run selected flow"),
                                     CommandItem::new("theme", "Change color palette"),
                                     CommandItem::new("quiet", "Toggle reduced motion"),
+                                    CommandItem::new(
+                                        "desk-windows",
+                                        "Toggle floating windows / F5",
+                                    ),
                                     CommandItem::new("quit", "Leave Lumen"),
                                 ]),
                         )
@@ -394,10 +406,10 @@ fn overview(s: &State, p: Palette) -> impl Widget<Msg> {
                 )
                 .child(
                     row().gap(2).child(run_button(s)).child(
-                        button("Explore motion")
+                        button("Open spatial desk")
                             .key("explore")
                             .variant(ButtonVariant::Ghost)
-                            .on_click(|| Msg::Page("motion".into())),
+                            .on_click(|| Msg::Page("desk".into())),
                     ),
                 ),
         )
@@ -754,10 +766,10 @@ fn motion_lab(s: &State, p: Palette) -> impl Widget<Msg> {
         )
         .child(spacer().height(1))
         .child(
-            button("Say hello  ↗")
+            button("Float this workspace  ↗")
                 .key("notify")
                 .variant(ButtonVariant::Ghost)
-                .on_click(|| Msg::Notify("Hello from the other side of the terminal.".into())),
+                .on_click(|| Msg::Desk(desktop::Action::Toggle)),
         );
     grid()
         .columns("1fr")
