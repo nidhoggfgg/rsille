@@ -63,6 +63,7 @@ cargo run -p tui --example workflow -- --headless
 cargo run -p tui --example composition
 cargo run --manifest-path examples/tui-showcase/Cargo.toml
 cargo run --release --manifest-path examples/lumen/Cargo.toml
+cargo run --release --manifest-path examples/orbit-files/Cargo.toml
 cargo run -p tui --example extensions -- --headless
 cargo run --manifest-path examples/rsille-showcase/Cargo.toml
 cargo run --release --manifest-path examples/neon-observatory/Cargo.toml
@@ -81,6 +82,10 @@ content viewers, layouts, animation, themes and modal interactions into one gall
 [Lumen](examples/lumen/README.md) is a standalone workspace with soft palettes,
 an interactive orbital canvas, live charts, entrance and layout animations,
 flow management, a command palette and an autosaving notebook.
+
+[Orbit Files](examples/orbit-files/README.md) is a working file manager with marquee selection,
+batch drag and drop, copy/cut/paste, navigation, search, previews, context menus and undoable trash.
+It starts in a disposable demo directory and can also open real directories.
 
 Panels opt into animated pointer feedback with
 `.hover_border_style(Style::default().fg(Color::Rgb(151, 220, 190)))`.

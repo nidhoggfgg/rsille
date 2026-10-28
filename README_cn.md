@@ -56,6 +56,7 @@ cargo run -p tui --example workflow -- --headless
 cargo run -p tui --example composition
 cargo run --manifest-path examples/tui-showcase/Cargo.toml
 cargo run --release --manifest-path examples/lumen/Cargo.toml
+cargo run --release --manifest-path examples/orbit-files/Cargo.toml
 cargo run -p tui --example extensions -- --headless
 cargo run --manifest-path examples/rsille-showcase/Cargo.toml
 cargo run --release --manifest-path examples/neon-observatory/Cargo.toml
@@ -72,6 +73,9 @@ cargo run --release --manifest-path examples/minecraft/Cargo.toml
 
 [Lumen 交互工作台](examples/lumen/README.md) 将轨道画布、鼠标涟漪、实时曲线、渐进入场、
 布局过渡和三套柔和配色结合到一个完整应用中，包含流程管理、命令面板、弹窗和自动保存笔记。
+
+[Orbit Files 文件管理器](examples/orbit-files/README.md) 提供鼠标框选、整组文件拖放、复制/剪切/粘贴、
+目录导航、搜索、预览、右键菜单和可撤销删除。默认使用一次性演示目录，也可打开真实目录。
 
 卡片可通过 `.hover_border_style(Style::default().fg(Color::Rgb(151, 220, 190)))`
 开启鼠标悬停时的边框与标题渐亮。按钮、输入框提供悬停反馈；自定义组件可查询
