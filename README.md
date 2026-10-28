@@ -70,6 +70,7 @@ cargo run --release --manifest-path examples/neon-observatory/Cargo.toml
 cargo run --release --manifest-path examples/folded-harbor/Cargo.toml
 cargo run --release --manifest-path examples/minecraft/Cargo.toml
 cargo run --release --manifest-path examples/clockwork/Cargo.toml
+cargo run --release --manifest-path examples/pokemon-battle/Cargo.toml
 ```
 
 The workflow example uses the same application for interactive editing and a
@@ -108,6 +109,14 @@ classic hotbar, collision, jumping, flight and a day/night toggle.
 ornithopter and an opening clockwork iris. Orbit the workbench, separate the
 mechanism in an exploded view, or scatter it with a magnetic pulse and watch it
 rebuild. Solid 3D geometry is rendered through rsille Canvas.
+
+[Pokémon Battle](examples/pokemon-battle/README.md) stages Pikachu against Blastoise
+in an open 3D meadow with rolling grass, wind-blown blades and a misty tree line.
+Play as Pikachu, choose four moves with keyboard or mouse,
+and battle an automated opponent with HP, PP, paralysis, guard and win/loss states.
+Solid models animate attacks, sparks and splashes under an orbitable camera.
+Native TUI Canvas, buttons, panels, progress bars and grid/overlay layouts power the interface,
+with frosted translucent HUD and skill cards floating over the full scene.
 
 Only **`rsille`** is published. Use its three public modules:
 

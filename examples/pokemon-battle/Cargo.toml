@@ -1,0 +1,11 @@
+[package]
+name = "pokemon-battle"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[dependencies]
+rsille = { path = "../.." }
+crossterm = "0.28.1"

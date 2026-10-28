@@ -63,6 +63,7 @@ cargo run --release --manifest-path examples/neon-observatory/Cargo.toml
 cargo run --release --manifest-path examples/folded-harbor/Cargo.toml
 cargo run --release --manifest-path examples/minecraft/Cargo.toml
 cargo run --release --manifest-path examples/clockwork/Cargo.toml
+cargo run --release --manifest-path examples/pokemon-battle/Cargo.toml
 ```
 
 `workflow` 使用同一套应用逻辑验证 Unicode 粘贴、debounce、后台保存、键盘焦点和退出，
@@ -96,6 +97,13 @@ cargo run --release --manifest-path examples/clockwork/Cargo.toml
 [Clockwork 发条生物](examples/clockwork/README.md) 用同一套 132 个黄铜、钢与陶瓷零件，
 自行组装成多足步行机、扑翼飞行器和会开合的机械花。可以绕工作台观察、展开爆炸视图，
 或用磁力脉冲震散整台机器，看它重新归位；实体三维几何通过 rsille Canvas 绘制。
+
+[宝可梦对战](examples/pokemon-battle/README.md) 是皮卡丘与水箭龟的 3D 战斗场景：
+在有草丛、起伏地形和薄雾远林的开阔草地上，控制皮卡丘，用键盘或鼠标选择四种技能，
+与会自动还击的水箭龟进行回合制对战。
+包含 HP、PP、麻痹、防御、胜负和重新开局，以及立体出招动作、电弧、水花与可旋转的相机。
+界面复用 TUI 的 Canvas、按钮、面板、血条、网格布局及浮层，交互和焦点统一由框架管理；
+血量与技能卡以半透明毛玻璃悬浮于完整场景上，可透见模糊的草地和树影。
 
 对外只发布 **`rsille`**，使用以下三个公开模块：
 
