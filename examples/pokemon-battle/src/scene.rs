@@ -16,7 +16,7 @@ const RIGHT: V3 = V3(1.85, 0.0, -0.75);
 const FACING: f32 = 1.96;
 
 fn muzzle(side: f32, water: f32) -> V3 {
-    V3(side * 0.74, 2.61 - water * 0.80, 0.64 + water * 0.20)
+    V3(side * 0.79, 2.53 - water * 0.64, 0.68 + water * 0.22)
 }
 
 fn front(yaw: f32) -> V3 {
@@ -116,96 +116,140 @@ pub fn render(
 }
 
 fn pikachu(m: &mut Model<'_>, t: f32, charge: f32) {
-    // The tail is an extruded lightning bolt, rather than a camera-facing sprite.
-    let wag = (t * 3.0).sin() * 0.07;
-    let sections = [
-        (-0.36, 0.48, 0.11),
-        (-0.91, 0.85, 0.13),
-        (-0.68, 1.09, 0.15),
-        (-1.22, 1.31, 0.21),
-        (-1.22 + wag, 1.94, 0.26),
-    ];
-    for i in 0..sections.len() - 1 {
-        let (x, y, w) = sections[i];
-        let (xx, yy, ww) = sections[i + 1];
-        let points = [
-            V3(x - w, y, -0.36),
-            V3(x + w, y, -0.36),
-            V3(xx + ww, yy, -0.36),
-            V3(xx - ww, yy, -0.36),
-        ];
-        let color = if i == 0 { [0.43, 0.22, 0.09] } else { YELLOW };
-        m.quad(points, color, false);
-        m.quad(points.map(|p| p + V3(0.0, 0.0, -0.16)), color, false);
-        for j in 0..4 {
-            let (a, b) = (points[j], points[(j + 1) % 4]);
+    // Broad, flat zigzags keep the lightning silhouette legible from the back.
+    let wag = (t * 3.0).sin() * 0.055;
+    for (outline, color) in [
+        (
+            [(0.02, 0.44), (0.22, 0.42), (0.46, 0.64), (0.27, 0.70)],
+            [0.43, 0.22, 0.09],
+        ),
+        (
+            [(0.27, 0.70), (0.46, 0.64), (0.65, 1.06), (0.38, 1.11)],
+            YELLOW,
+        ),
+        (
+            [(0.38, 1.11), (0.65, 1.06), (0.35, 1.52), (0.08, 1.49)],
+            YELLOW,
+        ),
+        (
+            [(0.08, 1.49), (0.35, 1.52), (1.37, 2.00), (0.80, 2.22)],
+            YELLOW,
+        ),
+    ] {
+        m.extrude(
+            &outline.map(|(x, y)| V3(x + wag * y, y, -0.49 - x * 0.35)),
+            V3(0.0, 0.0, -0.105),
+            color,
+        );
+    }
+    // A low, pear-shaped body flows into a broad cheeked head, without a neck.
+    m.loft(
+        &[
+            (V3(0.0, 0.15, 0.0), 0.0, 0.0),
+            (V3(0.0, 0.24, 0.0), 0.40, 0.32),
+            (V3(0.0, 0.48, 0.0), 0.57, 0.43),
+            (V3(0.0, 0.72, 0.0), 0.60, 0.45),
+            (V3(0.0, 0.96, 0.0), 0.51, 0.39),
+            (V3(0.0, 1.24, 0.02), 0.40, 0.30),
+            (V3(0.0, 1.40, 0.03), 0.0, 0.0),
+        ],
+        YELLOW,
+    );
+    for side in [-1.0, 1.0] {
+        m.ball(V3(side * 0.35, 0.12, 0.17), V3(0.25, 0.14, 0.34), YELLOW);
+        let hand = V3(
+            side * (0.50 + charge * 0.13),
+            0.73 + charge * 0.23,
+            0.35 + charge * 0.16,
+        );
+        m.tube(V3(side * 0.42, 1.03, 0.12), hand, 0.17, 0.12, YELLOW, false);
+        m.ball(hand, V3(0.14, 0.17, 0.16), YELLOW);
+    }
+    for (y, width, depth) in [(0.66, 0.54, 0.45), (0.94, 0.52, 0.40)] {
+        // Follow the back surface, so the stripes read as markings, not knobs.
+        for i in 0..12 {
+            let point = |j: usize, yy: f32| {
+                let x = (j as f32 / 12.0 - 0.5) * 0.72;
+                V3(x, yy, -depth * (1.0 - (x / width).powi(2)).sqrt() - 0.012)
+            };
             m.quad(
-                [a, b, b + V3(0.0, 0.0, -0.16), a + V3(0.0, 0.0, -0.16)],
-                color,
+                [
+                    point(i, y - 0.045),
+                    point(i + 1, y - 0.045),
+                    point(i + 1, y + 0.045),
+                    point(i, y + 0.045),
+                ],
+                [0.42, 0.23, 0.08],
                 false,
             );
         }
     }
-    m.ball(V3(0.0, 0.79, 0.0), V3(0.57, 0.71, 0.43), YELLOW);
+    m.loft(
+        &[
+            (V3(0.0, 1.10, 0.08), 0.0, 0.0),
+            (V3(0.0, 1.20, 0.08), 0.44, 0.31),
+            (V3(0.0, 1.38, 0.08), 0.64, 0.46),
+            (V3(0.0, 1.58, 0.08), 0.65, 0.46),
+            (V3(0.0, 1.79, 0.06), 0.59, 0.40),
+            (V3(0.0, 1.97, 0.03), 0.43, 0.28),
+            (V3(0.0, 2.04, 0.02), 0.25, 0.17),
+            (V3(0.0, 2.07, 0.02), 0.0, 0.0),
+        ],
+        YELLOW,
+    );
     for side in [-1.0, 1.0] {
-        m.ball(V3(side * 0.36, 0.12, 0.16), V3(0.29, 0.15, 0.39), YELLOW);
-        let hand = V3(
-            side * (0.55 + charge * 0.10),
-            0.84 + charge * 0.20,
-            0.27 + charge * 0.19,
+        let lean = if side < 0.0 { 0.12 } else { 0.0 };
+        let sway = (t * 3.0 + side).sin() * 0.025;
+        let ear = |x: f32, y: f32, z: f32| V3(side * (x + lean * (y - 1.9) + sway), y, z);
+        let boundary = (ear(0.63, 2.57 - lean, 0.015), 0.105, 0.056);
+        m.loft(
+            &[
+                (ear(0.37, 1.88, 0.04), 0.11, 0.085),
+                (ear(0.47, 2.13, 0.035), 0.145, 0.080),
+                (ear(0.57, 2.40 - lean, 0.025), 0.13, 0.066),
+                boundary,
+            ],
+            YELLOW,
         );
-        m.tube(V3(side * 0.43, 1.03, 0.05), hand, 0.18, 0.13, YELLOW, false);
-        m.ball(hand, V3(0.17, 0.19, 0.17), YELLOW);
-        // Brown back stripes are shallow solid patches on the rear of the torso.
-        m.ball(
-            V3(side * 0.23, 0.70, -0.385),
-            V3(0.23, 0.095, 0.055),
-            [0.42, 0.23, 0.08],
-        );
-        m.ball(
-            V3(side * 0.21, 0.97, -0.37),
-            V3(0.20, 0.085, 0.05),
-            [0.42, 0.23, 0.08],
-        );
-    }
-    m.ball(V3(0.0, 1.58, 0.07), V3(0.65, 0.53, 0.49), YELLOW);
-    for side in [-1.0, 1.0] {
-        let root = V3(side * 0.38, 1.91, 0.04);
-        let middle = V3(side * (0.60 + 0.035 * (t * 3.0).sin()), 2.49, 0.0);
-        let tip = V3(side * 0.69, 2.80, -0.03);
-        m.tube(root, middle, 0.155, 0.115, YELLOW, false);
-        m.tube(middle, tip, 0.116, 0.012, BLACK, false);
-        m.ball(
-            V3(side * 0.255, 1.68, 0.493),
-            V3(0.105, 0.139, 0.056),
+        m.loft(
+            &[
+                boundary,
+                (ear(0.69, 2.75 - lean, 0.0), 0.070, 0.040),
+                (ear(0.72, 2.88 - lean, -0.01), 0.0, 0.0),
+            ],
             BLACK,
         );
         m.ball(
-            V3(side * 0.24 - 0.022, 1.73, 0.542),
-            V3(0.032, 0.040, 0.018),
+            V3(side * 0.255, 1.66, 0.476),
+            V3(0.087, 0.117, 0.043),
+            BLACK,
+        );
+        m.ball(
+            V3(side * 0.255 - 0.022, 1.704, 0.511),
+            V3(0.027, 0.033, 0.012),
             WHITE,
         );
         m.ball(
-            V3(side * 0.47, 1.41, 0.40),
-            V3(0.138, 0.12, 0.067),
+            V3(side * 0.515, 1.39, 0.366),
+            V3(0.135, 0.115, 0.070),
             [0.94, 0.13, 0.11],
         );
     }
-    m.ball(V3(0.0, 1.52, 0.568), V3(0.053, 0.036, 0.025), BLACK);
+    m.ball(V3(0.0, 1.51, 0.546), V3(0.043, 0.027, 0.020), BLACK);
     for side in [-1.0, 1.0] {
         m.tube(
-            V3(0.0, 1.38, 0.553),
-            V3(side * 0.075, 1.34, 0.55),
-            0.015,
-            0.015,
+            V3(0.0, 1.39, 0.545),
+            V3(side * 0.068, 1.35, 0.535),
+            0.012,
+            0.012,
             BLACK,
             false,
         );
         m.tube(
-            V3(side * 0.075, 1.34, 0.55),
-            V3(side * 0.14, 1.39, 0.53),
-            0.015,
+            V3(side * 0.068, 1.35, 0.535),
+            V3(side * 0.13, 1.39, 0.527),
             0.012,
+            0.010,
             BLACK,
             false,
         );
@@ -213,73 +257,107 @@ fn pikachu(m: &mut Model<'_>, t: f32, charge: f32) {
 }
 
 fn blastoise(m: &mut Model<'_>, t: f32, water: f32) {
-    // Broad brown shell and ivory rim, with shoulder-mounted, hollow steel cannons.
+    // A wide shell and low, planted limbs give Blastoise its heavy silhouette.
     m.ball(
-        V3(0.0, 1.17, -0.26),
-        V3(0.94, 1.09, 0.59),
+        V3(0.0, 1.17, -0.25),
+        V3(1.00, 1.05, 0.60),
         [0.86, 0.81, 0.65],
     );
     m.ball(
-        V3(0.0, 1.20, -0.43),
-        V3(0.83, 0.98, 0.53),
-        [0.35, 0.20, 0.13],
+        V3(0.0, 1.20, -0.44),
+        V3(0.91, 0.96, 0.58),
+        [0.40, 0.24, 0.15],
     );
+    // The central scute and radial seams sit on the curved shell surface.
+    let shell = |x: f32, y: f32| {
+        V3(
+            x,
+            y,
+            -0.44
+                - 0.59
+                    * (1.0 - (x / 0.91).powi(2) - ((y - 1.20) / 0.96).powi(2))
+                        .max(0.0)
+                        .sqrt(),
+        )
+    };
+    let scute = [
+        (-0.34, 1.48),
+        (0.0, 1.75),
+        (0.34, 1.48),
+        (0.34, 0.98),
+        (0.0, 0.72),
+        (-0.34, 0.98),
+    ];
+    for i in 0..scute.len() {
+        let (a, b) = (scute[i], scute[(i + 1) % scute.len()]);
+        for j in 0..8 {
+            let point = |f: f32| shell(a.0 + (b.0 - a.0) * f, a.1 + (b.1 - a.1) * f);
+            m.tube(
+                point(j as f32 / 8.0),
+                point((j + 1) as f32 / 8.0),
+                0.018,
+                0.018,
+                [0.23, 0.14, 0.09],
+                false,
+            );
+        }
+        let end = (a.0 * 2.1, 1.20 + (a.1 - 1.20) * 1.65);
+        for j in 0..8 {
+            let point = |f: f32| shell(a.0 + (end.0 - a.0) * f, a.1 + (end.1 - a.1) * f);
+            m.tube(
+                point(j as f32 / 8.0),
+                point((j + 1) as f32 / 8.0),
+                0.016,
+                0.016,
+                [0.23, 0.14, 0.09],
+                false,
+            );
+        }
+    }
     for side in [-1.0, 1.0] {
-        m.tube(
-            V3(0.0, 2.12, -0.68),
-            V3(side * 0.64, 1.52, -0.81),
-            0.025,
-            0.025,
-            [0.17, 0.12, 0.10],
-            false,
-        );
-        m.tube(
-            V3(side * 0.64, 1.52, -0.81),
-            V3(side * 0.57, 0.72, -0.82),
-            0.025,
-            0.025,
-            [0.17, 0.12, 0.10],
-            false,
-        );
-        m.tube(
-            V3(side * 0.57, 0.72, -0.82),
-            V3(0.0, 0.28, -0.61),
-            0.025,
-            0.025,
-            [0.17, 0.12, 0.10],
-            false,
-        );
         m.ball(
-            V3(side * 0.66, 1.95, -0.22),
-            V3(0.28, 0.25, 0.28),
+            V3(side * 0.73, 1.98, -0.24),
+            V3(0.26, 0.23, 0.29),
             [0.09, 0.23, 0.34],
         );
-        let a = V3(side * 0.67, 2.02, -0.25);
+        let a = V3(side * 0.75, 2.04, -0.28);
         let b = muzzle(side, water);
         let direction = (b - a).unit();
-        m.pipe(a, b, 0.205, [0.53, 0.66, 0.73]);
+        m.pipe(a, b, 0.175, [0.53, 0.66, 0.73]);
         m.pipe(
             b - direction * 0.12,
             b + direction * 0.03,
-            0.234,
+            0.205,
             [0.66, 0.77, 0.81],
         );
     }
-    m.ball(V3(0.0, 1.10, 0.06), V3(0.76, 0.91, 0.52), BLUE);
+    m.ball(V3(0.0, 1.10, 0.06), V3(0.84, 0.87, 0.56), BLUE);
     m.ball(
-        V3(0.0, 1.08, 0.43),
-        V3(0.64, 0.79, 0.21),
+        V3(0.0, 1.08, 0.44),
+        V3(0.70, 0.77, 0.23),
         [0.87, 0.75, 0.48],
     );
-    for y in [0.62_f32, 0.96, 1.30, 1.62] {
-        for i in 0..14 {
-            let x = -0.49 + i as f32 * 0.07;
-            let z = 0.43
-                + 0.218
-                    * (1.0 - (x / 0.68).powi(2) - ((y - 1.08) / 0.89).powi(2))
-                        .max(0.0)
-                        .sqrt();
-            m.line(V3(x, y, z), V3(x + 0.07, y, z), [0.57, 0.45, 0.29]);
+    for y in [0.64_f32, 0.98, 1.32, 1.61] {
+        let half_width = 0.69 * (1.0 - ((y - 1.08) / 0.77).powi(2)).sqrt();
+        for i in 0..20 {
+            let point = |j: usize| {
+                let x = (j as f32 / 10.0 - 1.0) * half_width;
+                let yy = y - 0.035 * (1.0 - (x / half_width).powi(2));
+                let z = 0.44
+                    + 0.238
+                        * (1.0 - (x / 0.70).powi(2) - ((yy - 1.08) / 0.77).powi(2))
+                            .max(0.0)
+                            .sqrt();
+                V3(x, yy, z)
+            };
+            m.tube(
+                point(i),
+                point(i + 1),
+                0.012,
+                0.012,
+                [0.57, 0.45, 0.29],
+                false,
+            );
         }
     }
     m.tube(
@@ -291,27 +369,28 @@ fn blastoise(m: &mut Model<'_>, t: f32, water: f32) {
         false,
     );
     for side in [-1.0, 1.0] {
-        m.ball(V3(side * 0.57, 0.36, 0.04), V3(0.37, 0.37, 0.41), BLUE);
-        m.ball(V3(side * 0.58, 0.16, 0.29), V3(0.35, 0.19, 0.41), BLUE);
+        m.ball(V3(side * 0.58, 0.38, 0.02), V3(0.39, 0.40, 0.39), BLUE);
+        m.ball(V3(side * 0.62, 0.16, 0.29), V3(0.35, 0.18, 0.40), BLUE);
         for claw in [-1.0, 0.0, 1.0] {
             m.tube(
-                V3(side * 0.58 + claw * 0.16, 0.13, 0.57),
-                V3(side * 0.58 + claw * 0.16, 0.10, 0.78),
+                V3(side * 0.62 + claw * 0.16, 0.13, 0.57),
+                V3(side * 0.62 + claw * 0.16, 0.10, 0.75),
                 0.072,
                 0.014,
                 WHITE,
                 false,
             );
         }
-        let elbow = V3(side * 0.94, 1.40, 0.02);
-        let hand = V3(side * 1.01, 0.97 + water * 0.1, 0.45);
-        m.ball(V3(side * 0.69, 1.63, 0.01), V3(0.33, 0.37, 0.33), BLUE);
-        m.tube(elbow, hand, 0.30, 0.26, BLUE, false);
-        m.ball(hand, V3(0.28, 0.27, 0.30), BLUE);
+        let elbow = V3(side * 1.00, 1.37, 0.13);
+        let hand = V3(side * 1.04, 1.02 + water * 0.1, 0.48);
+        m.ball(V3(side * 0.76, 1.57, 0.07), V3(0.35, 0.36, 0.35), BLUE);
+        m.tube(V3(side * 0.78, 1.56, 0.09), elbow, 0.31, 0.29, BLUE, false);
+        m.tube(elbow, hand, 0.29, 0.25, BLUE, false);
+        m.ball(hand, V3(0.27, 0.24, 0.28), BLUE);
         for claw in [-1.0, 0.0, 1.0] {
             m.tube(
                 hand + V3(claw * 0.15, -0.05, 0.21),
-                hand + V3(claw * 0.16, -0.10, 0.44),
+                hand + V3(claw * 0.16, -0.10, 0.38),
                 0.065,
                 0.012,
                 WHITE,
@@ -320,67 +399,96 @@ fn blastoise(m: &mut Model<'_>, t: f32, water: f32) {
         }
     }
     let nod = (t * 2.8).sin() * 0.018;
-    m.ball(V3(0.0, 2.12 + nod, 0.13), V3(0.59, 0.50, 0.50), BLUE);
-    m.ball(V3(0.0, 1.94 + nod, 0.44), V3(0.49, 0.26, 0.36), BLUE);
+    let head = |x: f32, y: f32, z: f32| V3(x, y + nod, z);
+    m.loft(
+        &[
+            (head(0.0, 1.75, 0.17), 0.0, 0.0),
+            (head(0.0, 1.84, 0.20), 0.39, 0.32),
+            (head(0.0, 2.03, 0.20), 0.58, 0.45),
+            (head(0.0, 2.25, 0.17), 0.60, 0.43),
+            (head(0.0, 2.41, 0.10), 0.49, 0.33),
+            (head(0.0, 2.48, 0.07), 0.32, 0.24),
+            (head(0.0, 2.51, 0.06), 0.0, 0.0),
+        ],
+        BLUE,
+    );
+    m.ball(head(0.0, 1.99, 0.48), V3(0.48, 0.225, 0.32), BLUE);
+    m.ball(
+        head(0.0, 1.84, 0.47),
+        V3(0.40, 0.10, 0.24),
+        [0.23, 0.49, 0.72],
+    );
     for side in [-1.0, 1.0] {
-        m.tube(
-            V3(side * 0.37, 2.42, 0.0),
-            V3(side * 0.50, 2.71, -0.04),
-            0.13,
-            0.01,
+        m.loft(
+            &[
+                (head(side * 0.42, 2.33, 0.02), 0.13, 0.14),
+                (head(side * 0.53, 2.49, -0.01), 0.09, 0.09),
+                (head(side * 0.57, 2.58, -0.03), 0.0, 0.0),
+            ],
             BLUE,
-            false,
         );
-        m.ball(
-            V3(side * 0.30, 2.23 + nod, 0.535),
-            V3(0.15, 0.115, 0.046),
+        // Slanted eyes and an overhanging brow replace the round, startled face.
+        let eye = |x, y, z| head(side * x, y, z);
+        m.extrude(
+            &[
+                eye(0.14, 2.26, 0.608),
+                eye(0.46, 2.34, 0.461),
+                eye(0.43, 2.17, 0.515),
+                eye(0.18, 2.16, 0.617),
+            ],
+            V3(0.0, 0.0, -0.035),
             WHITE,
         );
         m.ball(
-            V3(side * 0.29, 2.22 + nod, 0.575),
-            V3(0.065, 0.09, 0.022),
+            eye(0.265, 2.224, 0.586),
+            V3(0.054, 0.072, 0.028),
             [0.30, 0.13, 0.14],
         );
-        m.ball(
-            V3(side * 0.28, 2.23 + nod, 0.595),
-            V3(0.032, 0.071, 0.012),
-            BLACK,
-        );
-        m.ball(
-            V3(side * 0.28 - 0.013, 2.26 + nod, 0.605),
-            V3(0.016, 0.019, 0.008),
-            WHITE,
-        );
+        m.ball(eye(0.255, 2.223, 0.610), V3(0.025, 0.057, 0.014), BLACK);
+        m.ball(eye(0.248, 2.249, 0.622), V3(0.012, 0.015, 0.007), WHITE);
         m.tube(
-            V3(side * 0.13, 2.37, 0.535),
-            V3(side * 0.47, 2.33, 0.48),
-            0.05,
-            0.038,
+            eye(0.13, 2.285, 0.611),
+            eye(0.48, 2.365, 0.456),
+            0.045,
+            0.050,
             BLUE,
             false,
         );
         m.tube(
-            V3(side * 0.36, 1.90, 0.65),
-            V3(side * 0.33, 1.82, 0.68),
-            0.047,
+            eye(0.32, 1.875, 0.716),
+            eye(0.30, 1.81, 0.724),
+            0.036,
             0.004,
             WHITE,
             false,
         );
         m.ball(
-            V3(side * 0.13, 2.02, 0.761),
-            V3(0.025, 0.015, 0.009),
+            eye(0.12, 2.065, 0.785),
+            V3(0.022, 0.014, 0.009),
             [0.06, 0.19, 0.28],
         );
     }
-    m.tube(
-        V3(-0.32, 1.84, 0.68),
-        V3(0.32, 1.84, 0.68),
-        0.018,
-        0.018,
-        [0.06, 0.17, 0.24],
-        false,
-    );
+    for i in 0..16 {
+        let point = |j: usize| {
+            let x = (j as f32 / 8.0 - 1.0) * 0.37;
+            head(
+                x,
+                1.875 + (x / 0.37).powi(2) * 0.025,
+                0.48 + 0.312
+                    * (1.0 - (x / 0.48).powi(2) - ((1.875 - 1.99) / 0.225_f32).powi(2))
+                        .max(0.0)
+                        .sqrt(),
+            )
+        };
+        m.tube(
+            point(i),
+            point(i + 1),
+            0.012,
+            0.012,
+            [0.06, 0.17, 0.24],
+            false,
+        );
+    }
 }
 
 fn effects(m: &mut Model<'_>, battle: Battle, left: V3, right: V3) {

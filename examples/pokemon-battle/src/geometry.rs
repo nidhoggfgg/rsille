@@ -56,6 +56,68 @@ impl Model<'_> {
         }
     }
 
+    /// Join elliptical cross sections into a continuous, sculpted silhouette.
+    /// Each section supplies its center, half width and half depth.
+    pub fn loft(&mut self, sections: &[(V3, f32, f32)], color: Rgb) {
+        for index in 0..sections.len().saturating_sub(1) {
+            let controls = [
+                sections[index.saturating_sub(1)],
+                sections[index],
+                sections[index + 1],
+                sections[(index + 2).min(sections.len() - 1)],
+            ];
+            // Catmull–Rom interpolation rounds the transitions between sections.
+            let section = |t: f32| {
+                let weights = [
+                    -0.5 * t + t * t - 0.5 * t * t * t,
+                    1.0 - 2.5 * t * t + 1.5 * t * t * t,
+                    0.5 * t + 2.0 * t * t - 1.5 * t * t * t,
+                    -0.5 * t * t + 0.5 * t * t * t,
+                ];
+                let mut result = (V3::ZERO, 0.0_f32, 0.0_f32);
+                for (control, weight) in controls.iter().zip(weights) {
+                    result.0 = result.0 + control.0 * weight;
+                    result.1 += control.1 * weight;
+                    result.2 += control.2 * weight;
+                }
+                (result.0, result.1.max(0.0), result.2.max(0.0))
+            };
+            for step in 0..4 {
+                let a = section(step as f32 / 4.0);
+                let b = section((step + 1) as f32 / 4.0);
+                let vertex = |section: (V3, f32, f32), i: usize| {
+                    let angle = i as f32 * TAU / 24.0;
+                    section.0 + V3(section.1 * angle.cos(), 0.0, section.2 * angle.sin())
+                };
+                for i in 0..24 {
+                    self.quad(
+                        [
+                            vertex(a, i),
+                            vertex(a, i + 1),
+                            vertex(b, i + 1),
+                            vertex(b, i),
+                        ],
+                        color,
+                        false,
+                    );
+                }
+            }
+        }
+    }
+
+    /// Give a convex, planar outline thickness, including its side walls.
+    pub fn extrude(&mut self, outline: &[V3], depth: V3, color: Rgb) {
+        for i in 1..outline.len() - 1 {
+            let face = [outline[0], outline[i], outline[i + 1]];
+            self.tri(face, color, false);
+            self.tri(face.map(|p| p + depth), color, false);
+        }
+        for i in 0..outline.len() {
+            let (a, b) = (outline[i], outline[(i + 1) % outline.len()]);
+            self.quad([a, b, b + depth, a + depth], color, false);
+        }
+    }
+
     pub fn tube(&mut self, a: V3, b: V3, ra: f32, rb: f32, color: Rgb, glow: bool) {
         let axis = (b - a).unit();
         let reference = if axis.1.abs() < 0.9 { V3::Y } else { V3::Z };
