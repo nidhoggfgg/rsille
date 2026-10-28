@@ -62,6 +62,7 @@ cargo run --manifest-path examples/rsille-showcase/Cargo.toml
 cargo run --release --manifest-path examples/neon-observatory/Cargo.toml
 cargo run --release --manifest-path examples/folded-harbor/Cargo.toml
 cargo run --release --manifest-path examples/minecraft/Cargo.toml
+cargo run --release --manifest-path examples/clockwork/Cargo.toml
 ```
 
 `workflow` 使用同一套应用逻辑验证 Unicode 粘贴、debounce、后台保存、键盘焦点和退出，
@@ -91,6 +92,10 @@ cargo run --release --manifest-path examples/minecraft/Cargo.toml
 
 [Minecraft 方块世界](examples/minecraft/README.md) 是一个第一人称终端沙盒：草地、橡树、湖泊和小木屋，
 加上准星、快捷栏、挖掘放置、碰撞跳跃、飞行与昼夜切换，直接运行即可游玩。
+
+[Clockwork 发条生物](examples/clockwork/README.md) 用同一套 132 个黄铜、钢与陶瓷零件，
+自行组装成多足步行机、扑翼飞行器和会开合的机械花。可以绕工作台观察、展开爆炸视图，
+或用磁力脉冲震散整台机器，看它重新归位；实体三维几何通过 rsille Canvas 绘制。
 
 对外只发布 **`rsille`**，使用以下三个公开模块：
 

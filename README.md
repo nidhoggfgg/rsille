@@ -69,6 +69,7 @@ cargo run --manifest-path examples/rsille-showcase/Cargo.toml
 cargo run --release --manifest-path examples/neon-observatory/Cargo.toml
 cargo run --release --manifest-path examples/folded-harbor/Cargo.toml
 cargo run --release --manifest-path examples/minecraft/Cargo.toml
+cargo run --release --manifest-path examples/clockwork/Cargo.toml
 ```
 
 The workflow example uses the same application for interactive editing and a
@@ -101,6 +102,12 @@ chapter dissolves, mouse orbiting and a complete auto-play journey.
 [Minecraft](examples/minecraft/README.md) is a small first-person voxel sandbox:
 explore grass, oak trees, a lake and a cabin, then mine and place blocks with a
 classic hotbar, collision, jumping, flight and a day/night toggle.
+
+[Clockwork](examples/clockwork/README.md) is a self-assembling mechanical menagerie:
+132 brass, steel and porcelain parts dock into a walking strider, a flapping
+ornithopter and an opening clockwork iris. Orbit the workbench, separate the
+mechanism in an exploded view, or scatter it with a magnetic pulse and watch it
+rebuild. Solid 3D geometry is rendered through rsille Canvas.
 
 Only **`rsille`** is published. Use its three public modules:
 
