@@ -218,10 +218,6 @@ impl<M> Widget<M> for Button<M> {
         let text_y = height / 2;
 
         let _ = chunk.set_string(text_x, text_y, &self.label, render_style);
-
-        if is_focused {
-            render_focus_markers(chunk, self.variant, text_y, render_style);
-        }
     }
 
     fn handle_event(&self, event: &Event, ctx: &mut EventCtx<M>) {
@@ -289,27 +285,6 @@ pub fn button<M>(label: impl Into<String>) -> Button<M> {
     Button::new(label)
 }
 
-fn render_focus_markers(
-    chunk: &mut crate::render::chunk::Chunk,
-    variant: ButtonVariant,
-    y: u16,
-    style: crate::render::style::Style,
-) {
-    let width = chunk.area().width();
-    if width < 2 {
-        return;
-    }
-
-    let (left_x, right_x) = if matches!(variant, ButtonVariant::Ghost) && width >= 4 {
-        (1, width - 2)
-    } else {
-        (0, width - 1)
-    };
-
-    let _ = chunk.set_char(left_x, y, '>', style);
-    let _ = chunk.set_char(right_x, y, '<', style);
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -364,14 +339,41 @@ mod tests {
     }
 
     #[test]
-    fn focused_solid_button_renders_structural_markers() {
-        let button = button::<()>("OK");
-        let buffer = render_button(&button, 6, 1, true);
+    fn focused_buttons_use_theme_styles_without_markers() {
+        let theme = Theme::dark();
+        for (variant, style) in [
+            (ButtonVariant::Primary, theme.styles.primary_action_focused),
+            (
+                ButtonVariant::Secondary,
+                theme.styles.secondary_action_focused,
+            ),
+            (
+                ButtonVariant::Destructive,
+                theme.styles.destructive_action_focused,
+            ),
+            (
+                ButtonVariant::Link,
+                theme.styles.interactive_focused.underlined(),
+            ),
+        ] {
+            let button = button::<()>("OK").variant(variant);
+            let buffer = render_button(&button, 6, 1, true);
 
-        assert_eq!(cell_char(&buffer, 0, 0), Some('>'));
-        assert_eq!(cell_char(&buffer, 5, 0), Some('<'));
-        assert_eq!(cell_char(&buffer, 2, 0), Some('O'));
-        assert_eq!(cell_char(&buffer, 3, 0), Some('K'));
+            for (x, expected) in "  OK  ".chars().enumerate() {
+                assert_eq!(cell_char(&buffer, x as u16, 0), Some(expected));
+            }
+            assert_eq!(buffer.content()[2].content.style, style.to_render_style());
+
+            let unfocused = render_button(&button, 6, 1, false);
+            assert_ne!(
+                buffer.content()[2].content.style,
+                unfocused.content()[2].content.style
+            );
+
+            let narrow = render_button(&button, 2, 1, true);
+            assert_eq!(cell_char(&narrow, 0, 0), Some('O'));
+            assert_eq!(cell_char(&narrow, 1, 0), Some('K'));
+        }
     }
 
     #[test]
@@ -384,14 +386,26 @@ mod tests {
     }
 
     #[test]
-    fn focused_ghost_button_renders_markers_inside_border() {
+    fn focused_ghost_button_highlights_border_without_markers() {
         let button = button::<()>("OK").variant(ButtonVariant::Ghost);
         let buffer = render_button(&button, 8, 3, true);
 
-        assert_eq!(cell_char(&buffer, 1, 1), Some('>'));
-        assert_eq!(cell_char(&buffer, 6, 1), Some('<'));
-        assert_eq!(cell_char(&buffer, 3, 1), Some('O'));
-        assert_eq!(cell_char(&buffer, 4, 1), Some('K'));
+        for (x, expected) in "│  OK  │".chars().enumerate() {
+            assert_eq!(cell_char(&buffer, x as u16, 1), Some(expected));
+        }
+        let theme = Theme::dark();
+        assert_eq!(
+            buffer.content()[8].content.style,
+            theme.styles.border_focused.to_render_style()
+        );
+        assert_eq!(
+            buffer.content()[11].content.style,
+            theme.styles.interactive_focused.to_render_style()
+        );
+
+        let narrow = render_button(&button, 4, 3, true);
+        assert_eq!(cell_char(&narrow, 1, 1), Some('O'));
+        assert_eq!(cell_char(&narrow, 2, 1), Some('K'));
     }
 
     #[test]
