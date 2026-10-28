@@ -20,7 +20,6 @@ struct Game {
     paused: bool,
     encoding: Encoding,
     viewport: Size,
-    last_move: usize,
     // A drawing cache, not application or interaction state.
     raster: Rc<RefCell<Raster>>,
     backdrop: glass::SharedBackdrop,
@@ -34,7 +33,6 @@ impl Default for Game {
             paused: false,
             encoding: Encoding::HalfBlock,
             viewport: (160, 50).into(),
-            last_move: 0,
             raster: Rc::new(RefCell::new(Raster::default())),
             backdrop: Default::default(),
         }
@@ -114,15 +112,12 @@ fn update(game: &mut Game, msg: Msg, ctx: &mut UpdateCtx<Msg>) {
             game.battle.advance(frame.delta.as_secs_f64().min(0.1))
         }
         Msg::Use(index) if !game.paused => {
-            if game.battle.choose(index) {
-                game.last_move = index;
-            }
+            game.battle.choose(index);
         }
         Msg::Pause => game.paused = !game.paused,
         Msg::Rematch => {
             game.battle = Battle::default();
             game.paused = false;
-            game.last_move = 0;
         }
         Msg::Orbit(x, y) => game.orbit(x, y),
         Msg::Zoom(delta) => game.camera.distance = (game.camera.distance + delta).clamp(7.5, 16.0),

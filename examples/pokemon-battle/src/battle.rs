@@ -44,19 +44,6 @@ impl Move {
             Self::Paralyzed => "PARALYZED",
         }
     }
-    pub fn description(self) -> &'static str {
-        match self {
-            Self::Thunderbolt => {
-                "ELECTRIC / 48 damage vs Water. Only 3 PP: save it for an opening!"
-            }
-            Self::QuickAttack => "NORMAL / 23 damage. A reliable dash attack with plenty of PP.",
-            Self::IronTail => "STEEL / 34 damage. Breaks through Withdraw's guard.",
-            Self::ThunderWave => {
-                "STATUS / Paralyzes Blastoise: every second counterattack is skipped."
-            }
-            _ => "",
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]

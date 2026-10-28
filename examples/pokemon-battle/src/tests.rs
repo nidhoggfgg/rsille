@@ -38,6 +38,9 @@ fn move_path(runtime: &GameRuntime, index: usize) -> WidgetPath {
     let mut path = WidgetPath::root();
     for segment in source.as_slice() {
         let key = match segment {
+            WidgetKey::Named(key) if key.starts_with("skill-glass-") => {
+                WidgetKey::from(format!("skill-glass-{index}"))
+            }
             WidgetKey::Named(key) if key.starts_with("skill-card-") => {
                 WidgetKey::from(format!("skill-card-{index}"))
             }
@@ -200,9 +203,9 @@ fn combat_results_are_independent_of_frame_rate() {
 fn native_focus_arrows_enter_pause_repeat_and_rematch() {
     let (mut runtime, clock) = running(Game::default(), (160, 50));
     assert_eq!(runtime.focused_key(), Some("move-0"));
-    for _ in 0..3 {
-        press(&mut runtime, KeyCode::Right);
-    }
+    press(&mut runtime, KeyCode::Right);
+    assert_eq!(runtime.focused_key(), Some("move-1"));
+    press(&mut runtime, KeyCode::Down);
     assert_eq!(runtime.focused_key(), Some("move-3"));
     press(&mut runtime, KeyCode::Enter);
     assert_eq!(
@@ -210,6 +213,8 @@ fn native_focus_arrows_enter_pause_repeat_and_rematch() {
         Move::ThunderWave
     );
     press(&mut runtime, KeyCode::Char('p'));
+    assert!(runtime.state().paused);
+    assert!(text(&runtime).contains("RESUME"));
     let before = runtime.state().battle;
     press(&mut runtime, KeyCode::Char('1'));
     advance(&mut runtime, &clock, 1.0);
@@ -316,7 +321,7 @@ fn native_layout_hit_bounds_hover_and_resize_match_the_rendered_cards() {
     press(&mut runtime, KeyCode::Right);
     assert_eq!(
         runtime.focused_key(),
-        Some(format!("move-{}", (current + 1) % 4).as_str())
+        Some(format!("move-{}", current ^ 1).as_str())
     );
     runtime.step(&[Event::Resize(80, 24)]).unwrap();
     let current = runtime
@@ -414,45 +419,45 @@ fn actual_tui_frames_resize_repeat_and_render_all_moves_without_mutating_combat(
         }
     }
     let (runtime, _) = running(Game::default(), (80, 24));
-    for expected in [
-        "120/120",
-        "160/160",
-        "THUNDERBOLT",
-        "IRON TAIL",
-        "CHOOSE A MOVE",
-    ] {
+    assert!(!text(&runtime).contains("What will"));
+    for expected in ["120/120", "160/160", "THUNDERBOLT", "IRON TAIL"] {
         assert!(text(&runtime).contains(expected), "missing {expected}");
     }
 }
 
 #[test]
-fn native_hp_panels_stay_in_upper_left_and_progress_tracks_damage() {
+fn battle_hud_flanks_the_scene_and_hp_meters_track_damage() {
     let (mut runtime, clock) = running(Game::default(), (160, 50));
-    let left: String = runtime
-        .frame()
-        .content()
-        .chunks(160)
-        .take(15)
-        .flat_map(|row| row.iter().take(42))
-        .map(|c| c.content.symbol())
-        .collect();
-    assert!(left.contains("PIKACHU"));
-    assert!(left.contains("BLASTOISE"));
-    assert!(left.contains("120/120"));
-    assert!(left.contains("160/160"));
-    let full_segments = text(&runtime).matches('■').count();
-    assert!(full_segments > 0, "native progress bars must be visible");
+    let vitals = |name: &str| WidgetPath::root().child("battle-scene").child(name);
+    let player = runtime.bounds(&vitals("player-vitals")).unwrap();
+    let foe = runtime.bounds(&vitals("foe-vitals")).unwrap();
+    assert!(player.x() < 40 && player.y() > 25);
+    assert!(foe.x() > 100 && foe.y() < 10);
+    let first_move = move_bounds(&runtime, 0);
+    assert!(player.x() + player.width() < first_move.x());
+    assert!(player.y() >= first_move.y());
+    let region_text = |runtime: &GameRuntime, area: rsille::render::area::Area| -> String {
+        (area.y()..area.y() + area.height())
+            .flat_map(|y| (area.x()..area.x() + area.width()).map(move |x| (x, y)))
+            .map(|pos| runtime.frame().get(pos.into()).unwrap().symbol())
+            .collect()
+    };
+    assert!(region_text(&runtime, player).contains("PIKACHU"));
+    assert!(region_text(&runtime, player).contains("120/120"));
+    assert!(region_text(&runtime, foe).contains("BLASTOISE"));
+    assert!(region_text(&runtime, foe).contains("160/160"));
+    assert!(!region_text(&runtime, player).contains('╱'));
+    assert!(!region_text(&runtime, foe).contains('╱'));
+    let full_blocks = region_text(&runtime, foe).matches('█').count();
+    assert!(full_blocks > 0, "native HP meters must be visible");
     press(&mut runtime, KeyCode::Char('1'));
     advance(&mut runtime, &clock, 0.8);
     assert_eq!(runtime.state().battle.enemy_hp, 112);
-    assert!(text(&runtime).contains("112/160"));
-    assert!(
-        text(&runtime).matches('■').count() < full_segments,
-        "the HP meter must shrink after impact"
-    );
+    assert!(region_text(&runtime, foe).contains("112/160"));
+    assert!(region_text(&runtime, foe).matches('█').count() < full_blocks);
     advance(&mut runtime, &clock, 3.2);
     assert_eq!(runtime.state().battle.player_hp, 92);
-    assert!(text(&runtime).contains("092/120"));
+    assert!(region_text(&runtime, player).contains("092/120"));
     assert_eq!(runtime.state().battle.phase, Phase::Choose);
 }
 
@@ -498,10 +503,62 @@ fn glass_overlays_follow_the_live_fullscreen_scene_without_blurring_text() {
         text(&runtime).contains("THUNDERBOLT"),
         "foreground text must remain sharp"
     );
-    let corner = runtime.frame().get((r.x() - 1, r.y() - 1).into()).unwrap();
-    assert_eq!(
-        corner.as_char(),
-        Some('╭'),
-        "glass must preserve native rounded frames"
+    let corner = runtime.frame().get((r.x() - 8, r.y() - 1).into()).unwrap();
+    assert!(
+        matches!(corner.as_char(), Some('▀' | '▄' | '█')),
+        "the cut-away corner must expose the actual scene, without a rectangular glass fill"
     );
+}
+
+#[test]
+fn skill_diagonal_edges_connect_and_keep_the_untinted_scene_background() {
+    for encoding in [Encoding::HalfBlock, Encoding::Braille] {
+        for size in [(160, 50), (80, 24)] {
+            let (runtime, _) = running(
+                Game {
+                    encoding,
+                    ..Game::default()
+                },
+                size,
+            );
+            let mut areas = Vec::new();
+            for index in 0..4 {
+                let mut path = move_path(&runtime, index);
+                for _ in 0..4 {
+                    path.pop();
+                }
+                areas.push(runtime.bounds(&path).unwrap());
+            }
+            let backdrop = runtime.state().backdrop.read().unwrap();
+            for area in areas {
+                let mut previous: Option<[u16; 2]> = None;
+                for y in area.y()..area.y() + area.height() {
+                    let slashes: Vec<_> = (area.x()..area.x() + area.width())
+                        .filter(|&x| {
+                            runtime.frame().get((x, y).into()).unwrap().as_char() == Some('╱')
+                        })
+                        .collect();
+                    let edges = [*slashes.first().unwrap(), *slashes.last().unwrap()];
+                    if let Some(previous) = previous {
+                        assert_eq!(
+                            previous,
+                            edges.map(|x| x + 1),
+                            "each diagonal must join the next cell corner"
+                        );
+                    }
+                    for x in edges {
+                        let raw = backdrop.raw_cell(x as usize, y as usize).unwrap();
+                        let [r, g, b] = raw.map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8);
+                        let cell = runtime.frame().get((x, y).into()).unwrap();
+                        assert_eq!(
+                            cell.style.colors.unwrap().background,
+                            Some(crossterm::style::Color::Rgb { r, g, b }),
+                            "edge cells must not paint rectangular panel tint over the scene"
+                        );
+                    }
+                    previous = Some(edges);
+                }
+            }
+        }
+    }
 }

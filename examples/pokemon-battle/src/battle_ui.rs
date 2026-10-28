@@ -1,22 +1,26 @@
-//! Native TUI controls, rounded panels and layout with skill-specific decorations.
+//! Battle HUD and command menu built on native TUI controls and focus routing.
 use crate::{
-    battle::{Phase, ENEMY_HP, MAX_PP, PLAYER_HP, SKILLS},
+    battle::{ENEMY_HP, MAX_PP, PLAYER_HP, SKILLS},
     Game, Msg,
 };
 use rsille::{
-    render::{area::Size, chunk::Chunk},
+    render::{
+        area::{Area, Size},
+        chunk::Chunk,
+    },
     tui::prelude::*,
 };
 
 type Rgb = [u8; 3];
 const INK: Rgb = [9, 17, 29];
-const WHITE: Rgb = [232, 241, 245];
-const MUTED: Rgb = [120, 148, 169];
+const WHITE: Rgb = [245, 240, 216];
+const MUTED: Rgb = [172, 190, 185];
+const SELECTED_FILL: Rgb = [28, 42, 52];
 const ACCENTS: [Rgb; 4] = [
     [255, 211, 83],
-    [255, 145, 117],
+    [232, 191, 157],
     [129, 211, 232],
-    [192, 160, 255],
+    [215, 172, 248],
 ];
 fn color([r, g, b]: Rgb) -> Color {
     Color::Rgb(r, g, b)
@@ -33,21 +37,21 @@ pub fn theme() -> Theme {
     theme.styles.surface = paint(WHITE, INK);
     theme.styles.surface_elevated = paint(WHITE, INK);
     theme.styles.text = paint(WHITE, INK);
-    // Let native Panel borders inherit each card's elemental foreground.
     theme.styles.border = Style::default().bg(color(INK));
-    theme.styles.primary_action = paint(WHITE, [15, 25, 40]);
-    theme.styles.primary_action_hover = paint(WHITE, [32, 43, 58]);
-    theme.styles.primary_action_focused = paint(WHITE, [32, 43, 58]).bold();
-    theme.styles.border_focused = paint(ACCENTS[0], INK);
-    theme.styles.interactive_focused = paint(WHITE, [32, 43, 58]).bold();
+    theme.styles.primary_action = paint(WHITE, INK);
+    theme.styles.primary_action_hover = paint(WHITE, INK).bold();
+    theme.styles.primary_action_focused = paint(WHITE, SELECTED_FILL).bold();
+    theme.styles.border_focused = paint(WHITE, SELECTED_FILL);
+    theme.styles.interactive_focused = paint(WHITE, SELECTED_FILL).bold();
     theme.styles.disabled = paint([88, 109, 130], INK);
     theme
 }
 
-fn frosted(widget: impl IntoWidget<Msg>, game: &Game, opacity: f32) -> Visual<Msg> {
+fn frosted(widget: impl IntoWidget<Msg>, game: &Game, opacity: f32, slanted: bool) -> Visual<Msg> {
     visual(widget).custom_effect(crate::glass::Glass {
         backdrop: game.backdrop.clone(),
         opacity,
+        slanted,
     })
 }
 
@@ -68,15 +72,71 @@ fn line(chunk: &mut Chunk, x: u16, y: u16, width: u16, text: &str, fg: Rgb, bg: 
     let _ = chunk.set_string(x, y, &value, paint(fg, bg).to_render_style());
 }
 
-/// Only constrains height. Native Panel owns the frame and title drawing.
+/// A slashed silhouette. Unpainted corners leave the live scene untouched.
+fn ribbon(chunk: &mut Chunk, accent: Rgb, fill: Rgb) {
+    let (w, h) = (chunk.area().width(), chunk.area().height());
+    for y in 0..h {
+        let left = h - 1 - y;
+        let right = w.saturating_sub(y + 1);
+        if left >= right {
+            continue;
+        }
+        let _ = chunk.fill(
+            left,
+            y,
+            right - left,
+            1,
+            ' ',
+            paint(accent, fill).to_render_style(),
+        );
+        line(chunk, left, y, 1, "╱", accent, fill);
+        line(chunk, right, y, 1, "╱", accent, fill);
+        if y == 0 {
+            let _ = chunk.fill(
+                left + 1,
+                y,
+                right - left - 1,
+                1,
+                '▁',
+                paint(accent, fill).to_render_style(),
+            );
+        }
+    }
+}
+
+/// Safe central allocation; artwork around it has no pointer handlers.
+struct CommandFrame {
+    children: Vec<Box<dyn Widget<Msg>>>,
+    large: bool,
+}
+impl Widget<Msg> for CommandFrame {
+    fn key(&self) -> Option<&str> {
+        Some("card-frame")
+    }
+    fn children(&self) -> &[Box<dyn Widget<Msg>>] {
+        &self.children
+    }
+    fn constraints(&self) -> Constraints {
+        Constraints::fill()
+    }
+    fn layout(&self, area: Area, _ctx: &MeasureCtx) -> Layout {
+        let inset = if self.large { 8 } else { 6 };
+        Layout::new([ChildLayout::new(
+            0,
+            area.shrink_saturating(1, 1, inset, inset),
+        )])
+    }
+    fn render(&self, chunk: &mut Chunk, ctx: &RenderCtx) {
+        ctx.render_children(chunk, self);
+    }
+}
+
+// Keep one wrapper level for stable button identities across responsive layouts.
 struct FixedHeight {
     height: u16,
     children: Vec<Box<dyn Widget<Msg>>>,
 }
 impl Widget<Msg> for FixedHeight {
-    fn render(&self, chunk: &mut Chunk, ctx: &RenderCtx) {
-        ctx.render_children(chunk, self);
-    }
     fn children(&self) -> &[Box<dyn Widget<Msg>>] {
         &self.children
     }
@@ -86,6 +146,81 @@ impl Widget<Msg> for FixedHeight {
             max_height: Some(self.height),
             ..Constraints::fill()
         }
+    }
+    fn render(&self, chunk: &mut Chunk, ctx: &RenderCtx) {
+        ctx.render_children(chunk, self);
+    }
+}
+
+struct HealthHud {
+    accent: Rgb,
+    index: usize,
+    backdrop: crate::glass::SharedBackdrop,
+    children: Vec<Box<dyn Widget<Msg>>>,
+}
+impl Widget<Msg> for HealthHud {
+    fn key(&self) -> Option<&str> {
+        Some(if self.index == 0 {
+            "player-vitals"
+        } else {
+            "foe-vitals"
+        })
+    }
+    fn children(&self) -> &[Box<dyn Widget<Msg>>] {
+        &self.children
+    }
+    fn constraints(&self) -> Constraints {
+        Constraints::fill()
+    }
+    fn layout(&self, area: Area, _ctx: &MeasureCtx) -> Layout {
+        Layout::new([ChildLayout::new(0, area.shrink_saturating(1, 1, 10, 1))])
+    }
+    fn render(&self, chunk: &mut Chunk, ctx: &RenderCtx) {
+        // A small round team emblem sits beside the open meter, independently
+        // of the text's glass effect so both halves retain their painted colors.
+        let pixel = |x: f32, y: f32| -> Option<Rgb> {
+            let dx = x - 3.5;
+            let dy = y - 3.5;
+            let radius = dx.hypot(dy);
+            if radius > 3.8 {
+                None
+            } else if radius < 0.85 {
+                Some(WHITE)
+            } else if radius < 1.8 || dy.abs() < 0.6 {
+                Some(INK)
+            } else if radius > 3.0 {
+                Some(WHITE)
+            } else if dy < 0.0 {
+                Some(self.accent)
+            } else {
+                Some([190, 204, 209])
+            }
+        };
+        let backdrop = self.backdrop.read().ok();
+        let area = chunk.area();
+        for y in 0..4 {
+            for x in 0..8 {
+                let top = pixel(x as f32, (y * 2) as f32);
+                let bottom = pixel(x as f32, (y * 2 + 1) as f32);
+                if top.is_none() && bottom.is_none() {
+                    continue;
+                }
+                let scene = backdrop
+                    .as_ref()
+                    .and_then(|backdrop| {
+                        backdrop.raw_cell((area.x() + x) as usize, (area.y() + y + 1) as usize)
+                    })
+                    .unwrap_or([0.0; 3])
+                    .map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8);
+                let _ = chunk.set_char(
+                    x,
+                    y + 1,
+                    '▀',
+                    paint(top.unwrap_or(scene), bottom.unwrap_or(scene)).to_render_style(),
+                );
+            }
+        }
+        ctx.render_children(chunk, self);
     }
 }
 
@@ -98,24 +233,22 @@ fn hp_color(hp: u16, max: u16) -> Rgb {
         [109, 230, 184]
     }
 }
-fn health(game: &Game, index: usize) -> FixedHeight {
-    let (name, hp, max, accent, element, fill) = if index == 0 {
+fn health(game: &Game, index: usize) -> HealthHud {
+    let (name, hp, max, accent, element) = if index == 0 {
         (
             "PIKACHU",
             game.battle.player_hp,
             PLAYER_HP,
             ACCENTS[0],
-            "025 / ELECTRIC",
-            [26, 29, 34],
+            "ELECTRIC",
         )
     } else {
         (
             "BLASTOISE",
             game.battle.enemy_hp,
             ENEMY_HP,
-            [104, 212, 246],
-            "009 / WATER",
-            [15, 31, 45],
+            ACCENTS[2],
+            "WATER",
         )
     };
     let status = if hp == 0 {
@@ -125,62 +258,45 @@ fn health(game: &Game, index: usize) -> FixedHeight {
     } else if index == 1 && game.battle.guard {
         "GUARD UP"
     } else {
-        "READY"
+        element
     };
-    let panel = panel()
-        .border(BorderStyle::Rounded)
-        .padding(Padding::horizontal(1))
-        .style(paint(accent, fill))
-        .title(format!(" {element} "))
-        .child(native_label(
-            format!(
-                "{name:<13} Lv.25   {}",
-                if index == 0 { "YOU" } else { "FOE" }
-            ),
-            WHITE,
-            fill,
-        ))
+    let content = grid()
+        .rows("1 1 1")
+        .columns("1fr")
         .child(
-            progress_bar(hp as f64 / max as f64)
-                .key(format!("hp-{index}"))
-                .width(33)
-                .variant(ProgressBarVariant::Segmented)
-                .style(paint([48, 69, 58], fill))
-                .fill_style(paint(hp_color(hp, max), fill)),
+            grid()
+                .columns("1fr 6")
+                .child(native_label(name, WHITE, INK).style(paint(WHITE, INK).bold()))
+                .child(native_label("Lv.25", accent, INK)),
         )
-        .child(native_label(
-            format!("{hp:03}/{max:03}                 {status}"),
-            accent,
-            fill,
-        ));
-    FixedHeight {
-        height: 5,
-        children: vec![Box::new(panel)],
-    }
-}
-fn compact_health(game: &Game) -> FixedHeight {
-    let fill = [15, 26, 39];
-    let panel = panel()
-        .border(BorderStyle::Rounded)
-        .padding(Padding::horizontal(1))
-        .style(paint(ACCENTS[0], fill))
-        .title(" TRAINER / VITALS ")
-        .child(native_label(
-            format!("PIKACHU   {:03}/{PLAYER_HP:03}", game.battle.player_hp),
-            hp_color(game.battle.player_hp, PLAYER_HP),
-            fill,
-        ))
-        .child(native_label(
-            format!("BLASTOISE {:03}/{ENEMY_HP:03}", game.battle.enemy_hp),
-            hp_color(game.battle.enemy_hp, ENEMY_HP),
-            fill,
-        ));
-    FixedHeight {
-        height: 4,
-        children: vec![Box::new(panel)],
+        .child(
+            grid()
+                .columns("3 1fr")
+                .child(native_label("HP", accent, INK))
+                .child(
+                    progress_bar(hp as f64 / max as f64)
+                        .key(format!("hp-{index}"))
+                        .width(12)
+                        .variant(ProgressBarVariant::Block)
+                        .style(paint([58, 82, 68], INK))
+                        .fill_style(paint(hp_color(hp, max), INK)),
+                ),
+        )
+        .child(
+            grid()
+                .columns("1fr 8")
+                .child(native_label(status, accent, INK))
+                .child(native_label(format!("{hp:03}/{max:03}"), WHITE, INK)),
+        );
+    HealthHud {
+        accent,
+        index,
+        backdrop: game.backdrop.clone(),
+        children: vec![Box::new(frosted(content, game, 0.45, false))],
     }
 }
 
+/// Move decoration reads native focus / hover; Button still owns all interaction.
 struct MoveCard {
     index: usize,
     pp: u8,
@@ -204,109 +320,83 @@ impl Widget<Msg> for MoveCard {
         if w < 2 || h < 2 {
             return;
         }
-        let focused = ctx.is_focus_within();
-        let hover = ctx.is_hover_within();
+        let focused = self.enabled && ctx.is_focus_within();
+        let hover = self.enabled && ctx.is_hover_within();
         let accent = if self.enabled {
             ACCENTS[self.index]
         } else {
-            [75, 94, 115]
+            [91, 112, 117]
         };
-        let fill = if self.enabled && (focused || hover) {
-            [32, 43, 58]
-        } else {
-            [15, 25, 40]
-        };
-        // Native Panel owns the frame; its native Button child owns activation.
+        let edge = if focused || hover { WHITE } else { accent };
+        let fill = if focused { SELECTED_FILL } else { INK };
+        let detail = if focused { WHITE } else { accent };
+        ribbon(chunk, edge, fill);
         ctx.render_children(chunk, self);
         line(
             chunk,
+            4,
+            1,
             2,
-            0,
-            5,
-            &format!(" {} {} ", if focused { "◆" } else { "◇" }, self.index + 1),
-            accent,
+            &format!("{:02}", self.index + 1),
+            detail,
+            fill,
+        );
+        line(
+            chunk,
+            4,
+            h - 1,
+            3,
+            if focused { "▶▶" } else { "╱╱" },
+            edge,
             fill,
         );
         if self.large {
-            let icons = [
-                ["   ╱█ ", " ╱██  ", "   ╱  "],
-                [" ▸▸╱  ", " ▸╱   ", " ╱    "],
-                [" ╱━━╲ ", "  ╳╳  ", " ╲━━╱ "],
-                [" ╱╲ ╱ ", "╱  ╳  ", "  ╱ ╲ "],
-            ];
-            for y in 0..3 {
-                line(
-                    chunk,
-                    2,
-                    y + 1,
-                    w.saturating_sub(4).min(6),
-                    icons[self.index][y as usize],
-                    accent,
-                    fill,
-                );
-            }
             line(
                 chunk,
                 9,
                 1,
-                w.saturating_sub(11),
-                [
-                    "ELECTRIC / BURST",
-                    "NORMAL / RUSH",
-                    "STEEL / BREAK",
-                    "ELECTRIC / STATUS",
-                ][self.index],
-                accent,
+                w.saturating_sub(26).min(10),
+                ["ELECTRIC", "NORMAL", "STEEL", "ELECTRIC"][self.index],
+                detail,
+                fill,
+            );
+            line(
+                chunk,
+                w.saturating_sub(19),
+                1,
+                10,
+                &format!("PP {:02}/{:02}", self.pp, MAX_PP[self.index]),
+                detail,
                 fill,
             );
             line(
                 chunk,
                 9,
-                2,
-                w.saturating_sub(11),
-                ["48 DMG", "23 DMG", "34 DMG", "PARALYZE"][self.index],
-                MUTED,
-                fill,
-            );
-            line(
-                chunk,
-                3,
-                4,
-                w.saturating_sub(6),
-                &format!(
-                    "PP {:02}/{:02}   {}",
-                    self.pp,
-                    MAX_PP[self.index],
-                    if self.pp == 0 {
-                        "EXHAUSTED"
-                    } else if self.enabled && (focused || hover) {
-                        "▸ EXECUTE"
-                    } else if self.enabled {
-                        "AVAILABLE"
-                    } else {
-                        "STANDBY"
-                    }
-                ),
-                accent,
+                h - 1,
+                w.saturating_sub(17),
+                if self.pp == 0 {
+                    "NO PP LEFT"
+                } else if !self.enabled {
+                    "STANDBY"
+                } else {
+                    [
+                        "48 DMG / SUPER EFFECTIVE",
+                        "23 DMG / PHYSICAL",
+                        "34 DMG / BREAKS GUARD",
+                        "PARALYZE / STATUS",
+                    ][self.index]
+                },
+                edge,
                 fill,
             );
         } else {
             line(
                 chunk,
-                w.saturating_sub(12),
+                w.saturating_sub(15),
                 0,
-                10,
+                11,
                 &format!("PP {:02}/{:02}", self.pp, MAX_PP[self.index]),
-                accent,
-                fill,
-            );
-            line(
-                chunk,
-                3,
-                h - 1,
-                w.saturating_sub(6),
-                [" 48 DMG ", " 23 DMG ", " 34 DMG ", " STATUS "][self.index],
-                accent,
+                detail,
                 fill,
             );
         }
@@ -371,6 +461,7 @@ impl Widget<Msg> for MoveDeck {
                 ctx.request_focus(
                     ctx.path()
                         .child("skills-grid")
+                        .child(format!("skill-glass-{next}"))
                         .child(format!("skill-card-{next}"))
                         .child("card-frame")
                         .child(0usize)
@@ -382,74 +473,94 @@ impl Widget<Msg> for MoveDeck {
     }
 }
 
-struct MoveDetail {
-    fallback: usize,
+struct StaggeredMoves {
+    large: bool,
+    children: Vec<Box<dyn Widget<Msg>>>,
 }
-impl Widget<Msg> for MoveDetail {
+impl Widget<Msg> for StaggeredMoves {
+    fn key(&self) -> Option<&str> {
+        Some("skills-grid")
+    }
+    fn children(&self) -> &[Box<dyn Widget<Msg>>] {
+        &self.children
+    }
     fn constraints(&self) -> Constraints {
-        Constraints {
-            min_height: 1,
-            max_height: Some(1),
-            ..Constraints::fill()
-        }
+        Constraints::fill()
+    }
+    fn layout(&self, area: Area, _ctx: &MeasureCtx) -> Layout {
+        let gap = if self.large { 4 } else { 2 };
+        let left = area.width().saturating_sub(gap) / 2;
+        let right = area.width().saturating_sub(gap + left);
+        let h = if self.large { 4 } else { 3 };
+        let positions = if self.large {
+            [
+                (0, 0, left),
+                (left + gap, 1, right),
+                (3, 5, left.saturating_sub(3)),
+                (left + gap - 2, 6, right),
+            ]
+        } else {
+            [
+                (0, 0, left),
+                (left + gap, 0, right),
+                (2, 4, left.saturating_sub(2)),
+                (left + gap + 2, 4, right.saturating_sub(2)),
+            ]
+        };
+        Layout::new(
+            positions
+                .into_iter()
+                .enumerate()
+                .filter_map(|(index, (x, y, w))| {
+                    Area::new((area.x() + x, area.y() + y).into(), (w, h).into())
+                        .clamp_to(&area)
+                        .map(|bounds| ChildLayout::new(index, bounds))
+                }),
+        )
     }
     fn render(&self, chunk: &mut Chunk, ctx: &RenderCtx) {
-        let index = ctx
-            .focused_path()
-            .and_then(focused_move)
-            .unwrap_or(self.fallback);
-        native_label(SKILLS[index].description(), MUTED, INK).render(chunk, ctx);
+        ctx.render_children(chunk, self);
     }
 }
 
 fn moves(game: &Game, large: bool) -> MoveDeck {
-    let mut grid = grid()
-        .key("skills-grid")
-        .columns(if large {
-            "repeat(4, 1fr)"
-        } else {
-            "repeat(2, 1fr)"
-        })
-        .rows(if large { "6" } else { "3 3" })
-        .gap_column(2)
-        .gap_row(1)
-        .trap_focus();
     let enabled = std::array::from_fn(|i| game.available(i));
-    for i in 0..4 {
-        let control = button(SKILLS[i].name())
-            .key(format!("move-{i}"))
-            .variant(ButtonVariant::Primary)
-            .disabled(!enabled[i])
-            .on_click(move || Msg::Use(i));
-        let accent = if enabled[i] {
-            ACCENTS[i]
-        } else {
-            [75, 94, 115]
-        };
-        let frame = panel()
-            .key("card-frame")
-            .border(BorderStyle::Rounded)
-            .title(format!(" {} ", i + 1))
-            .padding(Padding::ZERO)
-            .style(paint(accent, [15, 25, 40]))
-            .hover_border_style(paint(WHITE, [15, 25, 40]))
-            .child(FixedHeight {
-                height: if large { 4 } else { 1 },
-                children: vec![Box::new(control)],
-            });
-        grid = grid.child(MoveCard {
-            index: i,
-            pp: game.battle.pp[i],
-            enabled: enabled[i],
-            large,
-            key: format!("skill-card-{i}"),
-            children: vec![Box::new(frame)],
-        });
-    }
+    let children = (0..4)
+        .map(|i| {
+            let control = button(SKILLS[i].name())
+                .key(format!("move-{i}"))
+                .variant(ButtonVariant::Primary)
+                .disabled(!enabled[i])
+                .on_click(move || Msg::Use(i));
+            let frame = CommandFrame {
+                large,
+                children: vec![Box::new(FixedHeight {
+                    height: if large { 2 } else { 1 },
+                    children: vec![Box::new(control)],
+                })],
+            };
+            Box::new(
+                frosted(
+                    MoveCard {
+                        index: i,
+                        pp: game.battle.pp[i],
+                        enabled: enabled[i],
+                        large,
+                        key: format!("skill-card-{i}"),
+                        children: vec![Box::new(frame)],
+                    },
+                    game,
+                    0.48,
+                    true,
+                )
+                .key(format!("skill-glass-{i}")),
+            ) as Box<dyn Widget<Msg>>
+        })
+        .collect();
     MoveDeck {
-        columns: if large { 4 } else { 2 },
+        columns: 2,
         enabled,
-        children: vec![Box::new(grid)],
+        children: vec![Box::new(StaggeredMoves { large, children })],
     }
 }
 
@@ -471,7 +582,7 @@ fn scene_widget(game: &Game, large: bool) -> impl Widget<Msg> {
         let mut raster = raster.borrow_mut();
         let visible_rows = dimensions
             .cell_height()
-            .saturating_sub(if large { 11 } else { 10 })
+            .saturating_sub(if large { 12 } else { 8 })
             .max(1) as usize;
         let view_height =
             visible_rows * dimensions.encoding().samples_per_cell().1 as usize * scale;
@@ -519,102 +630,62 @@ fn scene_widget(game: &Game, large: bool) -> impl Widget<Msg> {
                 Msg::Ignore
             }
         });
-    let hud: Box<dyn Widget<Msg>> = if large {
-        Box::new(col().gap(1).child(health(game, 0)).child(health(game, 1)))
-    } else {
-        Box::new(compact_health(game))
-    };
-    let scene = overlay(scene).key("battle-scene").layer(
-        OverlayLayer::new(frosted(hud, game, 0.50).key("vitals-glass"))
-            .floating(OverlayAnchor::TopLeft)
-            .offset(if large { 3 } else { 2 }, if large { 3 } else { 1 })
-            .size(if large { 37 } else { 24 }, if large { 11 } else { 4 }),
-    );
-    if large {
-        scene
-            .layer(
-                OverlayLayer::new(frosted(
-                    native_label("◈  P O K É M O N   /   B A T T L E", ACCENTS[0], INK),
-                    game,
-                    0.45,
-                ))
-                .floating(OverlayAnchor::TopLeft)
-                .offset(3, 0)
-                .size(44, 1),
-            )
-            .layer(
-                OverlayLayer::new(frosted(
-                    native_label("I N D I G O   /   D U E L  001", [116, 203, 228], INK),
-                    game,
-                    0.45,
-                ))
+    let inset = if large { 3 } else { 1 };
+    let hud_width = if large { 42 } else { 34 };
+    overlay(scene)
+        .key("battle-scene")
+        .layer(
+            OverlayLayer::new(health(game, 1))
                 .floating(OverlayAnchor::TopRight)
-                .offset(-3, 0)
-                .size(32, 1),
-            )
-    } else {
-        scene
-    }
+                .offset(-inset, if large { 3 } else { 1 })
+                .size(hud_width, 5),
+        )
+        .layer(
+            OverlayLayer::new(health(game, 0))
+                .floating(OverlayAnchor::BottomLeft)
+                .offset(inset, if large { -2 } else { -9 })
+                .size(hud_width, 5),
+        )
 }
 
 pub fn view(game: &Game) -> impl Widget<Msg> {
     let large = wide(game.viewport);
-    let state = if game.paused {
-        "PAUSED"
+    let menu = if large {
+        grid()
+            .columns("1fr 2fr")
+            .gap_column(3)
+            .child(spacer())
+            .child(moves(game, true))
     } else {
-        match game.battle.phase {
-            Phase::Choose => "CHOOSE A MOVE",
-            Phase::Action { .. } => "BATTLE IN PROGRESS",
-            Phase::Won => "VICTORY",
-            Phase::Lost => "DEFEAT",
-        }
+        grid().columns("1fr").child(moves(game, false))
     };
-    let badge = native_label(
-        format!(" ◈ TURN {:02} / {state} ", game.battle.turn),
-        INK,
-        ACCENTS[0],
-    );
-    let message = if game.battle.last_damage > 0 {
-        format!("{} / -{} HP", game.battle.message, game.battle.last_damage)
-    } else {
-        game.battle.message.to_owned()
-    };
-    let mut footer = grid()
-        .key("control-layout")
+    let footer = grid()
+        .key("battle-controls")
         .columns("1fr")
-        .rows(if large { "1 1 6 1 1 1" } else { "1 1 7 1" })
+        .rows(if large { "10 1 1" } else { "7 1" })
         .padding(Padding::horizontal(if game.viewport.width >= 60 {
             3
         } else {
             0
-        }));
-    if large {
-        footer = footer
-            .child(
-                grid()
-                    .columns("38 1fr")
-                    .gap_column(2)
-                    .child(badge)
-                    .child(native_label(message, WHITE, INK)),
-            )
-            .child(spacer().height(1));
+        }))
+        .child(menu);
+    let footer = if large {
+        footer.child(spacer().height(1))
     } else {
-        footer = footer.child(badge).child(native_label(message, WHITE, INK));
-    }
-    footer = footer.child(moves(game, large));
-    if large {
-        footer = footer
-            .child(MoveDetail {
-                fallback: game.last_move,
-            })
-            .child(native_label("", MUTED, INK));
-    }
-    footer=footer.child(native_label("1-4 / CLICK attack   ARROWS / TAB select   ENTER confirm   DRAG orbit   P pause   R rematch   Q leave",MUTED,INK));
+        footer
+    };
+    let help = match (large, game.paused) {
+        (true, true) => " [1-4] MOVE   [ARROWS / TAB] SELECT   [ENTER] CONFIRM                         [DRAG] CAMERA   [P] RESUME  [R] REMATCH   [Q] EXIT",
+        (true, false) => " [1-4] MOVE   [ARROWS / TAB] SELECT   [ENTER] CONFIRM                         [DRAG] CAMERA   [P] PAUSE   [R] REMATCH   [Q] EXIT",
+        (false, true) => "1-4 move  ARROWS/TAB select  ENTER confirm  P resume R rematch  Q exit",
+        (false, false) => "1-4 move  ARROWS/TAB select  ENTER confirm  P pause  R rematch  Q exit",
+    };
+    let footer = footer.child(frosted(native_label(help, MUTED, INK), game, 0.55, false));
     overlay(scene_widget(game, large))
         .key("pokemon-battle")
         .layer(
-            OverlayLayer::new(frosted(footer, game, 0.48).key("battle-controls"))
+            OverlayLayer::new(footer)
                 .floating(OverlayAnchor::Bottom)
-                .size(game.viewport.width, if large { 11 } else { 10 }),
+                .size(game.viewport.width, if large { 12 } else { 8 }),
         )
 }

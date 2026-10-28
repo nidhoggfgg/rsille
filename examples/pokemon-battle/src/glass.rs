@@ -1,7 +1,10 @@
 //! Frosted backdrop composition through the public TUI Visual/CellEffect API.
 use crate::raster::{Raster, Rgb};
 use crossterm::style::{Color, Colors};
-use rsille::tui::prelude::{CellEffect, CellSample, VisualCtx};
+use rsille::{
+    render::style::Stylized,
+    tui::prelude::{CellEffect, CellSample, VisualCtx},
+};
 use std::sync::{Arc, RwLock};
 
 /// The same live scene used by Canvas, blurred once per frame for all HUD layers.
@@ -9,6 +12,7 @@ use std::sync::{Arc, RwLock};
 pub struct Backdrop {
     width: usize,
     height: usize,
+    original: Vec<Rgb>,
     horizontal: Vec<Rgb>,
     blurred: Vec<Rgb>,
 }
@@ -18,6 +22,7 @@ impl Backdrop {
         self.width = raster.width;
         self.height = raster.height;
         let (w, h) = (self.width, self.height);
+        self.original.clone_from(&raster.pixels);
         self.horizontal.resize(w * h, [0.0; 3]);
         self.blurred.resize(w * h, [0.0; 3]);
         if w == 0 || h == 0 {
@@ -65,6 +70,15 @@ impl Backdrop {
     }
 
     pub fn cell(&self, x: usize, y: usize) -> Option<Rgb> {
+        self.sample_cell(&self.blurred, x, y)
+    }
+
+    /// Unblurred scenery for diagonal glyph backgrounds, without panel tint.
+    pub fn raw_cell(&self, x: usize, y: usize) -> Option<Rgb> {
+        self.sample_cell(&self.original, x, y)
+    }
+
+    fn sample_cell(&self, pixels: &[Rgb], x: usize, y: usize) -> Option<Rgb> {
         // Both scene encoders rasterize at 2x4 subpixels per terminal cell.
         let (px, py) = (x * 2, y * 4);
         if px + 1 >= self.width || py + 3 >= self.height {
@@ -73,13 +87,27 @@ impl Backdrop {
         let mut rgb = [0.0; 3];
         for dy in 0..4 {
             for dx in 0..2 {
-                let p = self.blurred[(py + dy) * self.width + px + dx];
+                let p = pixels[(py + dy) * self.width + px + dx];
                 for c in 0..3 {
                     rgb[c] += p[c] / 8.0;
                 }
             }
         }
         Some(rgb)
+    }
+
+    /// Same 2×2 sample footprint as one half-block in the scene encoder.
+    fn half_cell(&self, pixels: &[Rgb], x: usize, y: usize, half: usize) -> Rgb {
+        let mut rgb = [0.0; 3];
+        for dy in half * 2..half * 2 + 2 {
+            for dx in 0..2 {
+                let pixel = pixels[(y * 4 + dy) * self.width + x * 2 + dx];
+                for c in 0..3 {
+                    rgb[c] += pixel[c] / 4.0;
+                }
+            }
+        }
+        rgb
     }
 }
 
@@ -88,17 +116,16 @@ pub type SharedBackdrop = Arc<RwLock<Backdrop>>;
 pub struct Glass {
     pub backdrop: SharedBackdrop,
     pub opacity: f32,
+    pub slanted: bool,
 }
 impl CellEffect for Glass {
     fn apply(&self, sample: &mut CellSample, ctx: VisualCtx<'_>) {
         let x = ctx.area.x() as usize + sample.dest_x.round().max(0.0) as usize;
         let y = ctx.area.y() as usize + sample.dest_y.round().max(0.0) as usize;
-        let Some(back) = self
-            .backdrop
-            .read()
-            .ok()
-            .and_then(|backdrop| backdrop.cell(x, y))
-        else {
+        let Ok(backdrop) = self.backdrop.read() else {
+            return;
+        };
+        let (Some(back), Some(raw)) = (backdrop.cell(x, y), backdrop.raw_cell(x, y)) else {
             return;
         };
         let mut colors = sample.content.style.colors.unwrap_or(Colors {
@@ -109,13 +136,53 @@ impl CellEffect for Glass {
             Some(Color::Rgb { r, g, b }) => [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0],
             _ => [0.035, 0.065, 0.11],
         };
-        // Keep text and native rounded borders crisp; composite only their backdrop.
+        // A ╱ connects opposite cell corners. Its background must remain scenery,
+        // not a whole tinted rectangle outside the diagonal. Feather the next two
+        // interior columns into the panel, including blur and sheen.
+        let coverage = if self.slanted {
+            let diagonal = sample.dest_x + sample.dest_y + 1.0;
+            let distance =
+                (diagonal - ctx.area.height() as f64).min(ctx.area.width() as f64 - diagonal);
+            (distance / 2.0).clamp(0.0, 1.0) as f32
+        } else {
+            1.0
+        };
+        // Keep text and HUD artwork crisp; composite only their backdrop.
         let sheen =
             (1.0 - sample.dest_y / ctx.area.height().max(1) as f64).clamp(0.0, 1.0) as f32 * 0.025;
+        // Empty cells beside the diagonal can encode two background colors.
+        // Sample and feather each half independently, avoiding a full-cell stair
+        // in the glass silhouette while preserving the actual scene detail.
+        if self.slanted && coverage < 1.0 && sample.content.as_char() == Some(' ') {
+            let halves: [[u8; 3]; 2] = std::array::from_fn(|half| {
+                let raw = backdrop.half_cell(&backdrop.original, x, y, half);
+                let back = backdrop.half_cell(&backdrop.blurred, x, y, half);
+                let diagonal = sample.dest_x + sample.dest_y + 0.75 + half as f64 * 0.5;
+                let distance =
+                    (diagonal - ctx.area.height() as f64).min(ctx.area.width() as f64 - diagonal);
+                let coverage = (distance / 2.0).clamp(0.0, 1.0) as f32;
+                std::array::from_fn(|c| {
+                    let glass = tint[c] * self.opacity + back[c] * (1.0 - self.opacity) + sheen;
+                    ((raw[c] * (1.0 - coverage) + glass * coverage).clamp(0.0, 1.0) * 255.0).round()
+                        as u8
+                })
+            });
+            let [[r, g, b], [br, bg, bb]] = halves;
+            let mut style = sample.content.style;
+            style.colors = Some(Colors {
+                foreground: Some(Color::Rgb { r, g, b }),
+                background: Some(Color::Rgb {
+                    r: br,
+                    g: bg,
+                    b: bb,
+                }),
+            });
+            sample.content = Stylized::new('▀', style);
+            return;
+        }
         let rgb: [u8; 3] = std::array::from_fn(|c| {
-            ((tint[c] * self.opacity + back[c] * (1.0 - self.opacity) + sheen).clamp(0.0, 1.0)
-                * 255.0)
-                .round() as u8
+            let glass = tint[c] * self.opacity + back[c] * (1.0 - self.opacity) + sheen;
+            ((raw[c] * (1.0 - coverage) + glass * coverage).clamp(0.0, 1.0) * 255.0).round() as u8
         });
         let [r, g, b] = rgb;
         colors.background = Some(Color::Rgb { r, g, b });
