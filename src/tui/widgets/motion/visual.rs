@@ -22,7 +22,7 @@ use crate::tui::visual_engine::{
     ResolvedEffectGroup, ResolvedVisualConfig,
 };
 pub use crate::tui::visual_engine::{
-    BlurMode, CellEffect, CellSample, CustomCellEffect, DissolveMode, GradientDirection,
+    Backdrop, BlurMode, CellEffect, CellSample, CustomCellEffect, DissolveMode, GradientDirection,
     GradientTarget, LargeAreaPolicy, StaggerMode, TerminalVisualCapabilities, TypewriterMode,
     VisualAnchor, VisualConfig, VisualCtx, VisualDegradation, VisualEffect, VisualEffectCost,
     VisualPerformanceConfig, VisualProfile, WaveAxis, WipeDirection, WipeMode,
@@ -40,6 +40,7 @@ pub fn visual<M>(child: impl IntoWidget<M>) -> Visual<M> {
 pub struct Visual<M = ()> {
     child: Box<dyn Widget<M>>,
     effects: Vec<VisualEffect>,
+    backdrop: Option<Backdrop>,
     animation: Option<AnimationSpec>,
     progress: Option<f64>,
     channel: String,
@@ -60,6 +61,7 @@ impl<M> std::fmt::Debug for Visual<M> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Visual")
             .field("effects", &self.effects)
+            .field("backdrop", &self.backdrop)
             .field("animation", &self.animation)
             .field("progress", &self.progress)
             .field("channel", &self.channel)
@@ -151,6 +153,7 @@ impl<M> Visual<M> {
         Self {
             child: child.into_widget(),
             effects: Vec::new(),
+            backdrop: None,
             animation: None,
             progress: None,
             channel: "visual".to_owned(),
@@ -181,6 +184,23 @@ impl<M> Visual<M> {
     /// Add a user-defined cell effect to the built-in effect pipeline.
     pub fn custom_effect(mut self, effect: impl CellEffect) -> Self {
         self.effects.push(VisualEffect::custom(effect));
+        self
+    }
+
+    /// Composite a translucent or frosted background from the current target.
+    ///
+    /// The backdrop is sampled before this wrapper writes to its target. It covers
+    /// the allocated rectangle unless masked, replaces child background colors,
+    /// and preserves foreground text and decoration. Lower layers must be drawn
+    /// first in the same render target; an outer offscreen effect forms a new target.
+    ///
+    /// ```
+    /// # use rsille::tui::prelude::*;
+    /// let widget = visual(label::<()>("Hello"))
+    ///     .backdrop(Backdrop::frosted().blur_radius(2).opacity(0.45));
+    /// ```
+    pub fn backdrop(mut self, backdrop: Backdrop) -> Self {
+        self.backdrop = Some(backdrop);
         self
     }
 
@@ -431,7 +451,8 @@ impl<M> Visual<M> {
     }
 
     fn has_visual_work(&self) -> bool {
-        !self.effects.is_empty()
+        self.backdrop.is_some()
+            || !self.effects.is_empty()
             || self.animation.is_some()
             || self.progress.is_some()
             || self.enter_effect.is_some()
@@ -608,12 +629,20 @@ impl<M> Visual<M> {
                 let visual_ctx = visual_ctx.with_capabilities(ctx.visual_capabilities());
                 let effect_groups = self.resolve_effect_groups(ctx);
                 if effect_groups.iter().all(|group| group.effects.is_empty()) {
-                    return blit_with_effects(chunk, offscreen, &[], &visual_ctx, profile_enabled);
+                    return blit_with_effects(
+                        chunk,
+                        offscreen,
+                        &[],
+                        self.backdrop.as_ref(),
+                        &visual_ctx,
+                        profile_enabled,
+                    );
                 }
                 blit_with_effect_groups(
                     chunk,
                     offscreen,
                     &effect_groups,
+                    self.backdrop.as_ref(),
                     &visual_ctx,
                     profile_enabled,
                 )

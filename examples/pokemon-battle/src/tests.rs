@@ -529,7 +529,15 @@ fn skill_diagonal_edges_connect_and_keep_the_untinted_scene_background() {
                 }
                 areas.push(runtime.bounds(&path).unwrap());
             }
-            let backdrop = runtime.state().backdrop.read().unwrap();
+            // Render the same scene without the skill dock. Edge backgrounds
+            // use the representative color of encoded cells, not original pixels.
+            let mut scene = app(runtime.state().clone())
+                .with_clock(ManualClock::default())
+                .update(update)
+                .view(|game| battle_ui::scene_widget(game, battle_ui::wide(game.viewport)))
+                .build()
+                .size(size.0, size.1);
+            scene.step(&[]).unwrap();
             for area in areas {
                 let mut previous: Option<[u16; 2]> = None;
                 for y in area.y()..area.y() + area.height() {
@@ -547,8 +555,27 @@ fn skill_diagonal_edges_connect_and_keep_the_untinted_scene_background() {
                         );
                     }
                     for x in edges {
-                        let raw = backdrop.raw_cell(x as usize, y as usize).unwrap();
-                        let [r, g, b] = raw.map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8);
+                        let raw = scene.frame().get((x, y).into()).unwrap();
+                        let colors = raw.style.colors.unwrap();
+                        let coverage = match raw.as_char().unwrap() {
+                            '█' => 1.0,
+                            '▀' | '▄' => 0.5,
+                            ch @ '\u{2800}'..='\u{28ff}' => {
+                                (ch as u32 - 0x2800).count_ones() as f64 / 8.0
+                            }
+                            _ => 0.0,
+                        };
+                        let rgb = |color| match color {
+                            Some(crossterm::style::Color::Rgb { r, g, b }) => [r, g, b],
+                            Some(crossterm::style::Color::Black) | None => [0; 3],
+                            other => panic!("unexpected scene color: {other:?}"),
+                        };
+                        let fg = rgb(colors.foreground);
+                        let bg = rgb(colors.background);
+                        let [r, g, b] = std::array::from_fn(|c| {
+                            (fg[c] as f64 * coverage + bg[c] as f64 * (1.0 - coverage)).round()
+                                as u8
+                        });
                         let cell = runtime.frame().get((x, y).into()).unwrap();
                         assert_eq!(
                             cell.style.colors.unwrap().background,

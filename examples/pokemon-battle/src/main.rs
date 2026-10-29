@@ -3,7 +3,6 @@ mod battle_ui;
 mod environment;
 mod export;
 mod geometry;
-mod glass;
 mod math;
 mod raster;
 mod scene;
@@ -22,7 +21,6 @@ struct Game {
     viewport: Size,
     // A drawing cache, not application or interaction state.
     raster: Rc<RefCell<Raster>>,
-    backdrop: glass::SharedBackdrop,
 }
 
 impl Default for Game {
@@ -34,7 +32,6 @@ impl Default for Game {
             encoding: Encoding::HalfBlock,
             viewport: (160, 50).into(),
             raster: Rc::new(RefCell::new(Raster::default())),
-            backdrop: Default::default(),
         }
     }
 }

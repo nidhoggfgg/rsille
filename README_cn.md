@@ -105,6 +105,23 @@ cargo run --release --manifest-path examples/pokemon-battle/Cargo.toml
 界面复用 TUI 的 Canvas、按钮、面板、血条、网格布局及浮层，交互和焦点统一由框架管理；
 血量与技能卡以半透明毛玻璃悬浮于完整场景上，可透见模糊的草地和树影。
 
+任意组件可直接添加毛玻璃背景：
+
+```rust
+use rsille::tui::prelude::*;
+
+let widget = visual(label::<()>("Hello"))
+    .backdrop(Backdrop::frosted());
+```
+
+通过 `.blur_radius(2)`、`.opacity(0.45)` 和 `.tint(Color::Rgb(9, 17, 29))` 调整效果；
+`Backdrop::tinted(color)` 提供不模糊的半透明染色。框架自动采样同一渲染目标中已绘制的下层字符，
+估算颜色并模糊，再与控件底色混合；未指定 tint 时沿用控件底色。文字和边框保持清晰。
+默认覆盖组件整个矩形（包括空白格），可用 `.mask(|x, y, size| coverage)` 指定覆盖范围，
+不改变布局和点击区域。模糊半径以字符格为单位（0–16），不透明度仅控制底色混合比例，独立于模糊。
+无需读取 Canvas 原始像素，也不依赖终端窗口透明度。外层离屏视觉效果会建立独立渲染目标，
+场景及其毛玻璃浮层应一起放在该目标内。
+
 对外只发布 **`rsille`**，使用以下三个公开模块：
 
 | 模块 | 内容 |

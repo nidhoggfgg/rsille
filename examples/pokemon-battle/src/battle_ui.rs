@@ -47,12 +47,19 @@ pub fn theme() -> Theme {
     theme
 }
 
-fn frosted(widget: impl IntoWidget<Msg>, game: &Game, opacity: f32, slanted: bool) -> Visual<Msg> {
-    visual(widget).custom_effect(crate::glass::Glass {
-        backdrop: game.backdrop.clone(),
-        opacity,
-        slanted,
-    })
+fn frosted(widget: impl IntoWidget<Msg>, opacity: f64, slanted: bool) -> Visual<Msg> {
+    let backdrop = Backdrop::frosted().opacity(opacity);
+    let backdrop = if slanted {
+        backdrop.mask(|x, y, size| {
+            let diagonal = f64::from(x) + f64::from(y) + 1.0;
+            let distance =
+                (diagonal - f64::from(size.height)).min(f64::from(size.width) - diagonal);
+            (distance / 2.0).clamp(0.0, 1.0)
+        })
+    } else {
+        backdrop
+    };
+    visual(widget).backdrop(backdrop)
 }
 
 fn native_label(value: impl Into<String>, fg: Rgb, bg: Rgb) -> Label<Msg> {
@@ -155,7 +162,6 @@ impl Widget<Msg> for FixedHeight {
 struct HealthHud {
     accent: Rgb,
     index: usize,
-    backdrop: crate::glass::SharedBackdrop,
     children: Vec<Box<dyn Widget<Msg>>>,
 }
 impl Widget<Msg> for HealthHud {
@@ -196,7 +202,6 @@ impl Widget<Msg> for HealthHud {
                 Some([190, 204, 209])
             }
         };
-        let backdrop = self.backdrop.read().ok();
         let area = chunk.area();
         for y in 0..4 {
             for x in 0..8 {
@@ -205,13 +210,15 @@ impl Widget<Msg> for HealthHud {
                 if top.is_none() && bottom.is_none() {
                     continue;
                 }
-                let scene = backdrop
-                    .as_ref()
-                    .and_then(|backdrop| {
-                        backdrop.raw_cell((area.x() + x) as usize, (area.y() + y + 1) as usize)
-                    })
-                    .unwrap_or([0.0; 3])
-                    .map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8);
+                let scene = match chunk
+                    .buffer()
+                    .get((area.x() + x, area.y() + y + 1).into())
+                    .and_then(|cell| cell.style.colors)
+                    .and_then(|colors| colors.background)
+                {
+                    Some(crossterm::style::Color::Rgb { r, g, b }) => [r, g, b],
+                    _ => [0; 3],
+                };
                 let _ = chunk.set_char(
                     x,
                     y + 1,
@@ -291,8 +298,7 @@ fn health(game: &Game, index: usize) -> HealthHud {
     HealthHud {
         accent,
         index,
-        backdrop: game.backdrop.clone(),
-        children: vec![Box::new(frosted(content, game, 0.45, false))],
+        children: vec![Box::new(frosted(content, 0.45, false))],
     }
 }
 
@@ -549,7 +555,6 @@ fn moves(game: &Game, large: bool) -> MoveDeck {
                         key: format!("skill-card-{i}"),
                         children: vec![Box::new(frame)],
                     },
-                    game,
                     0.48,
                     true,
                 )
@@ -564,11 +569,10 @@ fn moves(game: &Game, large: bool) -> MoveDeck {
     }
 }
 
-fn scene_widget(game: &Game, large: bool) -> impl Widget<Msg> {
+pub(crate) fn scene_widget(game: &Game, large: bool) -> impl Widget<Msg> {
     let battle = game.battle;
     let camera = game.camera;
     let raster = game.raster.clone();
-    let backdrop = game.backdrop.clone();
     let picture = canvas(move |surface, dimensions| {
         let (w, h) = (
             dimensions.sample_width() as usize,
@@ -594,9 +598,6 @@ fn scene_widget(game: &Game, large: bool) -> impl Widget<Msg> {
             battle,
             camera,
         );
-        if let Ok(mut backdrop) = backdrop.write() {
-            backdrop.update(&raster);
-        }
         surface.set_background(crossterm::style::Color::Black);
         for y in 0..h {
             for x in 0..w {
@@ -680,7 +681,7 @@ pub fn view(game: &Game) -> impl Widget<Msg> {
         (false, true) => "1-4 move  ARROWS/TAB select  ENTER confirm  P resume R rematch  Q exit",
         (false, false) => "1-4 move  ARROWS/TAB select  ENTER confirm  P pause  R rematch  Q exit",
     };
-    let footer = footer.child(frosted(native_label(help, MUTED, INK), game, 0.55, false));
+    let footer = footer.child(frosted(native_label(help, MUTED, INK), 0.55, false));
     overlay(scene_widget(game, large))
         .key("pokemon-battle")
         .layer(

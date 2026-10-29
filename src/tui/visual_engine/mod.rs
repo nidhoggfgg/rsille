@@ -4,6 +4,7 @@
 //! profiling, and source-buffer blitting. Widget wrappers feed it offscreen
 //! buffers and runtime context; it does not know about widget trees.
 
+mod backdrop;
 mod blit;
 mod color;
 mod config;
@@ -16,6 +17,7 @@ mod pipeline;
 mod profile;
 mod sample;
 
+pub use backdrop::Backdrop;
 pub(crate) use blit::{blit_with_effect_groups, blit_with_effects};
 pub(crate) use config::ResolvedVisualConfig;
 pub use config::{

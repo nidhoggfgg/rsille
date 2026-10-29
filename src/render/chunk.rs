@@ -106,6 +106,14 @@ impl<'a> Chunk<'a> {
         self.buffer.text_metrics()
     }
 
+    /// Read the current render target, including cells outside this chunk.
+    ///
+    /// Buffer coordinates are absolute. This is useful for sampling previously
+    /// painted layers; writes remain restricted to the chunk's area.
+    pub fn buffer(&self) -> &Buffer {
+        self.buffer
+    }
+
     pub fn set_text_metrics(&mut self, metrics: crate::render::text::TextMetrics) {
         self.buffer.set_text_metrics(metrics);
     }

@@ -2,16 +2,18 @@ use std::time::Instant;
 
 use crate::render::buffer::Buffer;
 
+use super::backdrop::BackdropSnapshot;
 use crate::tui::offscreen::{for_each_blit_cell, BlitOptions, BlitRegion};
 use crate::tui::visual_engine::pipeline::{
     effective_progress, plan_effects, EffectiveEffectGroup, ResolvedEffectGroup,
 };
-use crate::tui::visual_engine::{BlitReport, CellSample, VisualCtx, VisualEffect};
+use crate::tui::visual_engine::{Backdrop, BlitReport, CellSample, VisualCtx, VisualEffect};
 
 pub(crate) fn blit_with_effects(
     chunk: &mut crate::render::chunk::Chunk,
     source: &Buffer,
     effects: &[VisualEffect],
+    backdrop: Option<&Backdrop>,
     ctx: &VisualCtx<'_>,
     profile_enabled: bool,
 ) -> BlitReport {
@@ -26,7 +28,11 @@ pub(crate) fn blit_with_effects(
         ctx.area.height() as usize,
     );
 
-    let options = if effects.iter().all(VisualEffect::can_use_dirty_only) {
+    let snapshot =
+        backdrop.map(|backdrop| BackdropSnapshot::capture(chunk.buffer(), backdrop, ctx));
+    let options = if backdrop.is_some() {
+        BlitOptions::default()
+    } else if effects.iter().all(VisualEffect::can_use_dirty_only) {
         BlitOptions::default().skip_blank().dirty_only()
     } else {
         BlitOptions::default().skip_blank()
@@ -50,8 +56,15 @@ pub(crate) fn blit_with_effects(
             && dest_x < ctx.area.width() as i32
             && dest_y < ctx.area.height() as i32
         {
-            let _ = chunk.set_forced(dest_x as u16, dest_y as u16, sample.content);
-            report.processed_cells += 1;
+            if let (Some(backdrop), Some(snapshot)) = (backdrop, snapshot.as_ref()) {
+                snapshot.apply(backdrop, &mut sample, ctx);
+            }
+            if sample.visible {
+                let _ = chunk.set_forced(dest_x as u16, dest_y as u16, sample.content);
+                report.processed_cells += 1;
+            } else {
+                report.skipped_cells += 1;
+            }
         } else if sample.visible {
             report.skipped_cells += 1;
         }
@@ -68,6 +81,7 @@ pub(crate) fn blit_with_effect_groups(
     chunk: &mut crate::render::chunk::Chunk,
     source: &Buffer,
     groups: &[ResolvedEffectGroup],
+    backdrop: Option<&Backdrop>,
     ctx: &VisualCtx<'_>,
     profile_enabled: bool,
 ) -> BlitReport {
@@ -95,7 +109,11 @@ pub(crate) fn blit_with_effect_groups(
         ctx.area.height() as usize,
     );
 
-    let options = if effective_groups
+    let snapshot =
+        backdrop.map(|backdrop| BackdropSnapshot::capture(chunk.buffer(), backdrop, ctx));
+    let options = if backdrop.is_some() {
+        BlitOptions::default()
+    } else if effective_groups
         .iter()
         .all(|group| group.effects.iter().all(VisualEffect::can_use_dirty_only))
     {
@@ -131,8 +149,15 @@ pub(crate) fn blit_with_effect_groups(
             && dest_x < ctx.area.width() as i32
             && dest_y < ctx.area.height() as i32
         {
-            let _ = chunk.set_forced(dest_x as u16, dest_y as u16, sample.content);
-            report.processed_cells += 1;
+            if let (Some(backdrop), Some(snapshot)) = (backdrop, snapshot.as_ref()) {
+                snapshot.apply(backdrop, &mut sample, ctx);
+            }
+            if sample.visible {
+                let _ = chunk.set_forced(dest_x as u16, dest_y as u16, sample.content);
+                report.processed_cells += 1;
+            } else {
+                report.skipped_cells += 1;
+            }
         } else if sample.visible {
             report.skipped_cells += 1;
         }

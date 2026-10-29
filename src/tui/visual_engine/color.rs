@@ -71,7 +71,7 @@ pub(crate) fn blend_foreground(
     apply_crossterm_color(&mut sample.content, blended, GradientTarget::Foreground);
 }
 
-fn capable_color(color: Color, ctx: &VisualCtx<'_>) -> CrosstermColor {
+pub(super) fn capable_color(color: Color, ctx: &VisualCtx<'_>) -> CrosstermColor {
     if ctx.capabilities.truecolor {
         to_crossterm_color(color)
     } else {

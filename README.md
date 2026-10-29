@@ -118,6 +118,26 @@ Solid models animate attacks, sparks and splashes under an orbitable camera.
 Native TUI Canvas, buttons, panels, progress bars and grid/overlay layouts power the interface,
 with frosted translucent HUD and skill cards floating over the full scene.
 
+Use a frosted background on any widget:
+
+```rust
+use rsille::tui::prelude::*;
+
+let widget = visual(label::<()>("Hello"))
+    .backdrop(Backdrop::frosted());
+```
+
+`blur_radius(2)`, `opacity(0.45)` and `tint(Color::Rgb(9, 17, 29))` customize
+it; `Backdrop::tinted(color)` provides translucency without blur. The framework
+samples previously painted cells in the same render target, approximates their
+colors, blurs them, and uses child background colors as the tint unless overridden.
+Text and borders stay sharp. The default footprint fills the widget rectangle,
+including empty cells; `mask(|x, y, size| coverage)` restricts painting without
+changing layout or hit testing. Blur radius is in terminal cells (0–16), and opacity
+controls tint contribution independently of blur. No Canvas pixel access or terminal
+window transparency is needed. An outer offscreen visual effect creates a separate
+render target, so keep the scene and its glass layers inside that target together.
+
 Only **`rsille`** is published. Use its three public modules:
 
 | Module | Purpose |
