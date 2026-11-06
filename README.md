@@ -73,6 +73,7 @@ cargo run --release --manifest-path examples/clockwork/Cargo.toml
 cargo run --release --manifest-path examples/pokemon-battle/Cargo.toml
 cargo run --release --manifest-path examples/jellyfish/Cargo.toml
 cargo run --release --manifest-path examples/ai-rumble/Cargo.toml
+cargo run --release --manifest-path examples/ai-babies/Cargo.toml
 ```
 
 The workflow example uses the same application for interactive editing and a
@@ -129,6 +130,11 @@ just run it and watch. Press `q`, Esc or Ctrl+C to leave.
 DeepSeek's whale girl, Claude's book girl and ChatGPT's white dragon girl.
 Expressive faces, distinct costumes, squash-and-stretch poses and flowing chase paths
 bring whale splashes, flying pages and dragon breath into a 24-second inline loop. Character references and credits are included in the example.
+
+[AI Babies](examples/ai-babies/README.md) displays reference-based pixel versions of
+DeepSeek's blue-haired whale maid, Claude's orange-haired sun-flower girl and
+ChatGPT's white dragon girl, with quiet idle breathing, blinks and tiny hops. Embedded pixel sprites render
+through Half-block cells; press 1/2/3 to inspect one character, 0 for all, or Space to pause.
 
 Use a frosted background on any widget:
 

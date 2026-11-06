@@ -1,0 +1,14 @@
+Tool: built-in imagegen (not CLI).
+Output: assets/source-v3.png
+References: x/deepseek.png, x/claude.png, x/chatgpt.png (user-provided, local only).
+
+Use case: style-transfer.
+Asset type: transparent pixel sprite sheet for an existing terminal animation, three characters in one horizontal row.
+Input images: image 1 is DeepSeek character identity reference; image 2 is Claude character identity reference; image 3 is ChatGPT character identity reference. Each input is a turnaround with three views of ONE character; use only its FRONT view to make exactly ONE sprite per identity.
+Primary request: faithfully translate these three specific chibi girls into extremely readable low-resolution pixel sprites. Preserve their identity, hair, outfits, accessories and silhouette from the references. Simplify intricate decoration to large deliberate pixel clusters appropriate for 40x48 pixels per character. Adorable, big head, about 2 heads tall, tiny body, front facing, arms slightly out, feet on same baseline.
+Left DeepSeek: long navy-to-blue hair down both sides, one curled ahoge on top, white frilled maid headband, small blue bow, navy maid dress with white apron, tiny blue whale motif on apron, a large blue whale tail curving out to her right, blue eyes, friendly small closed smile. The hair and maid headband must be clear.
+Middle Claude: long flowing burnt-orange hair, small orange SUN-FLOWER hair clip at upper right with black ribbon, cream long dress with black side panels and orange/gold accents, amber eyes, tiny restrained smile. Her hair is long and rounded with soft waves; sun motif belongs on a flower clip, not the head silhouette.
+Right ChatGPT: long white hair with pale lavender shadows, TWO pale curved dragon horns clearly rising above head, small gold knot hair ornament at right temple, small pale lavender dragon wings sticking out on both sides, white dress with sparse gold details, curled white/lavender dragon tail out to right, purple eyes and tiny mouth.
+Style: authentic very chunky game pixel art at approximately 40x48 logical pixels each, displayed enlarged with hard square edges. Strong dark colored outlines, 12-18 flat colors per character, limited shading, no gradients, no painterly texture, no fine linework. Eyes must be clear matching pairs of blue / amber / purple pixel eyes, large enough to animate blinking. Light peach faces.
+Composition: 1536x1024 landscape canvas split into three equal 512px-wide columns. Each sprite entirely inside its own column, with large transparent gaps separating all sprites. Same apparent head/body scale and aligned feet, entire figure including tail, horns, hair and wings visible with margins. Exactly THREE figures total, each front facing, no side or back views.
+Background: real transparent alpha, no white or checkerboard baked into image, no floor, no shadows. No text, no labels, no frames.
