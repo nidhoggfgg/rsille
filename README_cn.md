@@ -64,6 +64,8 @@ cargo run --release --manifest-path examples/folded-harbor/Cargo.toml
 cargo run --release --manifest-path examples/minecraft/Cargo.toml
 cargo run --release --manifest-path examples/clockwork/Cargo.toml
 cargo run --release --manifest-path examples/pokemon-battle/Cargo.toml
+cargo run --release --manifest-path examples/jellyfish/Cargo.toml
+cargo run --release --manifest-path examples/ai-rumble/Cargo.toml
 ```
 
 `workflow` 使用同一套应用逻辑验证 Unicode 粘贴、debounce、后台保存、键盘焦点和退出，
@@ -104,6 +106,16 @@ cargo run --release --manifest-path examples/pokemon-battle/Cargo.toml
 包含 HP、PP、麻痹、防御、胜负和重新开局，以及立体出招动作、电弧、水花与可旋转的相机。
 界面复用 TUI 的 Canvas、按钮、面板、血条、网格布局及浮层，交互和焦点统一由框架管理；
 血量与技能卡以半透明毛玻璃悬浮于完整场景上，可透见模糊的草地和树影。
+
+[深海水母](examples/jellyfish/README.md) 是一个无需操作、启动即自动播放的终端水族箱：
+以最多 28 行的 inline 画面展示两只放大的发光水母，上下游动、伞体收缩、触须大幅摆动，
+背景有柔和光束、浮游微粒和远处鱼群。
+没有控制面板，适合静静观看；按 `q`、Esc 或 Ctrl+C 退出。
+
+[AI 娘大乱斗](examples/ai-rumble/README.md) 将 DeepSeek 鲸鱼娘、Claude 抱书少女和 ChatGPT 白龙娘
+画成各具服饰和表情的大眼 Q 版角色，以弹性伸缩、回弹和连续追逐串起水浪、书页和龙息，
+在 inline 画面中自动播放。
+每轮 24 秒，无需操作；示例附有角色参考、署名和完整动画预览。
 
 任意组件可直接添加毛玻璃背景：
 

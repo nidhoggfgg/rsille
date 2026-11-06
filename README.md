@@ -71,6 +71,8 @@ cargo run --release --manifest-path examples/folded-harbor/Cargo.toml
 cargo run --release --manifest-path examples/minecraft/Cargo.toml
 cargo run --release --manifest-path examples/clockwork/Cargo.toml
 cargo run --release --manifest-path examples/pokemon-battle/Cargo.toml
+cargo run --release --manifest-path examples/jellyfish/Cargo.toml
+cargo run --release --manifest-path examples/ai-rumble/Cargo.toml
 ```
 
 The workflow example uses the same application for interactive editing and a
@@ -117,6 +119,16 @@ and battle an automated opponent with HP, PP, paralysis, guard and win/loss stat
 Solid models animate attacks, sparks and splashes under an orbitable camera.
 Native TUI Canvas, buttons, panels, progress bars and grid/overlay layouts power the interface,
 with frosted translucent HUD and skill cards floating over the full scene.
+
+[Jellyfish](examples/jellyfish/README.md) is a quiet, self-playing deep-sea aquarium:
+two large luminous jellyfish swim, pulse and sweep their tentacles through soft
+light shafts, plankton and a distant school of fish in an inline view up to 28 rows tall. No controls or panels to manage;
+just run it and watch. Press `q`, Esc or Ctrl+C to leave.
+
+[AI Rumble](examples/ai-rumble/README.md) stages an automatic chibi fight between
+DeepSeek's whale girl, Claude's book girl and ChatGPT's white dragon girl.
+Expressive faces, distinct costumes, squash-and-stretch poses and flowing chase paths
+bring whale splashes, flying pages and dragon breath into a 24-second inline loop. Character references and credits are included in the example.
 
 Use a frosted background on any widget:
 
