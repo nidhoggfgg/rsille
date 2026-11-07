@@ -1,3 +1,5 @@
+//! Shared application core for terminal event loops and explicit runtime steps.
+
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::collections::{HashMap, HashSet};
@@ -90,10 +92,13 @@ impl FrameRuntime {
     }
 }
 
+/// Adapts application update callbacks to the core's effect-aware interface.
 pub(crate) trait UpdateDriver<State, M> {
+    /// Applies one message and records any effects through `ctx`.
     fn handle(&mut self, state: &mut State, message: M, ctx: &mut UpdateCtx<M>);
 }
 
+/// Wraps an update callback that does not produce effects.
 pub(crate) struct SimpleUpdate<F>(pub(crate) F);
 
 impl<State, M, F> UpdateDriver<State, M> for SimpleUpdate<F>
@@ -118,8 +123,12 @@ where
 // AppRuntime – implements Draw + Update for the render event loop
 // ---------------------------------------------------------------------------
 
-/// Thread-safe application ingress. Messages are FIFO and wake the UI immediately.
-/// The queue is unbounded; each runtime turn processes at most 256 messages.
+/// A clonable sender for delivering application messages from other threads.
+///
+/// Obtain a handle with [`Runtime::handle`]. Messages enter an unbounded FIFO
+/// queue and notify the runtime's wake handle. Each runtime turn processes at
+/// most 256 queued messages; a host using [`Runtime::step`] must drive those
+/// turns explicitly.
 pub struct AppHandle<M> {
     sender: TaskEventSender<M>,
 }
@@ -133,7 +142,14 @@ impl<M> Clone for AppHandle<M> {
 }
 
 impl<M> AppHandle<M> {
-    /// Returns the original message if the runtime has been dropped.
+    /// Enqueues a message and notifies the runtime without waiting for an update.
+    ///
+    /// Success means the message was queued, not that it has been processed.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`mpsc::SendError`] containing the original message if the
+    /// receiving runtime has been dropped.
     pub fn send(&self, message: M) -> Result<(), mpsc::SendError<M>> {
         self.sender.send_message(message)
     }
@@ -142,8 +158,16 @@ impl<M> AppHandle<M> {
 type RuntimeUpdate<State, M> = Box<dyn Fn(&mut State, M, &mut UpdateCtx<M>)>;
 type RuntimeView<State, M> = Box<dyn Fn(&State) -> Box<dyn Widget<M>>>;
 
-/// A single-step application using the same core as the terminal adapter.
-/// Building and stepping do not access a TTY. `run` enters the terminal adapter.
+/// An application that can be driven one step at a time without a terminal.
+///
+/// Create it with [`App::build`] or [`App::build_with_effects`]. The initial
+/// buffer is 80 columns by 24 rows; use [`size`](Self::size) to override it.
+/// [`step`](Self::step) processes input, messages and time-dependent work, and
+/// [`frame`](Self::frame) exposes the rendered buffer for inspection or display.
+///
+/// [`run`](Self::run), [`run_inline`](Self::run_inline) and
+/// [`run_async`](Self::run_async) consume the runtime and enter a terminal event
+/// loop using the same application state and message queue.
 pub struct Runtime<State, M> {
     core: AppRuntime<State, RuntimeUpdate<State, M>, RuntimeView<State, M>, M>,
     buffer: crate::render::buffer::Buffer,
@@ -152,11 +176,19 @@ pub struct Runtime<State, M> {
     inline_mouse_mode: InlineMouseMode,
 }
 
+/// Rendering, exit and scheduling information from one [`Runtime::step`].
 #[derive(Clone, Copy, Debug)]
 pub struct StepResult {
+    /// Whether at least one frame was drawn during the step.
+    ///
+    /// This does not indicate whether the rendered cells changed.
     pub rendered: bool,
+    /// Whether the application has requested exit and should no longer be stepped.
     pub should_quit: bool,
-    /// Deadline in the injected clock's time domain, or `None` when idle.
+    /// Earliest scheduled update in the injected clock's time domain.
+    ///
+    /// `None` means no update is scheduled or the runtime has stopped. New input
+    /// or messages can still require a step; see [`Runtime::wake_handle`].
     pub next_update_at: Option<Instant>,
 }
 
@@ -179,47 +211,83 @@ impl<State, M: Send + 'static> Runtime<State, M> {
         }
     }
 
-    /// Enter the terminal adapter after obtaining a handle with `handle()`.
+    /// Runs the terminal event loop in the application's configured mode.
+    ///
+    /// Obtain a [`handle`](Self::handle) before calling this method to send
+    /// messages from other threads. Returns the final state and exit reason.
+    /// This creates a private Tokio runtime; inside an existing runtime, use
+    /// [`run_async`](Self::run_async).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if called inside a Tokio runtime or if terminal setup,
+    /// input handling or rendering fails.
     pub fn run(self) -> WidgetResult<AppExit<State>> {
         self.core
             .run_terminal(self.mouse_capture, self.inline_mouse_mode)
     }
 
-    /// Enter the inline terminal adapter using this runtime and its message queue.
+    /// Runs the terminal event loop in inline mode, overriding the app's mode.
+    ///
+    /// Uses the current state and message queue, returning the final state and
+    /// exit reason. Like [`run`](Self::run), this creates a private Tokio runtime.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if called inside a Tokio runtime or if terminal setup,
+    /// input handling or rendering fails.
     pub fn run_inline(mut self) -> WidgetResult<AppExit<State>> {
         self.core.inline_mode = true;
         self.core
             .run_terminal(self.mouse_capture, self.inline_mouse_mode)
     }
 
+    /// Sets the in-memory frame size in terminal cells and returns the runtime.
+    ///
+    /// This is the builder form of [`resize`](Self::resize). Terminal event
+    /// loops determine their own dimensions from the terminal.
     pub fn size(mut self, width: u16, height: u16) -> Self {
         self.resize((width, height).into());
         self
     }
 
+    /// Replaces the in-memory buffer and requests a draw on the next step.
+    ///
+    /// Dimensions are measured in terminal cells. The previous frame contents
+    /// are discarded immediately; this does not resize a physical terminal.
     pub fn resize(&mut self, size: Size) {
         self.buffer = crate::render::buffer::Buffer::new(size);
         self.needs_draw = true;
     }
 
+    /// Returns a sender sharing this runtime's application message queue.
     pub fn handle(&self) -> AppHandle<M> {
         AppHandle {
             sender: self.core.task_sender.clone(),
         }
     }
 
+    /// Borrows the current application state after the most recent update.
     pub fn state(&self) -> &State {
         self.core.state.as_ref().expect("runtime state")
     }
 
+    /// Borrows the in-memory frame without triggering a draw.
+    ///
+    /// The buffer is blank before the first step and immediately after resizing.
     pub fn frame(&self) -> &crate::render::buffer::Buffer {
         &self.buffer
     }
 
+    /// Returns the keyboard-focused widget's path, or `None` if none is focused.
     pub fn focused_path(&self) -> Option<&WidgetPath> {
         self.core.focus.current_path()
     }
 
+    /// Returns the focused widget's named key, if it has one.
+    ///
+    /// Positional keys return `None`. For a focused root, this reads the root
+    /// widget's own key.
     pub fn focused_key(&self) -> Option<&str> {
         let path = self.focused_path()?;
         match path.as_slice().last() {
@@ -234,6 +302,10 @@ impl<State, M: Send + 'static> Runtime<State, M> {
         self.core.store.hovered_path.as_ref()
     }
 
+    /// Returns a widget's recorded bounds from the last draw, if available.
+    ///
+    /// Use [`layout_geometry`](Self::layout_geometry) for separate target,
+    /// displayed, clipping and hit-test areas.
     pub fn bounds(&self, path: &WidgetPath) -> Option<crate::render::area::Area> {
         self.core.geometry.borrow().get(path).copied()
     }
@@ -261,18 +333,34 @@ impl<State, M: Send + 'static> Runtime<State, M> {
         self.core.wake.wake();
     }
 
+    /// Borrows widget-local state by identity and concrete state type.
+    ///
+    /// Returns `None` if the widget has no stored state or its type is not `T`.
     pub fn widget_state<T: 'static>(&self, id: &WidgetId) -> Option<&T> {
         self.core.store.get(id.clone())
     }
 
+    /// Returns snapshots of retained task statuses in task creation order.
+    ///
+    /// The list can include finished tasks until their records are pruned.
     pub fn tasks(&self) -> Vec<TaskStatus> {
         self.core.task_statuses()
     }
 
+    /// Returns the earliest scheduled update in the injected clock's time domain.
+    ///
+    /// Includes timers, task deadlines and retries, ticks, frames and animations.
+    /// Already queued internal messages request an immediate update. `None`
+    /// means no deadline is scheduled or the runtime has stopped; external
+    /// messages notify [`wake_handle`](Self::wake_handle) separately.
     pub fn next_update_at(&self) -> Option<Instant> {
         self.core.next_update_at()
     }
 
+    /// Returns a shared notification handle for work arriving between steps.
+    ///
+    /// Embedding hosts can combine notifications with
+    /// [`next_update_at`](Self::next_update_at) when scheduling their next step.
     pub fn wake_handle(&self) -> crate::render::WakeHandle {
         self.core.wake.clone()
     }
@@ -283,29 +371,60 @@ impl<State, M: Send + 'static> Runtime<State, M> {
         self.core.on_input_capabilities(capabilities);
     }
 
-    /// Stop timers and signal cancellation without waiting for blocking jobs.
+    /// Stops the runtime, unmounts widgets and cancels timers and active tasks.
+    ///
+    /// Signals cooperative cancellation without waiting for blocking jobs.
+    /// Preserves an existing exit reason, or sets [`ExitReason::Shutdown`].
+    /// Subsequent steps report `should_quit` without processing further work.
     pub fn shutdown(&mut self) {
         self.core.shutdown();
     }
 
-    /// Cancel resources and recover state without cloning it.
+    /// Shuts down the runtime and returns its owned state and exit reason.
+    ///
+    /// Uses [`ExitReason::Shutdown`] if no exit reason has been recorded.
     pub fn into_exit(mut self) -> AppExit<State> {
         self.core.take_exit()
     }
 
+    /// Returns the recorded exit reason, or `None` while no exit was requested.
     pub fn exit_reason(&self) -> Option<ExitReason> {
         self.core.exit_reason
     }
 
-    /// Use the existing Tokio runtime rather than creating a nested runtime.
+    /// Runs the terminal event loop on the calling Tokio runtime.
+    ///
+    /// The Tokio runtime must have time and I/O drivers enabled. Uses the app's
+    /// configured terminal mode and returns the final state and exit reason.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if terminal setup, input handling or rendering fails.
     pub async fn run_async(self) -> WidgetResult<AppExit<State>> {
         self.core
             .run_terminal_async(self.mouse_capture, self.inline_mouse_mode)
             .await
     }
 
-    /// Dispatch input, drain messages, advance time-dependent work and draw.
-    /// Pass an empty slice to drive messages or an explicitly advanced clock.
+    /// Dispatches an input batch, processes queued work and draws as needed.
+    ///
+    /// An initial pending draw establishes focus and hit geometry before input
+    /// dispatch. Resize events update the in-memory buffer dimensions. The
+    /// runtime then processes messages and due work using its configured clock,
+    /// and draws again if needed and no exit was requested.
+    ///
+    /// Pass an empty slice to process messages or time advanced through a
+    /// [`ManualClock`](super::ManualClock). This method does not wait for input,
+    /// sleep until deadlines or run jobs queued in a
+    /// [`ManualExecutor`](super::ManualExecutor). Message processing is bounded
+    /// per step, so a backlog can require multiple calls.
+    ///
+    /// Once stopped, returns `should_quit: true` without drawing or processing
+    /// input. Use [`into_exit`](Self::into_exit) to recover the final state.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`DrawErr`] if input handling, updating or drawing fails.
     pub fn step(&mut self, events: &[Event]) -> Result<StepResult, DrawErr> {
         if self.core.should_quit {
             return Ok(StepResult {
@@ -411,6 +530,10 @@ impl<M> MessageQueue<M> {
     }
 }
 
+/// Owns application state, widget lifecycle, input routing and scheduled work.
+///
+/// Both the terminal adapter and [`Runtime`] drive this core through [`Draw`]
+/// and [`Update`], keeping rendering and message handling consistent.
 pub(crate) struct AppRuntime<State, U, V, M> {
     state: Option<State>,
     theme: Theme,
