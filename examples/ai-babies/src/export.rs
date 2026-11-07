@@ -1,4 +1,4 @@
-//! Export the actual terminal cells, including Canvas's half-block encoding.
+//! Export actual Half-block terminal cells at the same scale as static previews.
 use std::{error::Error, fs, time::Instant};
 
 use crossterm::style::Color;
@@ -12,33 +12,55 @@ pub fn frame(nursery: &mut Nursery, size: Size) -> Result<Buffer, Box<dyn Error>
     Ok(buffer)
 }
 
-fn rgb(color: Option<Color>) -> [u8; 3] {
-    match color {
-        Some(Color::Rgb { r, g, b }) => [r, g, b],
-        _ => [0, 0, 0],
-    }
-}
-
-fn ppm(buffer: &Buffer) -> Vec<u8> {
+pub fn rgba(buffer: &Buffer) -> Vec<[u8; 4]> {
     let size = buffer.size();
-    let mut bytes = format!("P6\n{} {}\n255\n", size.width, size.height * 2).into_bytes();
-    for y in 0..size.height * 2 {
-        for x in 0..size.width {
-            let cell = buffer.get((x, y / 2).into()).unwrap();
-            let colors = cell.style.colors;
-            let foreground = matches!(cell.as_char(), Some('█'))
-                || (cell.as_char() == Some('▀') && y % 2 == 0)
-                || (cell.as_char() == Some('▄') && y % 2 == 1);
-            bytes.extend_from_slice(&rgb(colors.and_then(|c| {
+    // Two output pixels across a cell and four down it, matching the static
+    // Quadrant export. Every Half-block sample occupies a 2x2 output square.
+    let mut pixels = Vec::with_capacity(usize::from(size.width) * usize::from(size.height) * 8);
+    for y in 0..size.height * 4 {
+        for x in 0..size.width * 2 {
+            let cell = buffer.get((x / 2, y / 4).into()).unwrap();
+            let foreground = cell.as_char() == Some('█')
+                || (cell.as_char() == Some('▀') && y % 4 < 2)
+                || (cell.as_char() == Some('▄') && y % 4 >= 2);
+            let color = cell.style.colors.and_then(|colors| {
                 if foreground {
-                    c.foreground
+                    colors.foreground
                 } else {
-                    c.background
+                    colors.background
                 }
-            })));
+            });
+            pixels.push(match color {
+                Some(Color::Rgb { r, g, b }) => [r, g, b, 255],
+                _ => [0, 0, 0, 0],
+            });
         }
     }
+    pixels
+}
+
+pub fn snapshot(buffer: &Buffer) -> Vec<u8> {
+    let size = buffer.size();
+    let mut bytes = format!("P6\n{} {}\n255\n", size.width * 2, size.height * 4).into_bytes();
+    // PPM has no alpha: black is only an export fallback, never a terminal fill.
+    for pixel in rgba(buffer) {
+        bytes.extend_from_slice(&pixel[..3]);
+    }
     bytes
+}
+
+fn save(path: impl AsRef<std::path::Path>, buffer: &Buffer) -> Result<(), Box<dyn Error>> {
+    let path = path.as_ref();
+    let mask_path = path.with_extension("pgm");
+    if path == mask_path {
+        return Err("Snapshot filename must not use the reserved .pgm mask extension".into());
+    }
+    let size = buffer.size();
+    let mut mask = format!("P5\n{} {}\n255\n", size.width * 2, size.height * 4).into_bytes();
+    mask.extend(rgba(buffer).iter().map(|pixel| pixel[3]));
+    fs::write(path, snapshot(buffer))?;
+    fs::write(mask_path, mask)?;
+    Ok(())
 }
 
 pub fn command(args: &[String]) -> Result<(), Box<dyn Error>> {
@@ -57,18 +79,30 @@ pub fn command(args: &[String]) -> Result<(), Box<dyn Error>> {
                 }
                 (width, height).into()
             } else { (PREVIEW_WIDTH, INLINE_HEIGHT).into() };
-            fs::write(&args[1], ppm(&frame(&mut nursery, size)?))?;
+            save(&args[1], &frame(&mut nursery, size)?)?;
             println!("Saved terminal frame to {} at {time}s", args[1]);
         }
         "--frames" if args.len() == 2 => {
             fs::create_dir_all(&args[1])?;
             let mut nursery = Nursery::default();
-            for index in 0..192 {
+            for index in 0..(crate::scene::PERIOD * 24.0).ceil() as usize {
                 nursery.time = index as f64 / 24.0;
                 let path = std::path::Path::new(&args[1]).join(format!("{index:04}.ppm"));
-                fs::write(path, ppm(&frame(&mut nursery, (PREVIEW_WIDTH, INLINE_HEIGHT).into())?))?;
+                save(path, &frame(&mut nursery, (PREVIEW_WIDTH, INLINE_HEIGHT).into())?)?;
             }
-            println!("Saved 8 seconds at 24 FPS to {}", args[1]);
+            println!("Saved {} seconds at 24 FPS to {}", crate::scene::PERIOD, args[1]);
+        }
+        "--action" if args.len() == 3 => {
+            let action = crate::scene::Action::ALL.into_iter()
+                .find(|action| action.name() == args[1]).ok_or("Unknown action; use idle/wave/walk/hop/think/sleep")?;
+            fs::create_dir_all(&args[2])?;
+            let mut nursery = Nursery { action: Some(action), ..Nursery::default() };
+            for index in 0..(action.duration() * 24.0).ceil() as usize {
+                nursery.time = index as f64 / 24.0;
+                let path = std::path::Path::new(&args[2]).join(format!("{index:04}.ppm"));
+                save(path, &frame(&mut nursery, (PREVIEW_WIDTH, INLINE_HEIGHT).into())?)?;
+            }
+            println!("Saved {} clip to {}", action.name(), args[2]);
         }
         "--headless" if args.len() == 1 => {
             let mut nursery = Nursery::default();
@@ -81,7 +115,7 @@ pub fn command(args: &[String]) -> Result<(), Box<dyn Error>> {
             println!("90 frames passed at {PREVIEW_WIDTH}x{INLINE_HEIGHT}; mean {:.2} ms/frame (drawing + encoding; no terminal I/O)", start.elapsed().as_secs_f64() * 1000.0 / 90.0);
         }
         "--help" | "-h" if args.len() == 1 => println!(
-            "AI BABIES / quiet raster companions\n\nRun without arguments for automatic inline playback (up to 32 rows).\nq / Esc / Ctrl+C: exit; Space: pause; 1/2/3: focus; 0: all\n\n--static [--height ROWS] [--snapshot FILE.ppm]  (default: 144 columns × 24 rows; height: 1..40)\n--headless\n--snapshot FILE.ppm [SECONDS [COLUMNS ROWS]]\n--frames DIRECTORY  (192 PPM frames at 24 FPS)"
+            "AI BABIES / pre-drawn dragon pet\n\nRun without arguments for automatic inline playback (up to 32 rows).\nq / Esc / Ctrl+C: exit; Space: pause; 1: idle; 2: wave; 3: walk; 4: hop; 5: think; 6: sleep; 0: automatic\n\n--static [--height ROWS] [--snapshot FILE.ppm]  (default: 144 columns × 24 rows; height: 1..40)\n--headless\n--snapshot FILE.ppm [SECONDS [COLUMNS ROWS]]\n--frames DIRECTORY  (one complete action playlist at 24 FPS)\n--action idle|wave|walk|hop|think|sleep DIRECTORY"
         ),
         _ => return Err("Unknown or incomplete arguments; use --help".into()),
     }

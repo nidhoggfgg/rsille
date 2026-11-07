@@ -1,4 +1,4 @@
-//! Generated raster mascots, embedded in the binary, with quiet idle motion.
+//! One raster pet, playing embedded, pre-drawn animation clips.
 mod export;
 mod scene;
 mod static_image;
@@ -11,14 +11,14 @@ use rsille::{
 use std::{error::Error, time::Instant};
 
 const INLINE_HEIGHT: u16 = 32;
-const PREVIEW_WIDTH: u16 = 128;
+const PREVIEW_WIDTH: u16 = 80;
 
 struct Nursery {
     time: f64,
     last: Option<Instant>,
     quit: bool,
     paused: bool,
-    focus: Option<usize>,
+    action: Option<scene::Action>,
     canvas: Canvas,
 }
 
@@ -29,7 +29,7 @@ impl Default for Nursery {
             last: None,
             quit: false,
             paused: false,
-            focus: None,
+            action: None,
             canvas: Canvas::with_encoding(Encoding::HalfBlock),
         }
     }
@@ -51,8 +51,13 @@ impl Update for Nursery {
                         self.paused = !self.paused;
                         self.last = None;
                     }
-                    KeyCode::Char('0') => self.focus = None,
-                    KeyCode::Char(n @ '1'..='3') => self.focus = Some(n as usize - '1' as usize),
+                    KeyCode::Char(n @ '0'..='6') => {
+                        self.action = n
+                            .to_digit(10)
+                            .and_then(|n| n.checked_sub(1).map(|i| scene::Action::ALL[i as usize]));
+                        self.time = 0.0;
+                        self.last = None;
+                    }
                     _ => {}
                 }
             }
@@ -64,8 +69,9 @@ impl Update for Nursery {
         let now = Instant::now();
         if !self.paused {
             if let Some(last) = self.last {
+                let period = self.action.map_or(scene::PERIOD, scene::Action::duration);
                 self.time = (self.time + now.duration_since(last).as_secs_f64().min(0.1))
-                    .rem_euclid(scene::PERIOD);
+                    .rem_euclid(period);
             }
         }
         self.last = Some(now);
@@ -85,18 +91,17 @@ impl Draw for Nursery {
         }
         let w = size.width as usize;
         let h = size.height as usize * 2;
-        let pixels = scene::render(w, h, self.time, self.focus);
+        let pixels = scene::render(w, h, self.time, self.action);
         self.canvas.clear();
-        self.canvas.set_background(scene::color(scene::BACKGROUND));
+        self.canvas.clear_background();
         self.canvas
             .set_bound((0, size.width as i32 - 1), (0, size.height as i32 - 1));
         for y in 0..h {
             for x in 0..w {
-                self.canvas.set_color(
-                    x as f64,
-                    (h - 1 - y) as f64,
-                    scene::color(pixels[y * w + x]),
-                );
+                if let Some(rgb) = pixels[y * w + x] {
+                    self.canvas
+                        .set_color(x as f64, (h - 1 - y) as f64, scene::color(rgb));
+                }
             }
         }
         self.canvas.draw(chunk)?;

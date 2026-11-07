@@ -1,84 +1,98 @@
 use super::*;
 use crossterm::event::KeyEvent;
+use scene::Action;
 
 #[test]
-fn embedded_sprites_survive_terminal_encoding_and_resize() {
+fn clips_use_distinct_embedded_drawings_and_loop_at_their_own_duration() {
+    for action in Action::ALL {
+        let mut seen = std::collections::BTreeSet::new();
+        for tick in 0..(action.duration() * 100.0) as usize {
+            let time = tick as f64 / 100.0;
+            let frame = scene::current_frame(time, Some(action));
+            assert!((action as usize * 4..action as usize * 4 + 4).contains(&frame));
+            assert_eq!(
+                frame,
+                scene::current_frame(time + action.duration(), Some(action))
+            );
+            seen.insert(frame);
+        }
+        assert_eq!(seen.len(), 4);
+        let frames: Vec<_> = seen
+            .into_iter()
+            .map(|index| {
+                &scene::SPRITES[index * scene::FRAME_BYTES..(index + 1) * scene::FRAME_BYTES]
+            })
+            .collect();
+        let distinct: std::collections::BTreeSet<_> = frames.iter().copied().collect();
+        assert_eq!(distinct.len(), if action == Action::Idle { 2 } else { 4 });
+        for frame in frames {
+            assert!(frame.chunks_exact(4).any(|px| px[3] == 0));
+            assert!(frame.chunks_exact(4).any(|px| px[3] == 255));
+        }
+    }
+}
+
+#[test]
+fn playlist_boundaries_and_authored_holds_are_deterministic() {
+    assert_eq!(Action::Idle.frame(0.899), 0);
+    assert_eq!(Action::Idle.frame(0.9), 1);
+    assert_eq!(Action::Idle.frame(1.5), 2);
+    assert_eq!(Action::Idle.frame(1.65), 3);
+    let mut time = 0.0;
+    for action in Action::ALL {
+        assert_eq!(scene::current_frame(time, None), action as usize * 4);
+        time += action.duration();
+    }
+    assert_eq!(time, scene::PERIOD);
+    for tick in 0..1702 {
+        let time = tick as f64 / 100.0;
+        assert_eq!(
+            scene::current_frame(time, None),
+            scene::current_frame(time + scene::PERIOD, None)
+        );
+    }
+}
+
+#[test]
+fn all_actions_survive_terminal_encoding_and_resize() {
     let mut nursery = Nursery::default();
-    for focus in [None, Some(0), Some(1), Some(2)] {
-        nursery.focus = focus;
-        for size in [(1, 1), (12, 6), (80, 24), (128, 32), (200, 40), (32, 60)] {
-            for time in [0.0, 2.78, 4.4, 7.99, 86400.0] {
+    for action in std::iter::once(None).chain(Action::ALL.map(Some)) {
+        nursery.action = action;
+        for size in [(1, 1), (12, 6), (80, 24), (80, 32), (200, 40), (32, 60)] {
+            for time in [0.0, 0.95, 1.55, 2.78, 4.4, 7.99, 86400.0] {
                 nursery.time = time;
                 let frame = export::frame(&mut nursery, size.into()).unwrap();
                 assert_eq!(frame.size(), Size::from(size));
                 assert!(frame.content().iter().all(|cell| !cell.content.is_empty()));
+                assert!(!export::snapshot(&frame).is_empty());
             }
         }
     }
 }
 
 #[test]
-fn each_character_blinks_hops_and_loops() {
-    for id in 0..3 {
+fn encoded_actions_change_visibly_at_normal_terminal_size() {
+    for action in Action::ALL {
         let mut nursery = Nursery {
-            focus: Some(id),
+            action: Some(action),
             ..Nursery::default()
         };
-        nursery.time = -(id as f64) * 2.0;
-        let idle = export::frame(&mut nursery, (128, 32).into()).unwrap();
-        nursery.time += 2.78;
-        let blink = export::frame(&mut nursery, (128, 32).into()).unwrap();
-        assert_ne!(idle.content(), blink.content());
-        nursery.time += scene::PERIOD;
-        let repeat = export::frame(&mut nursery, (128, 32).into()).unwrap();
-        assert_eq!(blink.content(), repeat.content());
-        nursery.time = 4.4 - id as f64 * 2.0;
-        let hop = export::frame(&mut nursery, (128, 32).into()).unwrap();
-        assert_ne!(idle.content(), hop.content());
+        let initial = export::frame(&mut nursery, (80, 24).into()).unwrap();
+        let changed = (1..20).any(|tick| {
+            nursery.time = tick as f64 * action.duration() / 20.0;
+            let next = export::frame(&mut nursery, (80, 24).into()).unwrap();
+            initial.content() != next.content()
+        });
+        assert!(
+            changed,
+            "{} lost motion after terminal encoding",
+            action.name()
+        );
     }
 }
 
 #[test]
-fn idle_motion_preserves_sprite_pixels_throughout_the_loop() {
-    // Remove translation and labels, retaining every colored sprite pixel.
-    // Both open-eye and blinking frames must keep a constant shape and color.
-    fn normalized_sprite(w: usize, h: usize, time: f64, id: usize) -> Vec<(usize, usize, [u8; 3])> {
-        let pixels = scene::render(w, h, time, Some(id));
-        let mut points: Vec<_> = pixels[..w * (h - 8)]
-            .iter()
-            .enumerate()
-            .filter(|(_, rgb)| **rgb != scene::BACKGROUND)
-            .map(|(i, &rgb)| (i % w, i / w, rgb))
-            .collect();
-        let left = points.iter().map(|p| p.0).min().unwrap();
-        let top = points.iter().map(|p| p.1).min().unwrap();
-        for point in &mut points {
-            point.0 -= left;
-            point.1 -= top;
-        }
-        points
-    }
-
-    for (w, h) in [(80, 48), (128, 64), (200, 80), (32, 120)] {
-        for id in 0..3 {
-            let offset = id as f64 * 2.0;
-            let open = normalized_sprite(w, h, -offset, id);
-            let closed = normalized_sprite(w, h, 2.78 - offset, id);
-            for frame in 0..192 {
-                let phase = frame as f64 / 24.0;
-                let blinking = (2.7..2.88).contains(&phase) || (6.1..6.24).contains(&phase);
-                let expected = if blinking { &closed } else { &open };
-                assert!(
-                    &normalized_sprite(w, h, phase - offset, id) == expected,
-                    "sprite {id} deformed at frame {frame} in {w}x{h}"
-                );
-            }
-        }
-    }
-}
-
-#[test]
-fn pause_focus_and_exit_controls_work() {
+fn pause_action_restart_and_exit_controls_work() {
     let mut nursery = Nursery::default();
     let press = |code| Event::Key(KeyEvent::new(code, KeyModifiers::NONE));
     nursery.on_events(&[press(KeyCode::Char(' '))]).unwrap();
@@ -87,10 +101,17 @@ fn pause_focus_and_exit_controls_work() {
     nursery.update().unwrap();
     nursery.update().unwrap();
     assert_eq!(time, nursery.time);
-    for (key, focus) in [('1', Some(0)), ('2', Some(1)), ('3', Some(2)), ('0', None)] {
-        nursery.on_events(&[press(KeyCode::Char(key))]).unwrap();
-        assert_eq!(nursery.focus, focus);
+    for (i, action) in Action::ALL.into_iter().enumerate() {
+        nursery.time = 10.0;
+        nursery
+            .on_events(&[press(KeyCode::Char(char::from(b'1' + i as u8)))])
+            .unwrap();
+        assert_eq!(nursery.action, Some(action));
+        assert_eq!(nursery.time, 0.0);
+        assert!(nursery.paused);
     }
+    nursery.on_events(&[press(KeyCode::Char('0'))]).unwrap();
+    assert_eq!(nursery.action, None);
     nursery.on_events(&[press(KeyCode::Char(' '))]).unwrap();
     assert!(!nursery.paused);
     for event in [
@@ -102,4 +123,132 @@ fn pause_focus_and_exit_controls_work() {
         nursery.on_events(&[event]).unwrap();
         assert!(nursery.should_quit());
     }
+}
+
+#[test]
+fn idle_and_wave_keep_hair_and_lower_body_identical() {
+    for (atlas, size) in [scene::atlas(48), scene::atlas(64)] {
+        let bytes = size * size * 4;
+        let base = &atlas[..bytes];
+        for frame in 1..8 {
+            let pixels = &atlas[frame * bytes..(frame + 1) * bytes];
+            for y in 0..size {
+                if y < size / 4 || y > size * 4 / 5 {
+                    assert_eq!(
+                        &base[y * size * 4..(y + 1) * size * 4],
+                        &pixels[y * size * 4..(y + 1) * size * 4],
+                        "stationary region changed in frame {frame}, row {y}, size {size}"
+                    );
+                }
+            }
+        }
+        for frame in [1, 3, 4] {
+            assert_eq!(base, &atlas[frame * bytes..(frame + 1) * bytes]);
+        }
+        let colors: std::collections::BTreeSet<_> = atlas
+            .chunks_exact(4)
+            .filter(|px| px[3] != 0)
+            .map(|px| &px[..3])
+            .collect();
+        assert!(colors.len() <= 25);
+        assert!(atlas.chunks_exact(4).all(|px| px[3] == 0 || px[3] == 255));
+    }
+}
+
+#[test]
+fn facial_skin_highlights_stay_warm_and_eye_glints_stay_white() {
+    for (size, skin_points, glint) in [
+        (64, [(32, 28), (33, 30), (25, 34), (32, 35)], (24, 30)),
+        (48, [(24, 21), (24, 25), (24, 26), (25, 26)], (18, 22)),
+    ] {
+        let (atlas, width) = scene::atlas(size);
+        let pixel = |frame: usize, x: usize, y: usize| {
+            let offset = (frame * width * width + y * width + x) * 4;
+            &atlas[offset..offset + 4]
+        };
+        for frame in [0, 1, 3, 4, 5, 7] {
+            for (x, y) in skin_points {
+                let rgba = pixel(frame, x, y);
+                assert_eq!(rgba[3], 255);
+                assert!(
+                    rgba[0] >= 239 && rgba[0] - rgba[2] >= 20,
+                    "skin turned white at frame {frame}, {x},{y}, size {size}: {rgba:?}"
+                );
+            }
+            let rgba = pixel(frame, glint.0, glint.1);
+            assert!(
+                rgba[..3].iter().all(|&channel| channel >= 245),
+                "eye glint was recolored at frame {frame}, size {size}"
+            );
+        }
+    }
+}
+
+#[test]
+fn terminal_encoding_preserves_every_sample_color() {
+    for (w, h) in [(80u16, 32u16), (80, 24), (51, 23), (32, 60)] {
+        for action in Action::ALL {
+            let mut nursery = Nursery {
+                action: Some(action),
+                time: 0.75,
+                ..Nursery::default()
+            };
+            let expected = scene::render(w as usize, h as usize * 2, nursery.time, nursery.action);
+            let buffer = export::frame(&mut nursery, (w, h).into()).unwrap();
+            let actual = export::rgba(&buffer);
+            for y in 0..usize::from(h) * 4 {
+                for x in 0..usize::from(w) * 2 {
+                    let offset = y * usize::from(w) * 2 + x;
+                    let expected = expected[(y / 2) * usize::from(w) + x / 2]
+                        .map_or([0, 0, 0, 0], |[r, g, b]| [r, g, b, 255]);
+                    assert_eq!(actual[offset], expected);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn transparent_cells_and_edges_inherit_terminal_background_without_trails() {
+    use rsille::render::buffer::Buffer;
+    let size: Size = (80, 32).into();
+    let mut buffer = Buffer::new(size);
+    let mut nursery = Nursery::default();
+    let mut saw_partial = false;
+    let mut saw_cleared = false;
+    let mut previous = vec![false; 80 * 32];
+    for time in [0.0, 3.1, 6.65, 13.0, 0.0] {
+        buffer.clear();
+        nursery.time = time;
+        nursery
+            .draw(Chunk::new(&mut buffer, size.into()).unwrap())
+            .unwrap();
+        let pixels = scene::render(80, 64, time, None);
+        for y in 0..32 {
+            for x in 0..80 {
+                let cell = buffer.get((x as u16, y as u16).into()).unwrap();
+                let top = pixels[(y * 2) * 80 + x];
+                let bottom = pixels[(y * 2 + 1) * 80 + x];
+                if top.is_none() || bottom.is_none() {
+                    assert_eq!(cell.style.colors.and_then(|c| c.background), None);
+                }
+                if top.is_none() && bottom.is_none() {
+                    assert_eq!(cell.as_char(), Some(' '));
+                    assert_eq!(cell.style.colors.and_then(|c| c.foreground), None);
+                    saw_cleared |= previous[y * 80 + x];
+                } else if top.is_none() || bottom.is_none() {
+                    saw_partial = true;
+                }
+                previous[y * 80 + x] = top.is_some() || bottom.is_some();
+            }
+        }
+    }
+    assert!(
+        saw_partial,
+        "must exercise a partially transparent character cell"
+    );
+    assert!(
+        saw_cleared,
+        "must exercise pixels vacated by the previous pose"
+    );
 }

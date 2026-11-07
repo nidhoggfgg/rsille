@@ -131,10 +131,11 @@ DeepSeek's whale girl, Claude's book girl and ChatGPT's white dragon girl.
 Expressive faces, distinct costumes, squash-and-stretch poses and flowing chase paths
 bring whale splashes, flying pages and dragon breath into a 24-second inline loop. Character references and credits are included in the example.
 
-[AI Babies](examples/ai-babies/README.md) displays reference-based pixel versions of
-DeepSeek's blue-haired whale maid, Claude's orange-haired sun-flower girl and
-ChatGPT's white dragon girl, with quiet idle breathing, blinks and tiny hops. Embedded pixel sprites render
-through Half-block cells; press 1/2/3 to inspect one character, 0 for all, or Space to pause.
+[AI Babies](examples/ai-babies/README.md) plays a single white-and-lavender dragon pet
+from 24 pre-drawn sprite frames: idle, wave, walk, hop, think and sleep.
+Clips share a fixed palette and stable idle/wave body pixels. Half-block cells
+preserve the sampled colors; press 1–6
+to select an action, 0 for the automatic playlist, or Space to pause.
 
 Use a frosted background on any widget:
 

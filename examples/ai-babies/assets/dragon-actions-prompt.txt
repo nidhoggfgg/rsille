@@ -1,0 +1,12 @@
+Use case: stylized-concept
+Asset type: production sprite animation atlas for a small terminal desktop pet.
+Reference image: /home/nidhogg/project/rsille/examples/ai-babies/assets/chibi-trio-source.png is the character identity and pixel art style reference. Use ONLY the RIGHTMOST white/lavender dragon girl. Do not include the blue or orange characters.
+Primary request: create a single transparent sprite sheet, exactly FOUR COLUMNS and SIX ROWS, 24 evenly spaced animation frames. Canvas portrait 1024x1536 (each cell 256x256). Each cell depicts the SAME ONE chibi dragon girl at consistent scale, camera and baseline. Large head, lavender bob hair, two pale horns, purple eyes, tiny white/lavender dragon wings, curled tail, white dress with a few gold details, dark purple pixel outlines, reference's cute expressive face. Faithful to reference, simplify tiny garment noise for terminal visibility. Crisp low-resolution pixel art, clean discrete color clusters, no antialiasing, no text.
+Animation frames left to right, rows top to bottom:
+Row 1 IDLE: neutral open eyes; slight breath and tail sway; eyes closed blinking; return to neutral.
+Row 2 WAVE: relaxed arms; right hand raised; right hand waving out with happy smile; hand waving inward. Keep left arm normal.
+Row 3 WALK: three-quarter facing right, left foot forward; feet passing; right foot forward; feet passing opposite, with corresponding arm and tail movement.
+Row 4 HOP: standing; crouch preparing to jump; airborne feet lifted wings spread cheerful face; landing soft crouch.
+Row 5 THINK: neutral; hand lifted to chin; head slightly tilted eyes looking up; hand to chin eyes looking the other way.
+Row 6 SLEEP: sitting low sleepy half-closed eyes; curled seated eyes closed; seated sleeping slight head dip; seated sleeping head slightly raised. No floating letters.
+Constraints: exactly 4x6 equal grid with invisible boundaries; each character entirely inside its own cell with generous transparent padding, no sprites touching adjacent cells. Same character size and head proportions in every frame, consistent fixed ground line except the airborne hop frame, no per-frame zoom. All poses genuinely drawn as animation keyframes with changing limbs and expressions. TRANSPARENT background, no floor, no shadow, no checkerboard, no labels, no grid lines, no scenery, no additional characters.
