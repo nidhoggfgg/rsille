@@ -6,7 +6,14 @@ use crate::tui::layout::{AxisLimit, Constraints, LayoutStyle, SizeProposal};
 use crate::tui::widget::{MeasureCtx, Widget, WidgetKey};
 use taffy::prelude::*;
 
-/// Layout manager using Taffy for flexbox layout
+/// Adapter from widget size preferences to Taffy flexbox and grid layouts.
+///
+/// Returned areas follow input order and use `available`'s coordinate space,
+/// including its origin. Floating-point edges are rounded outward to terminal
+/// cells and bounded by the available rectangle. Empty input returns an empty
+/// vector. Each nonempty computation rebuilds the tree; this is not a layout cache.
+///
+/// Prefer [`super::Flex`] or [`super::Grid`] for ordinary widget composition.
 pub struct TaffyBridge {
     tree: TaffyTree<usize>,
 }
@@ -18,13 +25,23 @@ impl Default for TaffyBridge {
 }
 
 impl TaffyBridge {
+    /// Creates an empty layout bridge. Nonempty computations rebuild its internal tree.
     pub fn new() -> Self {
         Self {
             tree: TaffyTree::new(),
         }
     }
 
-    /// Compute layout for a list of widgets
+    /// Computes flex layout from [`Widget::constraints`] without calling measurement.
+    ///
+    /// `gap` is the main-axis spacing in cells. `align_items` controls the cross
+    /// axis and `justify_content` the main axis; `None` uses Taffy's defaults.
+    /// Use [`Self::compute_layout_measured`] for intrinsic content measurement.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`WidgetError`](crate::tui::WidgetError) if Taffy fails to create
+    /// nodes, compute layout, or retrieve a computed layout.
     pub fn compute_layout<M>(
         &mut self,
         widgets: &[Box<dyn Widget<M>>],
@@ -95,7 +112,17 @@ impl TaffyBridge {
         Ok(results)
     }
 
-    /// Compute flex layout using widget measurement callbacks for leaf nodes.
+    /// Computes flex layout using widget measurement callbacks for leaf nodes.
+    ///
+    /// Reads [`Widget::layout_style_with`] and calls [`Widget::measure`] with
+    /// child contexts derived from `measure_ctx`. Known dimensions become exact
+    /// proposals; finite available space becomes an upper bound. `gap` is in
+    /// cells, and alignment options have the same meaning as [`Self::compute_layout`].
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`WidgetError`](crate::tui::WidgetError) if Taffy fails to create
+    /// nodes, compute layout, or retrieve a computed layout.
     pub fn compute_layout_measured<M>(
         &mut self,
         widgets: &[Box<dyn Widget<M>>],
@@ -187,7 +214,17 @@ impl TaffyBridge {
         Ok(results)
     }
 
-    /// Compute grid layout for a list of widgets with placement information
+    /// Computes measured grid layout for widgets paired with placement information.
+    ///
+    /// Templates describe explicit column and row tracks. Gaps are in cells;
+    /// `align_items` controls vertical alignment and `justify_items` horizontal
+    /// alignment within each grid area. `None` uses Taffy's defaults. Child
+    /// measurement contexts are derived from `measure_ctx` in input order.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`WidgetError`](crate::tui::WidgetError) if Taffy fails to create
+    /// nodes, compute layout, or retrieve a computed layout.
     pub fn compute_grid_layout_with_placement<M>(
         &mut self,
         items: &[(&dyn Widget<M>, &super::grid_placement::GridPlacement)],

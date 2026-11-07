@@ -3,14 +3,20 @@
 /// Horizontal placement of content inside available terminal cells.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum HorizontalAlign {
+    /// Aligns to the left edge (the default).
     #[default]
     Left,
+    /// Centers horizontally, leaving any odd spare cell on the right.
     Center,
+    /// Aligns to the right edge.
     Right,
 }
 
 impl HorizontalAlign {
     /// Returns the leading cell offset for `content` inside `available`.
+    ///
+    /// Returns zero when content fills or exceeds the available extent;
+    /// centered offsets use integer division, rounding down.
     pub fn offset(self, available: u16, content: u16) -> u16 {
         if content >= available {
             return 0;
@@ -28,14 +34,20 @@ impl HorizontalAlign {
 /// Vertical placement of content inside available terminal rows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum VerticalAlign {
+    /// Aligns to the top edge (the default).
     #[default]
     Top,
+    /// Centers vertically, leaving any odd spare row below.
     Middle,
+    /// Aligns to the bottom edge.
     Bottom,
 }
 
 impl VerticalAlign {
     /// Returns the leading row offset for `content` inside `available`.
+    ///
+    /// Returns zero when content fills or exceeds the available extent;
+    /// centered offsets use integer division, rounding down.
     pub fn offset(self, available: u16, content: u16) -> u16 {
         if content >= available {
             return 0;

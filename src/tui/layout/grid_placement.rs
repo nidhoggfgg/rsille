@@ -1,9 +1,13 @@
-//! Grid item placement types
+//! Grid-line coordinates and builders for explicit child placement.
 
 /// Grid line position
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum GridLine {
-    /// Start at a specific line number (1-indexed)
+    /// Selects a grid line using CSS-style numbering.
+    ///
+    /// Positive numbers are one-based; negative numbers count backward from the
+    /// end of the explicit grid (`-1` is its final line). Zero is not a valid
+    /// explicit line; the underlying layout engine treats it as automatic.
     Line(i16),
     /// Auto placement
     #[default]
@@ -11,7 +15,10 @@ pub enum GridLine {
 }
 
 impl GridLine {
-    /// Parse a grid line from a string
+    /// Parses `"auto"` or an `i16` line number after trimming whitespace.
+    ///
+    /// Returns `None` for unknown keywords or out-of-range integers. Parsing
+    /// does not validate line semantics: zero and negative numbers are accepted.
     ///
     /// # Examples
     /// ```
@@ -34,16 +41,23 @@ impl GridLine {
 
 /// Grid item placement information
 ///
-/// Defines where a grid item should be placed in the grid.
+/// Defines start and end grid lines for each axis. All lines default to
+/// [`GridLine::Auto`]. End lines are exclusive, not span counts. The bridge
+/// currently ignores an explicit end when the corresponding start is automatic.
+///
+/// Span builders compute `end = start + span as i16`; use positive starts and
+/// spans with both the span and `start + span` representable in `i16`.
+/// These builders do not store a CSS
+/// `span` value, so negative starts need particular care when crossing zero.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GridPlacement {
     /// Column start position
     pub column_start: GridLine,
-    /// Column end position (or span)
+    /// Exclusive column end line; not a span count.
     pub column_end: GridLine,
     /// Row start position
     pub row_start: GridLine,
-    /// Row end position (or span)
+    /// Exclusive row end line; not a span count.
     pub row_end: GridLine,
 }
 
@@ -72,6 +86,8 @@ impl GridPlacement {
     ///
     /// let placement = GridPlacement::new().column(2); // Second column
     /// ```
+    ///
+    /// Existing end lines are preserved; use a fresh placement for automatic ends.
     pub fn column(mut self, line: i16) -> Self {
         self.column_start = GridLine::Line(line);
         self
@@ -85,6 +101,12 @@ impl GridPlacement {
     ///
     /// let placement = GridPlacement::new().column_span(1, 2); // Starts at column 1, spans 2 columns
     /// ```
+    ///
+    /// # Panics
+    ///
+    /// In builds with overflow checks enabled, panics if adding the span (cast
+    /// to `i16`) to the start overflows. Use positive starts and spans, with
+    /// both the span and the resulting end line representable in `i16`.
     pub fn column_span(mut self, start: i16, span: u16) -> Self {
         self.column_start = GridLine::Line(start);
         self.column_end = GridLine::Line(start + span as i16);
@@ -99,6 +121,8 @@ impl GridPlacement {
     ///
     /// let placement = GridPlacement::new().row(2); // Second row
     /// ```
+    ///
+    /// Existing end lines are preserved; use a fresh placement for automatic ends.
     pub fn row(mut self, line: i16) -> Self {
         self.row_start = GridLine::Line(line);
         self
@@ -112,6 +136,12 @@ impl GridPlacement {
     ///
     /// let placement = GridPlacement::new().row_span(1, 2); // Starts at row 1, spans 2 rows
     /// ```
+    ///
+    /// # Panics
+    ///
+    /// In builds with overflow checks enabled, panics if adding the span (cast
+    /// to `i16`) to the start overflows. Use positive starts and spans, with
+    /// both the span and the resulting end line representable in `i16`.
     pub fn row_span(mut self, start: i16, span: u16) -> Self {
         self.row_start = GridLine::Line(start);
         self.row_end = GridLine::Line(start + span as i16);
@@ -130,6 +160,8 @@ impl GridPlacement {
     ///
     /// let placement = GridPlacement::new().area(2, 3); // Column 2, Row 3
     /// ```
+    ///
+    /// Existing end lines are preserved; use a fresh placement for automatic ends.
     pub fn area(mut self, column: i16, row: i16) -> Self {
         self.column_start = GridLine::Line(column);
         self.row_start = GridLine::Line(row);
@@ -151,6 +183,12 @@ impl GridPlacement {
     /// // Starts at column 1, row 1, spans 2 columns and 2 rows
     /// let placement = GridPlacement::new().area_span(1, 1, 2, 2);
     /// ```
+    ///
+    /// # Panics
+    ///
+    /// In builds with overflow checks enabled, panics if adding the span (cast
+    /// to `i16`) to the start overflows. Use positive starts and spans, with
+    /// both the span and the resulting end line representable in `i16`.
     pub fn area_span(
         mut self,
         column_start: i16,

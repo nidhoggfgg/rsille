@@ -14,16 +14,23 @@ use crate::tui::widget::{
 /// Split direction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SplitDirection {
+    /// Places the first pane on the left and the second on the right (the default).
     #[default]
     Horizontal,
+    /// Places the first pane above the second.
     Vertical,
 }
 
 /// Initial sizing mode for a split layout.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SplitSize {
+    /// Allocates this fraction of the space remaining after the divider to the first pane.
+    ///
+    /// The default is `0.5`.
     Ratio(f32),
+    /// Requests a fixed initial extent for the first pane, in cells.
     First(u16),
+    /// Requests a fixed initial extent for the second pane, in cells.
     Second(u16),
 }
 
@@ -36,7 +43,9 @@ impl Default for SplitSize {
 /// Persistent split state stored in the widget store.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct SplitState {
+    /// First pane extent in cells after interaction; `None` uses the configured initial size.
     pub first_size: Option<u16>,
+    /// Whether the divider is currently being dragged; initially false.
     pub dragging: bool,
 }
 
@@ -48,7 +57,28 @@ struct SplitLayout {
     first_size: u16,
 }
 
-/// Two-pane resizable split container.
+/// Two-pane container with a draggable divider and keyboard resizing.
+///
+/// Arrow keys along the split axis resize the first pane; Home/End move to the
+/// permitted extremes. The divider consumes space before pane sizing. Minimums
+/// come from child layout styles unless overridden. When both minimums cannot
+/// fit, the first pane's minimum takes priority. If the allocation is no larger
+/// than the divider along the split axis, no panes are laid out.
+///
+/// Resizing stores an absolute cell extent in [`SplitState`], which takes
+/// precedence over initial sizing on subsequent layouts.
+///
+/// # Examples
+///
+/// ```
+/// use rsille::tui::{layout::split, widgets::label};
+///
+/// let view = split(label::<()>("Navigation"), label("Content"))
+///     .sidebar(20)
+///     .min_first(10)
+///     .min_second(20)
+///     .key("main-split");
+/// ```
 pub struct Split<M = ()> {
     children: Vec<Box<dyn Widget<M>>>,
     direction: SplitDirection,
@@ -78,6 +108,10 @@ impl<M> std::fmt::Debug for Split<M> {
 }
 
 impl<M> Split<M> {
+    /// Creates a horizontal, evenly split pair with a one-cell divider.
+    ///
+    /// Resizing is enabled with a two-cell keyboard step. Minimum sizes are
+    /// taken from the children unless explicitly overridden.
     pub fn new(first: impl IntoWidget<M>, second: impl IntoWidget<M>) -> Self {
         Self {
             children: vec![first.into_widget(), second.into_widget()],
@@ -94,77 +128,99 @@ impl<M> Split<M> {
         }
     }
 
+    /// Sets the axis along which the two panes are arranged.
     pub fn direction(mut self, direction: SplitDirection) -> Self {
         self.direction = direction;
         self
     }
 
+    /// Places panes side by side, with the first on the left.
     pub fn horizontal(mut self) -> Self {
         self.direction = SplitDirection::Horizontal;
         self
     }
 
+    /// Stacks panes vertically, with the first on top.
     pub fn vertical(mut self) -> Self {
         self.direction = SplitDirection::Vertical;
         self
     }
 
+    /// Sets the initial first-pane fraction of space remaining after the divider.
+    ///
+    /// Finite values are clamped to `0.0..=1.0`. Stored interactive state takes
+    /// precedence over this initial setting.
     pub fn ratio(mut self, ratio: f32) -> Self {
         self.initial_size = SplitSize::Ratio(ratio.clamp(0.0, 1.0));
         self
     }
 
+    /// Sets the initial first-pane extent in cells, before minimum-size clamping.
+    ///
+    /// Stored interactive state takes precedence.
     pub fn first_size(mut self, size: u16) -> Self {
         self.initial_size = SplitSize::First(size);
         self
     }
 
+    /// Sets the initial second-pane extent in cells, before minimum-size clamping.
+    ///
+    /// Stored interactive state takes precedence.
     pub fn second_size(mut self, size: u16) -> Self {
         self.initial_size = SplitSize::Second(size);
         self
     }
 
+    /// Selects a horizontal split with the given initial first-pane width in columns.
     pub fn sidebar(mut self, width: u16) -> Self {
         self.initial_size = SplitSize::First(width);
         self.direction = SplitDirection::Horizontal;
         self
     }
 
+    /// Overrides the first pane's minimum extent along the split axis, in cells.
     pub fn min_first(mut self, size: u16) -> Self {
         self.min_first = Some(size);
         self
     }
 
+    /// Overrides the second pane's minimum extent along the split axis, in cells.
     pub fn min_second(mut self, size: u16) -> Self {
         self.min_second = Some(size);
         self
     }
 
+    /// Sets divider thickness in cells; zero is promoted to one.
     pub fn divider_size(mut self, size: u16) -> Self {
         self.divider_size = size.max(1);
         self
     }
 
+    /// Overrides the divider style; defaults to the theme border merged with its surface.
     pub fn divider_style(mut self, style: Style) -> Self {
         self.divider_style = Some(style);
         self
     }
 
+    /// Overrides the divider handle style; defaults to the theme's focused selection style.
     pub fn handle_style(mut self, style: Style) -> Self {
         self.handle_style = Some(style);
         self
     }
 
+    /// Sets a stable key for widget identity and persistent state.
     pub fn key(mut self, name: impl Into<String>) -> Self {
         self.widget_key = Some(name.into());
         self
     }
 
+    /// Enables or disables pointer and keyboard resizing; enabled by default.
     pub fn resizable(mut self, resizable: bool) -> Self {
         self.resizable = resizable;
         self
     }
 
+    /// Sets the arrow-key resize step in cells; defaults to two, with a minimum of one.
     pub fn resize_step(mut self, step: u16) -> Self {
         self.resize_step = step.max(1);
         self

@@ -12,8 +12,12 @@ use crate::tui::{
         FloatingWindow, FloatingWindowState, WindowProjection, WindowVisibility,
     },
 };
+/// Persistent active-window and stacking state stored under the host's widget identity.
+///
+/// The default has no active window and an empty ordering.
 #[derive(Debug, Clone, Default)]
 pub struct WindowHostState {
+    /// Stable key of the active window, or `None` when the base is active.
     pub active_window: Option<String>,
     /// Back to front logical ids. Reordering preserves keyed child identities.
     pub order: Vec<String>,
@@ -25,6 +29,13 @@ struct WindowMeta {
     max: (u16, u16),
     projection: WindowProjection,
 }
+/// Non-modal host that constrains floating windows to a shared viewport.
+///
+/// The base fills the allocation. Windows use the padded viewport, paint
+/// above the base, and retain identity through their unique keys. The active
+/// window paints last. Pointer presses and keyboard focus update activation.
+///
+/// Create a host with [`window_host`] and add windows with [`Self::window`].
 pub struct WindowHost<M = ()> {
     children: Vec<Box<dyn Widget<M>>>,
     windows: Vec<WindowMeta>,
@@ -35,6 +46,19 @@ pub struct WindowHost<M = ()> {
     snap: u16,
     on_active: Option<Box<dyn Fn(Option<String>) -> M>>,
 }
+/// Creates a host around a base widget, with no windows, padding, or edge snapping.
+///
+/// # Examples
+///
+/// ```
+/// use rsille::tui::{layout::window_host, widgets::{floating_window, label}};
+///
+/// let view = window_host(label::<()>("Desktop"))
+///     .key("desktop")
+///     .window(floating_window(label("Notes")).key("notes"))
+///     .default_active_window(Some("notes".into()))
+///     .snap_distance(2);
+/// ```
 pub fn window_host<M>(base: impl IntoWidget<M>) -> WindowHost<M> {
     WindowHost {
         children: vec![base.into_widget()],
@@ -48,10 +72,18 @@ pub fn window_host<M>(base: impl IntoWidget<M>) -> WindowHost<M> {
     }
 }
 impl<M: 'static> WindowHost<M> {
+    /// Sets a stable key for widget identity and persistent state.
     pub fn key(mut self, key: impl Into<String>) -> Self {
         self.key = Some(key.into());
         self
     }
+    /// Appends a floating window to the host.
+    ///
+    /// Its stable key is also its logical ID for activation and stacking.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the window has no key or another window already uses that key.
     pub fn window(mut self, window: FloatingWindow<M>) -> Self {
         let id = Widget::key(&window)
             .expect("FloatingWindow in WindowHost requires a stable key")
@@ -70,14 +102,26 @@ impl<M: 'static> WindowHost<M> {
         self.children.push(Box::new(window));
         self
     }
+    /// Sets the authoritative active-window key for this view.
+    ///
+    /// `None` explicitly selects no window; omitting this method leaves
+    /// activation managed by host state. Pair with [`Self::on_active_window_change`]
+    /// to keep application state synchronized with interactions.
     pub fn active_window(mut self, id: Option<String>) -> Self {
         self.active = Some(id);
         self
     }
+    /// Sets the initial active-window key, applied only when the host mounts.
+    ///
+    /// An explicit [`Self::active_window`] value takes precedence.
     pub fn default_active_window(mut self, id: Option<String>) -> Self {
         self.default_active = id;
         self
     }
+    /// Emits a notification when interaction changes the active window.
+    ///
+    /// The argument is the window's stable key, or `None` for the base. Use the
+    /// message to update application state when controlling activation.
     pub fn on_active_window_change(
         mut self,
         handler: impl Fn(Option<String>) -> M + 'static,
@@ -85,12 +129,16 @@ impl<M: 'static> WindowHost<M> {
         self.on_active = Some(Box::new(handler));
         self
     }
-    /// Padding reserves viewport space for application-composed docks or toolbars.
+    /// Reserves viewport space in cells for application-composed docks or toolbars.
+    ///
+    /// Only windows use the inset viewport; the base still fills the host area.
     pub fn padding(mut self, padding: Padding) -> Self {
         self.padding = padding;
         self
     }
-    /// Edge snapping occurs on release; zero disables snapping.
+    /// Sets the edge snapping distance in cells, for all existing and future windows.
+    ///
+    /// Snapping occurs on release; zero (the default) disables it.
     pub fn snap_distance(mut self, distance: u16) -> Self {
         self.snap = distance;
         for w in &self.windows {

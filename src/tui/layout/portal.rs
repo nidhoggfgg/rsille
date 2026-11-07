@@ -15,6 +15,9 @@ pub struct Portal<M = ()> {
     children: Vec<Box<dyn Widget<M>>>,
 }
 impl<M> Portal<M> {
+    /// Creates a root host with a base widget and no floating layers.
+    ///
+    /// The base determines the host's constraints and measured size.
     pub fn new(base: impl IntoWidget<M>) -> Self {
         Self {
             children: vec![base.into_widget()],
@@ -56,6 +59,24 @@ impl<M> Widget<M> for Portal<M> {
 /// A floating surface. By default it is centered. An anchored surface prefers
 /// below its anchor, flips above if it fits, then clamps to the host viewport.
 /// A missing/offscreen anchor falls back to centered placement.
+///
+/// Dismissal emits a message; the application must remove the layer from its
+/// next view to close it. Modal behavior is opt-in via [`Self::modal`].
+///
+/// # Examples
+///
+/// ```
+/// use rsille::tui::{layout::{portal, PortalLayer}, widgets::label};
+///
+/// enum Message { Close }
+/// let view = portal(label::<Message>("Application")).layer(
+///     PortalLayer::new(label("Press Escape to close"))
+///         .key("dialog")
+///         .size(30, 5)
+///         .modal(true)
+///         .on_dismiss(|| Message::Close),
+/// );
+/// ```
 pub struct PortalLayer<M = ()> {
     children: Vec<Box<dyn Widget<M>>>,
     anchor: Option<WidgetId>,
@@ -66,6 +87,9 @@ pub struct PortalLayer<M = ()> {
     key: Option<String>,
 }
 impl<M> PortalLayer<M> {
+    /// Creates a centered, non-modal layer with measured size and no dismissal handler.
+    ///
+    /// Outside-click dismissal is enabled, but requires [`Self::on_dismiss`].
     pub fn new(content: impl IntoWidget<M>) -> Self {
         Self {
             children: vec![content.into_widget()],
@@ -77,14 +101,23 @@ impl<M> PortalLayer<M> {
             key: None,
         }
     }
+    /// Anchors to the displayed bounds of a widget identity.
+    ///
+    /// Place the anchor in the base or an earlier layer so its bounds are
+    /// available when this layer paints. Missing or offscreen anchors center
+    /// the layer instead.
     pub fn anchor(mut self, id: WidgetId) -> Self {
         self.anchor = Some(id);
         self
     }
+    /// Sets explicit dimensions in terminal cells, capped to the host viewport.
     pub fn size(mut self, width: u16, height: u16) -> Self {
         self.size = Some((width, height));
         self
     }
+    /// Sets whether this layer owns modal input and traps Tab focus; defaults to false.
+    ///
+    /// When several modal layers exist, the last one owns input.
     pub fn modal(mut self, modal: bool) -> Self {
         self.modal = modal;
         self
@@ -94,12 +127,16 @@ impl<M> PortalLayer<M> {
         self.dismiss_on_outside_click = dismiss;
         self
     }
+    /// Sets a stable key for widget identity and persistent state.
     pub fn key(mut self, key: impl Into<String>) -> Self {
         self.key = Some(key.into());
         self
     }
-    /// Escape and a left click outside the content request dismissal. The click
-    /// is consumed; it never activates the background control beneath it.
+    /// Emits a dismissal message for an unhandled Escape press or, when enabled,
+    /// a left click outside the content. The event is consumed and propagation
+    /// stops, so the click does not activate a background control.
+    ///
+    /// The application must remove the layer in response to this message.
     pub fn on_dismiss(mut self, handler: impl Fn() -> M + 'static) -> Self {
         self.on_dismiss = Some(Box::new(handler));
         self
@@ -208,6 +245,7 @@ impl<M> Widget<M> for PortalLayer<M> {
         }
     }
 }
+/// Creates a root portal host around a base widget; see [`Portal`].
 pub fn portal<M>(base: impl IntoWidget<M>) -> Portal<M> {
     Portal::new(base)
 }

@@ -16,7 +16,24 @@ use taffy::style::{AlignItems, JustifyItems};
 
 /// Grid layout widget that arranges children in a 2D grid.
 ///
-/// This is a pure layout container — it does not handle events or manage focus.
+/// Tracks can be fixed, fractional, or content-sized. Children are placed
+/// automatically unless added with [`Self::child_at`], [`Self::child_area`], or
+/// [`Self::child_span`]. The framework routes events and applies focus scopes.
+///
+/// # Examples
+///
+/// ```
+/// use rsille::tui::{layout::grid, widgets::label};
+///
+/// let view = grid::<()>()
+///     .columns("12 1fr")
+///     .rows("auto auto")
+///     .gap_column(1)
+///     .child_span(label("Heading"), 1, 1, 2, 1)
+///     .child_area(label("Name"), 1, 2)
+///     .child_area(label("Ada"), 2, 2);
+/// assert_eq!(view.len(), 3);
+/// ```
 pub struct Grid<M = ()> {
     children: Vec<Box<dyn Widget<M>>>,
     placements: Vec<GridPlacement>,
@@ -49,6 +66,9 @@ impl<M> std::fmt::Debug for Grid<M> {
 }
 
 impl<M> Grid<M> {
+    /// Creates an empty grid with one `1fr` column and one `auto` row.
+    ///
+    /// Gaps and padding are zero; no border or focus scope is configured.
     pub fn new() -> Self {
         Self {
             children: Vec::new(),
@@ -68,76 +88,96 @@ impl<M> Grid<M> {
         }
     }
 
+    /// Sets columns from a [`GridTrack::parse_template`] string.
+    ///
+    /// Invalid tokens are skipped. For example, `"20 1fr"` defines a fixed sidebar
+    /// and a flexible content column.
     pub fn columns(mut self, template: &str) -> Self {
         self.template_columns = GridTrack::parse_template(template);
         self
     }
 
+    /// Sets rows from a [`GridTrack::parse_template`] string; invalid tokens are skipped.
     pub fn rows(mut self, template: &str) -> Self {
         self.template_rows = GridTrack::parse_template(template);
         self
     }
 
+    /// Replaces the column template with explicit track sizes.
     pub fn template_columns(mut self, tracks: Vec<GridTrack>) -> Self {
         self.template_columns = tracks;
         self
     }
 
+    /// Replaces the row template with explicit track sizes.
     pub fn template_rows(mut self, tracks: Vec<GridTrack>) -> Self {
         self.template_rows = tracks;
         self
     }
 
+    /// Sets the default row and column spacing in cells.
+    ///
+    /// Explicit [`Self::gap_row`] and [`Self::gap_column`] values take precedence.
     pub fn gap(mut self, gap: u16) -> Self {
         self.gap = gap;
         self
     }
 
+    /// Sets row spacing in cells, overriding [`Self::gap`].
     pub fn gap_row(mut self, gap: u16) -> Self {
         self.gap_row = Some(gap);
         self
     }
 
+    /// Sets column spacing in cells, overriding [`Self::gap`].
     pub fn gap_column(mut self, gap: u16) -> Self {
         self.gap_column = Some(gap);
         self
     }
 
+    /// Sets inner spacing in terminal cells, inside any border; defaults to zero.
     pub fn padding(mut self, padding: Padding) -> Self {
         self.padding = padding;
         self
     }
 
+    /// Sets the container style, merged with the theme when rendering.
     pub fn style(mut self, style: Style) -> Self {
         self.style = style;
         self
     }
 
+    /// Adds a one-cell border around the content and padding.
     pub fn border(mut self, border: BorderStyle) -> Self {
         self.border = Some(border);
         self
     }
 
+    /// Sets vertical alignment of children within their grid areas; defaults to stretch.
     pub fn align_items(mut self, align: AlignItems) -> Self {
         self.align_items = Some(align);
         self
     }
 
+    /// Sets horizontal alignment of children within their grid areas; defaults to stretch.
     pub fn justify_items(mut self, justify: JustifyItems) -> Self {
         self.justify_items = Some(justify);
         self
     }
 
+    /// Sets a stable key for widget identity and persistent state.
     pub fn key(mut self, name: impl Into<String>) -> Self {
         self.widget_key = Some(name.into());
         self
     }
 
+    /// Configures focus traversal for descendants of this container.
     pub fn focus_scope(mut self, scope: FocusScope) -> Self {
         self.focus_scope = Some(scope);
         self
     }
 
+    /// Traps Tab traversal within this container and restores its last focused child on entry.
     pub fn trap_focus(self) -> Self {
         self.focus_scope(
             FocusScope::new()
@@ -146,6 +186,7 @@ impl<M> Grid<M> {
         )
     }
 
+    /// Applies `f` only when `condition` is true; otherwise returns this builder unchanged.
     pub fn when<F>(self, condition: bool, f: F) -> Self
     where
         F: FnOnce(Self) -> Self,
@@ -157,32 +198,41 @@ impl<M> Grid<M> {
         }
     }
 
+    /// Returns the number of children.
     pub fn len(&self) -> usize {
         self.children.len()
     }
 
+    /// Returns whether the container has no children.
     pub fn is_empty(&self) -> bool {
         self.children.is_empty()
     }
 }
 
 impl<M> Grid<M> {
+    /// Appends a child with automatic placement.
     pub fn child(mut self, widget: impl IntoWidget<M>) -> Self {
         self.children.push(widget.into_widget());
         self.placements.push(GridPlacement::default());
         self
     }
 
+    /// Appends a child with explicit grid-line placement.
     pub fn child_at(mut self, widget: impl IntoWidget<M>, placement: GridPlacement) -> Self {
         self.children.push(widget.into_widget());
         self.placements.push(placement);
         self
     }
 
+    /// Appends a child at the given column and row start lines (positive lines are one-based).
     pub fn child_area(self, widget: impl IntoWidget<M>, column: i16, row: i16) -> Self {
         self.child_at(widget, GridPlacement::new().area(column, row))
     }
 
+    /// Appends a child spanning the given number of columns and rows.
+    ///
+    /// Positive start lines are one-based. See [`GridPlacement::area_span`] for
+    /// valid span arithmetic and panic conditions.
     pub fn child_span(
         self,
         widget: impl IntoWidget<M>,
@@ -197,6 +247,7 @@ impl<M> Grid<M> {
         )
     }
 
+    /// Appends children in iteration order, each with automatic placement.
     pub fn children<I>(mut self, widgets: I) -> Self
     where
         I: IntoIterator,

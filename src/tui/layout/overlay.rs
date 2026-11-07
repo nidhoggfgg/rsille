@@ -11,27 +11,43 @@ use crate::tui::widget::{EventCtx, IntoWidget, MeasureCtx, RenderCtx, Widget, Wi
 /// Cardinal anchor positions used for floating layers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OverlayAnchor {
+    /// The top-left corner.
     TopLeft,
+    /// The midpoint of the top edge.
     Top,
+    /// The top-right corner.
     TopRight,
+    /// The midpoint of the left edge.
     Left,
+    /// The center of the rectangle.
     Center,
+    /// The midpoint of the right edge.
     Right,
+    /// The bottom-left corner.
     BottomLeft,
+    /// The midpoint of the bottom edge.
     Bottom,
+    /// The bottom-right corner.
     BottomRight,
 }
 
-/// Rectangle used to anchor a floating layer.
+/// Rectangle used to anchor a floating layer, relative to the overlay container.
+///
+/// A tuple `(x, y, width, height)` can be converted into this type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AnchorRect {
+    /// Horizontal offset from the overlay container's left edge, in cells.
     pub x: u16,
+    /// Vertical offset from the overlay container's top edge, in cells.
     pub y: u16,
+    /// Rectangle width in terminal columns.
     pub width: u16,
+    /// Rectangle height in terminal rows.
     pub height: u16,
 }
 
 impl AnchorRect {
+    /// Creates a container-relative rectangle in terminal cells.
     pub fn new(x: u16, y: u16, width: u16, height: u16) -> Self {
         Self {
             x,
@@ -56,24 +72,43 @@ impl From<(u16, u16, u16, u16)> for AnchorRect {
 }
 
 /// Placement strategy for an overlay child.
+///
+/// Floating and anchored layers are measured when dimensions are omitted.
+/// Their dimensions and position are constrained to the overlay container.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OverlayPlacement {
+    /// Uses the entire container area; the default placement value.
     Fill,
+    /// Aligns a point on the popup with a point on the container.
     Floating {
+        /// Reference point on the container or anchor rectangle.
         anchor: OverlayAnchor,
+        /// Point on the popup aligned to the reference point.
         popup_anchor: OverlayAnchor,
+        /// Signed horizontal adjustment in cells; positive moves right.
         offset_x: i16,
+        /// Signed vertical adjustment in cells; positive moves down.
         offset_y: i16,
+        /// Explicit width in columns, or `None` to measure the child.
         width: Option<u16>,
+        /// Explicit height in rows, or `None` to measure the child.
         height: Option<u16>,
     },
+    /// Aligns a point on the popup with a point on a container-relative rectangle.
     Anchored {
+        /// Rectangle relative to the container origin.
         rect: AnchorRect,
+        /// Reference point on the container or anchor rectangle.
         anchor: OverlayAnchor,
+        /// Point on the popup aligned to the reference point.
         popup_anchor: OverlayAnchor,
+        /// Signed horizontal adjustment in cells; positive moves right.
         offset_x: i16,
+        /// Signed vertical adjustment in cells; positive moves down.
         offset_y: i16,
+        /// Explicit width in columns, or `None` to measure the child.
         width: Option<u16>,
+        /// Explicit height in rows, or `None` to measure the child.
         height: Option<u16>,
     },
 }
@@ -101,6 +136,7 @@ impl<M> std::fmt::Debug for OverlayLayer<M> {
 }
 
 impl<M> OverlayLayer<M> {
+    /// Creates a centered floating layer with measured size and a z-index of zero.
     pub fn new(widget: impl IntoWidget<M>) -> Self {
         Self {
             widget: widget.into_widget(),
@@ -116,11 +152,15 @@ impl<M> OverlayLayer<M> {
         }
     }
 
+    /// Replaces the complete placement strategy, including its offsets and dimensions.
     pub fn placement(mut self, placement: OverlayPlacement) -> Self {
         self.placement = placement;
         self
     }
 
+    /// Aligns matching anchors on the popup and container.
+    ///
+    /// Resets offsets to zero and explicit dimensions to `None`.
     pub fn floating(mut self, anchor: OverlayAnchor) -> Self {
         self.placement = OverlayPlacement::Floating {
             anchor,
@@ -133,6 +173,10 @@ impl<M> OverlayLayer<M> {
         self
     }
 
+    /// Aligns `popup_anchor` on the popup to `anchor` on `rect`.
+    ///
+    /// The rectangle is relative to the overlay container, in terminal cells.
+    /// Resets offsets to zero and explicit dimensions to `None`.
     pub fn anchored(
         mut self,
         rect: impl Into<AnchorRect>,
@@ -151,6 +195,10 @@ impl<M> OverlayLayer<M> {
         self
     }
 
+    /// Sets signed cell offsets from the anchor; positive values move right/down.
+    ///
+    /// Has no effect on [`OverlayPlacement::Fill`]. Final placement is kept
+    /// inside the container.
     pub fn offset(mut self, offset_x: i16, offset_y: i16) -> Self {
         match &mut self.placement {
             OverlayPlacement::Fill => {}
@@ -171,6 +219,9 @@ impl<M> OverlayLayer<M> {
         self
     }
 
+    /// Sets explicit dimensions in cells, capped to the container size at layout time.
+    ///
+    /// Has no effect on [`OverlayPlacement::Fill`].
     pub fn size(mut self, width: u16, height: u16) -> Self {
         match &mut self.placement {
             OverlayPlacement::Fill => {}
@@ -191,6 +242,9 @@ impl<M> OverlayLayer<M> {
         self
     }
 
+    /// Sets paint priority; higher values paint later. Defaults to zero.
+    ///
+    /// Equal priorities retain insertion order. Every layer paints above the base.
     pub fn z_index(mut self, z_index: i16) -> Self {
         self.z_index = z_index;
         self
@@ -213,6 +267,7 @@ impl<M> std::fmt::Debug for Stack<M> {
 }
 
 impl<M> Stack<M> {
+    /// Creates an empty stack with no key or focus scope.
     pub fn new() -> Self {
         Self {
             children: Vec::new(),
@@ -221,11 +276,13 @@ impl<M> Stack<M> {
         }
     }
 
+    /// Appends a child above existing children, using the same allocated area.
     pub fn child(mut self, widget: impl IntoWidget<M>) -> Self {
         self.children.push(widget.into_widget());
         self
     }
 
+    /// Appends children in iteration order; later children paint above earlier ones.
     pub fn children<I>(mut self, widgets: I) -> Self
     where
         I: IntoIterator,
@@ -236,16 +293,19 @@ impl<M> Stack<M> {
         self
     }
 
+    /// Sets a stable key for widget identity and persistent state.
     pub fn key(mut self, name: impl Into<String>) -> Self {
         self.widget_key = Some(name.into());
         self
     }
 
+    /// Configures focus traversal for descendants of this container.
     pub fn focus_scope(mut self, scope: FocusScope) -> Self {
         self.focus_scope = Some(scope);
         self
     }
 
+    /// Traps Tab traversal within this container and restores its last focused child on entry.
     pub fn trap_focus(self) -> Self {
         self.focus_scope(
             FocusScope::new()
@@ -326,7 +386,23 @@ impl<M> Widget<M> for Stack<M> {
     }
 }
 
-/// Overlay renders a base widget and any number of popup layers above it.
+/// Renders a base widget and popup layers ordered by z-index.
+///
+/// Only the base contributes to measurement. Layers remain within the overlay's
+/// allocation; use [`super::Portal`] at the root to cross nested clipping boundaries.
+///
+/// # Examples
+///
+/// ```
+/// use rsille::tui::{layout::{overlay, OverlayAnchor, OverlayLayer}, widgets::label};
+///
+/// let view = overlay(label::<()>("Background")).layer(
+///     OverlayLayer::new(label("Notice"))
+///         .floating(OverlayAnchor::TopRight)
+///         .size(12, 3)
+///         .offset(-1, 1),
+/// );
+/// ```
 pub struct Overlay<M = ()> {
     children: Vec<Box<dyn Widget<M>>>,
     placements: Vec<OverlayPlacement>,
@@ -345,6 +421,7 @@ impl<M> std::fmt::Debug for Overlay<M> {
 }
 
 impl<M> Overlay<M> {
+    /// Creates an overlay whose base fills the allocated area and determines its measured size.
     pub fn new(base: impl IntoWidget<M>) -> Self {
         Self {
             children: vec![base.into_widget()],
@@ -355,6 +432,7 @@ impl<M> Overlay<M> {
         }
     }
 
+    /// Appends a popup layer, ordered by its z-index and then insertion order.
     pub fn layer(mut self, layer: OverlayLayer<M>) -> Self {
         self.children.push(layer.widget);
         self.placements.push(layer.placement);
@@ -362,16 +440,19 @@ impl<M> Overlay<M> {
         self
     }
 
+    /// Sets a stable key for widget identity and persistent state.
     pub fn key(mut self, name: impl Into<String>) -> Self {
         self.widget_key = Some(name.into());
         self
     }
 
+    /// Configures focus traversal for descendants of this container.
     pub fn focus_scope(mut self, scope: FocusScope) -> Self {
         self.focus_scope = Some(scope);
         self
     }
 
+    /// Traps Tab traversal within this container and restores its last focused child on entry.
     pub fn trap_focus(self) -> Self {
         self.focus_scope(
             FocusScope::new()

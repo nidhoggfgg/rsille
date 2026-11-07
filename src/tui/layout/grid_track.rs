@@ -1,8 +1,10 @@
-//! Grid track sizing types
+//! Fixed, fractional, and content-sized grid tracks and template parsing.
 
 /// Grid track sizing unit
 ///
 /// Defines how a grid track (row or column) should be sized.
+/// Fixed dimensions are terminal cells, even when parsed with the `px` suffix.
+/// Use nonnegative, finite fractional weights for layout.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum GridTrack {
     /// Fixed size in terminal cells
@@ -49,6 +51,10 @@ impl GridTrack {
     /// - "1fr" -> Fr(1.0)
     /// - "auto" -> Auto
     ///
+    /// Whitespace around the token and its numeric part is ignored. Keywords
+    /// and suffixes are case-sensitive. Invalid tokens return `None`. Fractional
+    /// weights use Rust's `f32` parser without checking positivity or finiteness.
+    ///
     /// # Examples
     /// ```
     /// use rsille::tui::layout::GridTrack;
@@ -81,8 +87,14 @@ impl GridTrack {
 
     /// Parse a track template string into a vector of tracks
     ///
-    /// Splits by whitespace and parses each part.
-    /// Supports repeat() function syntax: "repeat(3, 1fr)" expands to "1fr 1fr 1fr"
+    /// Splits by whitespace, parses each token, and silently skips invalid tokens.
+    /// An empty template produces no tracks.
+    ///
+    /// A whole-template `repeat(count, track)` repeats a single track, for example
+    /// `"repeat(3, 1fr)"`. Nested repeats, multi-track repeat bodies, and repeats
+    /// mixed with other tracks are not supported. A recognized repeat with an
+    /// invalid track produces no tracks; other malformed input falls back to
+    /// whitespace token parsing.
     ///
     /// # Examples
     /// ```

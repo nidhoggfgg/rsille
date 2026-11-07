@@ -1,13 +1,17 @@
-//! Border rendering helper functions
+//! Cell-based border and background drawing helpers for layout containers.
 
 use crate::render::chunk::Chunk;
 use crate::render::style::Style;
 use crate::tui::style::{BorderChars, BorderStyle};
 
-/// Render a border in the chunk's area
+/// Renders a one-cell border along the chunk edges, leaving its interior untouched.
+///
+/// Does nothing if either dimension is smaller than two cells.
 ///
 /// This function renders borders using the chunk's area information.
 /// All rendering is done in relative coordinates within the chunk.
+/// If the configured text-width policy gives the horizontal border glyph a
+/// width other than one cell, ASCII border characters are used instead.
 ///
 /// # Arguments
 /// * `chunk` - The chunk to render into (contains area information)
@@ -43,10 +47,14 @@ pub fn render_border(chunk: &mut Chunk, border: BorderStyle, style: Style) {
     let _ = chunk.set_char(width - 1, height - 1, chars.bottom_right, style);
 }
 
-/// Render only the bottom border in the chunk's area
+/// Renders a horizontal line across the bottom row, without corner glyphs.
+///
+/// Does nothing for an empty chunk.
 ///
 /// This function renders only the bottom border using the chunk's area information.
 /// All rendering is done in relative coordinates within the chunk.
+/// If the configured text-width policy gives the horizontal border glyph a
+/// width other than one cell, ASCII border characters are used instead.
 ///
 /// # Arguments
 /// * `chunk` - The chunk to render into (contains area information)
@@ -69,7 +77,9 @@ pub fn render_border_bottom(chunk: &mut Chunk, border: BorderStyle, style: Style
     }
 }
 
-/// Render a background fill in the chunk's area
+/// Fills every cell in the chunk with a space and the supplied render style.
+///
+/// Existing content is overwritten; an empty chunk is left untouched.
 ///
 /// # Arguments
 /// * `chunk` - The chunk to render into (contains area information)

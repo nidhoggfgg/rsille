@@ -14,14 +14,30 @@ use taffy::style::{AlignItems, JustifyContent};
 /// Layout direction
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Direction {
+    /// Arranges children from top to bottom (a column).
     Vertical,
+    /// Arranges children from left to right (a row).
     Horizontal,
 }
 
 /// Flex widget that arranges children using flexbox layout.
 ///
-/// This is a pure layout container — it does not handle events or manage focus.
-/// The framework handles focus chain building and event routing externally.
+/// Children are laid out inside the border and padding. Use [`Self::gap`] for
+/// spacing, [`Self::align_items`] for cross-axis alignment, and
+/// [`Self::justify_content`] for main-axis distribution. The framework routes
+/// events to descendants and applies any configured focus scope.
+///
+/// # Examples
+///
+/// ```
+/// use rsille::tui::{layout::{col, row}, widgets::label};
+///
+/// let view = col::<()>()
+///     .gap(1)
+///     .child(label("Title"))
+///     .child(row().gap(2).child(label("Left")).child(label("Right")));
+/// assert_eq!(view.len(), 2);
+/// ```
 pub struct Flex<M = ()> {
     children: Vec<Box<dyn Widget<M>>>,
     direction: Direction,
@@ -66,58 +82,74 @@ impl<M> Flex<M> {
         }
     }
 
+    /// Creates a column with the supplied children, no gap, padding, or border.
     pub fn vertical(children: Vec<Box<dyn Widget<M>>>) -> Self {
         Self::with_direction(children, Direction::Vertical)
     }
 
+    /// Creates a row with the supplied children, no gap, padding, or border.
     pub fn horizontal(children: Vec<Box<dyn Widget<M>>>) -> Self {
         Self::with_direction(children, Direction::Horizontal)
     }
 
+    /// Creates an empty column. Equivalent to [`col`].
     pub fn new() -> Self {
         Self::vertical(Vec::new())
     }
 
+    /// Sets the spacing between adjacent children in cells; defaults to zero.
     pub fn gap(mut self, gap: u16) -> Self {
         self.gap = gap;
         self
     }
 
+    /// Sets inner spacing in terminal cells, inside any border; defaults to zero.
     pub fn padding(mut self, padding: Padding) -> Self {
         self.padding = padding;
         self
     }
 
+    /// Sets the container style, merged with the theme when rendering.
     pub fn style(mut self, style: Style) -> Self {
         self.style = style;
         self
     }
 
+    /// Adds a one-cell border around the content and padding.
     pub fn border(mut self, border: BorderStyle) -> Self {
         self.border = Some(border);
         self
     }
 
+    /// Sets cross-axis alignment: horizontal for columns, vertical for rows.
+    ///
+    /// The default is stretch, subject to each child's size limits.
     pub fn align_items(mut self, align: AlignItems) -> Self {
         self.align_items = Some(align);
         self
     }
 
+    /// Sets how children share free space along the main axis.
+    ///
+    /// The default places children at the start of the axis.
     pub fn justify_content(mut self, justify: JustifyContent) -> Self {
         self.justify_content = Some(justify);
         self
     }
 
+    /// Sets a stable key for widget identity and persistent state.
     pub fn key(mut self, name: impl Into<String>) -> Self {
         self.widget_key = Some(name.into());
         self
     }
 
+    /// Configures focus traversal for descendants of this container.
     pub fn focus_scope(mut self, scope: FocusScope) -> Self {
         self.focus_scope = Some(scope);
         self
     }
 
+    /// Traps Tab traversal within this container and restores its last focused child on entry.
     pub fn trap_focus(self) -> Self {
         self.focus_scope(
             FocusScope::new()
@@ -126,6 +158,7 @@ impl<M> Flex<M> {
         )
     }
 
+    /// Applies `f` only when `condition` is true; otherwise returns this builder unchanged.
     pub fn when<F>(self, condition: bool, f: F) -> Self
     where
         F: FnOnce(Self) -> Self,
@@ -137,25 +170,30 @@ impl<M> Flex<M> {
         }
     }
 
+    /// Appends an already boxed widget to this container.
     pub fn add_child(&mut self, child: Box<dyn Widget<M>>) {
         self.children.push(child);
     }
 
+    /// Returns the number of children.
     pub fn len(&self) -> usize {
         self.children.len()
     }
 
+    /// Returns whether the container has no children.
     pub fn is_empty(&self) -> bool {
         self.children.is_empty()
     }
 }
 
 impl<M> Flex<M> {
+    /// Appends one child and returns the builder.
     pub fn child(mut self, widget: impl IntoWidget<M>) -> Self {
         self.children.push(widget.into_widget());
         self
     }
 
+    /// Appends children in iteration order.
     pub fn children<I>(mut self, widgets: I) -> Self
     where
         I: IntoIterator,

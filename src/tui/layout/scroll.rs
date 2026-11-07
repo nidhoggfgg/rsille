@@ -17,9 +17,12 @@ use crate::tui::widget::{
 /// Axis support for scrollable containers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ScrollAxis {
+    /// Allows horizontal movement in terminal columns.
     Horizontal,
+    /// Allows vertical movement in terminal rows.
     #[default]
     Vertical,
+    /// Allows movement on both axes.
     Both,
 }
 
@@ -36,9 +39,12 @@ impl ScrollAxis {
 /// Controls when a scrollbar should be rendered.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ScrollbarVisibility {
+    /// Never reserves or paints scrollbars; scrolling remains enabled.
     Hidden,
+    /// Shows a bar only when content exceeds the viewport on that axis (the default).
     #[default]
     Auto,
+    /// Always reserves and paints bars on enabled scroll axes.
     Always,
 }
 
@@ -47,11 +53,16 @@ pub enum ScrollbarVisibility {
 pub struct ScrollState {
     /// Active thumb gesture: axis and pointer offset within the thumb.
     pub dragging: Option<(ScrollbarOrientation, usize)>,
+    /// Horizontal offset from the content origin, in columns; initially zero.
     pub offset_x: usize,
+    /// Vertical offset from the content origin, in rows; initially zero.
     pub offset_y: usize,
 }
 
 impl ScrollState {
+    /// Clamps both offsets to the content minus viewport extents.
+    ///
+    /// All dimensions are cells; content smaller than the viewport yields zero offset.
     pub fn clamp(
         &mut self,
         content_width: usize,
@@ -63,6 +74,9 @@ impl ScrollState {
         self.offset_y = clamp_scroll_offset(self.offset_y, content_height, viewport_height);
     }
 
+    /// Moves by signed cell deltas and clamps both axes to the valid range.
+    ///
+    /// Positive deltas move toward the right/bottom of the content.
     pub fn scroll_by(
         &mut self,
         delta_x: isize,
@@ -76,6 +90,7 @@ impl ScrollState {
         self.offset_y = apply_scroll_delta(self.offset_y, delta_y, content_height, viewport_height);
     }
 
+    /// Sets absolute cell offsets, clamped to the content and viewport dimensions.
     pub fn scroll_to_offset(
         &mut self,
         offset_x: usize,
@@ -89,6 +104,9 @@ impl ScrollState {
         self.offset_y = clamp_scroll_offset(offset_y, content_height, viewport_height);
     }
 
+    /// Reveals a zero-based, fixed-height item by changing only the vertical offset.
+    ///
+    /// Uses [`scroll_offset_for_item`], including its zero-size and clamping behavior.
     pub fn scroll_to_item_y(
         &mut self,
         index: usize,
@@ -107,6 +125,8 @@ impl ScrollState {
 }
 
 /// Maximum offset allowed for the given content and viewport sizes.
+///
+/// Returns zero when the content fits. Both extents must use the same units.
 pub fn max_scroll_offset(content_size: usize, viewport_size: usize) -> usize {
     content_size.saturating_sub(viewport_size)
 }
@@ -116,12 +136,32 @@ pub fn clamp_scroll_offset(offset: usize, content_size: usize, viewport_size: us
     offset.min(max_scroll_offset(content_size, viewport_size))
 }
 
-/// Ensure a row-like item is visible inside a viewport.
+/// Computes an offset that reveals a zero-based item of extent one.
+///
+/// Offsets and viewport size are in items. A zero-sized viewport returns zero.
+/// See [`scroll_offset_for_item`] for behavior when the item is already visible.
+///
+/// # Examples
+///
+/// ```
+/// use rsille::tui::layout::ensure_item_visible;
+/// assert_eq!(ensure_item_visible(0, 7, 5), 3);
+/// assert_eq!(ensure_item_visible(3, 4, 5), 3);
+/// ```
 pub fn ensure_item_visible(scroll_offset: usize, item_index: usize, visible_items: usize) -> usize {
     scroll_offset_for_item(scroll_offset, item_index, 1, item_index + 1, visible_items)
 }
 
-/// Compute the offset needed to reveal an item of fixed extent.
+/// Computes the offset needed to reveal a zero-based item of fixed extent.
+///
+/// All extents and the offset must use the same units. A zero viewport returns
+/// zero; a zero item extent is treated as one. Items before the viewport align
+/// their start to it, and items extending past its end align their end to it.
+/// Otherwise the offset is unchanged. Oversized items cannot be fully visible.
+///
+/// This helper does not clamp the result to the content's maximum scroll offset.
+/// Use [`clamp_scroll_offset`] afterward when needed; pass a valid item index and
+/// extents whose sums fit in `usize`.
 pub fn scroll_offset_for_item(
     scroll_offset: usize,
     item_index: usize,
@@ -159,11 +199,18 @@ fn apply_scroll_delta(
 /// Scrollbar direction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScrollbarOrientation {
+    /// A horizontal track whose extent is measured in columns.
     Horizontal,
+    /// A vertical track whose extent is measured in rows.
     Vertical,
 }
 
-/// Standalone scrollbar widget.
+/// Display-only scrollbar widget with a one-cell cross-axis thickness.
+///
+/// Supply content size, viewport size, and offset in the same units. The track
+/// is always drawn, but a thumb appears only for a nonzero viewport with content
+/// larger than that viewport. This widget does not handle input; [`ScrollView`]
+/// provides interactive scrollbar dragging and track clicks.
 pub struct Scrollbar {
     orientation: ScrollbarOrientation,
     content_size: usize,
@@ -185,6 +232,7 @@ impl std::fmt::Debug for Scrollbar {
 }
 
 impl Scrollbar {
+    /// Creates a display-only scrollbar with zero extents and offset, using theme styles.
     pub fn new(orientation: ScrollbarOrientation) -> Self {
         Self {
             orientation,
@@ -196,34 +244,43 @@ impl Scrollbar {
         }
     }
 
+    /// Creates a vertical scrollbar; equivalent to [`scrollbar`].
     pub fn vertical() -> Self {
         Self::new(ScrollbarOrientation::Vertical)
     }
 
+    /// Creates a horizontal scrollbar.
     pub fn horizontal() -> Self {
         Self::new(ScrollbarOrientation::Horizontal)
     }
 
+    /// Sets the total content extent in cells along the scrollbar axis.
     pub fn content_size(mut self, content_size: usize) -> Self {
         self.content_size = content_size;
         self
     }
 
+    /// Sets the visible content extent in cells along the scrollbar axis.
     pub fn viewport_size(mut self, viewport_size: usize) -> Self {
         self.viewport_size = viewport_size;
         self
     }
 
+    /// Sets the displayed scroll offset in cells.
+    ///
+    /// The thumb position is clamped to the valid range when painted.
     pub fn offset(mut self, offset: usize) -> Self {
         self.offset = offset;
         self
     }
 
+    /// Overrides the theme style for the scrollbar track.
     pub fn track_style(mut self, style: Style) -> Self {
         self.track_style = Some(style);
         self
     }
 
+    /// Overrides the theme style for the scrollbar thumb.
     pub fn thumb_style(mut self, style: Style) -> Self {
         self.thumb_style = Some(style);
         self
@@ -316,7 +373,27 @@ struct ScrollMetrics {
     show_vertical_bar: bool,
 }
 
-/// Generic scrollable viewport container.
+/// Scrollable viewport around a single child, with optional interactive scrollbars.
+///
+/// Content is measured without a bound along enabled scroll axes, rendered to an
+/// offscreen buffer, then clipped to the viewport. This container is not a
+/// virtualized list: the full content is rendered. Persistent offsets live in
+/// [`ScrollState`]; a stable [`Self::key`] preserves identity across view rebuilds.
+///
+/// Arrow keys and the mouse wheel move by [`Self::scroll_step`]. Page Up/Down
+/// move vertically by one viewport; Home resets offsets and End reaches the end
+/// of enabled axes. Handled descendant events are left alone.
+///
+/// # Examples
+///
+/// ```
+/// use rsille::tui::{layout::{scroll_view, ScrollbarVisibility}, widgets::label};
+///
+/// let view = scroll_view(label::<()>("First\nSecond\nThird"))
+///     .key("log")
+///     .focusable(true)
+///     .scrollbars(ScrollbarVisibility::Auto);
+/// ```
 pub struct ScrollView<M = ()> {
     child: Box<dyn Widget<M>>,
     axis: ScrollAxis,
@@ -348,6 +425,10 @@ impl<M> std::fmt::Debug for ScrollView<M> {
 }
 
 impl<M> ScrollView<M> {
+    /// Creates a vertical viewport with automatic scrollbars and a three-cell scroll step.
+    ///
+    /// The view has no border or padding and is not itself focusable by default.
+    /// Content dimensions are measured unless explicitly overridden.
     pub fn new(child: impl IntoWidget<M>) -> Self {
         Self {
             child: child.into_widget(),
@@ -364,71 +445,95 @@ impl<M> ScrollView<M> {
         }
     }
 
+    /// Selects which axes may scroll; defaults to [`ScrollAxis::Vertical`].
     pub fn axis(mut self, axis: ScrollAxis) -> Self {
         self.axis = axis;
         self
     }
 
+    /// Enables vertical scrolling only.
     pub fn vertical(mut self) -> Self {
         self.axis = ScrollAxis::Vertical;
         self
     }
 
+    /// Enables horizontal scrolling only.
     pub fn horizontal(mut self) -> Self {
         self.axis = ScrollAxis::Horizontal;
         self
     }
 
+    /// Enables scrolling on both axes.
     pub fn both(mut self) -> Self {
         self.axis = ScrollAxis::Both;
         self
     }
 
+    /// Adds a one-cell border around the content and padding.
     pub fn border(mut self, border: BorderStyle) -> Self {
         self.border = Some(border);
         self
     }
 
+    /// Removes the border, restoring the default.
     pub fn borderless(mut self) -> Self {
         self.border = None;
         self
     }
 
+    /// Sets inner spacing in terminal cells, inside any border; defaults to zero.
     pub fn padding(mut self, padding: Padding) -> Self {
         self.padding = padding;
         self
     }
 
+    /// Sets the container style, merged with the theme when rendering.
     pub fn style(mut self, style: Style) -> Self {
         self.style = style;
         self
     }
 
+    /// Sets a stable key for widget identity and persistent state.
     pub fn key(mut self, name: impl Into<String>) -> Self {
         self.widget_key = Some(name.into());
         self
     }
 
+    /// Overrides the measured content width in columns.
+    ///
+    /// The backing content area remains at least as wide as the viewport.
     pub fn content_width(mut self, width: u16) -> Self {
         self.content_width = Some(width);
         self
     }
 
+    /// Overrides the measured content height in rows.
+    ///
+    /// The backing content area remains at least as tall as the viewport.
     pub fn content_height(mut self, height: u16) -> Self {
         self.content_height = Some(height);
         self
     }
 
+    /// Sets visibility for scrollbars on enabled axes; defaults to automatic.
+    ///
+    /// Each visible bar reserves one row or column of viewport space.
     pub fn scrollbars(mut self, visibility: ScrollbarVisibility) -> Self {
         self.scrollbar_visibility = visibility;
         self
     }
 
+    /// Sets whether the viewport itself participates in keyboard focus; defaults to false.
+    ///
+    /// Unhandled events from descendants can still bubble to the viewport.
     pub fn focusable(mut self, focusable: bool) -> Self {
         self.focusable = focusable;
         self
     }
 
+    /// Sets arrow-key and mouse-wheel movement in cells; defaults to three.
+    ///
+    /// Zero is promoted to one. Page Up/Down use the viewport height instead.
     pub fn scroll_step(mut self, step: u16) -> Self {
         self.scroll_step = step.max(1);
         self
@@ -1124,7 +1229,18 @@ pub fn scroll_view<M>(child: impl IntoWidget<M>) -> ScrollView<M> {
     ScrollView::new(child)
 }
 
-/// Build a simple line-based scroll view from strings.
+/// Builds a scroll view with one label per input string and scrolling on both axes.
+///
+/// Content height is the number of strings; width is their maximum terminal text
+/// width. Supply single-line strings whose count and widths fit in `u16`.
+/// The view is not focusable by default; call [`ScrollView::focusable`] to enable it.
+///
+/// # Examples
+///
+/// ```
+/// use rsille::tui::layout::{scroll_lines, ScrollView};
+/// let log: ScrollView<()> = scroll_lines(["Starting", "Ready"]).focusable(true);
+/// ```
 pub fn scroll_lines<M, I, S>(lines: I) -> ScrollView<M>
 where
     I: IntoIterator<Item = S>,
