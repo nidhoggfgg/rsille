@@ -4,7 +4,7 @@ use std::{error::Error, fs, time::Instant};
 use crossterm::style::Color;
 use rsille::render::{area::Size, buffer::Buffer, chunk::Chunk, Draw};
 
-use crate::{Nursery, INLINE_HEIGHT, PREVIEW_WIDTH};
+use crate::{Nursery, PREVIEW_WIDTH};
 
 pub fn frame(nursery: &mut Nursery, size: Size) -> Result<Buffer, Box<dyn Error>> {
     let mut buffer = Buffer::new(size);
@@ -63,7 +63,11 @@ fn save(path: impl AsRef<std::path::Path>, buffer: &Buffer) -> Result<(), Box<dy
     Ok(())
 }
 
-pub fn command(args: &[String], character: crate::scene::Character) -> Result<(), Box<dyn Error>> {
+pub fn command(
+    args: &[String],
+    character: crate::scene::Character,
+    height: u16,
+) -> Result<(), Box<dyn Error>> {
     match args[0].as_str() {
         "--snapshot" if [2, 3, 5].contains(&args.len()) => {
             let time: f64 = args.get(2).map_or(Ok(0.0), |s| s.parse())?;
@@ -78,7 +82,7 @@ pub fn command(args: &[String], character: crate::scene::Character) -> Result<()
                     return Err("size must be within 1..512 columns and 1..128 rows".into());
                 }
                 (width, height).into()
-            } else { (PREVIEW_WIDTH, INLINE_HEIGHT).into() };
+            } else { (PREVIEW_WIDTH, height).into() };
             save(&args[1], &frame(&mut nursery, size)?)?;
             println!("Saved terminal frame to {} at {time}s", args[1]);
         }
@@ -88,7 +92,7 @@ pub fn command(args: &[String], character: crate::scene::Character) -> Result<()
             for index in 0..(crate::scene::PERIOD * 24.0).ceil() as usize {
                 nursery.time = index as f64 / 24.0;
                 let path = std::path::Path::new(&args[1]).join(format!("{index:04}.ppm"));
-                save(path, &frame(&mut nursery, (PREVIEW_WIDTH, INLINE_HEIGHT).into())?)?;
+                save(path, &frame(&mut nursery, (PREVIEW_WIDTH, height).into())?)?;
             }
             println!("Saved {} seconds at 24 FPS to {}", crate::scene::PERIOD, args[1]);
         }
@@ -100,7 +104,7 @@ pub fn command(args: &[String], character: crate::scene::Character) -> Result<()
             for index in 0..(action.duration() * 24.0).ceil() as usize {
                 nursery.time = index as f64 / 24.0;
                 let path = std::path::Path::new(&args[2]).join(format!("{index:04}.ppm"));
-                save(path, &frame(&mut nursery, (PREVIEW_WIDTH, INLINE_HEIGHT).into())?)?;
+                save(path, &frame(&mut nursery, (PREVIEW_WIDTH, height).into())?)?;
             }
             println!("Saved {} clip to {}", action.name(), args[2]);
         }
@@ -109,13 +113,13 @@ pub fn command(args: &[String], character: crate::scene::Character) -> Result<()
             let start = Instant::now();
             for index in 0..90 {
                 nursery.time = index as f64 * 0.75;
-                let buffer = frame(&mut nursery, (PREVIEW_WIDTH, INLINE_HEIGHT).into())?;
+                let buffer = frame(&mut nursery, (PREVIEW_WIDTH, height).into())?;
                 assert!(buffer.content().iter().all(|cell| !cell.content.is_empty()));
             }
-            println!("90 frames passed at {PREVIEW_WIDTH}x{INLINE_HEIGHT}; mean {:.2} ms/frame (drawing + encoding; no terminal I/O)", start.elapsed().as_secs_f64() * 1000.0 / 90.0);
+            println!("90 frames passed at {PREVIEW_WIDTH}x{height}; mean {:.2} ms/frame (drawing + encoding; no terminal I/O)", start.elapsed().as_secs_f64() * 1000.0 / 90.0);
         }
         "--help" | "-h" if args.len() == 1 => println!(
-            "AI BABIES / ChatGPT, DeepSeek and Claude pets\n\nRun without arguments for automatic inline playback (up to 32 rows).\nTab: next character; g: ChatGPT; d: DeepSeek; c: Claude; q / Esc / Ctrl+C: exit; Space: pause; 1: idle; 2: wave; 3: walk; 4: hop; 5: think; 6: sleep; 0: automatic\n\n--static [--height ROWS] [--snapshot FILE.ppm]  (default: 144 columns × 24 rows; height: 1..40)\n[--character chatgpt|deepseek|claude] [EXPORT OPTION]  (put character before export options; default: chatgpt)\n--headless\n--snapshot FILE.ppm [SECONDS [COLUMNS ROWS]]\n--frames DIRECTORY  (one complete action playlist at 24 FPS)\n--action idle|wave|walk|hop|think|sleep DIRECTORY"
+            "AI BABIES / ChatGPT, DeepSeek and Claude pets\n\nRun without arguments for automatic inline playback (up to 32 rows). Use --height ROWS to set the height (1..128, limited by the terminal during playback).\nTab: next character; g: ChatGPT; d: DeepSeek; c: Claude; q / Esc / Ctrl+C: exit; Space: pause; 1: idle; 2: wave; 3: walk; 4: hop; 5: think; 6: sleep; 0: automatic\n\n--static [--height ROWS] [--snapshot FILE.ppm]  (default: 144 columns × 24 rows; height: 1..40)\n[--character chatgpt|deepseek|claude] [--height ROWS] [EXPORT OPTION]  (either order, before export options; defaults: chatgpt, 32 rows)\n--headless\n--snapshot FILE.ppm [SECONDS [COLUMNS ROWS]]  (explicit dimensions override --height)\n--frames DIRECTORY  (one complete action playlist at 24 FPS)\n--action idle|wave|walk|hop|think|sleep DIRECTORY"
         ),
         _ => return Err("Unknown or incomplete arguments; use --help".into()),
     }

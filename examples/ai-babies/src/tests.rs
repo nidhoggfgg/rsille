@@ -134,8 +134,8 @@ fn character_selection_restarts_clip_preserves_pause_and_clears_old_sprite() {
 fn character_cli_selection_applies_to_playback_and_exports() {
     let empty: Vec<String> = vec![];
     assert_eq!(
-        character_args(&empty).unwrap(),
-        (Character::ChatGpt, empty.as_slice())
+        animation_args(&empty).unwrap(),
+        (Character::ChatGpt, INLINE_HEIGHT, empty.as_slice())
     );
     for character in Character::ALL {
         for tail in [
@@ -147,13 +147,40 @@ fn character_cli_selection_applies_to_playback_and_exports() {
         ] {
             let mut args = vec!["--character".to_string(), character.name().to_string()];
             args.extend(tail.iter().map(|s| s.to_string()));
-            let (selected, remaining) = character_args(&args).unwrap();
+            let (selected, height, remaining) = animation_args(&args).unwrap();
+            assert_eq!(height, INLINE_HEIGHT);
             assert_eq!(selected, character);
             assert_eq!(remaining, &args[2..]);
         }
     }
-    assert!(character_args(&["--character".into()]).is_err());
-    assert!(character_args(&["--character".into(), "unknown".into()]).is_err());
+    assert!(animation_args(&["--character".into()]).is_err());
+    assert!(animation_args(&["--character".into(), "unknown".into()]).is_err());
+}
+
+#[test]
+fn animation_height_accepts_either_option_order_and_rejects_invalid_rows() {
+    for args in [
+        vec!["--height", "24", "--character", "claude", "--frames", "out"],
+        vec!["--character", "claude", "--height", "24", "--frames", "out"],
+    ] {
+        let args: Vec<String> = args.into_iter().map(String::from).collect();
+        let (character, height, remaining) = animation_args(&args).unwrap();
+        assert_eq!(character, Character::Claude);
+        assert_eq!(height, 24);
+        assert_eq!(remaining, &["--frames", "out"]);
+    }
+    for value in ["0", "129", "-1", "abc", "65536"] {
+        assert!(animation_args(&["--height".into(), value.into()]).is_err());
+    }
+    assert!(animation_args(&["--height".into()]).is_err());
+    for height in [1, 24, 32, 128] {
+        assert_eq!(
+            animation_args(&["--height".into(), height.to_string()])
+                .unwrap()
+                .1,
+            height
+        );
+    }
 }
 
 #[test]

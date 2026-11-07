@@ -121,15 +121,33 @@ impl Draw for Nursery {
     }
 }
 
-fn character_args(args: &[String]) -> Result<(scene::Character, &[String]), Box<dyn Error>> {
-    if args.first().is_some_and(|arg| arg == "--character") {
-        let name = args
-            .get(1)
-            .ok_or("--character requires chatgpt/deepseek/claude")?;
-        Ok((scene::Character::parse(name)?, &args[2..]))
-    } else {
-        Ok((scene::Character::default(), args))
+fn animation_args(
+    mut args: &[String],
+) -> Result<(scene::Character, u16, &[String]), Box<dyn Error>> {
+    let mut character = scene::Character::default();
+    let mut height = INLINE_HEIGHT;
+    while let Some(arg) = args.first() {
+        match arg.as_str() {
+            "--character" => {
+                let name = args
+                    .get(1)
+                    .ok_or("--character requires chatgpt/deepseek/claude")?;
+                character = scene::Character::parse(name)?;
+            }
+            "--height" => {
+                height = args
+                    .get(1)
+                    .ok_or("--height requires ROWS (1..128)")?
+                    .parse()?;
+                if !(1..=128).contains(&height) {
+                    return Err("--height must be within 1..128 rows".into());
+                }
+            }
+            _ => break,
+        }
+        args = &args[2..];
     }
+    Ok((character, height, args))
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -137,15 +155,15 @@ fn main() -> Result<(), Box<dyn Error>> {
     if args.first().is_some_and(|arg| arg == "--static") {
         return static_image::command(&args[1..]);
     }
-    let (character, args) = character_args(&args)?;
+    let (character, requested_height, args) = animation_args(&args)?;
     if !args.is_empty() {
-        return export::command(args, character);
+        return export::command(args, character, requested_height);
     }
     let (width, height) = crossterm::terminal::size()?;
     Builder::new()
-        .size((width, height.min(INLINE_HEIGHT)))
+        .size((width, height.min(requested_height)))
         .inline_mode(true)
-        .inline_max_height(INLINE_HEIGHT)
+        .inline_max_height(requested_height)
         .enable_raw_mode()
         .enable_hide_cursor()
         .frame_limit(24)

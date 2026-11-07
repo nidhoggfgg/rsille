@@ -9,10 +9,18 @@ DeepSeek（蓝发女仆）、Claude（橙发女孩）、ChatGPT（白紫色小�
 
 ```sh
 cargo run --release --manifest-path examples/ai-babies/Cargo.toml
+# 固定最多 24 行，使用 48px 图集（终端宽度至少 48 列）
+cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --height 24
 # 直接启动新角色
 cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --character deepseek
 cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --character claude
 ```
+
+动态模式支持 `--height ROWS`（1–128，默认 32），可与 `--character` 以任意顺序组合，
+放在导出选项之前。播放时高度不超过终端实际行数，调整窗口后仍遵守指定的高度上限。
+24 行对应 48px 图集，32 行对应 64px 图集；更高的区域只增加留白，角色最大仍为 64×64。
+`--height` 也作用于 `--frames`、`--action`、`--snapshot` 和 `--headless`；
+`--snapshot` 末尾显式指定的列数、行数优先。
 
 ![实际 Half-block 终端 Buffer 导出的单角色动作动画](preview-pet.gif)
 
@@ -126,6 +134,7 @@ cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --headless
 cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --snapshot /tmp/ai-babies.ppm 0
 cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --snapshot /tmp/ai-babies-small.ppm 3 80 24
 cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --frames /tmp/ai-babies-frames
+cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --height 24 --frames /tmp/ai-babies-24-frames
 cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --action wave /tmp/ai-babies-wave
 python3 examples/ai-babies/tools/preview_actions.py /tmp/ai-babies-frames
 # 新角色同样支持所有动态导出选项；--character 放在导出选项之前
