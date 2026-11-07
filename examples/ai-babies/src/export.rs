@@ -81,7 +81,7 @@ pub fn command(args: &[String]) -> Result<(), Box<dyn Error>> {
             println!("90 frames passed at {PREVIEW_WIDTH}x{INLINE_HEIGHT}; mean {:.2} ms/frame (drawing + encoding; no terminal I/O)", start.elapsed().as_secs_f64() * 1000.0 / 90.0);
         }
         "--help" | "-h" if args.len() == 1 => println!(
-            "AI BABIES / quiet raster companions\n\nRun without arguments for automatic inline playback (up to 32 rows).\nq / Esc / Ctrl+C: exit; Space: pause; 1/2/3: focus; 0: all\n\n--headless\n--snapshot FILE.ppm [SECONDS [COLUMNS ROWS]]\n--frames DIRECTORY  (192 PPM frames at 24 FPS)"
+            "AI BABIES / quiet raster companions\n\nRun without arguments for automatic inline playback (up to 32 rows).\nq / Esc / Ctrl+C: exit; Space: pause; 1/2/3: focus; 0: all\n\n--static [--height ROWS] [--snapshot FILE.ppm]  (default: 144 columns × 24 rows; height: 1..40)\n--headless\n--snapshot FILE.ppm [SECONDS [COLUMNS ROWS]]\n--frames DIRECTORY  (192 PPM frames at 24 FPS)"
         ),
         _ => return Err("Unknown or incomplete arguments; use --help".into()),
     }

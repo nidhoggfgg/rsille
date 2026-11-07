@@ -1,6 +1,7 @@
 //! Generated raster mascots, embedded in the binary, with quiet idle motion.
 mod export;
 mod scene;
+mod static_image;
 
 use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
 use rsille::{
@@ -105,6 +106,9 @@ impl Draw for Nursery {
 
 fn main() -> Result<(), Box<dyn Error>> {
     let args: Vec<_> = std::env::args().skip(1).collect();
+    if args.first().is_some_and(|arg| arg == "--static") {
+        return static_image::command(&args[1..]);
+    }
     if !args.is_empty() {
         return export::command(&args);
     }

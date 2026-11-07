@@ -1,5 +1,52 @@
 # AI Babies / AI 幼崽待机
 
+## 静态预览（288×48 → 144 列 × 24 行）
+
+```sh
+cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --static
+```
+
+用户提供的原始大图（2172×724）保存在
+[assets/chibi-trio-source.png](assets/chibi-trio-source.png)。
+此前确认效果的 240×80 小图保存在
+[assets/chibi-trio-240x80.png](assets/chibi-trio-240x80.png)，保留原有像素。
+两份图片均纳入 Git；打包直接读取小图，无需依赖 `x/` 目录。
+渲染时调整为 288×48 采样点，使用最近邻采样保留像素边缘，
+再用 `Canvas` 的 `Encoding::Quadrant`（2×2）渲染。按字符格宽高 1:2 补偿
+横向尺寸，在终端中保持原图的 3:1 显示比例，默认高度为 24 行。
+输出一次后退出，画面留在终端里。终端至少需要 144 列；完整同屏查看建议留出
+26 行，包括 shell 提示符。保留原图白底，静态显示。
+每个字符格最多两种颜色，由 Canvas 合并四个采样点的颜色。
+以下预览采用字符格宽高 1:2，来自实际编码后的终端 Buffer，
+按块重建，不模拟具体字体的接缝；实际比例随终端字体设置略有差异。
+
+![144×24 Quadrant 静态渲染预览](preview-static.png)
+
+```sh
+# 导出实际编码后的画面（PPM，按终端字符格比例）
+cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --static --snapshot /tmp/ai-babies-static.ppm
+# 修改 assets/chibi-trio-240x80.png 后重新打包，需要 Pillow
+python3 examples/ai-babies/tools/pack_static.py
+```
+
+`assets/chibi-trio-240x80.rgb` 保存小图的 240×80 RGB 字节，编译进二进制；每个高度直接从小图
+做最近邻采样和比例补偿，避免多次缩放损失，运行时无需图片解码依赖。
+
+### 自定义高度
+
+可用 `--height ROWS` 指定 1–40 行，宽度自动为高度的 6 倍。
+
+```sh
+# 稳妥档：144 列 × 24 行
+cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --static --height 24
+# 紧凑档：120 列 × 20 行
+cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --static --height 20
+# 导出指定高度
+cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --static --height 20 --snapshot /tmp/ai-babies-20.ppm
+```
+
+## 待机动画
+
 按 `x/` 中三张 Q 版参考图制作的终端像素角色：DeepSeek 蓝发鲸尾女仆、
 Claude 橙色长发太阳花女孩、ChatGPT 白紫色小龙女孩。
 三人只在原位轻轻起伏、眨眼、弹跳，没有战斗和追逐。
