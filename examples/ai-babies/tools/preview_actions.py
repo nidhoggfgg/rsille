@@ -41,6 +41,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("frames", type=Path)
     parser.add_argument("--compare", type=Path, help="older --frames export directory")
+    parser.add_argument("--name", default="pet", choices=("pet", "deepseek", "claude"),
+                        help="output preview suffix; preserves the other characters' previews")
     args = parser.parse_args()
     files = sorted(args.frames.glob("*.ppm"))
     if not files:
@@ -50,8 +52,8 @@ def main():
         frame = read_frame(path)
         images.append(frame.resize((frame.width * 4, frame.height * 4), Image.Resampling.NEAREST))
     output = Path(__file__).resolve().parent.parent
-    images[0].save(output / "preview-pet.png")
-    save_gif(images, output / "preview-pet.gif")
+    images[0].save(output / f"preview-{args.name}.png")
+    save_gif(images, output / f"preview-{args.name}.gif")
     if args.compare:
         # First 4.4 seconds: idle + wave, the two clips with frozen body regions.
         if len(files) < 106:
@@ -70,8 +72,8 @@ def main():
             draw.text((12, 6), "BEFORE", fill=(47, 28, 65))
             draw.text((size[0] + 12, 6), "AFTER - stable body / shared palette", fill=(47, 28, 65))
             comparison.append(panel)
-        comparison[0].save(output / "preview-pet-comparison.png")
-        save_gif(comparison, output / "preview-pet-comparison.gif")
+        comparison[0].save(output / f"preview-{args.name}-comparison.png")
+        save_gif(comparison, output / f"preview-{args.name}-comparison.gif")
     print(f"Saved terminal previews from {len(images)} frames to {output}")
 
 

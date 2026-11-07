@@ -1,4 +1,4 @@
-//! One raster pet, playing embedded, pre-drawn animation clips.
+//! Three selectable raster pets, playing embedded, pre-drawn animation clips.
 mod export;
 mod scene;
 mod static_image;
@@ -19,6 +19,7 @@ struct Nursery {
     quit: bool,
     paused: bool,
     action: Option<scene::Action>,
+    character: scene::Character,
     canvas: Canvas,
 }
 
@@ -30,6 +31,7 @@ impl Default for Nursery {
             quit: false,
             paused: false,
             action: None,
+            character: scene::Character::default(),
             canvas: Canvas::with_encoding(Encoding::HalfBlock),
         }
     }
@@ -46,6 +48,16 @@ impl Update for Nursery {
                     KeyCode::Esc | KeyCode::Char('q') => self.quit = true,
                     KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                         self.quit = true
+                    }
+                    KeyCode::Tab | KeyCode::Char('g' | 'd' | 'c') => {
+                        self.character = match key.code {
+                            KeyCode::Char('g') => scene::Character::ChatGpt,
+                            KeyCode::Char('d') => scene::Character::DeepSeek,
+                            KeyCode::Char('c') => scene::Character::Claude,
+                            _ => self.character.next(),
+                        };
+                        self.time = 0.0;
+                        self.last = None;
                     }
                     KeyCode::Char(' ') => {
                         self.paused = !self.paused;
@@ -91,7 +103,7 @@ impl Draw for Nursery {
         }
         let w = size.width as usize;
         let h = size.height as usize * 2;
-        let pixels = scene::render(w, h, self.time, self.action);
+        let pixels = scene::render(w, h, self.time, self.action, self.character);
         self.canvas.clear();
         self.canvas.clear_background();
         self.canvas
@@ -109,13 +121,25 @@ impl Draw for Nursery {
     }
 }
 
+fn character_args(args: &[String]) -> Result<(scene::Character, &[String]), Box<dyn Error>> {
+    if args.first().is_some_and(|arg| arg == "--character") {
+        let name = args
+            .get(1)
+            .ok_or("--character requires chatgpt/deepseek/claude")?;
+        Ok((scene::Character::parse(name)?, &args[2..]))
+    } else {
+        Ok((scene::Character::default(), args))
+    }
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     let args: Vec<_> = std::env::args().skip(1).collect();
     if args.first().is_some_and(|arg| arg == "--static") {
         return static_image::command(&args[1..]);
     }
+    let (character, args) = character_args(&args)?;
     if !args.is_empty() {
-        return export::command(&args);
+        return export::command(args, character);
     }
     let (width, height) = crossterm::terminal::size()?;
     Builder::new()
@@ -125,7 +149,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         .enable_raw_mode()
         .enable_hide_cursor()
         .frame_limit(24)
-        .build_event_loop(Nursery::default())
+        .build_event_loop(Nursery {
+            character,
+            ..Nursery::default()
+        })
         .run()?;
     println!();
     Ok(())

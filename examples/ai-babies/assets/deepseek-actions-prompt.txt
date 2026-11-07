@@ -1,0 +1,15 @@
+Use case: stylized-concept
+Asset type: production pixel-art animation sprite atlas for the ai-babies terminal demo.
+Input image 1: character identity reference. Input image 2: existing dragon animation sheet, use ONLY as layout, pose and pixel style reference.
+Create a transparent 1024x1536 RGBA image, exactly FOUR columns by SIX rows, each cell 256x256, 24 full-body poses of the same character.
+Crisp low-resolution chibi pixel art, bold dark outlines, simple discrete color clusters, readable when reduced to 64x64, no antialiasing. Match the reference character faithfully.
+All cells: same camera, same head scale, same center x=128 in cell, standing feet baseline y=232. Head spans approximately x=80..176, face around y=92..146. Generous transparent padding, all limbs/hair inside cell. No cell borders, no captions, no text, no shadows, no background, no other characters.
+Rows in order, frames left to right:
+1 IDLE: neutral front open eyes, identical neutral, same pose eyes closed blink, identical neutral. Keep entire body and hair unchanged.
+2 WAVE: neutral identical to idle; character's right hand raised beside face (viewer left); hand out waving with happy smile; hand inward waving. Keep body head hair and left arm in exact same positions as idle.
+3 WALK: three-quarter facing right, left foot forward; passing feet; right foot forward; opposite passing feet. Corresponding arm swing.
+4 HOP: standing neutral; crouch; airborne feet lifted joyful smile; landing crouch. Preserve relative vertical movement.
+5 THINK: neutral; hand rising to chin; hand at chin head tilted looking up; hand at chin looking sideways.
+6 SLEEP: sitting sleepy; sitting eyes closed; sleeping head dipped; sleeping head slightly raised. No floating symbols.
+Real distinct authored limb and facial poses, not a repeated static sprite. Transparent background with real alpha.
+Subject: Use ONLY the LEFTMOST blue-haired DeepSeek girl in reference 1. Long navy/cobalt twin-tail hair with cyan ends and little blue bows, white frilled maid headband, blue eyes, navy maid dress, white apron with small blue whale emblem, white frilled skirt, dark blue shoes. Preserve the loop-shaped hair curl above head. No horns or dragon wings.

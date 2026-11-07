@@ -1,15 +1,24 @@
-# AI Babies / 单角色动作宠物
+# AI Babies / ChatGPT、DeepSeek 与 Claude 动作宠物
 
-参考 [chibi-trio-source.png](assets/chibi-trio-source.png) 右侧的白紫色小龙女孩，
-用内置 imagegen 生成 **6 组动作、24 张预制姿态帧**。默认只显示这个角色，
+参考 [chibi-trio-source.png](assets/chibi-trio-source.png) 中的三位角色：
+DeepSeek（蓝发女仆）、Claude（橙发女孩）、ChatGPT（白紫色小龙女孩）。
+每个角色都有内置 imagegen 生成的 **6 组动作、24 个预制帧槽位**。
+默认显示 ChatGPT，按 `Tab` 轮换角色，或用 `g / d / c` 直接选择；每次显示一个角色，
 按动作时间表逐帧播放：待机眨眼 → 挥手 → 原地走路 → 跳跃 → 思考 → 睡觉。
 完整演示约 17 秒循环；每个动作有独立帧停留时间。
 
 ```sh
 cargo run --release --manifest-path examples/ai-babies/Cargo.toml
+# 直接启动新角色
+cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --character deepseek
+cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --character claude
 ```
 
 ![实际 Half-block 终端 Buffer 导出的单角色动作动画](preview-pet.gif)
+
+| DeepSeek | Claude |
+| --- | --- |
+| ![DeepSeek 的六组动作](preview-deepseek.gif) | ![Claude 的六组动作](preview-claude.gif) |
 
 动态版使用 `Canvas → Encoding::HalfBlock → Buffer`，每格上下两个采样点的
 颜色都能保留，避免四个采样点合并为两种颜色时产生额外色块变化。
@@ -20,6 +29,8 @@ cargo run --release --manifest-path examples/ai-babies/Cargo.toml
 
 | 按键 | 操作 |
 | --- | --- |
+| `Tab` | 轮换 ChatGPT → DeepSeek → Claude |
+| `g` / `d` / `c` | 选择 ChatGPT / DeepSeek / Claude |
 | `1` | 待机 / 眨眼 |
 | `2` | 挥手 |
 | `3` | 原地走路 |
@@ -30,9 +41,44 @@ cargo run --release --manifest-path examples/ai-babies/Cargo.toml
 | 空格 | 暂停 / 继续 |
 | `q` / Esc / Ctrl+C | 退出 |
 
-选择动作会从该动作第一帧重新播放；暂停时切换动作仍保持暂停。
+选择动作会从该动作第一帧重新播放；切换角色保留所选动作并从第一帧重新播放。
+暂停时切换角色或动作仍保持暂停。`Ctrl+C` 仍用于退出。
 
-## 稳定性优化对照
+## DeepSeek 与 Claude 素材
+
+两个角色各自使用 4 列 × 6 行的透明源图，动作顺序与 ChatGPT 一致。
+由内置 imagegen 参考原三人立绘生成，源图和完整提示保存在仓库：
+
+- DeepSeek：[清理版源图](assets/deepseek-actions-clean-source.png)、[原源图](assets/deepseek-actions-source.png)、[原提示词](assets/deepseek-actions-prompt.txt)、[64px 图集](assets/deepseek-actions-64.png)、[48px 图集](assets/deepseek-actions-48.png)。
+- Claude：[清理版源图](assets/claude-actions-clean-source.png)、[原源图](assets/claude-actions-source.png)、[原提示词](assets/claude-actions-prompt.txt)、[64px 图集](assets/claude-actions-64.png)、[48px 图集](assets/claude-actions-48.png)。
+
+清理版由内置 imagegen 在原图上简化头发、服饰中的碎色和明暗纹理，
+保持原来的角色设定和六组动作；两个角色共用的完整编辑提示保存在
+[companions-cleanup-prompt.txt](assets/companions-cleanup-prompt.txt)。原源图保留用于追溯。
+
+`tools/pack_companions.py` 直接从清理版源图制作两档尺寸。DeepSeek 使用固定 16 色调色板，
+Claude 使用固定 17 色调色板，分别保留头发、肤色、眼睛、布料及装饰所需的颜色；
+不抖色，透明度二值化，并清理被同色包围的近色头发孤点。
+每格统一加 16px 透明边距，保留跳跃的相对位移，避免 DeepSeek 的发环碰到边界。
+待机、挥手共用身体底图：眨眼只替换眼部，挥手只替换手臂及必要表情，
+静止部分逐像素一致。跳跃、思考的起始姿态也复用中性帧，其余保留完整姿态。
+新增 RGBA 数据共 1,228,800 字节，编译进程序，运行时无需图片解码或 Python。
+
+下面是实际 Half-block 终端输出的前后对照（左：原版；右：清理版），展示待机和挥手：
+
+![DeepSeek 色块与动作稳定性对照](preview-deepseek-comparison.gif)
+
+![Claude 色块与动作稳定性对照](preview-claude-comparison.gif)
+
+以 64px 图集的前 8 帧为例，逐帧比较中性底图，在头顶四分之一区域和底部四分之一
+区域，DeepSeek 的像素变化数从 786 降为 0，Claude 从 735 降为 0。
+48px/64px 的编码输出测试同时验证这些静止区域不闪动，并确认眨眼、挥手仍有可见变化。
+
+```sh
+python3 examples/ai-babies/tools/pack_companions.py
+```
+
+## ChatGPT 稳定性优化对照
 
 ![左：优化前；右：优化后的待机与挥手](preview-pet-comparison.gif)
 
@@ -63,7 +109,7 @@ cargo run --release --manifest-path examples/ai-babies/Cargo.toml
   运行时无需联网、图片解码或 Python。
 - `src/scene.rs`：动作表规定帧序与停留时长，运行时只取帧、缩放和透明合成。
   每组四个帧槽位，待机复用睁眼帧，属于低帧数像素动画。
-- 原生成源图、旧的 96×96 图集、原三人立绘素材均保留；默认动态版使用 v2 图集。
+- 原生成源图、旧的 96×96 图集、原三人立绘素材均保留；ChatGPT 动态版使用 v2 图集。
 
 重新打包需要 Pillow：
 
@@ -82,6 +128,11 @@ cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --snapshot 
 cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --frames /tmp/ai-babies-frames
 cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --action wave /tmp/ai-babies-wave
 python3 examples/ai-babies/tools/preview_actions.py /tmp/ai-babies-frames
+# 新角色同样支持所有动态导出选项；--character 放在导出选项之前
+cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --character deepseek --frames /tmp/ai-babies-deepseek-frames
+cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --character claude --frames /tmp/ai-babies-claude-frames
+python3 examples/ai-babies/tools/preview_actions.py /tmp/ai-babies-deepseek-frames --name deepseek
+python3 examples/ai-babies/tools/preview_actions.py /tmp/ai-babies-claude-frames --name claude
 # 如果保留了优化前的实际终端导出，可重新生成并排对照
 python3 examples/ai-babies/tools/preview_actions.py /tmp/ai-babies-frames --compare /tmp/ai-babies-before-frames
 ```
@@ -94,6 +145,8 @@ python3 examples/ai-babies/tools/preview_actions.py /tmp/ai-babies-frames --comp
 上面的历史并排对照使用统一浅色底板展示，当前主预览为透明背景。
 测试覆盖动作变化与帧复用、静止区域一致性、颜色数量与透明度、编码颜色保真、
 停留时间、循环与自动切换边界、多种窗口尺寸、暂停、按键切换和退出。
+三个角色均验证完整动作图集、编码后的可见运动、颜色保真和透明边缘；另有角色切换、
+暂停状态保持和命令行角色参数测试。
 
 ## 静态预览（288×48 → 144 列 × 24 行）
 

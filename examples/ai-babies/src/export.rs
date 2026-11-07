@@ -63,14 +63,14 @@ fn save(path: impl AsRef<std::path::Path>, buffer: &Buffer) -> Result<(), Box<dy
     Ok(())
 }
 
-pub fn command(args: &[String]) -> Result<(), Box<dyn Error>> {
+pub fn command(args: &[String], character: crate::scene::Character) -> Result<(), Box<dyn Error>> {
     match args[0].as_str() {
         "--snapshot" if [2, 3, 5].contains(&args.len()) => {
             let time: f64 = args.get(2).map_or(Ok(0.0), |s| s.parse())?;
             if !time.is_finite() || !(0.0..=86400.0).contains(&time) {
                 return Err("SECONDS must be finite and between 0 and 86400".into());
             }
-            let mut nursery = Nursery { time, ..Nursery::default() };
+            let mut nursery = Nursery { time, character, ..Nursery::default() };
             let size = if args.len() == 5 {
                 let width: u16 = args[3].parse()?;
                 let height: u16 = args[4].parse()?;
@@ -84,7 +84,7 @@ pub fn command(args: &[String]) -> Result<(), Box<dyn Error>> {
         }
         "--frames" if args.len() == 2 => {
             fs::create_dir_all(&args[1])?;
-            let mut nursery = Nursery::default();
+            let mut nursery = Nursery { character, ..Nursery::default() };
             for index in 0..(crate::scene::PERIOD * 24.0).ceil() as usize {
                 nursery.time = index as f64 / 24.0;
                 let path = std::path::Path::new(&args[1]).join(format!("{index:04}.ppm"));
@@ -96,7 +96,7 @@ pub fn command(args: &[String]) -> Result<(), Box<dyn Error>> {
             let action = crate::scene::Action::ALL.into_iter()
                 .find(|action| action.name() == args[1]).ok_or("Unknown action; use idle/wave/walk/hop/think/sleep")?;
             fs::create_dir_all(&args[2])?;
-            let mut nursery = Nursery { action: Some(action), ..Nursery::default() };
+            let mut nursery = Nursery { action: Some(action), character, ..Nursery::default() };
             for index in 0..(action.duration() * 24.0).ceil() as usize {
                 nursery.time = index as f64 / 24.0;
                 let path = std::path::Path::new(&args[2]).join(format!("{index:04}.ppm"));
@@ -105,7 +105,7 @@ pub fn command(args: &[String]) -> Result<(), Box<dyn Error>> {
             println!("Saved {} clip to {}", action.name(), args[2]);
         }
         "--headless" if args.len() == 1 => {
-            let mut nursery = Nursery::default();
+            let mut nursery = Nursery { character, ..Nursery::default() };
             let start = Instant::now();
             for index in 0..90 {
                 nursery.time = index as f64 * 0.75;
@@ -115,7 +115,7 @@ pub fn command(args: &[String]) -> Result<(), Box<dyn Error>> {
             println!("90 frames passed at {PREVIEW_WIDTH}x{INLINE_HEIGHT}; mean {:.2} ms/frame (drawing + encoding; no terminal I/O)", start.elapsed().as_secs_f64() * 1000.0 / 90.0);
         }
         "--help" | "-h" if args.len() == 1 => println!(
-            "AI BABIES / pre-drawn dragon pet\n\nRun without arguments for automatic inline playback (up to 32 rows).\nq / Esc / Ctrl+C: exit; Space: pause; 1: idle; 2: wave; 3: walk; 4: hop; 5: think; 6: sleep; 0: automatic\n\n--static [--height ROWS] [--snapshot FILE.ppm]  (default: 144 columns × 24 rows; height: 1..40)\n--headless\n--snapshot FILE.ppm [SECONDS [COLUMNS ROWS]]\n--frames DIRECTORY  (one complete action playlist at 24 FPS)\n--action idle|wave|walk|hop|think|sleep DIRECTORY"
+            "AI BABIES / ChatGPT, DeepSeek and Claude pets\n\nRun without arguments for automatic inline playback (up to 32 rows).\nTab: next character; g: ChatGPT; d: DeepSeek; c: Claude; q / Esc / Ctrl+C: exit; Space: pause; 1: idle; 2: wave; 3: walk; 4: hop; 5: think; 6: sleep; 0: automatic\n\n--static [--height ROWS] [--snapshot FILE.ppm]  (default: 144 columns × 24 rows; height: 1..40)\n[--character chatgpt|deepseek|claude] [EXPORT OPTION]  (put character before export options; default: chatgpt)\n--headless\n--snapshot FILE.ppm [SECONDS [COLUMNS ROWS]]\n--frames DIRECTORY  (one complete action playlist at 24 FPS)\n--action idle|wave|walk|hop|think|sleep DIRECTORY"
         ),
         _ => return Err("Unknown or incomplete arguments; use --help".into()),
     }

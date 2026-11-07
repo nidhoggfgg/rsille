@@ -8,11 +8,67 @@ pub const SMALL_WIDTH: usize = 48;
 pub const SMALL_SPRITES: &[u8; SMALL_WIDTH * SMALL_WIDTH * 4 * 24] =
     include_bytes!("../assets/dragon-actions-v2-48.rgba");
 
-pub fn atlas(display_height: usize) -> (&'static [u8], usize) {
-    if display_height <= SMALL_WIDTH {
-        (SMALL_SPRITES, SMALL_WIDTH)
-    } else {
-        (SPRITES, WIDTH)
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Character {
+    #[default]
+    ChatGpt,
+    DeepSeek,
+    Claude,
+}
+
+impl Character {
+    pub const ALL: [Self; 3] = [Self::ChatGpt, Self::DeepSeek, Self::Claude];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::ChatGpt => "chatgpt",
+            Self::DeepSeek => "deepseek",
+            Self::Claude => "claude",
+        }
+    }
+
+    pub fn parse(name: &str) -> Result<Self, &'static str> {
+        Self::ALL
+            .into_iter()
+            .find(|c| c.name() == name)
+            .ok_or("Unknown character; use chatgpt/deepseek/claude")
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            Self::ChatGpt => Self::DeepSeek,
+            Self::DeepSeek => Self::Claude,
+            Self::Claude => Self::ChatGpt,
+        }
+    }
+
+    pub fn atlas(self, display_height: usize) -> (&'static [u8], usize) {
+        const DEEPSEEK: &[u8; FRAME_BYTES * 24] =
+            include_bytes!("../assets/deepseek-actions-64.rgba");
+        const DEEPSEEK_SMALL: &[u8; SMALL_WIDTH * SMALL_WIDTH * 4 * 24] =
+            include_bytes!("../assets/deepseek-actions-48.rgba");
+        const CLAUDE: &[u8; FRAME_BYTES * 24] = include_bytes!("../assets/claude-actions-64.rgba");
+        const CLAUDE_SMALL: &[u8; SMALL_WIDTH * SMALL_WIDTH * 4 * 24] =
+            include_bytes!("../assets/claude-actions-48.rgba");
+        if display_height <= SMALL_WIDTH {
+            (
+                match self {
+                    Self::ChatGpt => SMALL_SPRITES,
+                    Self::DeepSeek => DEEPSEEK_SMALL,
+                    Self::Claude => CLAUDE_SMALL,
+                },
+                SMALL_WIDTH,
+            )
+        } else {
+            (
+                match self {
+                    Self::ChatGpt => SPRITES,
+                    Self::DeepSeek => DEEPSEEK,
+                    Self::Claude => CLAUDE,
+                },
+                WIDTH,
+            )
+        }
     }
 }
 
@@ -150,7 +206,13 @@ pub fn color([r, g, b]: [u8; 3]) -> Color {
     Color::Rgb { r, g, b }
 }
 
-pub fn render(w: usize, h: usize, time: f64, action: Option<Action>) -> Vec<Option<[u8; 3]>> {
+pub fn render(
+    w: usize,
+    h: usize,
+    time: f64,
+    action: Option<Action>,
+    character: Character,
+) -> Vec<Option<[u8; 3]>> {
     let mut pixels = vec![None; w * h];
     if w == 0 || h == 0 {
         return pixels;
@@ -159,7 +221,7 @@ pub fn render(w: usize, h: usize, time: f64, action: Option<Action>) -> Vec<Opti
     // 24- and 32-row displays use atlases baked directly from the original art.
     let dh = h.min(w).min(HEIGHT);
     let dw = dh;
-    let (sprites, source_size) = atlas(dh);
+    let (sprites, source_size) = character.atlas(dh);
     let left = (w - dw) / 2;
     let top = (h - dh) / 2;
     let frame = current_frame(time, action) * source_size * source_size * 4;
