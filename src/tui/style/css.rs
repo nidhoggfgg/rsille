@@ -1,14 +1,19 @@
-//! CSS-style syntax support for widget styling
+//! CSS-like declaration parsing for visual styles and layout constraints.
 
 use super::{Color, Style};
 use crate::tui::{layout::Constraints, style::CssError};
 use std::collections::HashMap;
 
-/// CSS parsing error
-/// Parse CSS-style string into a map of properties
-/// Supports formats:
-/// - "color: red; background-color: blue"
-/// - "font-weight: bold; padding: 1"
+/// Parses semicolon-separated `property: value` declarations into a map.
+///
+/// Whitespace is trimmed, property names are lowercased, and values retain their
+/// case. Empty declarations are skipped. Repeated properties keep their last
+/// value; different properties have no guaranteed iteration order. This step
+/// does not validate property names or values.
+///
+/// # Errors
+///
+/// Returns [`CssError::ParseError`] for a nonempty declaration without a colon.
 pub fn parse_css(css: &str) -> Result<HashMap<String, String>, CssError> {
     let mut properties = HashMap::new();
 
@@ -37,11 +42,20 @@ pub fn parse_css(css: &str) -> Result<HashMap<String, String>, CssError> {
     Ok(properties)
 }
 
-/// Parse a color value from CSS
-/// Supports:
-/// - Named colors: "red", "blue", "green", etc.
-/// - RGB: "rgb(255, 0, 0)" or "#ff0000"
-/// - Indexed: "idx(123)"
+/// Parses a named, RGB, hexadecimal, or indexed color, ignoring case.
+///
+/// Accepts the eight named [`Color`] variants, `#RGB`, `#RRGGBB`, `rgb(r, g, b)`,
+/// and `idx(n)`. RGB channels and palette indices must fit in a `u8`.
+///
+/// # Errors
+///
+/// Returns [`CssError::InvalidValue`] with property `color` if the format or
+/// numeric value is invalid, including when parsing a background color.
+///
+/// # Panics
+///
+/// Malformed hexadecimal input containing non-ASCII characters may panic if a
+/// channel boundary falls inside a UTF-8 character.
 pub fn parse_color(value: &str) -> Result<Color, CssError> {
     let value = value.trim().to_lowercase();
 
@@ -131,21 +145,51 @@ pub fn parse_color(value: &str) -> Result<Color, CssError> {
 }
 
 impl Style {
-    /// Create a style from CSS-like syntax
+    /// Creates a style from semicolon-separated CSS-like declarations.
+    ///
+    /// Property names and recognized keyword values are case-insensitive.
+    /// Duplicate property names keep the last value. Unknown properties and
+    /// unrecognized text attribute values are ignored. Empty input produces an
+    /// empty style. This parser accepts declarations only, without selectors or
+    /// braces.
     ///
     /// # Supported properties
-    /// - `color`: Foreground color (named, #RGB, #RRGGBB, rgb(r,g,b), idx(n))
-    /// - `background-color`: Background color (same formats as color)
-    /// - `font-weight`: "bold" to enable bold
-    /// - `font-style`: "italic" to enable italic
-    /// - `text-decoration`: "underline" to enable underline
-    /// - `border`: Border style ("solid", "rounded", "double", "thick")
-    /// - `padding`: Padding (single value or "top right bottom left")
     ///
-    /// # Example
-    /// ```no_run
-    /// use rsille::tui::prelude::*;
-    /// let style = Style::from_css("color: red; background-color: #282c34; font-weight: bold");
+    /// - `color`: Foreground color: one of the eight named [`Color`] variants,
+    ///   `#RGB`, `#RRGGBB`, `rgb(r, g, b)`, or `idx(n)`.
+    /// - `background-color` or `background`: Background color in the same formats.
+    /// - `font-weight`: `bold` enables bold.
+    /// - `font-style`: `italic` enables italic.
+    /// - `text-decoration`: `underline` enables underline.
+    ///
+    /// Color channels and palette indices range from `0` to `255`. Layout
+    /// properties such as `border` and `padding` are ignored; set them on the
+    /// widget. Avoid specifying both background aliases, since their application
+    /// order is unspecified.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CssError::ParseError`] for declarations without a colon, or
+    /// [`CssError::InvalidValue`] for invalid colors. Color errors identify the
+    /// property as `color`, including errors in background declarations.
+    ///
+    /// # Panics
+    ///
+    /// Malformed hexadecimal colors containing non-ASCII characters may panic
+    /// if a channel boundary falls inside a UTF-8 character.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rsille::tui::style::{Color, CssError, Style};
+    ///
+    /// let style = Style::from_css(
+    ///     "color: red; background-color: #282c34; font-weight: bold",
+    /// )?;
+    /// assert_eq!(style.fg_color, Some(Color::Red));
+    /// assert_eq!(style.bg_color, Some(Color::Rgb(40, 44, 52)));
+    /// assert!(style.modifiers.contains_bold());
+    /// # Ok::<(), CssError>(())
     /// ```
     pub fn from_css(css: &str) -> Result<Self, CssError> {
         let properties = parse_css(css)?;
@@ -183,16 +227,29 @@ impl Style {
         Ok(style)
     }
 
-    /// Builder method to apply CSS styling
+    /// Creates a style using [`Self::from_css`].
+    ///
+    /// Accepts the same declarations and has the same error and panic behavior.
     pub fn css(css: &str) -> Result<Self, CssError> {
         Self::from_css(css)
     }
 }
 
 impl Constraints {
-    /// Create constraints from CSS-like syntax
+    /// Creates layout constraints from semicolon-separated CSS-like declarations.
+    ///
+    /// Starts with [`Self::content`]. Property names are case-insensitive,
+    /// duplicate names keep the last value, and unknown properties are ignored.
+    /// Dimensions are unitless `u16` cell counts; suffixes such as `px` or `%`
+    /// are not supported. The `flex` value is parsed as an `f32`.
+    ///
+    /// Distinct properties are applied in an unspecified order. Avoid combining
+    /// `width` with `min-width` or `max-width`, or `height` with `min-height` or
+    /// `max-height`, since they write the same fields. Bounds and flex values are
+    /// not checked for consistency or nonnegativity.
     ///
     /// # Supported properties
+    ///
     /// - `width`: Fixed width in cells
     /// - `min-width`: Minimum width
     /// - `max-width`: Maximum width
@@ -201,10 +258,22 @@ impl Constraints {
     /// - `max-height`: Maximum height
     /// - `flex`: Flex grow factor
     ///
-    /// # Example
-    /// ```no_run
-    /// use rsille::tui::prelude::*;
-    /// let constraints = Constraints::from_css("width: 20; height: 10; flex: 1");
+    /// # Errors
+    ///
+    /// Returns [`CssError::ParseError`] for declarations without a colon, or
+    /// [`CssError::InvalidValue`] when a recognized value cannot be parsed into
+    /// the corresponding numeric type.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rsille::tui::{layout::Constraints, style::CssError};
+    ///
+    /// let constraints = Constraints::from_css("width: 20; height: 10; flex: 1")?;
+    /// assert_eq!(constraints.min_width, 20);
+    /// assert_eq!(constraints.max_width, Some(20));
+    /// assert_eq!(constraints.flex, Some(1.0));
+    /// # Ok::<(), CssError>(())
     /// ```
     pub fn from_css(css: &str) -> Result<Self, CssError> {
         let properties = parse_css(css)?;
@@ -272,7 +341,11 @@ impl Constraints {
         Ok(constraints)
     }
 
-    /// Builder method to apply CSS constraints
+    /// Creates constraints using [`Self::from_css`].
+    ///
+    /// # Errors
+    ///
+    /// Returns the same syntax and numeric-value errors as [`Self::from_css`].
     pub fn css(css: &str) -> Result<Self, CssError> {
         Self::from_css(css)
     }

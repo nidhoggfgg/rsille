@@ -1,4 +1,4 @@
-//! Theme system for global styling
+//! Semantic widget styles, shared text metrics, and animation and effect defaults.
 
 use super::{Color, Style};
 use crate::tui::animation::AnimationTheme;
@@ -215,6 +215,11 @@ impl Palette {
 /// including user-defined custom widgets. Instead of hardcoding styles for
 /// specific components, we provide semantic roles based on the purpose and
 /// context of UI elements.
+///
+/// Start with a built-in palette such as [`Self::dark`] and replace individual
+/// fields to customize it. Pass the result to [`Theme::new`] or
+/// [`ThemeBuilder::styles`]. Widgets can fill unset explicit style properties
+/// from a role using [`Style::merge`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct ThemeStyles {
     // === Action Styles ===
@@ -464,7 +469,11 @@ impl ThemeStyles {
     }
 }
 
-/// A complete theme definition
+/// Shared appearance, text measurement, animation timing, and visual effects.
+///
+/// Built-in themes provide semantic [`ThemeStyles`] and use the default text
+/// metrics, animation timings, and effects. Use [`Self::builder`] to customize
+/// those defaults, or [`Self::with_text_metrics`] to set text measurement policy.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Theme {
     /// Shared terminal text width and tab-stop policy.
@@ -480,7 +489,10 @@ pub struct Theme {
 }
 
 impl Theme {
-    /// Create a new theme with the given name and semantic styles
+    /// Creates a named theme with the supplied semantic styles.
+    ///
+    /// Text metrics, animation timings, and visual effects use their respective
+    /// `Default` implementations.
     pub fn new(name: impl Into<String>, styles: ThemeStyles) -> Self {
         Self {
             text_metrics: crate::render::text::TextMetrics::default(),
@@ -491,6 +503,7 @@ impl Theme {
         }
     }
 
+    /// Replaces the shared terminal text width and tab-stop policy.
     pub fn with_text_metrics(mut self, metrics: crate::render::text::TextMetrics) -> Self {
         self.text_metrics = metrics;
         self
@@ -533,13 +546,29 @@ impl Theme {
         Self::new("tokyo-night", ThemeStyles::tokyo_night())
     }
 
-    /// Create a theme builder for custom themes
+    /// Creates a builder named `custom` with dark styles and default settings.
     pub fn builder() -> ThemeBuilder {
         ThemeBuilder::new()
     }
 }
 
-/// Builder for creating custom themes
+/// Builds a theme from semantic styles and optional animation and effect presets.
+///
+/// Unset styles use [`ThemeStyles::dark`]; unset animation and effect settings
+/// use their respective defaults. Text metrics can be changed on the built
+/// theme with [`Theme::with_text_metrics`].
+///
+/// # Examples
+///
+/// ```
+/// use rsille::tui::style::{Color, Style, Theme, ThemeStyles};
+///
+/// let mut styles = ThemeStyles::dark();
+/// styles.text_heading = Style::default().fg(Color::Cyan).bold();
+/// let theme = Theme::builder().name("ocean").styles(styles).build();
+/// assert_eq!(theme.name, "ocean");
+/// assert_eq!(theme.styles.text_heading.fg_color, Some(Color::Cyan));
+/// ```
 #[derive(Debug)]
 pub struct ThemeBuilder {
     name: String,
@@ -549,7 +578,7 @@ pub struct ThemeBuilder {
 }
 
 impl ThemeBuilder {
-    /// Create a new theme builder
+    /// Creates a builder with the name `custom` and no explicit overrides.
     pub fn new() -> Self {
         Self {
             name: "custom".to_string(),
@@ -565,7 +594,7 @@ impl ThemeBuilder {
         self
     }
 
-    /// Set the style roles
+    /// Replaces the complete set of semantic style roles.
     pub fn styles(mut self, styles: ThemeStyles) -> Self {
         self.styles = Some(styles);
         self
@@ -583,7 +612,8 @@ impl ThemeBuilder {
         self
     }
 
-    /// Build the theme, using dark theme defaults for unset fields
+    /// Builds the theme, using dark styles and default animation/effect settings
+    /// for unset fields, along with default text metrics.
     pub fn build(self) -> Theme {
         let styles = self.styles.unwrap_or_else(ThemeStyles::dark);
         let animations = self.animations.unwrap_or_default();
@@ -601,11 +631,29 @@ impl Default for ThemeBuilder {
 }
 
 /// Theme-level defaults for visual post-processing effects.
+///
+/// [`Default`] supplies fade and magic-lamp effects for modals, staggered reveal
+/// and dissolve effects for toasts, a highlight sweep for focus, and a downward
+/// reveal for screen transitions. Retrieve a cloned preset with [`Self::get`]
+/// or replace individual presets with the builder methods.
+///
+/// # Examples
+///
+/// ```
+/// use rsille::tui::style::{EffectSlot, ThemeEffects};
+/// use rsille::tui::widgets::visual::VisualEffect;
+///
+/// let effects = ThemeEffects::default()
+///     .cell_aspect(0.5)
+///     .modal_enter(VisualEffect::fade_in());
+/// assert_eq!(effects.cell_aspect, 0.5);
+/// assert_eq!(effects.get(EffectSlot::ModalEnter), effects.modal_enter);
+/// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct ThemeEffects {
     /// Terminal cell width divided by height as used by geometry effects.
     ///
-    /// The default keeps historical behavior. Applications can tune this to
+    /// The default is `1.0`. Applications can tune this to
     /// match their terminal font, for example `0.5` for narrow cells.
     pub cell_aspect: f64,
     /// Default visual effect for modal/dialog entry.
@@ -650,6 +698,10 @@ impl Default for ThemeEffects {
 
 impl ThemeEffects {
     /// Override the terminal cell aspect used by geometry effects.
+    ///
+    /// Finite values are clamped to at least [`f64::EPSILON`]. Non-finite values
+    /// are replaced with `1.0`. Assigning the public field directly bypasses
+    /// this normalization.
     pub fn cell_aspect(mut self, cell_aspect: f64) -> Self {
         self.cell_aspect = sanitize_cell_aspect(cell_aspect);
         self
@@ -691,7 +743,7 @@ impl ThemeEffects {
         self
     }
 
-    /// Resolve a named theme effect slot at render time.
+    /// Returns a clone of the visual effect stored in the named slot.
     pub fn get(&self, slot: EffectSlot) -> VisualEffect {
         match slot {
             EffectSlot::ModalEnter => self.modal_enter.clone(),
@@ -707,11 +759,17 @@ impl ThemeEffects {
 /// Named visual effect presets supplied by [`ThemeEffects`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum EffectSlot {
+    /// Modal or dialog entry, using [`ThemeEffects::modal_enter`].
     ModalEnter,
+    /// Modal or dialog exit, using [`ThemeEffects::modal_exit`].
     ModalExit,
+    /// Toast or notification entry, using [`ThemeEffects::toast_enter`].
     ToastEnter,
+    /// Toast or notification exit, using [`ThemeEffects::toast_exit`].
     ToastExit,
+    /// Focus emphasis, using [`ThemeEffects::focus_pulse`].
     FocusPulse,
+    /// Full-screen or route transition, using [`ThemeEffects::screen_transition`].
     ScreenTransition,
 }
 

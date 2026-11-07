@@ -1,4 +1,21 @@
-//! Styling types for widget appearance
+//! Colors, text attributes, borders, spacing, and themes for TUI widgets.
+//!
+//! Use [`Style`] for visual properties and [`Theme`] for shared semantic styles
+//! and animation defaults. [`BorderStyle`] and [`Padding`] affect layout and are
+//! configured on widgets separately from their style.
+//!
+//! Styles can be built with methods or parsed with [`Style::from_css`]. Use
+//! [`Style::merge`] to fill unspecified values from a theme role.
+//!
+//! # Examples
+//!
+//! ```
+//! use rsille::tui::style::{Color, Style, Theme};
+//!
+//! let theme = Theme::dark();
+//! let style = Style::default().fg(Color::Cyan).merge(theme.styles.text);
+//! assert_eq!(style.fg_color, Some(Color::Cyan));
+//! ```
 
 mod border;
 mod css;
@@ -12,18 +29,24 @@ pub use padding::Padding;
 pub use error::CssError;
 pub use theme::{EffectSlot, Theme, ThemeBuilder, ThemeEffects, ThemeStyles};
 
-/// Widget style configuration (visual properties only)
+/// Colors and text attributes for a widget.
 ///
 /// Style contains only visual/themeable properties like colors and text modifiers.
 /// Layout properties like border and padding should be set directly on widgets.
+/// Unset colors and empty modifiers can be filled from another style with
+/// [`merge`](Self::merge).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Style {
+    /// Foreground color, or `None` when unspecified.
     pub fg_color: Option<Color>,
+    /// Background color, or `None` when unspecified.
     pub bg_color: Option<Color>,
+    /// Text attributes; an empty set leaves attributes unspecified when merging.
     pub modifiers: TextModifiers,
 }
 
 impl Style {
+    /// Creates an empty style with no colors or text attributes set.
     pub fn default() -> Self {
         Self {
             fg_color: None,
@@ -32,44 +55,55 @@ impl Style {
         }
     }
 
+    /// Sets the foreground color, replacing any previously specified color.
     pub fn fg(mut self, color: Color) -> Self {
         self.fg_color = Some(color);
         self
     }
 
+    /// Sets the background color, replacing any previously specified color.
     pub fn bg(mut self, color: Color) -> Self {
         self.bg_color = Some(color);
         self
     }
 
+    /// Enables bold text while preserving the other attributes.
     pub fn bold(mut self) -> Self {
         self.modifiers = self.modifiers.with_bold();
         self
     }
 
+    /// Enables italic text while preserving the other attributes.
     pub fn italic(mut self) -> Self {
         self.modifiers = self.modifiers.with_italic();
         self
     }
 
+    /// Enables underlined text while preserving the other attributes.
     pub fn underlined(mut self) -> Self {
         self.modifiers = self.modifiers.with_underlined();
         self
     }
 
-    /// Merge this style with another, preferring this style's values when set
+    /// Fills unspecified properties from another style.
     ///
     /// This is useful for combining explicit widget styles with theme defaults.
     /// Values from `self` take precedence over values from `other`.
+    /// Colors are merged independently. Modifiers are taken as a whole: a
+    /// nonempty modifier set in `self` replaces all modifiers from `other`.
     ///
-    /// # Example
-    /// ```no_run
+    /// # Examples
+    ///
+    /// ```
     /// use rsille::tui::style::{Style, Color};
     ///
-    /// let theme_style = Style::default().fg(Color::White).bg(Color::Blue);
-    /// let widget_style = Style::default().fg(Color::Red); // Override fg only
+    /// let theme_style = Style::default().fg(Color::White).bg(Color::Blue).bold();
+    /// let widget_style = Style::default().fg(Color::Red).italic();
     /// let final_style = widget_style.merge(theme_style);
-    /// // final_style has fg=Red (from widget_style) and bg=Blue (from theme_style)
+    /// assert_eq!(final_style.fg_color, Some(Color::Red));
+    /// assert_eq!(final_style.bg_color, Some(Color::Blue));
+    /// assert!(final_style.modifiers.contains_italic());
+    /// assert!(!final_style.modifiers.contains_bold());
     /// ```
     pub fn merge(self, other: Style) -> Self {
         Self {
@@ -83,12 +117,15 @@ impl Style {
         }
     }
 
-    /// Check if this style has any values set
+    /// Returns `true` when both colors are unset and no text attributes are enabled.
     pub fn is_empty(&self) -> bool {
         self.fg_color.is_none() && self.bg_color.is_none() && self.modifiers.is_empty()
     }
 
-    /// Convert to render style
+    /// Converts colors and supported attributes to the terminal renderer's style.
+    ///
+    /// Bold, italic, and underline are forwarded. Dim and reversed flags are
+    /// currently omitted by this conversion. Unset colors remain unspecified.
     pub fn to_render_style(&self) -> crate::render::style::Style {
         use crate::render::style::Style as RenderStyle;
         use crossterm::style::{Attributes, Colors};
@@ -133,9 +170,9 @@ impl Style {
 
     /// Interpolate this style toward another style.
     ///
-    /// RGB colors are blended. Named and indexed terminal colors fall back to a
-    /// discrete switch at the halfway point, matching terminal capability
-    /// constraints.
+    /// Progress is clamped to `0.0..=1.0`. Two RGB colors are blended channel by
+    /// channel; all other color pairs, including an unset color, switch to the
+    /// target at `0.5`. The entire modifier set also switches at `0.5`.
     pub fn interpolate(self, target: Style, progress: f64) -> Self {
         let progress = progress.clamp(0.0, 1.0);
         Self {
@@ -146,24 +183,52 @@ impl Style {
     }
 }
 
-/// Terminal colors
+/// Named terminal colors, true-color RGB values, or 256-color palette entries.
+///
+/// Named and indexed colors depend on the terminal's palette. Red, green,
+/// yellow, blue, magenta, and cyan map to crossterm's `Dark*` variants.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Color {
+    /// The terminal's black color.
     Black,
+    /// The terminal's dark red color.
     Red,
+    /// The terminal's dark green color.
     Green,
+    /// The terminal's dark yellow color.
     Yellow,
+    /// The terminal's dark blue color.
     Blue,
+    /// The terminal's dark magenta color.
     Magenta,
+    /// The terminal's dark cyan color.
     Cyan,
+    /// The terminal's white color.
     White,
-    /// RGB color (true color)
+    /// True-color red, green, and blue channels, each in `0..=255`.
     Rgb(u8, u8, u8),
-    /// 256-color palette index
+    /// An entry in the terminal's 256-color palette.
     Indexed(u8),
 }
 
 impl Color {
+    /// Interpolates toward `target` with progress clamped to `0.0..=1.0`.
+    ///
+    /// RGB pairs use linear interpolation with each channel rounded to the
+    /// nearest integer. Other pairs return `self` below `0.5` and `target`
+    /// otherwise, including pairs with only one RGB color.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rsille::tui::style::Color;
+    ///
+    /// assert_eq!(
+    ///     Color::Rgb(0, 10, 20).interpolate(Color::Rgb(100, 110, 120), 0.5),
+    ///     Color::Rgb(50, 60, 70),
+    /// );
+    /// assert_eq!(Color::Red.interpolate(Color::Blue, 0.5), Color::Blue);
+    /// ```
     pub fn interpolate(self, target: Color, progress: f64) -> Color {
         let progress = progress.clamp(0.0, 1.0);
         match (self, target) {
@@ -183,7 +248,11 @@ impl Color {
     }
 }
 
-/// Text modifiers
+/// A set of text attribute flags.
+///
+/// Start with [`empty`](Self::empty) and combine attributes with the `with_*`
+/// methods. [`Style::to_render_style`] currently forwards only bold, italic,
+/// and underline; dim and reversed flags are stored but not rendered there.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TextModifiers {
     bits: u8,
@@ -196,51 +265,65 @@ impl TextModifiers {
     const UNDERLINED: u8 = 0b01000;
     const REVERSED: u8 = 0b10000;
 
+    /// Creates a set with no enabled attributes.
     pub const fn empty() -> Self {
         Self { bits: 0 }
     }
 
+    /// Enables bold while preserving existing flags.
     pub const fn with_bold(mut self) -> Self {
         self.bits |= Self::BOLD;
         self
     }
 
+    /// Enables dim while preserving existing flags.
     pub const fn with_dim(mut self) -> Self {
         self.bits |= Self::DIM;
         self
     }
 
+    /// Enables italic while preserving existing flags.
     pub const fn with_italic(mut self) -> Self {
         self.bits |= Self::ITALIC;
         self
     }
 
+    /// Enables underline while preserving existing flags.
     pub const fn with_underlined(mut self) -> Self {
         self.bits |= Self::UNDERLINED;
         self
     }
 
+    /// Enables reversed foreground and background while preserving existing flags.
     pub const fn with_reversed(mut self) -> Self {
         self.bits |= Self::REVERSED;
         self
     }
 
+    /// Returns whether bold is enabled.
     pub const fn contains_bold(&self) -> bool {
         self.bits & Self::BOLD != 0
     }
 
+    /// Returns whether italic is enabled.
     pub const fn contains_italic(&self) -> bool {
         self.bits & Self::ITALIC != 0
     }
 
+    /// Returns whether underline is enabled.
     pub const fn contains_underlined(&self) -> bool {
         self.bits & Self::UNDERLINED != 0
     }
 
+    /// Returns whether no attributes are enabled.
     pub const fn is_empty(&self) -> bool {
         self.bits == 0
     }
 
+    /// Switches the entire set from `self` to `target` at progress `0.5`.
+    ///
+    /// Returns `self` for values below `0.5` and `target` otherwise; flags are
+    /// not blended or combined.
     pub fn interpolate(self, target: Self, progress: f64) -> Self {
         if progress < 0.5 {
             self

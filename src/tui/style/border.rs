@@ -1,21 +1,25 @@
-//! Border styles using Unicode box-drawing characters
+//! Border styles using Unicode box-drawing characters.
 
-/// Border style variants
+/// A box-drawing style for widget borders and layout separators.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BorderStyle {
+    /// No visible border; all characters returned by [`Self::chars`] are spaces.
     None,
-    /// ┌─┐│└─┘
+    /// Thin single lines: `┌─┐│└─┘`.
     Single,
-    /// ╔═╗║╚═╝
+    /// Double lines: `╔═╗║╚═╝`.
     Double,
-    /// ╭─╮│╰─╯
+    /// Thin lines with rounded corners: `╭─╮│╰─╯`.
     Rounded,
-    /// ┏━┓┃┗━┛
+    /// Heavy lines: `┏━┓┃┗━┛`.
     Thick,
 }
 
 impl BorderStyle {
-    /// Get the box-drawing characters for this style
+    /// Returns the corners, lines, and junctions for this style.
+    ///
+    /// Rounded borders use single-line junctions. [`Self::None`] returns spaces
+    /// for every character.
     pub fn chars(&self) -> BorderChars {
         match self {
             BorderStyle::None => BorderChars::none(),
@@ -95,13 +99,19 @@ impl BorderStyle {
 #[derive(Debug, Clone, Copy)]
 pub struct BorderChars {
     // Corner characters
+    /// Upper-left corner, such as `┌`.
     pub top_left: char,
+    /// Upper-right corner, such as `┐`.
     pub top_right: char,
+    /// Lower-left corner, such as `└`.
     pub bottom_left: char,
+    /// Lower-right corner, such as `┘`.
     pub bottom_right: char,
 
     // Line characters
+    /// Horizontal line segment, such as `─`.
     pub horizontal: char,
+    /// Vertical line segment, such as `│`.
     pub vertical: char,
 
     // T-junction characters (for connecting borders)
