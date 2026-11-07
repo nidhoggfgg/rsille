@@ -1,25 +1,20 @@
-# Internal canvas crate
+# Internal canvas crate / 内部 canvas crate
 
-This private workspace crate is a separate development and testing target.
-It has `publish = false`; users install only `rsille` and use `rsille::canvas`.
+English · [中文](README_cn.md)
 
-Implementation is shared with the public package under `../../src/canvas`.
-`src/lib.rs` provides the internal crate aliases and includes those module declarations;
-there is no duplicated implementation or dependency on a separately published component.
+Colored sample graphics with Braille (2 × 4), Half-block (1 × 2) and Quadrant
+(2 × 2) encoding. Drawing coordinates use samples with y increasing upward; bounds
+and output sizes use terminal cells.
+
+This is a private workspace target (`publish = false`). In an application, depend on
+`rsille` and import `rsille::canvas`. The adapter in [src/lib.rs](src/lib.rs) compiles
+the shared implementation under [src/canvas](../../src/canvas); it does not duplicate it.
+
+Run from the repository root:
 
 ```bash
 cargo check -p canvas
 cargo test -p canvas
 ```
 
-See [the root README](../../README.md) and [migration guide](../../MIGRATION_V3.md).
-
-`Canvas` stores sample coverage and color until output. It defaults to
-`Encoding::Braille` (2×4 samples per cell); construct it with
-`Canvas::with_encoding(Encoding::HalfBlock)` for 1×2 color samples per cell, or
-`Canvas::with_encoding(Encoding::Quadrant)` for 2×2 quadrant blocks.
-Quadrant preserves partial coverage with one averaged ink color; fully colored
-cells fit their four samples to two terminal colors.
-`set_color` paints samples, `set_background` fills uncovered regions, and the
-same `Draw` implementation outputs each encoding into the shared renderer.
-Canvas bounds use terminal cells; drawing coordinates use samples, with y upwards.
+[Project README](../../README.md) · [Migration guide](../../MIGRATION_V3.md)

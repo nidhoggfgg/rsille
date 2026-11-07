@@ -1,15 +1,19 @@
-# Internal render crate
+# Internal render crate / 内部 render crate
 
-This private workspace crate is a separate development and testing target.
-It has `publish = false`; users install only `rsille` and use `rsille::render`.
+English · [中文](README_cn.md)
 
-Implementation is shared with the public package under `../../src/render`.
-`src/lib.rs` provides the internal crate aliases and includes those module declarations;
-there is no duplicated implementation or dependency on a separately published component.
+Terminal buffers, styled Unicode text, bounded drawing and terminal event loops.
+Coordinates and dimensions use terminal columns and rows.
+
+This is a private workspace target (`publish = false`). In an application, depend on
+`rsille` and import `rsille::render`. The adapter in [src/lib.rs](src/lib.rs) compiles
+the shared implementation under [src/render](../../src/render); it does not duplicate it.
+
+Run from the repository root:
 
 ```bash
 cargo check -p render
 cargo test -p render
 ```
 
-See [the root README](../../README.md) and [migration guide](../../MIGRATION_V3.md).
+[Project README](../../README.md) · [Migration guide](../../MIGRATION_V3.md)

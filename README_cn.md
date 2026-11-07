@@ -1,172 +1,181 @@
-# rsille v3
+# rsille
 
-面向 Rust 的终端应用框架，提供组件组合、Unicode 编辑、布局、动画、后台任务和采样式终端图形。
-v3 仍在开发，本分支使用下列接口。[English](README.md) · [迁移说明](MIGRATION_V3.md)
+[English](README.md) · 中文
+
+面向 Rust 的终端应用与图形框架。既可以用组件、布局和后台任务构建交互工具，也可以通过
+渲染器和采样画布直接绘制终端字符。
+
+当前仓库使用 **v3 API**（`Cargo.toml` 中版本为 `3.0.0`）。从 v2 升级请阅读
+[迁移指南](MIGRATION_V3.md)。
+
+![使用 rsille 构建的 Lumen 工作台](examples/lumen/preview.png)
+
+## 可以做什么
+
+- **终端应用**：表单、Unicode 文本编辑、表格、树、文件浏览器、命令面板和内容查看器。
+- **交互布局**：Flex、Grid、滚动、可调分栏、模态 Portal、可拖动浮窗、指针捕获和键盘焦点。
+- **动画与图形**：过渡、视觉特效、毛玻璃背景，以及支持盲文、半块和四分块编码的彩色 Canvas。
+- **可测试的流程**：消息、后台任务、防抖、带作用域的订阅，以及无需终端即可驱动的运行时。
+
+[示例目录](examples/README_cn.md) 包含工具、游戏和动画。完整应用可以从
+[Lumen](examples/lumen/README_cn.md) 开始，组件展示看
+[TUI showcase](examples/tui-showcase/README_cn.md)，单项 API 用法看
+[TUI 小示例](packages/tui/examples/README_cn.md)。
+
+## 先运行看看
+
+使用当前稳定版 Rust 工具链，在仓库根目录执行：
+
+```bash
+cargo run -p tui --example hello
+cargo run --release --manifest-path examples/lumen/Cargo.toml
+cargo run --release --manifest-path examples/pokemon-battle/Cargo.toml
+```
+
+交互示例需要终端。图形示例建议使用 Unicode 等宽字体与 True Color；各示例文档列出了
+推荐窗口尺寸和操作方式。首次运行会编译依赖，图形示例建议加 `--release`。
+
+## 在应用中引入 rsille
+
+如果要在另一个项目中使用当前源码，添加路径依赖，并替换为本地仓库的位置：
 
 ```toml
 [dependencies]
-rsille = "3.0.0"
+rsille = { path = "../rsille" }
 ```
+
+对外的包名是 `rsille`。仓库中的 `tui`、`render`、`canvas` 都是内部开发用 crate，
+均设置了 `publish = false`。
+
+默认没有启用任何 feature。代码查看器需要 Syntect 语法高亮时，启用 `syntax-highlighting`：
+
+```toml
+[dependencies]
+rsille = { path = "../rsille", features = ["syntax-highlighting"] }
+```
+
+未启用时，代码查看器仍支持纯文本显示和导航。
+
+## 第一个应用
 
 ```rust,no_run
 use rsille::tui::prelude::*;
 
 fn main() -> WidgetResult<()> {
-    let exit = App::new(0)
+    let exit = App::new(0_u32)
         .mode(Mode::Inline)
         .update(|count, (), _ctx| *count += 1)
         .view(|count| button(format!("计数：{count}")).on_click(|| ()))
         .run()?;
-    println!("最终计数：{}；退出原因：{:?}", exit.state, exit.reason);
+
+    println!("最终计数：{}", exit.state);
     Ok(())
 }
 ```
 
-在 `.update()` 前配置主题、订阅、快捷键、时钟和执行器。统一更新函数接收
-`UpdateCtx`，可发送消息、调度任务、设置 debounce，以及通过 `ctx.exit()` 退出。
-默认全屏；`Mode::Inline` 在普通终端屏幕内显示。默认 Esc 退出，组件先获得事件处理机会。
-退出时卸载组件并取消资源，再返回包含最终状态和 `ExitReason` 的结果。
+Tab 切换焦点，Enter 或空格激活按钮，默认按 Esc 退出。`view` 根据状态描述组件，
+组件产生的消息交给 `update`。更新函数的第三个参数 `UpdateCtx` 可调度任务、发送消息，
+也可以调用 `ctx.exit()` 退出。
 
-用 `.update(update).view(view).build()` 创建无 TTY 运行时，通过 `step(&events)`
-输入事件，`handle().send(message)` 发送外部消息。可读取状态、帧、焦点、组件状态、任务和布局几何；
-`into_exit()` 结束运行并取回状态。测试工具从 `rsille::tui::runtime` 显式导入
-`ManualClock`、`ManualExecutor`，推进时间和执行任务后调用 `step(&[])`。
+主题、快捷键、订阅和时间相关配置放在 `.update()` 之前。默认全屏；`Mode::Inline`
+使用普通终端屏幕。`run()` 在清理后返回 `AppExit`，其中包含最终状态和退出原因。
+在已有的、启用了 I/O 与时间驱动的 Tokio runtime 中使用 `.run_async().await`。
 
-需要独立按住多个键时，在 `.update()` 前设置 `.keyboard_mode(KeyboardMode::Auto)`、
-`.focus_events(true)` 和 `.on_input(...)`。输入回调先收到终端启动时的
-`InputEvent::Capabilities`，再收到保留 Press / Repeat / Release 和焦点变化的
-`InputEvent::Terminal`，不会因组件消费事件而漏报。只有 `key_releases` 为真时才维护
-持续按住状态，并在失焦时清空，按 `FrameInfo.delta` 推进动作。传统终端自动降级，
-无法保证准确松手和独立多键按住；框架默认仍为 Legacy 模式。
-无 TTY 测试可用 `runtime.set_input_capabilities(...)` 注入能力。
-`on_key` 保留 Press / Repeat 行为；内置组件、快捷键、焦点导航和退出不因 Release 激活，
-按钮和布尔开关只在 Press 时激活。
+## 无需终端的测试
 
-嵌入已启用 I/O 和时间驱动的 Tokio 环境时使用 `.run_async().await`。同步 `.run()`
-自行创建 runtime，在 Tokio 内调用会返回错误。UI 状态与回调可留在当前线程，无需
-`Send`、`Clone` 或 `Debug`；消息因跨线程入口需要 `Send + 'static`，无需 `Clone` 或 `Debug`。
-`build()` 存储回调，因此要求回调为 `'static`。
-
-从仓库根目录运行：
-
-```bash
-cargo run -p tui --example hello
-cargo run -p tui --example workflow
-cargo run -p tui --example workflow -- --headless
-cargo run -p tui --example composition
-cargo run --manifest-path examples/tui-showcase/Cargo.toml
-cargo run --release --manifest-path examples/lumen/Cargo.toml
-cargo run --release --manifest-path examples/orbit-files/Cargo.toml
-cargo run -p tui --example extensions -- --headless
-cargo run --manifest-path examples/rsille-showcase/Cargo.toml
-cargo run --release --manifest-path examples/neon-observatory/Cargo.toml
-cargo run --release --manifest-path examples/folded-harbor/Cargo.toml
-cargo run --release --manifest-path examples/minecraft/Cargo.toml
-cargo run --release --manifest-path examples/clockwork/Cargo.toml
-cargo run --release --manifest-path examples/pokemon-battle/Cargo.toml
-cargo run --release --manifest-path examples/jellyfish/Cargo.toml
-```
-
-`workflow` 使用同一套应用逻辑验证 Unicode 粘贴、debounce、后台保存、键盘焦点和退出，
-无 TTY 模式不使用真实睡眠。`extensions` 演示十万行虚拟日志、锚点模态命令面板，
-以及支持缩放、平移和指针交互的世界坐标 Canvas。[完整示例和框架契约](packages/tui/examples/README.md)。
-
-[TUI 综合组件展厅](examples/tui-showcase/README.md) 在七个页面中集中展示表单、数据组件、
-内容查看器、布局、动画和五套主题，并提供命令面板与对话框交互。
-
-[Lumen 交互工作台](examples/lumen/README.md) 将轨道画布、鼠标涟漪、实时曲线、渐进入场、
-布局过渡和三套柔和配色结合到一个完整应用中，包含流程管理、命令面板、弹窗和自动保存笔记。
-
-[Orbit Files 文件管理器](examples/orbit-files/README.md) 提供鼠标框选、整组文件拖放、复制/剪切/粘贴、
-目录导航、搜索、预览、右键菜单和可撤销删除。默认使用一次性演示目录，也可打开真实目录。
-
-卡片可通过 `.hover_border_style(Style::default().fg(Color::Rgb(151, 220, 190)))`
-开启鼠标悬停时的边框与标题渐亮。按钮、输入框提供悬停反馈；自定义组件可查询
-`RenderCtx::is_hovered()` / `is_hover_within()`，并使用 `AnimationCtx` 中的同名方法驱动动画。
-悬停独立于键盘焦点，遵循滚动裁剪、遮挡和模态输入隔离。
-
-[霓虹观测站](examples/neon-observatory/README.md) 以 inline 模式展示环形行星、光子隧道、霓虹山谷、星系、金属环面和极光，
-包含渐变与揭幕特效、键鼠控制和按窗口尺寸调整的布局，并附框架能力评估与无 TTY 验证入口。
-
-[折叠星港](examples/folded-harbor/README.md) 把视角变成解谜机关：旋转立体悬浮建筑，
-让不同深度的通道口在投影中重合，再折叠跨越。包含三章九道机关、光照与光晕、
-跟随三维位置的可点击组件、章节溶解、键鼠观察和完整自动演示。
-
-[Minecraft 方块世界](examples/minecraft/README.md) 是一个第一人称终端沙盒：草地、橡树、湖泊和小木屋，
-加上准星、快捷栏、挖掘放置、碰撞跳跃、飞行与昼夜切换，直接运行即可游玩。
-
-[Clockwork 发条生物](examples/clockwork/README.md) 用同一套 132 个黄铜、钢与陶瓷零件，
-自行组装成多足步行机、扑翼飞行器和会开合的机械花。可以绕工作台观察、展开爆炸视图，
-或用磁力脉冲震散整台机器，看它重新归位；实体三维几何通过 rsille Canvas 绘制。
-
-[宝可梦对战](examples/pokemon-battle/README.md) 是皮卡丘与水箭龟的 3D 战斗场景：
-在有草丛、起伏地形和薄雾远林的开阔草地上，控制皮卡丘，用键盘或鼠标选择四种技能，
-与会自动还击的水箭龟进行回合制对战。
-包含 HP、PP、麻痹、防御、胜负和重新开局，以及立体出招动作、电弧、水花与可旋转的相机。
-界面复用 TUI 的 Canvas、按钮、面板、血条、网格布局及浮层，交互和焦点统一由框架管理；
-血量与技能卡以半透明毛玻璃悬浮于完整场景上，可透见模糊的草地和树影。
-
-[深海水母](examples/jellyfish/README.md) 是一个无需操作、启动即自动播放的终端水族箱：
-以最多 28 行的 inline 画面展示两只放大的发光水母，上下游动、伞体收缩、触须大幅摆动，
-背景有柔和光束、浮游微粒和远处鱼群。
-没有控制面板，适合静静观看；按 `q`、Esc 或 Ctrl+C 退出。
-
-任意组件可直接添加毛玻璃背景：
+同一个 builder 也能创建内存中的运行时：
 
 ```rust
 use rsille::tui::prelude::*;
 
-let widget = visual(label::<()>("Hello"))
-    .backdrop(Backdrop::frosted());
+let mut runtime = App::new(0_u32)
+    .update(|count, (), _ctx| *count += 1)
+    .view(|count| button(format!("计数：{count}")).on_click(|| ()))
+    .build()
+    .size(40, 3);
+
+runtime.handle().send(()).unwrap();
+runtime.step(&[]).unwrap();
+assert_eq!(*runtime.state(), 1);
+assert_eq!(runtime.frame().size().width, 40);
 ```
 
-通过 `.blur_radius(2)`、`.opacity(0.45)` 和 `.tint(Color::Rgb(9, 17, 29))` 调整效果；
-`Backdrop::tinted(color)` 提供不模糊的半透明染色。框架自动采样同一渲染目标中已绘制的下层字符，
-估算颜色并模糊，再与控件底色混合；未指定 tint 时沿用控件底色。文字和边框保持清晰。
-默认覆盖组件整个矩形（包括空白格），可用 `.mask(|x, y, size| coverage)` 指定覆盖范围，
-不改变布局和点击区域。模糊半径以字符格为单位（0–16），不透明度仅控制底色混合比例，独立于模糊。
-无需读取 Canvas 原始像素，也不依赖终端窗口透明度。外层离屏视觉效果会建立独立渲染目标，
-场景及其毛玻璃浮层应一起放在该目标内。
+通过 `step(&events)` 回放输入，使用 `frame()` 检查渲染后的字符格。
+从 `rsille::tui::runtime` 导入 `ManualClock` 和 `ManualExecutor`，即可手动推进计时器
+和队列中的任务。[workflow 示例](packages/tui/examples/basics/workflow.rs) 用同一个应用
+验证 Unicode 编辑、防抖、后台保存和退出：
 
-对外只发布 **`rsille`**，使用以下三个公开模块：
+```bash
+cargo run -p tui --example workflow -- --headless
+```
 
-| 模块 | 内容 |
-| --- | --- |
-| `rsille::tui` | 应用、组件、布局、effect |
-| `rsille::render` | 终端 buffer、Unicode 文本、渲染 |
-| `rsille::canvas` | 统一 Canvas，支持 Braille、Half-block 和 Quadrant 编码 |
+## 使用 Canvas 绘图
 
-仓库内保留 `tui`、`render`、`canvas` 三个独立 workspace crate，均设置 `publish = false`，
-仍可分别编译和测试。其入口复用 `src/tui`、`src/render`、`src/canvas` 中的实现；
-顶层 `rsille` 直接将同一份实现编译为模块。发布包自包含，不依赖内部 crate，也不生成或维护重复源码。
-v2 的根路径类型已移入相应模块。绘图通过 `render::Builder` 输出，参见英文首页的示例。
+不需要组件树时，可以直接使用渲染器：
 
-`Canvas::new()` 默认使用 Braille，每个字符格含 2×4 个采样点；
-`Canvas::with_encoding(Encoding::HalfBlock)` 每格含上下两个可分别着色的采样点；
-`Canvas::with_encoding(Encoding::Quadrant)` 使用 2×2 四分块字符（`▘ ▝ ▖ ▗`）。
-Quadrant 在部分覆盖时保留形状并平均已绘制颜色；完全着色时将四个采样点归并为前景、背景两色。
-用 `set_color(x, y, color)` 设置采样点颜色，`set_background(color)` 设置未覆盖区域的背景，
-两者都接受 crossterm 和 TUI 的颜色类型。颜色保留到输出阶段，再生成字符及前景／背景色。
-边界和 `get_size()` 使用字符格单位，绘图坐标使用采样点单位，y 轴向上。
+```rust,no_run
+use rsille::{canvas::Canvas, render};
 
-TUI 的 `canvas(...)` 通过 `.encoding(Encoding::HalfBlock)` 选择编码；
-`ctx.sample_width()`、`sample_height()` 返回对应采样尺寸。需要切换编码而保持相同场景范围时，
-设置显式 `.viewport(...)`，通过 `ctx.world(surface)` 绘图，鼠标事件使用同一坐标转换。
-运行 `cargo run -p tui --example canvas` 可对照三种编码。
+fn main() -> std::io::Result<()> {
+    let mut canvas = Canvas::new();
+    for x in 0..160 {
+        let x = x as f64;
+        canvas.set(x, 15.0 + (x / 10.0).sin() * 10.0);
+    }
+    render::Builder::new()
+        .size((80, 10))
+        .append_newline(true)
+        .build_render(canvas, std::io::stdout())
+        .render()
+}
+```
 
-默认 feature 集为空；启用 `syntax-highlighting` 后使用 Syntect 代码高亮。
-未启用时代码查看器仍提供纯文本显示、布局与键盘导航。showcase 显式启用此功能。
+| 编码 | 每个字符格的采样数 | 用途 |
+| --- | --- | --- |
+| `Encoding::Braille`（默认） | 2 × 4 | 密集线条、曲线和彩色场景 |
+| `Encoding::HalfBlock` | 1 × 2 | 上下两个可独立着色的采样点 |
+| `Encoding::Quadrant` | 2 × 2 | 四分块形状，采样颜色拟合为终端颜色 |
 
-验证命令：
+通过 `Canvas::with_encoding(...)` 选择编码。绘图坐标以采样点为单位，y 轴向上；
+边界与输出尺寸以终端字符格为单位。`set_color` 设置采样点颜色，`set_background`
+填充未覆盖区域。每个字符格最多使用一个前景色和一个背景色，因此盲文和四分块编码可能合并采样颜色。
+
+TUI 的 `canvas(...)` 组件把同一套绘图能力嵌入布局。通过 `.viewport(...)` 和
+`ctx.world(surface)` 使用世界坐标，并让指针转换与画面一致。
+运行 `cargo run -p tui --example canvas` 可对比三种编码。
+
+## API 与源码入口
+
+| 公开模块 | 职责 | 共用实现 |
+| --- | --- | --- |
+| `rsille::tui` | 应用、组件、布局、输入和特效 | [src/tui](src/tui) |
+| `rsille::render` | Buffer、带样式的 Unicode 文本、绘制与终端循环 | [src/render](src/render) |
+| `rsille::canvas` | 采样图形与终端编码 | [src/canvas](src/canvas) |
+
+`packages/` 中的内部 crate 复用这些源码，提供独立测试和示例入口，不维护重复实现。
+可在本地生成 API 文档：
+
+```bash
+cargo doc -p rsille --all-features --no-deps --open
+```
+
+文本编辑以字素簇为单位，实际字宽与显示效果仍受终端和字体影响。需要按住键操作时，
+可启用 `KeyboardMode::Auto` 并检查 `InputEvent::Capabilities`；准确的松键事件和独立
+多键按住需要终端支持，详见 [Minecraft 输入说明](examples/minecraft/README_cn.md)。
+
+## 开发与验证
 
 ```bash
 cargo test --workspace
 cargo test --workspace --all-features
 cargo check --workspace --all-targets --all-features
-python3 scripts/check-release.py --offline
 ```
 
-发布检查仅生成一个 `rsille` 包，执行 Cargo 的打包验证，再对解压内容运行测试，
-并用独立消费应用分别验证默认和全部 feature、完整 TUI 流程以及 Canvas 与渲染类型互通。
-消费应用仅依赖解包后的 `rsille` 和第三方库。依赖未缓存时去掉 `--offline`；脚本不会上传。
-[迁移与发布细节](MIGRATION_V3.md) · [MIT 许可](LICENCE)。
+`examples/` 下的独立项目不属于根 workspace，需要用 `--manifest-path` 单独检查，
+具体命令见各示例 README。
+
+`python3 scripts/check-release.py --offline` 验证自包含的打包产物和独立消费应用，
+不会上传。需要 Python 3.12+ 和已缓存的依赖；允许下载依赖时去掉 `--offline`。
+
+[示例目录](examples/README_cn.md) · [TUI 小示例](packages/tui/examples/README_cn.md) ·
+[迁移指南](MIGRATION_V3.md) · [MIT 许可](LICENCE)

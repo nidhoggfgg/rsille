@@ -1,115 +1,69 @@
 # Pokémon Battle / 宝可梦对战
 
-你控制皮卡丘，在开阔草地中与水箭龟进行回合制对战。选择技能、观看出招和受击动画，
-水箭龟自动还击；双方 HP、技能 PP、麻痹和防御状态实时显示。击倒对手获胜，按 `r` 再来一局。
+English · [中文](README_cn.md)
 
-```sh
+Play Pikachu against an automated Blastoise in a 3D meadow. Choose moves, watch attacks
+resolve and manage HP, PP, paralysis and guard. The scene and models are generated on
+the CPU, with native TUI buttons and health bars over frosted backdrops.
+
+![Battle frame](preview.png)
+
+## Run
+
+From the repository root:
+
+```bash
 cargo run --release --manifest-path examples/pokemon-battle/Cargo.toml
 ```
 
-![实际 rsille 游戏画面](preview.png)
+Use a True Color terminal, preferably 160 × 50 or larger; 80 × 24 also works. The default
+encoder is Half-block with 2 × 2 supersampling. Press b to switch to Braille.
 
-推荐支持 True Color 的终端，窗口 **160×50** 或更大；**80×24** 也可运行。
-默认使用 Half-block 编码和 2×2 超采样，按 `b` 可切换 Braille。
+## Battle
 
-开局采用背侧斜向对战视角：皮卡丘在近处面向远处的水箭龟，角色真正朝向彼此。
-默认镜头距离为 8.6，角色在开局画面中更大；按 `c` 也会恢复到这一近景。
-血量 HUD 分置两侧，使用黄／蓝精灵球徽记搭配开放式长血条，名字、等级、HP 数值和状态独立悬浮，
-不使用技能菜单的斜切外框；文字与血条的衬底仍使用半透明毛玻璃。
-底部仅保留四招菜单和按键提示，四招采用上下错位的斜切轮廓，带属性、伤害和 PP，
-选中招式统一使用浅色描边、浅色文字和深色半透明底，双箭头标明当前选择；未选中项保留属性色。
-宽窗口下菜单位于右下角，窄窗口下铺满底部，均按两列导航。
-宽窗口下皮卡丘血量放在左下角，与右侧技能菜单底部对齐；窄窗口下放在技能上方以避免遮挡。
-暂停时招式暂不可用，底部按键提示切换为继续。
-水箭龟会压低双肩炮再发射两束水流。
+Pikachu starts with 120 HP and Blastoise with 160 HP. Pikachu acts first; damage resolves
+once at impact. Moves cannot be queued during attack animations or pause.
 
-血量文字与底部技能使用半透明毛玻璃背景，场景绘制覆盖整个窗口，草地会延伸到技能后面。
-飘带下的树影、草色与战斗画面会随相机和动画同步变化；文字、血条和斜切边缘保持清晰。
-技能之间及斜角外侧直接露出草地，底部不再切出一整块不透明区域。
+| Key | Move | PP | Effect |
+| --- | --- | --- | --- |
+| 1 | Thunderbolt | 3 | 48 damage |
+| 2 | Quick Attack | 20 | 23 damage |
+| 3 | Iron Tail | 8 | 34 damage; bypasses guard |
+| 4 | Thunder Wave | 5 | Paralysis; prevents retaliation on even turns |
 
-## 怎么玩
+Blastoise cycles Hydro Pump (28 damage), Tackle (22), Withdraw and Hydro Pump.
+Withdraw halves the next direct hit unless bypassed by Iron Tail. Reapplying paralysis
+or choosing an exhausted move does not spend a turn. These are simplified demo rules.
 
-开局等待你选择技能。直接按 `1`–`4` 出招，或者用方向键／Tab 选中技能后按 Enter／空格确认；
-也可以直接点击底部技能按钮。Tab／Shift+Tab 遍历可用技能，耗尽或不可用的技能会跳过。
-动画期间无法重复出招，伤害在命中时结算一次。
-皮卡丘先手，水箭龟行动后进入下一回合；击倒对手后不会再遭到反击。
-
-| 技能 | PP | 作用 |
-| --- | --- | --- |
-| `1` 十万伏特 / Thunderbolt | 3 | 对水系水箭龟造成 48 点伤害，适合留到对手没有防御时使用 |
-| `2` 电光一闪 / Quick Attack | 20 | 冲刺撞击，造成 23 点伤害 |
-| `3` 铁尾 / Iron Tail | 8 | 旋身攻击，造成 34 点伤害，并穿透缩壳的防御 |
-| `4` 电磁波 / Thunder Wave | 5 | 使对手麻痹；此后偶数回合的反击无法行动，无直接伤害 |
-
-皮卡丘初始 **120 HP**，水箭龟初始 **160 HP**。水箭龟依次使用水炮（28 伤害）、
-撞击（22 伤害）、缩壳、水炮，然后重复。缩壳使下一次直接伤害减半，铁尾可以穿透。
-已经麻痹时不能重复使用电磁波；PP 耗尽时必须选择其他技能，均不会白白消耗回合。
-这是为示例设计的简化战斗规则，数值和技能效果并非原作战斗系统的完整实现。
-
-| 按键／鼠标 | 操作 |
+| Input | Action |
 | --- | --- |
-| `1`–`4` / 点击技能 | 直接使用指定技能 |
-| 方向键 / Tab | 选择技能 |
-| Enter / 空格 | 使用当前选中的技能 |
-| 场景内左键拖动 / WASD | 绕场景旋转相机 |
-| 滚轮 / `+` / `-` | 缩放 |
-| `c` | 恢复默认视角 |
-| `p` | 暂停／继续；暂停时不能出招，仍可转动相机 |
-| `r` | 重新开局，恢复 HP、PP 并清除状态 |
-| `b` | 切换 Half-block / Braille |
-| `q` / Esc / Ctrl+C | 退出并恢复终端 |
+| 1–4 / click a move | Use the selected move directly |
+| Arrows / Tab / Shift+Tab | Focus an available move |
+| Enter / Space | Activate the focused move |
+| Left drag in the scene / w, a, s, d | Orbit the camera |
+| Wheel / + / - | Zoom |
+| c | Reset camera |
+| p / r / b | Pause / rematch / change encoder |
+| q / Esc / Ctrl+C | Exit |
 
-## 实现与验证
+## Verify and export
 
-模型均由代码生成的实体三角网格组成。皮卡丘使用连续曲面塑造圆润的头部和梨形身体，
-搭配扁平尖耳、红脸颊、贴合背部的棕色条纹和宽片闪电尾巴；水箭龟使用宽厚龟壳、分节腹甲、
-粗壮四肢、收窄的眼形和带真实炮口的双肩炮，龟壳背面的甲片接缝沿曲面延伸。
-CPU 光栅器计算透视、深度遮挡和光照；
-转动相机可以看到侧面及背面。技能包含电弧、水流、冲刺、旋转和防御光环。
-场景是一片连续延伸的草地，包含起伏地形、随风摆动的草丛、树木、野花和小石块；
-远处使用薄雾形成纵深，脚下保留简化接触阴影。无需下载图片、模型或其他素材。
-
-界面运行在 `rsille::tui::App` 上，复用现成组件：
-
-- `canvas()` 承载 3D 场景，`drag_region()` 负责鼠标捕获、拖动及失焦／缩放窗口时的取消。
-- `grid()` 和 `overlay()` 负责响应式布局及两侧血量浮层，`StaggeredMoves` 分配错位招式的位置。
-- 原生 `button()` 负责技能卡内部的点击、Enter／空格激活、禁用、焦点与悬停。
-- 血量使用 `label()` 和块状 `progress_bar()`；血量及技能通过 `overlay()` 悬浮。
-
-`HealthHud` 绘制独立的半块像素精灵球，仅给原生名字、血条和状态组件添加毛玻璃衬底；徽记外围直接露出场景。
-`MoveCard` 绘制斜切外形，斜角外不绘制任何背景；侧边的 `╱` 每行只横移一格，首尾连续。
-`CommandFrame` 为原生按钮分配轮廓内部的安全区域，`FixedHeight` 约束按钮高度，
-不维护按下或悬停状态，不手工执行鼠标命中判断；技能名由原生 Button 绘制。方向键导航通过框架的焦点请求
-切换按钮，Tab 及禁用目标过滤由框架处理。键盘数字键只负责派发出招消息。
-
-`main.rs` 定义应用状态、消息及更新函数；`battle.rs` 管理回合、命中及胜负。
-`scene.rs` 生成模型动作，`environment.rs` 生成草地，`geometry.rs` 提供图元，`raster.rs` 处理光栅化。
-3D 输出由 TUI Canvas 编码为 Half-block 或 Braille，布局、事件路由和终端生命周期统一由 TUI 运行时管理。
-毛玻璃由框架的 `visual(widget).backdrop(Backdrop::frosted())` 提供：自动读取下层字符 Buffer，
-根据半块／盲文的覆盖比例估算场景颜色，做邻域模糊，再与控件原有底色混合；文字及装饰的前景色保持清晰。
-示例只设置不透明度，并通过 `Backdrop::mask` 描述飘带的覆盖范围：斜角外不覆盖场景，
-斜线背景使用未经模糊和染色的场景代表色，向内两列逐渐增加毛玻璃效果。
-这是基于已编码字符的近似合成，不读取原始 3D 像素，不依赖终端窗口透明度；应用无需维护场景副本或模糊缓存。
-战斗逻辑与绘制分离，绘制不会推进回合或造成伤害。
-
-```sh
+```bash
 cargo test --manifest-path examples/pokemon-battle/Cargo.toml
-cargo clippy --manifest-path examples/pokemon-battle/Cargo.toml --all-targets -- -D warnings
 cargo run --release --manifest-path examples/pokemon-battle/Cargo.toml -- --headless
-cargo run --release --manifest-path examples/pokemon-battle/Cargo.toml -- --snapshot /tmp/pokemon-menu.svg
-cargo run --release --manifest-path examples/pokemon-battle/Cargo.toml -- --snapshot /tmp/pokemon-electric.svg 0.9
-cargo run --release --manifest-path examples/pokemon-battle/Cargo.toml -- --snapshot /tmp/pokemon-water.svg 2.7
-cargo run --release --manifest-path examples/pokemon-battle/Cargo.toml -- --snapshot /tmp/pokemon-braille.svg 0.9 braille
+cargo run --release --manifest-path examples/pokemon-battle/Cargo.toml -- --snapshot /tmp/pokemon.svg
+cargo run --release --manifest-path examples/pokemon-battle/Cargo.toml -- --snapshot /tmp/pokemon-attack.svg 0.9 braille
 ```
 
-`--snapshot FILE.svg [SECONDS] [block|braille]` 导出真实 TUI Runtime 的 160×50 字符 Buffer。
-默认 0 秒，显示技能选择界面；指定正数时自动选择一次十万伏特，再推进相应秒数，
-演示玩家出招、对手反击及重新等待输入。秒数范围 0–3600，不会自动开始第二回合。
-半块字符按采样矩形导出，盲文按圆点导出。
+`--snapshot FILE.svg [SECONDS] [block|braille]` exports the actual 160 × 50 runtime buffer.
+Defaults are 0 seconds and `block`, showing move selection. A positive time chooses one
+Thunderbolt and advances 0–3600 seconds; it does not start another turn automatically.
+Headless verification completes a battle through keyboard input and checks victory.
 
-`--headless` 使用 TUI Runtime 与手动时钟，通过真实键盘消息自动完成一局并验证胜利。
-测试保留战斗规则和三维遮挡检查，并使用同一 TUI Runtime 验证原生按钮点击、重复输入锁定、
-Tab 跳过禁用技能、方向键焦点、鼠标悬停、布局实际命中范围、窗口调整、拖动捕获与失焦取消，
-以及 HP 数值与原生血条随命中变化、两种编码下的小窗口绘制及确定性快照。
-框架测试覆盖颜色估算、模糊核、图层快照和遮罩；示例检查覆盖全屏背景范围、飘带下的空间色彩变化、相机转动后的背景更新、清晰文字和斜角透景，
-并验证两种编码和宽窄窗口下的技能斜线首尾连续、边缘背景与未染色场景的代表色一致。
+[battle.rs](src/battle.rs) contains combat rules; [scene.rs](src/scene.rs),
+[environment.rs](src/environment.rs), [geometry.rs](src/geometry.rs) and
+[raster.rs](src/raster.rs) build and draw the world. [battle_ui.rs](src/battle_ui.rs)
+composes the HUD and move cards. Frosted backgrounds sample already rendered terminal
+cells through `Backdrop`; they do not require terminal-window transparency.
+
+[All examples](../README.md)
