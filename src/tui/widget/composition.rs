@@ -1,10 +1,37 @@
+//! Adapters for composing widgets with different message types and resource scopes.
+//!
+//! Import [`WidgetExt`] to use [`map`](WidgetExt::map) and
+//! [`scope`](WidgetExt::scope) on any owned, `'static` widget description.
+
 use std::rc::Rc;
 
 use super::*;
 
 /// Message conversion and lifetime namespaces for any widget description.
+///
+/// Implemented automatically for every sized, `'static` [`Widget`], including
+/// boxed widget descriptions. These adapters can be chained to embed a child
+/// component in an application with its own message type and resource lifetime.
 pub trait WidgetExt<M>: Widget<M> + Sized + 'static {
     /// Convert all messages in the subtree without adding a layout/identity node.
+    ///
+    /// The conversion applies to messages emitted by event, pointer-cancellation,
+    /// and focus-entry handlers, including those of descendants. Widget types,
+    /// keys, state, layout, and event-routing outcomes are preserved.
+    /// Map effects and subscriptions separately with their own `map` methods.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rsille::tui::prelude::*;
+    ///
+    /// enum ChildMsg { Save }
+    /// enum AppMsg { Editor(ChildMsg) }
+    ///
+    /// let child = button("Save").on_click(|| ChildMsg::Save).key("save");
+    /// let editor = child.map(AppMsg::Editor);
+    /// assert_eq!(editor.key(), Some("save"));
+    /// ```
     fn map<N: 'static>(self, map: impl Fn(M) -> N + 'static) -> MappedWidget<M, N>
     where
         M: 'static,
@@ -12,7 +39,25 @@ pub trait WidgetExt<M>: Widget<M> + Sized + 'static {
         MappedWidget::build(Rc::new(self), Vec::new(), Rc::new(map))
     }
 
-    /// A named identity boundary and owner for scoped effects/subscriptions.
+    /// Wrap this widget in a named identity boundary and resource namespace.
+    ///
+    /// The wrapper uses `name` as both its [`Widget::key`] and
+    /// [`Widget::resource_scope`], while forwarding the child's sizing intent.
+    /// Nested scopes form a [`Scope`](crate::tui::scope::Scope) path. Use the
+    /// same path for effects and subscriptions that should be cancelled when
+    /// this scope is unmounted; scoping the widget does not scope those resources
+    /// automatically. Names follow the uniqueness rules of [`Widget::key`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rsille::tui::prelude::*;
+    ///
+    /// let editor = button("Save").on_click(|| ()).scope("editor");
+    /// assert_eq!(editor.key(), Some("editor"));
+    /// assert_eq!(editor.resource_scope(), Some("editor"));
+    /// assert_eq!(editor.children().len(), 1);
+    /// ```
     fn scope(self, name: impl Into<String>) -> ScopedWidget<M> {
         ScopedWidget {
             name: name.into(),
@@ -25,8 +70,12 @@ impl<M, W: Widget<M> + Sized + 'static> WidgetExt<M> for W {}
 
 type MessageMap<M, N> = Rc<dyn Fn(M) -> N>;
 
-/// Transparent adapter. Nodes share ownership of the original immutable tree;
-/// each exposes the corresponding mapped children for framework traversal.
+/// A widget subtree that converts messages from `M` to `N`.
+///
+/// Created by [`WidgetExt::map`]. Each adapter shares ownership of the original
+/// immutable tree and exposes its visible and retained children with the new
+/// message type. The adapter forwards widget identity and layout without adding
+/// a container node, so mapping alone does not reset widget-local state.
 pub struct MappedWidget<M, N> {
     root: Rc<dyn Widget<M>>,
     // Visible and retained children form one stable sequence. A container may
@@ -150,7 +199,11 @@ impl<M: 'static, N: 'static> Widget<N> for MappedWidget<M, N> {
     }
 }
 
-/// A scope adds one named container without changing its child's layout intent.
+/// A named container that owns a resource scope for its mounted lifetime.
+///
+/// Created by [`WidgetExt::scope`]. The container holds one child, forwards its
+/// constraints and measurement, and renders it in the allocated area. Its name
+/// serves as a stable identity anchor and a resource-scope path segment.
 pub struct ScopedWidget<M> {
     name: String,
     children: Vec<Box<dyn Widget<M>>>,

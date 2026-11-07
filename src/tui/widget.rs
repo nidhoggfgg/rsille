@@ -1,3 +1,14 @@
+//! Widget descriptions, identity, persistent state, and per-phase contexts.
+//!
+//! Implement [`Widget`] to define a component's rendering and sizing. Keep
+//! widget-local mutable state in [`WidgetStore`], accessing it through
+//! [`StateCtx`] during lifecycle reconciliation and [`EventCtx`] during input.
+//! [`MeasureCtx`] and [`RenderCtx`] provide read-only access to that state.
+//!
+//! [`WidgetPath`] addresses a node in the current tree; [`WidgetId`] identifies
+//! it across rebuilds. Use [`WidgetExt`] to map a subtree's messages or give it a
+//! named resource scope, and [`IntoWidget`] to box descriptions for containers.
+
 mod composition;
 pub use composition::{MappedWidget, ScopedWidget, WidgetExt};
 
@@ -37,7 +48,9 @@ use crate::tui::widgets::visual::TerminalVisualCapabilities;
 /// against dynamic list changes.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum WidgetKey {
+    /// A child's zero-based position among its siblings.
     Index(usize),
+    /// A user-assigned name that anchors identity across tree rebuilds.
     Named(String),
 }
 
@@ -89,40 +102,61 @@ impl fmt::Display for WidgetKey {
 pub struct WidgetPath(SmallVec<[WidgetKey; 8]>);
 
 impl WidgetPath {
+    /// Creates the empty path identifying the root widget.
     pub fn root() -> Self {
         Self(SmallVec::new())
     }
 
+    /// Returns a new path with the child's key appended.
     pub fn child(&self, key: impl Into<WidgetKey>) -> Self {
         let mut p = self.0.clone();
         p.push(key.into());
         Self(p)
     }
 
+    /// Appends a child key to this path in place.
     pub fn push(&mut self, key: impl Into<WidgetKey>) {
         self.0.push(key.into());
     }
 
+    /// Removes and returns the last key, or `None` for the root path.
     pub fn pop(&mut self) -> Option<WidgetKey> {
         self.0.pop()
     }
 
+    /// Returns the keys in root-to-leaf order.
     pub fn as_slice(&self) -> &[WidgetKey] {
         &self.0
     }
 
+    /// Returns the number of keys, or zero for the root path.
     pub fn len(&self) -> usize {
         self.0.len()
     }
 
+    /// Returns whether this path identifies the root widget.
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
 
+    /// Returns whether `prefix` identifies this widget or one of its ancestors.
+    /// The root path is a prefix of every path.
     pub fn starts_with(&self, prefix: &WidgetPath) -> bool {
         self.0.starts_with(prefix.as_slice())
     }
 
+    /// Returns every ancestor path from the root through this path, inclusive.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rsille::tui::widget::WidgetPath;
+    ///
+    /// let root = WidgetPath::root();
+    /// let panel = root.child("panel");
+    /// let button = panel.child(0);
+    /// assert_eq!(button.ancestors_inclusive(), vec![root, panel, button]);
+    /// ```
     pub fn ancestors_inclusive(&self) -> Vec<WidgetPath> {
         let mut ancestors = Vec::with_capacity(self.len() + 1);
         ancestors.push(WidgetPath::root());
@@ -172,32 +206,46 @@ impl fmt::Display for WidgetPath {
 pub struct WidgetId(SmallVec<[WidgetKey; 8]>);
 
 impl WidgetId {
+    /// Creates the empty identity used for the root widget.
     pub fn root() -> Self {
         Self(SmallVec::new())
     }
 
+    /// Returns an identity with `key` appended verbatim.
+    ///
+    /// This does not apply the runtime's named-anchor normalization. Contexts
+    /// provide the resolved identity for a mounted widget.
     pub fn child(&self, key: impl Into<WidgetKey>) -> Self {
         let mut id = self.0.clone();
         id.push(key.into());
         Self(id)
     }
 
+    /// Returns the identity's stored key sequence.
     pub fn as_slice(&self) -> &[WidgetKey] {
         &self.0
     }
 
+    /// Returns the number of keys in this identity.
     pub fn len(&self) -> usize {
         self.0.len()
     }
 
+    /// Returns whether this is the root identity.
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
 
+    /// Returns whether this identity's key sequence begins with `prefix`.
+    /// This compares identity segments, not current tree ancestry.
     pub fn starts_with(&self, prefix: &WidgetId) -> bool {
         self.0.starts_with(prefix.as_slice())
     }
 
+    /// Copies a path's keys into an identity without named-anchor normalization.
+    ///
+    /// For mounted widgets, use the identity supplied by their context instead:
+    /// keyed widgets may have an identity that differs from their current path.
     pub fn from_path(path: &WidgetPath) -> Self {
         Self(path.as_slice().iter().cloned().collect())
     }
@@ -261,8 +309,13 @@ impl fmt::Display for WidgetId {
 /// Lifecycle of a mounted description. Hidden, retained children remain mounted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Lifecycle {
+    /// First reconciliation for this identity and concrete widget type.
+    /// Initialize state and synchronize the initial properties.
     Mount,
+    /// Reconciliation of an existing component with its current description.
+    /// Synchronization must be idempotent because it may run more than once.
     Sync,
+    /// Logical removal of the component, before any retained exit rendering.
     Unmount,
 }
 
@@ -290,22 +343,33 @@ impl<'a> StateCtx<'a> {
         }
     }
 
+    /// Returns the lifecycle notification being processed.
     pub fn lifecycle(&self) -> Lifecycle {
         self.lifecycle
     }
+    /// Returns this component's path in the tree being reconciled.
     pub fn path(&self) -> &WidgetPath {
         &self.path
     }
+    /// Returns the stable identity used to access this component's state.
     pub fn id(&self) -> &WidgetId {
         &self.id
     }
+    /// Reads state, returning `None` if absent or stored with a different type.
     pub fn state<T: 'static>(&self) -> Option<&T> {
         self.store.get(&self.id)
     }
+    /// Reads mutable state, inserting `T::default()` if no state exists.
+    /// Request layout or paint explicitly when synchronization changes them.
+    ///
+    /// # Panics
+    ///
+    /// Panics if this component's state slot already contains another type.
     pub fn state_mut<T: Default + 'static>(&mut self) -> &mut T {
         self.store.get_or_default(&self.id)
     }
 
+    /// Requests cancellation of this widget's pointer interaction with `reason`.
     pub fn cancel_pointer(&mut self, reason: crate::tui::gesture::DragCancelReason) {
         self.store.pointer_cancel_request = Some((self.path.clone(), reason));
     }
@@ -315,6 +379,7 @@ impl<'a> StateCtx<'a> {
         self.store.invalidation.request_layout();
     }
 
+    /// Requests repainting with the existing layout allocations.
     pub fn request_paint(&mut self) {
         self.store.invalidation.request_paint();
     }
@@ -337,6 +402,8 @@ pub struct MeasureCtx<'a> {
 }
 
 impl<'a> MeasureCtx<'a> {
+    /// Creates a root measurement context with the current time, frame zero,
+    /// and default terminal visual capabilities.
     pub fn new(store: &'a WidgetStore, theme: &'a Theme) -> Self {
         Self {
             store,
@@ -369,6 +436,8 @@ impl<'a> MeasureCtx<'a> {
         }
     }
 
+    /// Creates a context for a child, resolving its path and stable identity.
+    /// Use [`WidgetKey::for_child`] to respect the child's explicit key.
     pub fn child_ctx(&self, key: impl Into<WidgetKey>) -> Self {
         let key = key.into();
         let (current_id, stable_scope_id) =
@@ -386,30 +455,37 @@ impl<'a> MeasureCtx<'a> {
         }
     }
 
+    /// Returns the active theme, including its text measurement policy.
     pub fn theme(&self) -> &Theme {
         self.theme
     }
 
+    /// Returns the instant captured for this measurement pass.
     pub fn now(&self) -> std::time::Instant {
         self.now
     }
 
+    /// Returns the runtime's frame number, or zero for a standalone context.
     pub fn frame(&self) -> u64 {
         self.frame
     }
 
+    /// Returns terminal feature hints used when measuring visual content.
     pub fn visual_capabilities(&self) -> TerminalVisualCapabilities {
         self.visual_capabilities
     }
 
+    /// Returns the current widget's traversal path.
     pub fn path(&self) -> &WidgetPath {
         &self.current_path
     }
 
+    /// Returns the current widget's stable identity.
     pub fn id(&self) -> &WidgetId {
         &self.current_id
     }
 
+    /// Reads state without creating it, returning `None` if absent or of another type.
     pub fn state<T: Default + 'static>(&self) -> Option<&T> {
         self.store.get::<T>(&self.current_id)
     }
@@ -669,10 +745,7 @@ impl<M> Widget<M> for Box<dyn Widget<M>> {
 // RenderCtx – immutable context passed during rendering
 // ---------------------------------------------------------------------------
 
-/// Context passed to [`Widget::render`].
-///
-/// Provides read-only access to the [`WidgetStore`], focus information,
-/// and the current render theme.
+/// Read-only or runtime-managed access to animation state during painting.
 #[derive(Clone, Copy)]
 enum AnimationStoreView<'a> {
     ReadOnly(&'a AnimationStore),
@@ -752,6 +825,13 @@ impl HitRegion {
     }
 }
 
+/// Context passed to [`Widget::render`].
+///
+/// Provides read-only access to widget-local state, focus, hover, and the active
+/// theme. Geometry recording and animation tracking use interior mutability;
+/// application messages and widget-local state mutations belong in [`EventCtx`].
+/// Containers can use [`Self::render_children`] to paint their child allocations
+/// with the framework's identity, clipping, animation, and hit-testing behavior.
 #[derive(Clone)]
 pub struct RenderCtx<'a> {
     store: &'a WidgetStore,
@@ -778,6 +858,13 @@ pub struct RenderCtx<'a> {
 }
 
 impl<'a> RenderCtx<'a> {
+    /// Creates a standalone root render context backed by read-only animations.
+    ///
+    /// Uses the current time, frame zero, and default motion and visual policies.
+    /// Bounds are recorded in `geometry`, but no pointer hit-region list or
+    /// precomputed layout cache is attached. Layout tracking returns its target
+    /// area without starting animations. `focused_path` is converted verbatim
+    /// to a [`WidgetId`]; runtime contexts resolve stable identities separately.
     pub fn new(
         store: &'a WidgetStore,
         animation_store: &'a AnimationStore,
@@ -967,7 +1054,7 @@ impl<'a> RenderCtx<'a> {
     }
 
     /// Read persistent state stored for this widget.
-    /// Returns `None` if no state has been stored yet.
+    /// Returns `None` if no state has been stored or its type differs from `T`.
     pub fn state<T: Default + 'static>(&self) -> Option<&T> {
         self.store.get::<T>(&self.current_id)
     }
@@ -1049,9 +1136,12 @@ impl<'a> RenderCtx<'a> {
         )
     }
 
-    /// Read persistent state, or return a default reference if absent.
-    /// This is a convenience that avoids `unwrap_or` at every call-site
-    /// by falling back to a leaked static default. Use sparingly.
+    /// Read persistent state, falling back to a thread-local default for `T`.
+    ///
+    /// The fallback is initialized once per type on each thread and is not
+    /// inserted into [`WidgetStore`]. It is also used when the stored state has
+    /// a different type. Initialize persistent state through [`StateCtx::state_mut`]
+    /// or [`EventCtx::state_mut`] when later updates must retain it.
     pub fn state_or_default<T: Default + 'static>(&self) -> &T {
         self.store.get::<T>(&self.current_id).unwrap_or_else(|| {
             // Safe: Default is computed once per type via OnceLock-like pattern
@@ -1468,33 +1558,50 @@ fn zero_area() -> Area {
 /// The current event routing phase.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EventPhase {
+    /// An ancestor observes the event on its way from the root to the target.
     Capture,
+    /// The event is delivered to its selected target widget.
     Target,
+    /// An ancestor observes the event on its way back from the target to the root.
     Bubble,
 }
 
 /// Requested focus change emitted by event handlers.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FocusRequest {
+    /// Requests focus for the widget at the given current-tree path.
     Set(WidgetPath),
+    /// Clears keyboard focus.
     Clear,
+    /// Moves to the next global focus target.
     Next,
+    /// Moves to the previous global focus target.
     Prev,
+    /// Moves to the next target in a scope; `None` selects the focused widget's
+    /// nearest enclosing focus scope, falling back to global traversal.
     NextInScope(Option<WidgetPath>),
+    /// Moves to the previous target in a scope; `None` selects the focused widget's
+    /// nearest enclosing focus scope, falling back to global traversal.
     PrevInScope(Option<WidgetPath>),
 }
 
 /// Final event outcome collected after a widget has handled an event.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EventOutcome {
+    /// Whether this handler consumed the event; propagation may still continue.
     pub handled: bool,
+    /// Whether routing should stop after this handler.
     pub stop_propagation: bool,
+    /// The last focus change requested by this handler, if any.
     pub focus_request: Option<FocusRequest>,
 }
 
 /// Context passed to [`Widget::handle_event`].
 ///
 /// Provides mutable access to the [`WidgetStore`] and message collection.
+/// Check [`Self::phase`] and [`Self::was_handled`] when deciding whether to act.
+/// Emitting a message with [`Self::emit`] marks the event handled but does not
+/// stop propagation; use [`Self::stop_propagation`] to stop routing explicitly.
 pub struct EventCtx<'a, M> {
     store: &'a mut WidgetStore,
     messages: &'a mut Vec<M>,
@@ -1515,6 +1622,13 @@ pub struct EventCtx<'a, M> {
 }
 
 impl<'a, M> EventCtx<'a, M> {
+    /// Creates an event context for a widget and routing phase.
+    ///
+    /// `already_handled` reports consumption by earlier handlers. This handler's
+    /// outcome starts unhandled, with no propagation stop or focus request.
+    /// Messages are appended to `messages` as they are emitted. No theme is
+    /// attached, so [`Self::measure_ctx`] returns `None` and text metrics use
+    /// their default policy.
     pub fn new(
         store: &'a mut WidgetStore,
         messages: &'a mut Vec<M>,
@@ -1608,6 +1722,7 @@ impl<'a, M> EventCtx<'a, M> {
         self.messages.extend(messages.into_iter().map(map));
     }
 
+    /// Returns the runtime theme's text metrics, or defaults for a standalone context.
     pub fn text_metrics(&self) -> crate::render::text::TextMetrics {
         self.theme
             .map(|theme| theme.text_metrics)
@@ -1615,6 +1730,13 @@ impl<'a, M> EventCtx<'a, M> {
     }
 
     /// Get or create mutable persistent state for this widget.
+    ///
+    /// Requests repainting automatically. Call [`Self::request_layout`] as well
+    /// when the mutation affects measurement or child allocations.
+    ///
+    /// # Panics
+    ///
+    /// Panics if this component's state slot already contains another type.
     pub fn state_mut<T: Default + 'static>(&mut self) -> &mut T {
         self.store.invalidation.request_paint();
         self.store.get_or_default::<T>(self.id.clone())
@@ -1636,6 +1758,7 @@ impl<'a, M> EventCtx<'a, M> {
     }
 
     /// Emit a message that will be delivered to the application's `update` function.
+    /// Marks this event handled without stopping propagation.
     pub fn emit(&mut self, message: M) {
         self.messages.push(message);
         self.handled = true;
@@ -1657,7 +1780,7 @@ impl<'a, M> EventCtx<'a, M> {
         &self.id
     }
 
-    /// Create a read-only measurement context at the current event target path.
+    /// Create a read-only measurement context for the widget handling the event.
     ///
     /// This is available when events are dispatched by the runtime. Manually
     /// constructed contexts may not have theme/runtime metadata attached.
@@ -1722,9 +1845,12 @@ impl<'a, M> EventCtx<'a, M> {
     pub fn capture_pointer(&mut self) {
         self.store.pointer_request = Some((self.path.clone(), true));
     }
+    /// Requests release of pointer capture owned by this widget.
     pub fn release_pointer(&mut self) {
         self.store.pointer_request = Some((self.path.clone(), false));
     }
+    /// Requests cancellation with [`DragCancelReason::Explicit`](crate::tui::gesture::DragCancelReason::Explicit).
+    /// Cancellation is distinct from a normal pointer release.
     pub fn cancel_pointer(&mut self) {
         self.store.pointer_cancel_request = Some((
             self.path.clone(),
@@ -1768,6 +1894,8 @@ impl<'a, M> EventCtx<'a, M> {
     }
 
     /// Mouse coordinates relative to the current widget bounds.
+    /// Returns `None` when coordinates or bounds are unavailable, or when the
+    /// pointer lies outside the widget's allocation.
     pub fn local_mouse_position(&self, event: &Event) -> Option<(u16, u16)> {
         let (x, y) = self.layout_mouse_position(event)?;
         let bounds = self.bounds()?;
@@ -1784,6 +1912,7 @@ impl<'a, M> EventCtx<'a, M> {
     }
 
     /// Mark the event as handled.
+    /// Ancestors may still observe it unless [`Self::stop_propagation`] is called.
     pub fn set_handled(&mut self) {
         self.handled = true;
     }
@@ -1824,17 +1953,25 @@ impl<'a, M> EventCtx<'a, M> {
     }
 
     /// Move focus to the next target within the given scope.
+    /// `None` selects the focused widget's nearest enclosing focus scope, with
+    /// global traversal as a fallback. Active modal boundaries still apply.
+    /// Marks the event handled.
     pub fn focus_next_in_scope(&mut self, scope: Option<WidgetPath>) {
         self.handled = true;
         self.focus_request = Some(FocusRequest::NextInScope(scope));
     }
 
     /// Move focus to the previous target within the given scope.
+    /// `None` selects the focused widget's nearest enclosing focus scope, with
+    /// global traversal as a fallback. Active modal boundaries still apply.
+    /// Marks the event handled.
     pub fn focus_prev_in_scope(&mut self, scope: Option<WidgetPath>) {
         self.handled = true;
         self.focus_request = Some(FocusRequest::PrevInScope(scope));
     }
 
+    /// Consumes the context and returns this handler's routing and focus outcome.
+    /// Messages and state changes have already been written to the supplied stores.
     pub fn finish(self) -> EventOutcome {
         EventOutcome {
             handled: self.handled,
@@ -1853,6 +1990,23 @@ impl<'a, M> EventCtx<'a, M> {
 ///
 /// State survives `view()` rebuilds because the store lives in the application runtime,
 /// not inside widget instances.
+/// Each identity has one state slot; combine multiple values in a single state
+/// struct. The runtime resets that slot when the concrete component type changes.
+///
+/// # Examples
+///
+/// ```
+/// use rsille::tui::widget::{WidgetId, WidgetStore};
+///
+/// #[derive(Default)]
+/// struct EditorState { cursor: usize }
+///
+/// let mut store = WidgetStore::new();
+/// let editor = WidgetId::root().child("editor");
+/// store.get_or_default::<EditorState>(&editor).cursor = 3;
+/// assert_eq!(store.get::<EditorState>(&editor).unwrap().cursor, 3);
+/// assert!(store.get::<String>(&editor).is_none());
+/// ```
 #[derive(Default)]
 pub struct WidgetStore {
     states: HashMap<WidgetId, Box<dyn Any>>,
@@ -1869,6 +2023,7 @@ pub struct WidgetStore {
 }
 
 impl WidgetStore {
+    /// Creates an empty store with no mounted components or widget state.
     pub fn new() -> Self {
         Self::default()
     }
@@ -1907,13 +2062,19 @@ impl WidgetStore {
         extracted
     }
 
-    /// Read state for the given widget id. Returns `None` if no state is stored.
+    /// Read state for the given widget id.
+    /// Returns `None` if no state is stored or its type differs from `T`.
     pub fn get<T: 'static>(&self, id: impl Into<WidgetId>) -> Option<&T> {
         let id = id.into();
         self.states.get(&id)?.downcast_ref()
     }
 
     /// Get or insert a default state for the given widget id.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the identity already has state of a different type. Store all
+    /// of a component's local values in one aggregate state type.
     pub fn get_or_default<T: Default + 'static>(&mut self, id: impl Into<WidgetId>) -> &mut T {
         let id = id.into();
         self.states
@@ -1924,6 +2085,7 @@ impl WidgetStore {
     }
 
     /// Apply a function to all states of type T. Used for frame-level resets.
+    /// Iteration order is unspecified. This does not request layout or paint.
     pub fn for_each_state_mut<T: 'static, F>(&mut self, mut f: F)
     where
         F: FnMut(&WidgetId, &mut T),
@@ -1936,7 +2098,10 @@ impl WidgetStore {
     }
 
     /// Remove entries whose widget ids are not in the active set.
-    /// Called after building the widget tree to clean up stale state.
+    ///
+    /// Removes both state and mounted-component type entries. The predicate may
+    /// be called twice for an identity and should give a consistent answer.
+    /// This is storage cleanup only; it does not invoke widget lifecycle hooks.
     pub fn retain_active<F>(&mut self, mut is_active: F)
     where
         F: FnMut(&WidgetId) -> bool,
@@ -1951,7 +2116,9 @@ impl WidgetStore {
 // ---------------------------------------------------------------------------
 
 /// Trait for converting types into boxed widgets, used by container `.child()` methods.
+/// Implemented automatically for every `'static` [`Widget`].
 pub trait IntoWidget<M> {
+    /// Boxes this description while preserving its message type.
     fn into_widget(self) -> Box<dyn Widget<M>>;
 }
 
