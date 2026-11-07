@@ -1,3 +1,5 @@
+//! Buffered terminal output with cell-level and line-level frame comparison.
+
 use crossterm::{
     cursor::{MoveTo, MoveToNextLine, MoveToPreviousLine},
     style::{Attribute, Print, ResetColor, SetAttribute},
@@ -12,6 +14,11 @@ use crate::render::{
     Builder, Draw, DrawErr, DrawUpdate,
 };
 
+/// Draws `T` into a reusable buffer and writes terminal commands to `W`.
+///
+/// Construct with [`Builder::build_render`]. Absolute rendering emits changed
+/// cells; inline rendering compares whole lines and uses relative cursor
+/// movement. This type does not set up or restore terminal modes.
 #[derive(Debug, Clone, Default)]
 pub struct Render<W, T> {
     pub(crate) pos: Position,
@@ -30,6 +37,15 @@ where
     W: std::io::Write,
     T: Draw,
 {
+    /// Draws a complete frame, writes its changes, and flushes the writer.
+    ///
+    /// On success, saves the frame for comparison and clears the working
+    /// buffer. The size returned by [`Draw::draw`] is ignored.
+    ///
+    /// # Errors
+    ///
+    /// Returns drawing failures converted to [`std::io::Error`], or errors
+    /// from writing or flushing output. A failed frame is not saved.
     pub fn render(&mut self) -> std::io::Result<()> {
         #[cfg(debug_assertions)]
         let start = std::time::Instant::now();
@@ -322,15 +338,23 @@ where
     W: std::io::Write,
     T: DrawUpdate,
 {
+    /// Advances the application, returning whether it requests a redraw.
+    ///
+    /// Forwards errors from [`crate::render::Update::update`].
     pub fn update(&mut self) -> Result<bool, DrawErr> {
         self.thing.update()
     }
 
+    /// Forwards events unchanged to the application and propagates its errors.
+    ///
+    /// This method does not translate inline mouse coordinates.
     pub fn on_events(&mut self, events: &[crossterm::event::Event]) -> Result<(), DrawErr> {
         self.thing.on_events(events)
     }
 
-    /// Resize the render buffer
+    /// Resizes the buffer and resets the used height to the new height.
+    ///
+    /// If dimensions change, current and previous frame contents are discarded.
     pub fn resize(&mut self, new_size: Size) {
         self.buffer.resize(new_size);
         self.used_height = new_size.height; // Update used_height when resizing
@@ -340,7 +364,7 @@ where
     ///
     /// This changes the actual height rendered without reallocating the buffer.
     /// Used in inline mode to avoid frequent buffer reallocations.
-    /// The height must not exceed the buffer's capacity.
+    /// Heights exceeding the buffer's capacity are clamped to that capacity.
     pub fn set_used_height(&mut self, height: u16) {
         let max_height = self.buffer.size().height;
         self.used_height = height.min(max_height);

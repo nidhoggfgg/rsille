@@ -13,31 +13,52 @@ use crossterm::{
 use log::warn;
 use std::io::{self, stdout};
 
+/// One terminal operation, separated from I/O so setup and rollback can be tested.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum TerminalAction {
+    /// Enters the alternate screen.
     EnterScreen,
+    /// Clears all cells on the active screen.
     ClearScreen,
+    /// Enables raw input processing.
     EnableRaw,
+    /// Enables bracketed paste reporting.
     EnablePaste,
+    /// Enables mouse reporting.
     EnableMouse,
+    /// Pushes enhanced keyboard reporting flags for the active screen.
     PushKeyboard,
+    /// Enables focus-change reporting.
     EnableFocus,
+    /// Hides the cursor.
     HideCursor,
+    /// Disables focus-change reporting.
     DisableFocus,
+    /// Restores the previous keyboard reporting flags on the active screen.
     PopKeyboard,
+    /// Disables bracketed paste reporting.
     DisablePaste,
+    /// Shows the cursor.
     ShowCursor,
+    /// Disables mouse reporting.
     DisableMouse,
+    /// Restores normal terminal input processing.
     DisableRaw,
+    /// Returns from the alternate screen.
     LeaveScreen,
 }
 
+/// Terminal operations and capability queries used by the lifecycle guard.
 pub(super) trait TerminalBackend {
+    /// Performs one action, propagating terminal I/O errors.
     fn apply(&mut self, action: TerminalAction) -> io::Result<()>;
+    /// Queries enhanced keyboard support before an event stream is created.
     fn keyboard_supported(&mut self) -> io::Result<bool>;
+    /// Reports whether the platform already delivers native key-release events.
     fn native_key_releases(&self) -> bool;
 }
 
+/// Crossterm-backed terminal operations using standard output.
 pub(super) struct SystemTerminal;
 impl TerminalBackend for SystemTerminal {
     fn apply(&mut self, action: TerminalAction) -> io::Result<()> {
@@ -69,6 +90,10 @@ impl TerminalBackend for SystemTerminal {
     }
 }
 
+/// Tracks enabled modes and restores them with best-effort cleanup on drop.
+///
+/// The guard exists before setup begins, so failures roll back completed steps.
+/// Keyboard flags are popped before leaving the screen where they were pushed.
 pub(super) struct TerminalGuard<B: TerminalBackend = SystemTerminal> {
     backend: B,
     hide_cursor: bool,
@@ -81,6 +106,9 @@ pub(super) struct TerminalGuard<B: TerminalBackend = SystemTerminal> {
 }
 
 impl TerminalGuard {
+    /// Applies requested modes to the system terminal, rolling back on failure.
+    ///
+    /// Returns [`DrawErr::TerminalSetup`] if an enabling operation fails.
     pub(super) fn new(
         alt_screen: bool,
         raw_mode: bool,
@@ -102,6 +130,7 @@ impl TerminalGuard {
 }
 
 impl<B: TerminalBackend> TerminalGuard<B> {
+    /// Sets up modes through a backend while tracking their cleanup requirements.
     fn with_backend(
         backend: B,
         alt_screen: bool,
@@ -184,6 +213,7 @@ impl<B: TerminalBackend> TerminalGuard<B> {
         Ok(guard)
     }
 
+    /// Reports features actually enabled, including native raw key reporting.
     pub(super) fn input_capabilities(&self) -> InputCapabilities {
         InputCapabilities {
             key_releases: self.enhanced_keyboard
@@ -193,6 +223,7 @@ impl<B: TerminalBackend> TerminalGuard<B> {
     }
 }
 
+/// Flags needed to distinguish presses, repeats, and releases for all keys.
 fn held_key_flags() -> KeyboardEnhancementFlags {
     KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
         | KeyboardEnhancementFlags::REPORT_EVENT_TYPES

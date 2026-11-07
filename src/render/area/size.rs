@@ -1,16 +1,32 @@
+//! Terminal-cell dimensions and even grid partitioning.
+
 use std::ops::Add;
 
+/// Width and height in terminal cells; the default is `(0, 0)`.
+///
+/// Addition combines dimensions with ordinary `u16` arithmetic, so callers
+/// must ensure that both sums fit in `u16`.
 #[derive(Debug, Clone, Hash, Copy, Default, PartialEq, Eq)]
 pub struct Size {
+    /// Number of terminal columns.
     pub width: u16,
+    /// Number of terminal rows.
     pub height: u16,
 }
 
 impl Size {
-    /// split the size into m * n grid
-    /// for example, if the size is (11, 10) and n = 2, m = 2, then the result is:
-    /// ([6, 5], [5, 5])
-    /// size = (10, 11), n = 3, m = 3, then the result is: ([4, 3, 3], [4, 4, 3])
+    /// Splits width into `m` columns and height into `n` rows.
+    ///
+    /// Returns `(column_widths, row_heights)`, assigning remainder cells to the
+    /// first partitions. If either count is zero, both vectors are empty.
+    /// Counts larger than a dimension produce some zero-sized partitions.
+    ///
+    /// ```
+    /// use rsille::render::area::Size;
+    ///
+    /// let size = Size::from((10, 11));
+    /// assert_eq!(size.split_mxn(3, 3), (vec![4, 3, 3], vec![4, 4, 3]));
+    /// ```
     pub fn split_mxn(&self, m: u16, n: u16) -> (Vec<u16>, Vec<u16>) {
         if m == 0 || n == 0 {
             return (Vec::new(), Vec::new());
@@ -47,6 +63,7 @@ impl Size {
         (width_parts, height_parts)
     }
 
+    /// Returns whether either dimension is smaller than its counterpart.
     pub fn less_any(&self, other: Size) -> bool {
         self.width < other.width || self.height < other.height
     }

@@ -1,3 +1,9 @@
+//! Bounded, mutable views into a drawing buffer.
+//!
+//! Painting coordinates are local to a [`Chunk`]. Areas passed to constructors
+//! use absolute buffer coordinates. Text helpers clip whole graphemes at the
+//! right edge and preserve the buffer's text-width policy.
+
 use log::trace;
 
 use crate::render::{
@@ -7,6 +13,20 @@ use crate::render::{
     DrawErr,
 };
 
+/// A mutable drawing view with a local origin and a rectangular boundary.
+///
+/// [`set`](Self::set) rejects writes starting in a wide grapheme's continuation
+/// cell. [`set_forced`](Self::set_forced) can replace it, erasing the entire old
+/// grapheme and merging styles. Subchunks borrow the same underlying buffer.
+///
+/// ```
+/// use rsille::render::{area::Size, buffer::Buffer, chunk::Chunk, style::Style};
+///
+/// let mut buffer = Buffer::new((12, 2).into());
+/// let mut chunk = Chunk::new(&mut buffer, Size::from((12, 2)).into())?;
+/// chunk.set_string(1, 0, "Hello", Style::default())?;
+/// # Ok::<(), rsille::render::DrawErr>(())
+/// ```
 #[derive(Debug)]
 pub struct Chunk<'a> {
     buffer: &'a mut Buffer,
@@ -14,6 +34,12 @@ pub struct Chunk<'a> {
 }
 
 impl<'a> Chunk<'a> {
+    /// Borrows the specified area in absolute buffer coordinates.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DrawErr::InvalidArea`] if the area's exclusive end exceeds
+    /// the buffer dimensions. Origin plus size must fit in `u16`.
     pub fn new(buffer: &'a mut Buffer, area: Area) -> Result<Self, DrawErr> {
         if buffer.size().less_any(area.real_size()) {
             return Err(DrawErr::invalid_area(area.real_size(), buffer.size()));
@@ -22,10 +48,22 @@ impl<'a> Chunk<'a> {
         Ok(Self { buffer, area })
     }
 
+    /// Tests whether local `(x, y)` lies inside this chunk.
     pub fn is_inside(&self, x: u16, y: u16) -> bool {
         self.area.is_inside(x, y)
     }
 
+    /// Writes a grapheme at local `(x, y)` and returns its width in columns.
+    ///
+    /// Tabs expand to styled spaces using `x` as the tab-stop column. Existing
+    /// leading cells can be replaced; only continuation cells are protected.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DrawErr::ContentTooWide`] if the content crosses the right
+    /// edge, [`DrawErr::OutOfBounds`] for an invalid position, or
+    /// [`DrawErr::PositionOccupied`] when starting in a wide grapheme's tail.
+    /// A failed tab expansion can leave earlier spaces already written.
     pub fn set(&mut self, x: u16, y: u16, content: Stylized) -> Result<usize, DrawErr> {
         let content_width = content.width_with(self.text_metrics(), x as usize) as u16;
         if x as usize + content_width as usize > self.area.size().width as usize {
@@ -68,6 +106,16 @@ impl<'a> Chunk<'a> {
         }
     }
 
+    /// Overwrites local `(x, y)`, merging styles, and returns the display width.
+    ///
+    /// Replaces any intersecting wide grapheme in full, including portions
+    /// outside this chunk. Unspecified style components inherit from the old
+    /// destination grapheme. Tabs expand to spaces using the local `x` column.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DrawErr::ContentTooWide`] if content crosses the right edge or
+    /// [`DrawErr::OutOfBounds`] if the destination is outside the chunk.
     pub fn set_forced(&mut self, x: u16, y: u16, content: Stylized) -> Result<usize, DrawErr> {
         let content_width = content.width_with(self.text_metrics(), x as usize) as u16;
         if x as usize + content_width as usize > self.area.size().width as usize {
@@ -102,6 +150,7 @@ impl<'a> Chunk<'a> {
         }
     }
 
+    /// Returns the text-width policy shared by the entire underlying buffer.
     pub fn text_metrics(&self) -> crate::render::text::TextMetrics {
         self.buffer.text_metrics()
     }
@@ -109,16 +158,30 @@ impl<'a> Chunk<'a> {
     /// Read the current render target, including cells outside this chunk.
     ///
     /// Buffer coordinates are absolute. This is useful for sampling previously
-    /// painted layers; writes remain restricted to the chunk's area.
+    /// painted layers. New glyphs must fit inside the chunk, though replacing
+    /// a wide glyph can erase its owner or tail outside the chunk.
     pub fn buffer(&self) -> &Buffer {
         self.buffer
     }
 
+    /// Changes the entire buffer's text-width policy before painting.
+    ///
+    /// A changed policy clears all buffer content, including outside this
+    /// chunk, and discards the previous frame to force a full redraw.
     pub fn set_text_metrics(&mut self, metrics: crate::render::text::TextMetrics) {
         self.buffer.set_text_metrics(metrics);
     }
 
     /// Paint rich text, preserving graphemes crossing span boundaries.
+    ///
+    /// Overwrites from local `(x, y)` and stops before a grapheme that would
+    /// cross the right edge. Tabs are measured relative to the start of the
+    /// supplied line, and zero-width graphemes are skipped.
+    ///
+    /// # Errors
+    ///
+    /// Propagates write errors, such as an out-of-bounds row, after any earlier
+    /// graphemes have been painted.
     pub fn set_line(
         &mut self,
         x: u16,
@@ -150,10 +213,15 @@ impl<'a> Chunk<'a> {
         Ok(())
     }
 
+    /// Returns this chunk's rectangle in absolute buffer coordinates.
     pub fn area(&self) -> Area {
         self.area
     }
 
+    /// Reborrows this chunk with the specified margins removed.
+    ///
+    /// Returns [`DrawErr::InvalidShrink`] if the margin totals exceed the
+    /// current dimensions. Margin and coordinate sums must fit in `u16`.
     pub fn shrink(
         &mut self,
         top: u16,
@@ -166,13 +234,18 @@ impl<'a> Chunk<'a> {
         Chunk::new(self.buffer, new_area)
     }
 
+    /// Reborrows the buffer at an absolute area, independently of this chunk.
+    ///
+    /// The new area need not be contained in the parent chunk. Use
+    /// [`with_clip`](Self::with_clip) to enforce that boundary. Returns
+    /// [`DrawErr::InvalidArea`] if the area does not fit in the buffer.
     pub fn from_area(&mut self, area: Area) -> Result<Chunk<'_>, DrawErr> {
         Chunk::new(self.buffer, area)
     }
 
     /// Create a child chunk clipped to this chunk's bounds.
     ///
-    /// The supplied area is in absolute terminal coordinates, matching
+    /// The supplied area is in absolute buffer coordinates, matching
     /// [`from_area`](Self::from_area). If the area has no overlap with the
     /// current chunk, the closure is not called.
     pub fn with_clip<R>(
@@ -188,8 +261,16 @@ impl<'a> Chunk<'a> {
         Ok(Some(render(&mut chunk)))
     }
 
-    /// Set a string at the specified position with style
-    /// This is a convenience method for TUI-style rendering
+    /// Overwrites a single line of text from local `(x, y)` with `style`.
+    ///
+    /// Clips at complete grapheme boundaries on the right. Tabs expand relative
+    /// to the start of `string`; control and zero-width graphemes are skipped.
+    /// Newlines do not advance to another row; use [`set_text`](Self::set_text)
+    /// for multiple lines. Unspecified style components inherit from the buffer.
+    ///
+    /// # Errors
+    ///
+    /// Propagates write errors, such as an invalid row. Earlier writes remain.
     pub fn set_string(
         &mut self,
         x: u16,
@@ -221,6 +302,9 @@ impl<'a> Chunk<'a> {
     }
 
     /// Paint rich text with explicit line boundaries and clipping.
+    ///
+    /// Starts at local `(x, y)`, clips each line at the right edge, and stops
+    /// at the bottom edge. Propagates errors from [`set_line`](Self::set_line).
     pub fn set_text(
         &mut self,
         x: u16,
@@ -237,7 +321,12 @@ impl<'a> Chunk<'a> {
         Ok(())
     }
 
-    /// Fill a rectangular area with a character
+    /// Overwrites a local rectangle with repetitions of `ch` and `style`.
+    ///
+    /// Wide characters are repeated only while they fit in the requested
+    /// width, possibly leaving a trailing column unchanged. Zero-width
+    /// characters paint nothing. Individual write errors are ignored, so
+    /// out-of-bounds cells are skipped and this method always returns `Ok(())`.
     pub fn fill(
         &mut self,
         x: u16,
@@ -263,7 +352,9 @@ impl<'a> Chunk<'a> {
         Ok(())
     }
 
-    /// Set a single character at the specified position
+    /// Overwrites one character at local `(x, y)`, merging its style.
+    ///
+    /// Returns the same bounds and width errors as [`set_forced`](Self::set_forced).
     pub fn set_char(&mut self, x: u16, y: u16, ch: char, style: Style) -> Result<(), DrawErr> {
         let stylized = Stylized::new(ch, style);
         self.set_forced(x, y, stylized)?;

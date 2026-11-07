@@ -1,3 +1,10 @@
+//! Terminal-cell storage, wide-grapheme ownership, and frame comparison.
+//!
+//! All positions are absolute within the buffer, starting at `(0, 0)`.
+//! A wide grapheme has one leading cell and occupied continuation cells.
+//! Call [`Buffer::clear`] after presenting a frame to preserve it for diffing
+//! and prepare a blank working frame.
+
 use log::info;
 
 use crate::render::{
@@ -6,6 +13,23 @@ use crate::render::{
     DrawErr,
 };
 
+/// A row-major drawing buffer with optional previous-frame storage.
+///
+/// Dimensions and positions are measured in terminal cells, not UTF-8 bytes.
+/// New buffers contain spaces and are marked dirty. Resizing or changing text
+/// metrics discards existing content when the requested value changes.
+///
+/// ```
+/// use rsille::render::{buffer::Buffer, style::Stylized};
+///
+/// let mut buffer = Buffer::new((4, 1).into());
+/// buffer.set((0, 0).into(), Stylized::plain('界'))?;
+/// assert!(buffer.is_occupied((1, 0).into()));
+/// buffer.clear(); // Save the frame and prepare spaces for the next one.
+/// buffer.set((0, 0).into(), Stylized::plain('界'))?;
+/// assert_eq!(buffer.diff().unwrap().count(), 0);
+/// # Ok::<(), rsille::render::DrawErr>(())
+/// ```
 #[derive(Debug, Clone, Default)]
 pub struct Buffer {
     size: Size,
@@ -15,8 +39,8 @@ pub struct Buffer {
     text_metrics: crate::render::text::TextMetrics,
 }
 
-// every position in the buffer is absolute
 impl Buffer {
+    /// Allocates `width * height` space cells with default text metrics.
     pub fn new(size: Size) -> Self {
         Self {
             size,
@@ -27,6 +51,7 @@ impl Buffer {
         }
     }
 
+    /// Returns the row-major index of `pos`, or `None` outside the buffer.
     pub fn index(&self, pos: Position) -> Option<usize> {
         if pos.x >= self.size.width || pos.y >= self.size.height {
             return None;
@@ -35,6 +60,9 @@ impl Buffer {
         Some(pos.y as usize * self.size.width as usize + pos.x as usize)
     }
 
+    /// Returns whether `pos` is a continuation cell of a wide grapheme.
+    ///
+    /// Leading cells and out-of-bounds positions return `false`.
     pub fn is_occupied(&self, pos: Position) -> bool {
         if let Some(i) = self.index(pos) {
             self.content[i].is_occupied
@@ -43,6 +71,9 @@ impl Buffer {
         }
     }
 
+    /// Reads a leading cell or space at `pos`.
+    ///
+    /// Returns `None` for continuation cells and out-of-bounds positions.
     pub fn get(&self, pos: Position) -> Option<&Stylized> {
         if let Some(i) = self.index(pos) {
             if self.content[i].is_occupied {
@@ -55,6 +86,7 @@ impl Buffer {
         }
     }
 
+    /// Returns the width and tab-stop policy used for writes.
     pub fn text_metrics(&self) -> crate::render::text::TextMetrics {
         self.text_metrics
     }
@@ -69,6 +101,16 @@ impl Buffer {
         }
     }
 
+    /// Writes content at `pos`, returning the number of terminal columns used.
+    ///
+    /// Existing leading cells are replaced without style inheritance. Any
+    /// intersecting wide grapheme is erased in full. Tabs expand to spaces;
+    /// zero-width content leaves existing cells unchanged.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DrawErr::PositionOccupied`] when `pos` is a continuation cell,
+    /// or [`DrawErr::OutOfBounds`] if the position or content exceeds the buffer.
     pub fn set(&mut self, pos: Position, content: Stylized) -> Result<usize, DrawErr> {
         if self.is_occupied(pos) {
             return Err(DrawErr::position_occupied(pos));
@@ -76,6 +118,15 @@ impl Buffer {
         self.write(pos, content, false)
     }
 
+    /// Writes over any cell, merging styles, and returns the display width.
+    ///
+    /// Erases intersecting wide graphemes completely. Missing style components
+    /// inherit from the grapheme owning the destination cell. Zero-width
+    /// content leaves the buffer unchanged; tabs expand to spaces.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DrawErr::OutOfBounds`] if the position or content does not fit.
     pub fn overwrite(&mut self, pos: Position, content: Stylized) -> Result<usize, DrawErr> {
         self.write(pos, content, true)
     }
@@ -136,10 +187,12 @@ impl Buffer {
         Ok(width)
     }
 
+    /// Returns the buffer dimensions in terminal cells.
     pub fn size(&self) -> Size {
         self.size
     }
 
+    /// Returns all current cells in row-major order, including continuation cells.
     pub fn content(&self) -> &[Cell] {
         &self.content
     }
@@ -169,7 +222,7 @@ impl Buffer {
         self.dirty = false;
     }
 
-    /// Reset diff state (clears previous buffer)
+    /// Discards the previous frame without changing current content or dirtiness.
     pub fn reset_diff(&mut self) {
         self.previous = None;
     }
@@ -179,12 +232,18 @@ impl Buffer {
         self.previous.as_deref()
     }
 
-    /// Check if buffer has pending changes that need to be rendered
+    /// Returns the dirty flag set by writes, resizes, or text-policy changes.
+    ///
+    /// This flag does not compare frames; writing identical content still marks
+    /// the buffer dirty. [`clear`](Self::clear) resets it after saving a frame.
     pub fn has_pending_changes(&self) -> bool {
         self.dirty
     }
 
-    /// Resize the buffer to a new size
+    /// Replaces content with spaces and discards the previous frame on resize.
+    ///
+    /// Marks the buffer dirty when dimensions change; identical dimensions
+    /// leave content and flags unchanged. Text metrics are preserved.
     pub fn resize(&mut self, new_size: Size) {
         if self.size == new_size {
             return;
@@ -205,6 +264,9 @@ impl Buffer {
     }
 
     /// Returns an iterator over cells that changed since the previous frame
+    ///
+    /// Returns `None` when no previous frame exists. Items are `(x, y, cell)`
+    /// in row-major order, excluding occupied continuation cells.
     pub fn diff(&self) -> Option<DiffIterator<'_>> {
         self.previous.as_ref().map(|prev| DiffIterator {
             current: &self.content,
@@ -236,7 +298,9 @@ impl Buffer {
     }
 }
 
-/// Iterator over changed cells between current and previous frame
+/// Changed leading cells as `(column, row, cell)` in row-major order.
+///
+/// Created by [`Buffer::diff`]; occupied continuation cells are skipped.
 pub struct DiffIterator<'a> {
     current: &'a [Cell],
     previous: &'a [Cell],
@@ -266,7 +330,9 @@ impl<'a> Iterator for DiffIterator<'a> {
     }
 }
 
-/// Iterator over all visible cells in the buffer
+/// All leading cells and spaces as `(column, row, cell)` in row-major order.
+///
+/// Created by [`Buffer::all_cells`]; occupied continuation cells are skipped.
 pub struct AllCellsIterator<'a> {
     content: &'a [Cell],
     index: usize,
@@ -419,19 +485,29 @@ impl<'a> Iterator for LineDiffIterator<'a> {
     }
 }
 
+/// One buffer slot, holding a grapheme or its continuation metadata.
+///
+/// [`width`](Self::width) is cached when the cell is created or written.
+/// Mutating public fields directly does not recompute this cache. The default
+/// is empty with zero width; [`space`](Self::space) creates a blank column.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Cell {
+    /// Styled grapheme, or an empty symbol in a continuation cell.
     pub content: Stylized,
+    /// Whether this slot belongs to a wide grapheme in an earlier column.
     pub is_occupied: bool,
+    /// Row-major index of the leading cell for a continuation slot.
     pub owner: Option<usize>,
     columns: usize,
 }
 
 impl Cell {
+    /// Creates a leading cell from an unstyled character.
     pub fn raw(c: char) -> Self {
         Self::new(Stylized::plain(c))
     }
 
+    /// Creates a leading cell with width measured using default text metrics.
     pub fn new(content: Stylized) -> Self {
         let columns = content.width();
         Self {
@@ -442,6 +518,7 @@ impl Cell {
         }
     }
 
+    /// Creates an unstyled space occupying one column.
     pub fn space() -> Self {
         Self {
             content: Stylized::space(),
@@ -451,22 +528,31 @@ impl Cell {
         }
     }
 
+    /// Returns the cached column count; continuation cells have width zero.
     pub fn width(&self) -> usize {
         self.columns
     }
 
+    /// Measures the content with ambiguous characters treated as wide.
+    ///
+    /// Unlike [`width`](Self::width), this recomputes width from the symbol.
     pub fn width_cjk(&self) -> usize {
         self.content.width_cjk()
     }
 
+    /// Queues styled content without flushing, propagating writer errors.
+    ///
+    /// Delegates to [`Stylized::queue`], which skips empty and zero-width symbols.
     pub fn queue(&self, buffer: &mut impl std::io::Write) -> std::io::Result<()> {
         self.content.queue(buffer)
     }
 
+    /// Returns whether the content has explicit color settings.
     pub fn has_color(&self) -> bool {
         self.content.has_color()
     }
 
+    /// Returns whether the content has explicit text attributes.
     pub fn has_attr(&self) -> bool {
         self.content.has_attr()
     }

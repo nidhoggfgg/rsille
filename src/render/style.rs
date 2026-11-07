@@ -1,24 +1,36 @@
+//! Colors, attributes, styled graphemes, and rich text spans.
+//!
+//! [`Stylized`] stores one grapheme, [`StylizedText`] stores a styled UTF-8 span,
+//! and [`StylizedLine`] joins spans before segmentation so a style boundary
+//! cannot split a grapheme. Widths are measured in terminal columns.
+
 use std::{borrow::Cow, io};
 
 use crate::render::text::{AmbiguousWidth, TextMetrics, UnicodeSegmentation};
 use crossterm::style::{Attributes, Colors, Print, SetAttributes, SetColors};
 use std::sync::Arc;
 
-/// 样式定义，包含颜色和文本属性
+/// Optional terminal colors and text attributes.
+///
+/// The default has neither. Missing settings can inherit through
+/// [`merge`](Self::merge); queueing this style alone does not reset terminal
+/// settings left by earlier output.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Copy)]
 pub struct Style {
+    /// Optional foreground and background color settings.
     pub colors: Option<Colors>,
+    /// Optional text attributes, such as bold or underline.
     pub attr: Option<Attributes>,
 }
 
 impl Style {
-    /// 创建一个新的空样式
+    /// Creates a style without explicit colors or attributes.
     #[inline]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// 创建带有颜色的样式
+    /// Creates a style with colors and no explicit attributes.
     #[inline]
     pub fn with_colors(colors: Colors) -> Self {
         Self {
@@ -27,7 +39,7 @@ impl Style {
         }
     }
 
-    /// 创建带有属性的样式
+    /// Creates a style with attributes and no explicit colors.
     #[inline]
     pub fn with_attr(attr: Attributes) -> Self {
         Self {
@@ -36,7 +48,7 @@ impl Style {
         }
     }
 
-    /// 创建完整的样式
+    /// Creates a style with both colors and attributes.
     #[inline]
     pub fn with_both(colors: Colors, attr: Attributes) -> Self {
         Self {
@@ -45,47 +57,50 @@ impl Style {
         }
     }
 
-    /// 设置颜色（链式调用）
+    /// Replaces the color settings and returns the updated style.
     #[inline]
     pub fn colors(mut self, colors: Colors) -> Self {
         self.colors = Some(colors);
         self
     }
 
-    /// 设置属性（链式调用）
+    /// Replaces the attributes and returns the updated style.
     #[inline]
     pub fn attr(mut self, attr: Attributes) -> Self {
         self.attr = Some(attr);
         self
     }
 
-    /// 可变设置颜色
+    /// Replaces the color settings in place and returns this style.
     #[inline]
     pub fn set_colors(&mut self, colors: Colors) -> &mut Self {
         self.colors = Some(colors);
         self
     }
 
-    /// 可变设置属性
+    /// Replaces the attributes in place and returns this style.
     #[inline]
     pub fn set_attr(&mut self, attr: Attributes) -> &mut Self {
         self.attr = Some(attr);
         self
     }
 
-    /// 检查是否有颜色
+    /// Returns whether color settings are explicitly present.
     #[inline]
     pub fn has_color(&self) -> bool {
         self.colors.is_some()
     }
 
-    /// 检查是否有属性
+    /// Returns whether attributes are explicitly present, even if empty.
     #[inline]
     pub fn has_attr(&self) -> bool {
         self.attr.is_some()
     }
 
-    /// 合并另一个样式（other 的设置会覆盖当前设置）
+    /// Overlays `other`, inheriting any unspecified settings from this style.
+    ///
+    /// Foreground and background colors merge independently. An explicit
+    /// attribute set replaces the old set rather than adding to it.
     #[inline]
     pub fn merge(self, other: Style) -> Self {
         Self {
@@ -111,6 +126,7 @@ fn merge_colors(base: Option<Colors>, overlay: Option<Colors>) -> Option<Colors>
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Stylized {
     symbol: Symbol,
+    /// Colors and attributes applied when the grapheme is rendered.
     pub style: Style,
 }
 
@@ -123,23 +139,31 @@ enum Symbol {
 }
 
 impl Stylized {
+    /// Creates a styled Unicode scalar; use [`grapheme`](Self::grapheme) for clusters.
     pub fn new(c: char, style: Style) -> Self {
         Self {
             symbol: Symbol::Scalar(c),
             style,
         }
     }
+    /// Creates a scalar with the default style.
     pub fn plain(c: char) -> Self {
         Self::new(c, Style::default())
     }
+    /// Creates an unstyled space occupying one column.
     pub fn space() -> Self {
         Self::plain(' ')
     }
+    /// Creates an empty, zero-width cell with the default style.
     pub fn empty() -> Self {
         Self::default()
     }
 
-    /// Store the first complete grapheme; use Chunk::set_string for text.
+    /// Stores only the first complete grapheme in `text`, preserving `style`.
+    ///
+    /// Empty input creates an empty cell. Use
+    /// [`Chunk::set_string`](crate::render::chunk::Chunk::set_string) for text
+    /// containing multiple graphemes.
     pub fn grapheme(text: &str, style: Style) -> Self {
         let symbol = match text.graphemes(true).next() {
             None => Symbol::Empty,
@@ -156,6 +180,7 @@ impl Stylized {
         Self { symbol, style }
     }
 
+    /// Returns the symbol as UTF-8, allocating only for a scalar character.
     pub fn symbol(&self) -> Cow<'_, str> {
         match &self.symbol {
             Symbol::Empty => Cow::Borrowed(""),
@@ -171,25 +196,33 @@ impl Stylized {
             _ => None,
         }
     }
+    /// Replaces the symbol with a scalar, preserving its style.
     pub fn set_char(&mut self, c: char) -> &mut Self {
         self.symbol = Symbol::Scalar(c);
         self
     }
+    /// Replaces the symbol with the first grapheme of `text`, preserving style.
+    ///
+    /// Empty input clears the symbol.
     pub fn set_grapheme(&mut self, text: &str) -> &mut Self {
         self.symbol = Self::grapheme(text, self.style).symbol;
         self
     }
+    /// Replaces the style in place without changing the symbol.
     pub fn set_style(&mut self, style: Style) -> &mut Self {
         self.style = style;
         self
     }
+    /// Replaces the style and returns the updated cell.
     pub fn with_style(mut self, style: Style) -> Self {
         self.style = style;
         self
     }
+    /// Returns whether no symbol is stored; a space is not empty.
     pub fn is_empty(&self) -> bool {
         matches!(self.symbol, Symbol::Empty)
     }
+    /// Returns whether the symbol is empty or contains only Unicode whitespace.
     pub fn is_whitespace(&self) -> bool {
         match &self.symbol {
             Symbol::Empty => true,
@@ -197,15 +230,19 @@ impl Stylized {
             Symbol::Cluster(text) => text.chars().all(char::is_whitespace),
         }
     }
+    /// Returns whether the style has explicit color settings.
     pub fn has_color(&self) -> bool {
         self.style.has_color()
     }
+    /// Returns whether the style has explicit attributes.
     pub fn has_attr(&self) -> bool {
         self.style.has_attr()
     }
+    /// Measures the symbol with default text metrics at column zero.
     pub fn width(&self) -> usize {
         self.width_with(TextMetrics::default(), 0)
     }
+    /// Measures at column zero with ambiguous characters treated as wide.
     pub fn width_cjk(&self) -> usize {
         self.width_with(
             TextMetrics {
@@ -215,6 +252,10 @@ impl Stylized {
             0,
         )
     }
+    /// Measures the symbol using `metrics` at the given tab-stop column.
+    ///
+    /// Empty symbols and control graphemes have zero width, except tabs,
+    /// which advance to the next configured stop.
     pub fn width_with(&self, metrics: TextMetrics, column: usize) -> usize {
         // Avoid allocation for the overwhelmingly common scalar cell.
         let mut bytes = [0; 4];
@@ -224,6 +265,15 @@ impl Stylized {
             Symbol::Cluster(text) => metrics.grapheme_width(text, column),
         }
     }
+    /// Queues style commands and the symbol without flushing the writer.
+    ///
+    /// Empty and zero-width symbols produce no output. Tabs become four
+    /// spaces using default metrics at column zero. Missing colors and
+    /// attributes do not reset earlier terminal styling.
+    ///
+    /// # Errors
+    ///
+    /// Propagates errors from writing terminal commands or symbol content.
     pub fn queue(&self, buffer: &mut impl io::Write) -> io::Result<()> {
         if self.is_empty() || self.width() == 0 {
             return Ok(());
@@ -257,14 +307,19 @@ impl From<char> for Stylized {
     }
 }
 
-/// 带样式的文本行，由多个文本片段组成
+/// A single logical line made of styled spans.
+///
+/// Measurement and cell conversion segment the concatenated text, preserving
+/// graphemes across span boundaries. The leading span supplies a crossing
+/// grapheme's style. Embedded newlines do not create additional lines here.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct StylizedLine<'a> {
+    /// Ordered spans whose text is concatenated to form the line.
     pub content: Vec<StylizedText<'a>>,
 }
 
 impl<'a> StylizedLine<'a> {
-    /// 创建一个空行
+    /// Creates a line with no spans.
     #[inline]
     pub fn new() -> Self {
         Self {
@@ -272,7 +327,7 @@ impl<'a> StylizedLine<'a> {
         }
     }
 
-    /// 从单个文本片段创建行
+    /// Creates a line containing one span.
     #[inline]
     pub fn from_text(text: StylizedText<'a>) -> Self {
         Self {
@@ -280,13 +335,13 @@ impl<'a> StylizedLine<'a> {
         }
     }
 
-    /// 从多个文本片段创建行
+    /// Creates a line from ordered spans.
     #[inline]
     pub fn from_texts(content: Vec<StylizedText<'a>>) -> Self {
         Self { content }
     }
 
-    /// 从字符串创建带样式的行
+    /// Creates a line containing one styled string, borrowed or owned.
     #[inline]
     pub fn styled<T>(content: T, style: Style) -> Self
     where
@@ -297,19 +352,20 @@ impl<'a> StylizedLine<'a> {
         }
     }
 
-    /// 添加文本片段
+    /// Appends a span and returns this line.
     #[inline]
     pub fn push(&mut self, text: StylizedText<'a>) -> &mut Self {
         self.content.push(text);
         self
     }
 
-    /// 获取行的显示宽度
+    /// Measures the concatenated line using default text metrics.
     #[inline]
     pub fn width(&self) -> usize {
         self.width_with(TextMetrics::default())
     }
 
+    /// Measures the concatenated line using the supplied width and tab policy.
     pub fn width_with(&self, metrics: TextMetrics) -> usize {
         metrics.width(
             &self
@@ -320,7 +376,9 @@ impl<'a> StylizedLine<'a> {
         )
     }
 
-    /// Graphemes spanning multiple spans use the leading span's style.
+    /// Collects complete graphemes, using the leading span's style for each.
+    ///
+    /// Segments the concatenated text, including zero-width graphemes and tabs.
     pub fn cells(&self) -> Vec<Stylized> {
         let text: String = self.content.iter().map(|s| s.content.as_ref()).collect();
         let mut offset = 0;
@@ -344,13 +402,13 @@ impl<'a> StylizedLine<'a> {
             .collect()
     }
 
-    /// 判断是否为空行
+    /// Returns whether the line has no spans, regardless of their text contents.
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.content.is_empty()
     }
 
-    /// 获取片段数量
+    /// Returns the number of spans, not the number of graphemes or columns.
     #[inline]
     pub fn len(&self) -> usize {
         self.content.len()
@@ -398,15 +456,19 @@ impl<'a> From<StylizedText<'a>> for StylizedLine<'a> {
     }
 }
 
-/// 带样式的文本片段
+/// A borrowed or owned UTF-8 text span with a single style.
+///
+/// Iterating over `&StylizedText` yields [`Stylized`] graphemes with this style.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct StylizedText<'a> {
+    /// UTF-8 text, borrowed from the caller or owned by this span.
     pub content: Cow<'a, str>,
+    /// Colors and attributes shared by all graphemes in the span.
     pub style: Style,
 }
 
 impl<'a> StylizedText<'a> {
-    /// 创建带样式的文本片段
+    /// Creates a styled span from borrowed or owned text.
     #[inline]
     pub fn new<T>(content: T, style: Style) -> Self
     where
@@ -418,7 +480,7 @@ impl<'a> StylizedText<'a> {
         }
     }
 
-    /// 创建无样式的文本片段
+    /// Creates a span with the default style.
     #[inline]
     pub fn plain<T>(content: T) -> Self
     where
@@ -430,31 +492,32 @@ impl<'a> StylizedText<'a> {
         }
     }
 
-    /// 设置样式
+    /// Replaces the span's style in place and returns this span.
     #[inline]
     pub fn set_style(&mut self, style: Style) -> &mut Self {
         self.style = style;
         self
     }
 
-    /// 应用样式（链式调用）
+    /// Replaces the style and returns the updated span.
     #[inline]
     pub fn with_style(mut self, style: Style) -> Self {
         self.style = style;
         self
     }
 
-    /// 获取文本显示宽度
+    /// Measures the text using default text metrics.
     #[inline]
     pub fn width(&self) -> usize {
         self.width_with(TextMetrics::default())
     }
 
+    /// Measures the text as a single line using the supplied width and tab policy.
     pub fn width_with(&self, metrics: TextMetrics) -> usize {
         metrics.width(&self.content)
     }
 
-    /// 获取文本显示宽度（CJK 模式）
+    /// Measures the text with ambiguous characters treated as wide.
     #[inline]
     pub fn width_cjk(&self) -> usize {
         TextMetrics {
@@ -464,19 +527,22 @@ impl<'a> StylizedText<'a> {
         .width(&self.content)
     }
 
-    /// 判断是否为空文本
+    /// Returns whether the UTF-8 text is empty.
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.content.is_empty()
     }
 
-    /// 获取文本长度（字素簇数）
+    /// Returns the number of extended grapheme clusters, not bytes or columns.
     #[inline]
     pub fn len(&self) -> usize {
         self.content.graphemes(true).count()
     }
 
-    /// 将文本输出到缓冲区
+    /// Queues the span without flushing, propagating writer errors.
+    ///
+    /// Uses default text metrics to expand tabs and remove control and
+    /// zero-width graphemes. Newlines are removed rather than moving the cursor.
     pub fn queue(&self, buffer: &mut impl io::Write) -> io::Result<()> {
         let text = TextMetrics::default().expand(&self.content);
         for c in text.graphemes(true) {
@@ -486,6 +552,9 @@ impl<'a> StylizedText<'a> {
     }
 }
 
+/// Styled graphemes yielded by iterating over a borrowed [`StylizedText`].
+///
+/// Each item retains the span's style; tabs and controls are not expanded here.
 pub struct StylizedTextIter<'a> {
     graphemes: unicode_segmentation::Graphemes<'a>,
     style: Style,

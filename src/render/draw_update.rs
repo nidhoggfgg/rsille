@@ -1,13 +1,47 @@
+//! Contracts for drawing application state and processing input.
+
 use crate::render::{area::Size, chunk::Chunk, DrawErr};
 
-/// core trait for Render
-/// in Render.render, it will call this trait's draw method to draw the content
+/// Paints application state into a terminal-cell buffer.
+///
+/// Each frame starts with a blank buffer, so implementations should paint all
+/// visible content. The renderer handles comparison with the previous frame.
+///
+/// ```
+/// use rsille::render::{area::Size, chunk::Chunk, style::Style, Builder, Draw, DrawErr};
+///
+/// struct Greeting;
+///
+/// impl Draw for Greeting {
+///     fn draw(&mut self, mut chunk: Chunk<'_>) -> Result<Size, DrawErr> {
+///         chunk.set_string(0, 0, "Hello", Style::default())?;
+///         Ok((5, 1).into())
+///     }
+/// }
+///
+/// let mut output = Vec::new();
+/// Builder::new()
+///     .size((5, 1))
+///     .clear(false)
+///     .build_render(Greeting, &mut output)
+///     .render()?;
+/// assert!(output.ends_with(b"Hello"));
+/// # Ok::<(), std::io::Error>(())
+/// ```
 pub trait Draw {
+    /// Paints into `chunk` using coordinates relative to its top-left corner.
+    ///
+    /// Returns the content size in terminal cells. [`crate::render::Render`]
+    /// currently ignores this size; use [`Update::required_size`] to request
+    /// event-loop resizing. Drawing errors propagate to the caller.
     fn draw(&mut self, chunk: Chunk) -> Result<Size, DrawErr>;
 }
 
-/// core trait for EventLoop
-/// in every frame, call on_events -> update -> required_size -> Render.render(draw)
+/// Processes input and advances an application's state in the event loop.
+///
+/// Each iteration dispatches input, calls [`update`](Self::update), checks
+/// [`should_quit`](Self::should_quit), and applies a size request before
+/// drawing if needed. Update and draw failures are logged by the event loop.
 pub trait Update {
     /// Called after terminal setup, before input. Headless callers may inject
     /// capabilities explicitly; no terminal probing happens during headless steps.
@@ -25,11 +59,21 @@ pub trait Update {
         None
     }
 
+    /// Processes an ordered batch of terminal events before the next update.
+    ///
+    /// The batch may be empty. Fullscreen mouse positions are terminal
+    /// coordinates; the default inline dispatcher translates them to viewport
+    /// coordinates. Errors are logged by the event loop, which keeps running.
     fn on_events(&mut self, events: &[crossterm::event::Event]) -> Result<(), DrawErr>;
 
     /// Dispatch raw terminal events into an Inline viewport. The default drops
     /// outside pointer input; capture-aware applications may retain signed
     /// outside positions without splitting the input batch.
+    ///
+    /// `origin` is the viewport's absolute `(column, row)` and `viewport` is
+    /// its size in cells. Returns whether dispatch should trigger a redraw;
+    /// the default returns `true` if any events remain after filtering.
+    /// Errors from [`on_events`](Self::on_events) are propagated.
     fn on_events_in_viewport(
         &mut self,
         events: &[crossterm::event::Event],
@@ -82,25 +126,26 @@ pub trait Update {
     /// This allows the application to signal a clean shutdown without
     /// calling std::process::exit(), which would bypass terminal cleanup.
     ///
-    /// The event loop will gracefully stop after the current frame when
-    /// this returns true, allowing proper cleanup via Drop.
+    /// The event loop checks this after updating and exits before drawing
+    /// another frame, allowing terminal cleanup via `Drop`.
     fn should_quit(&self) -> bool {
         false
     }
 
     /// Get required size for next render (optional)
     ///
-    /// Returns None to keep current size, or Some(Size) to request a resize.
-    /// This is called after update() and before render(), allowing components
-    /// to adjust their size based on current state.
-    ///
-    /// Primary use case: inline mode dynamic height adjustment
+    /// Returns `None` to keep the current size, or `Some(size)` to request a
+    /// change after updating and before drawing. Fullscreen mode resizes the
+    /// buffer; inline mode uses only the requested height, clamped to the
+    /// existing buffer capacity.
     fn required_size(&self, _current_size: Size) -> Option<Size> {
         None // Default: no size change requested
     }
 }
 
-// this trait is for making trait object
+/// Combines drawing and updating for an event-loop application or trait object.
+///
+/// Implemented automatically for every type implementing [`Draw`] and [`Update`].
 pub trait DrawUpdate: Draw + Update {}
 
 impl<T: Draw + Update> DrawUpdate for T {}

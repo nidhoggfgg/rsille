@@ -1,41 +1,56 @@
+//! Rectangular drawing regions and coordinate conversion.
+
 use crate::render::{
     area::{Position, Size},
     DrawErr,
 };
 
+/// A rectangle with an absolute origin and a size in terminal cells.
+///
+/// [`is_inside`](Self::is_inside) and [`to_absolute`](Self::to_absolute) take
+/// coordinates relative to this origin. Rectangle operations use absolute
+/// coordinates. The default area has zero size at the origin.
+///
+/// Coordinate and margin sums must fit in `u16`; methods using ordinary
+/// addition may panic on overflow when overflow checks are enabled.
 #[derive(Debug, Clone, Hash, Copy, Default, PartialEq, Eq)]
 pub struct Area {
     pos: Position,
     size: Size,
 }
 
-// x, y in Area is relative to the postion
 impl Area {
+    /// Creates a rectangle at `pos` with the given dimensions.
     pub fn new(pos: Position, size: Size) -> Self {
         Self { pos, size }
     }
 
+    /// Returns the absolute top-left position.
     pub fn pos(&self) -> Position {
         self.pos
     }
 
+    /// Returns the width and height in cells.
     pub fn size(&self) -> Size {
         self.size
     }
 
-    // Convenience accessors for compatibility with flat-field access patterns
+    /// Returns the absolute left column.
     pub fn x(&self) -> u16 {
         self.pos.x
     }
 
+    /// Returns the absolute top row.
     pub fn y(&self) -> u16 {
         self.pos.y
     }
 
+    /// Returns the number of columns.
     pub fn width(&self) -> u16 {
         self.size.width
     }
 
+    /// Returns the number of rows.
     pub fn height(&self) -> u16 {
         self.size.height
     }
@@ -45,6 +60,9 @@ impl Area {
         (self.size.width as usize) * (self.size.height as usize)
     }
 
+    /// Converts local coordinates to an absolute position.
+    ///
+    /// Returns `None` when `x >= width` or `y >= height`.
     pub fn to_absolute(&self, x: u16, y: u16) -> Option<Position> {
         if !self.is_inside(x, y) {
             return None;
@@ -53,10 +71,18 @@ impl Area {
         Some((x + self.pos.x, y + self.pos.y).into())
     }
 
+    /// Tests local coordinates against the exclusive right and bottom edges.
     pub fn is_inside(&self, x: u16, y: u16) -> bool {
         x < self.size.width && y < self.size.height
     }
 
+    /// Insets each edge, moving the origin right by `left` and down by `top`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DrawErr::InvalidShrink`] if the combined horizontal or
+    /// vertical margins exceed the corresponding dimension. An exactly
+    /// exhausted dimension is allowed and becomes zero.
     pub fn shrink(self, top: u16, bottom: u16, left: u16, right: u16) -> Result<Self, DrawErr> {
         let shrink_total = (left + right, bottom + top).into();
         if self.size.less_any(shrink_total) {
@@ -73,7 +99,10 @@ impl Area {
         })
     }
 
-    /// Shrink the area with saturating subtraction (never returns an error)
+    /// Insets each edge, clamping the resulting dimensions to zero.
+    ///
+    /// Only subtraction saturates: margin sums and origin offsets must still
+    /// fit in `u16`.
     pub fn shrink_saturating(self, top: u16, bottom: u16, left: u16, right: u16) -> Self {
         let new_x = self.pos.x + left;
         let new_y = self.pos.y + top;
@@ -86,6 +115,9 @@ impl Area {
         }
     }
 
+    /// Returns `(x + width, y + height)`, the exclusive absolute end position.
+    ///
+    /// This is the minimum buffer size needed to contain the area.
     pub fn real_size(&self) -> Size {
         (self.size.width + self.pos.x, self.size.height + self.pos.y).into()
     }

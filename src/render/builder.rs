@@ -1,3 +1,5 @@
+//! Configuration shared by standalone renderers and terminal event loops.
+
 use crossterm::event::{KeyCode, KeyEvent};
 use log::info;
 
@@ -21,11 +23,24 @@ pub enum InlineMouseMode {
 }
 
 impl InlineMouseMode {
+    /// Returns whether each inline frame should force the viewport to follow.
     pub fn force_follows_viewport(self) -> bool {
         matches!(self, Self::ForceFollowViewport)
     }
 }
 
+/// Configures a [`Render`] or [`EventLoop`] without touching the terminal.
+///
+/// Set [`size`](Self::size) before building: the default buffer is empty.
+/// Terminal setup options apply to event loops; standalone renderers only
+/// draw and write output. Setters mutate this builder and can be chained.
+///
+/// ```
+/// use rsille::render::Builder;
+///
+/// let mut builder = Builder::new();
+/// builder.size((80, 24)).enable_all().frame_limit(60);
+/// ```
 #[derive(Debug, Clone, Copy, Hash)]
 pub struct Builder {
     pub(super) enable_raw_mode: bool,
@@ -47,6 +62,13 @@ pub struct Builder {
 }
 
 impl Builder {
+    /// Creates a builder with a zero-sized buffer at `(0, 0)`.
+    ///
+    /// Raw mode, alternate screen, mouse capture, cursor hiding, focus events,
+    /// and inline mode are disabled. Keyboard input uses the legacy protocol.
+    /// The exit key is Escape, the event batch limit is 10, and no periodic
+    /// frame interval is configured. The first render clears the screen and
+    /// frames do not append a newline. Inline height is capped at 50 rows.
     pub fn new() -> Self {
         Self {
             size: Size::default(),
@@ -68,6 +90,9 @@ impl Builder {
         }
     }
 
+    /// Enables raw mode, alternate screen, mouse capture, and cursor hiding.
+    ///
+    /// Keyboard negotiation and focus events retain their current settings.
     pub fn enable_all(&mut self) -> &mut Self {
         self.enable_raw_mode();
         self.enable_alt_screen();
@@ -88,83 +113,106 @@ impl Builder {
         self
     }
 
+    /// Enables raw input and bracketed paste during event-loop execution.
     pub fn enable_raw_mode(&mut self) -> &mut Self {
         self.enable_raw_mode = true;
         self
     }
 
+    /// Leaves raw mode and bracketed paste setup disabled for the event loop.
     pub fn disable_raw_mode(&mut self) -> &mut Self {
         self.enable_raw_mode = false;
         self
     }
 
+    /// Enters and clears the alternate screen when the event loop starts.
     pub fn enable_alt_screen(&mut self) -> &mut Self {
         self.enable_alt_screen = true;
         self
     }
 
+    /// Keeps the event loop on the current terminal screen.
     pub fn disable_alt_screen(&mut self) -> &mut Self {
         self.enable_alt_screen = false;
         self
     }
 
+    /// Requests terminal mouse events while the event loop is running.
     pub fn enable_mouse_capture(&mut self) -> &mut Self {
         self.enable_mouse_capture = true;
         self
     }
 
+    /// Disables the event loop's request for terminal mouse events.
     pub fn disable_mouse_capture(&mut self) -> &mut Self {
         self.enable_mouse_capture = false;
         self
     }
 
+    /// Hides the cursor during event-loop execution and restores it on cleanup.
     pub fn enable_hide_cursor(&mut self) -> &mut Self {
         self.enable_hide_cursor = true;
         self
     }
 
+    /// Leaves cursor visibility unchanged during event-loop setup.
     pub fn disable_hide_cursor(&mut self) -> &mut Self {
         self.enable_hide_cursor = false;
         self
     }
 
+    /// Sets the batch limit used when draining queued input events.
+    ///
+    /// The default is 10 events per iteration. Zero disables draining but still
+    /// allows the event that woke the loop to be dispatched.
     pub fn max_event_per_frame(&mut self, max_event_per_frame: usize) -> &mut Self {
         self.max_event_per_frame = max_event_per_frame;
         self
     }
 
+    /// Sets the periodic update rate in frames per second.
+    ///
+    /// Zero disables periodic polling. Input can trigger earlier iterations;
+    /// this is not a strict cap on redraws. Applications providing a
+    /// [`crate::render::Update::wake_handle`] use their own update deadlines.
     pub fn frame_limit(&mut self, frame_limit: u16) -> &mut Self {
         self.frame_limit = Some(frame_limit);
         self
     }
 
+    /// Sets the initial buffer `(width, height)` in terminal cells.
     pub fn size(&mut self, size: (u16, u16)) -> &mut Self {
         self.size = size.into();
         self
     }
 
+    /// Sets the zero-based output `(column, row)` for absolute rendering.
+    ///
+    /// Inline event loops determine their origin from the terminal cursor.
     pub fn pos(&mut self, pos: (u16, u16)) -> &mut Self {
         self.pos = pos.into();
         self
     }
 
+    /// Controls clearing the entire screen before a render without a prior frame.
+    ///
+    /// Defaults to `true`. Alternate-screen setup clears independently.
     pub fn clear(&mut self, clear: bool) -> &mut Self {
         self.clear = clear;
         self
     }
 
+    /// Controls appending a newline after each rendered frame; defaults to `false`.
     pub fn append_newline(&mut self, append_newline: bool) -> &mut Self {
         self.append_newline = append_newline;
         self
     }
 
-    /// Enable inline mode for non-fullscreen, CLI-style interaction
+    /// Enables rendering in the current terminal output using relative movement.
     ///
-    /// When enabled:
-    /// - Disables alternate screen (renders to current terminal position)
-    /// - Keeps cursor visible by default
-    /// - Suitable for modern CLI tools (npm, yarn style)
-    /// - Automatically sets clear=false to preserve previous output
+    /// Enabling this also disables alternate-screen setup and screen clearing.
+    /// It does not change cursor visibility. Disabling inline mode does not
+    /// restore earlier settings; later setters can override these choices.
     pub fn inline_mode(&mut self, enable: bool) -> &mut Self {
         self.inline_mode = enable;
         if enable {
@@ -176,10 +224,11 @@ impl Builder {
         self
     }
 
-    /// Set maximum height for inline mode (default: 50)
+    /// Sets the inline buffer height cap used on terminal resize (default: 50).
     ///
-    /// This limits how many lines inline mode can use when rendering.
-    /// Actual height will be min(content_height, max_height, terminal_height)
+    /// Resizes also respect the terminal height, reserving a row when forced
+    /// viewport following is enabled. The initial allocation comes from
+    /// [`size`](Self::size); this setting does not resize it when building.
     pub fn inline_max_height(&mut self, max_height: u16) -> &mut Self {
         self.inline_max_height = max_height;
         self
@@ -197,10 +246,12 @@ impl Builder {
         self
     }
 
-    /// Set the exit key code (default: ESC)
+    /// Sets the automatic exit key (default: Escape).
     ///
-    /// When the user presses this key, the event loop will automatically exit.
-    /// Use `disable_exit_code()` if you want to handle exit logic in your application.
+    /// Matches the code and modifiers on key press, ignoring repeats, releases,
+    /// and keyboard state bits. The exit press is not sent to the application.
+    /// Use [`disable_exit_code`](Self::disable_exit_code) for application-defined
+    /// exit handling.
     pub fn exit_code(&mut self, key: KeyEvent) -> &mut Self {
         self.exit_code = Some(key);
         self
@@ -219,6 +270,10 @@ impl Builder {
         self
     }
 
+    /// Builds a renderer that writes terminal commands to `writer`.
+    ///
+    /// Does not initialize terminal modes or draw a frame. Call
+    /// [`Render::render`] to paint and flush output.
     pub fn build_render<T, W>(&self, thing: T, writer: W) -> Render<W, T>
     where
         T: Draw,
@@ -236,6 +291,9 @@ impl Builder {
         Render::from_builder(self, thing, writer)
     }
 
+    /// Builds an event loop owning `thing` and writing to standard output.
+    ///
+    /// Terminal setup is deferred until the loop is run.
     pub fn build_event_loop<T>(&self, thing: T) -> EventLoop<T>
     where
         T: DrawUpdate,

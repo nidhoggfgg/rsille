@@ -3,9 +3,13 @@
 /// Keyboard protocol policy. Existing applications keep legacy input by default.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub enum KeyboardMode {
+    /// Uses the platform's default key reporting without protocol negotiation.
     #[default]
     Legacy,
-    /// Negotiate full key reporting, falling back to legacy input on failure.
+    /// Negotiates full key reporting in raw mode when not provided natively.
+    ///
+    /// An unsupported terminal or failed capability query falls back to legacy
+    /// input. Failure to enable a supported protocol is a terminal setup error.
     Auto,
 }
 

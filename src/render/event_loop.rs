@@ -1,3 +1,9 @@
+//! Terminal lifecycle, batched input, and polling or wake-driven updates.
+//!
+//! Construct an [`EventLoop`] through [`Builder::build_event_loop`]. Synchronous
+//! entry points create a Tokio runtime; asynchronous entry points use the
+//! caller's runtime. Terminal modes are restored when execution ends.
+
 #[cfg(test)]
 use crossterm::event::MouseEvent;
 use std::{
@@ -20,6 +26,12 @@ use crate::render::{
     KeyboardMode, Render, WakeHandle,
 };
 
+/// Owns an application, its standard-output renderer, and terminal settings.
+///
+/// Each iteration dispatches input and updates the application before deciding
+/// whether to draw. Input, update, and drawing failures during iterations are
+/// logged and the loop continues. Setup failures are returned to the caller.
+/// Cleanup is best-effort, including when a running future is dropped.
 pub struct EventLoop<T> {
     render: Render<Stdout, T>,
     raw_mode: bool,
@@ -63,51 +75,70 @@ where
         }
     }
 
+    /// Sets the batch limit used when draining queued input.
+    ///
+    /// Zero disables draining; an event that woke the loop is still dispatched.
     pub fn max_event_per_frame(&mut self, max_event_per_frame: usize) -> &mut Self {
         self.max_event_per_frame = max_event_per_frame;
         self
     }
 
+    /// Sets the periodic update rate in frames per second.
+    ///
+    /// `None` and `Some(0)` disable periodic polling. Input may trigger earlier
+    /// iterations, so this is not a strict redraw limit. Applications returning
+    /// a [`crate::render::Update::wake_handle`] use their own deadlines instead.
     pub fn frame_limit(&mut self, frame_limit: Option<u16>) -> &mut Self {
         self.frame_limit = frame_limit;
         self
     }
 
+    /// Sets the automatic exit key, matching its code and modifiers on press.
+    ///
+    /// Repeats and releases do not exit, and the matching press is not passed
+    /// to the application. The default key is Escape.
     pub fn exit_code(&mut self, exit_code: KeyEvent) -> &mut Self {
         self.exit_code = Some(exit_code);
         self
     }
 
+    /// Disables automatic key-based exit so the application controls shutdown.
     pub fn disable_exit_code(&mut self) -> &mut Self {
         self.exit_code = None;
         self
     }
 
+    /// Enters and clears the alternate screen during startup.
     pub fn enable_alt_screen(&mut self) -> &mut Self {
         self.alt_screen = true;
         self
     }
 
+    /// Keeps rendering on the current terminal screen.
     pub fn disable_alt_screen(&mut self) -> &mut Self {
         self.alt_screen = false;
         self
     }
 
+    /// Enables terminal mouse reporting during startup.
     pub fn enable_mouse_capture(&mut self) -> &mut Self {
         self.mouse_capture = true;
         self
     }
 
+    /// Leaves terminal mouse reporting disabled during startup.
     pub fn disable_mouse_capture(&mut self) -> &mut Self {
         self.mouse_capture = false;
         self
     }
 
+    /// Hides the cursor at startup and shows it again during cleanup.
     pub fn hide_cursor_when_render(&mut self) -> &mut Self {
         self.hide_cursor = true;
         self
     }
 
+    /// Leaves cursor visibility unchanged during startup.
     pub fn show_cursor_when_render(&mut self) -> &mut Self {
         self.hide_cursor = false;
         self
@@ -117,12 +148,17 @@ where
     ///
     /// This should be called before run() to set the initial rendering height
     /// without reallocating the buffer. Only effective in inline mode.
+    /// Values greater than the initial buffer height are clamped.
     pub fn set_initial_used_height(&mut self, height: u16) -> &mut Self {
         self.render.set_used_height(height);
         self
     }
 
     /// Reject synchronous entry inside Tokio before changing terminal state.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DrawErr::RuntimeCreation`] if called within a Tokio runtime.
     pub fn check_sync_runtime() -> Result<(), DrawErr> {
         if tokio::runtime::Handle::try_current().is_ok() {
             return Err(DrawErr::RuntimeCreation(std::io::Error::other(
@@ -132,11 +168,26 @@ where
         Ok(())
     }
 
+    /// Runs synchronously until exit, discarding the application after cleanup.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same runtime, terminal setup, and startup I/O errors as
+    /// [`run_returning`](Self::run_returning). Use [`run_async`](Self::run_async)
+    /// when already inside Tokio.
     pub fn run(self) -> Result<(), DrawErr> {
         self.run_returning().map(|_| ())
     }
 
     /// Run and return the application after terminal cleanup.
+    ///
+    /// Creates a current-thread Tokio runtime with time and I/O enabled.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DrawErr::RuntimeCreation`] when already inside Tokio or runtime
+    /// creation fails, [`DrawErr::TerminalSetup`] on terminal setup failure,
+    /// or [`DrawErr::Io`] if inline cursor positioning fails.
     pub fn run_returning(self) -> Result<T, DrawErr> {
         Self::check_sync_runtime()?;
         let rt = tokio::runtime::Builder::new_current_thread()
@@ -147,11 +198,31 @@ where
     }
 
     /// Run on an existing Tokio runtime with time and I/O drivers enabled.
+    ///
+    /// Discards the application after cleanup. Returns the same startup errors
+    /// as [`run_async_returning`](Self::run_async_returning).
+    ///
+    /// # Panics
+    ///
+    /// May panic if polled without a Tokio runtime or required drivers.
     pub async fn run_async(self) -> Result<(), DrawErr> {
         self.run_async_returning().await.map(|_| ())
     }
 
     /// Run on the caller's runtime and return the application after cleanup.
+    ///
+    /// The runtime must have time and I/O drivers enabled. Actual enabled input
+    /// capabilities are delivered to the application before event dispatch.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DrawErr::TerminalSetup`] on setup failure or [`DrawErr::Io`]
+    /// on failed inline cursor positioning. Successfully enabled terminal
+    /// modes are restored on return, including after partial setup failure.
+    ///
+    /// # Panics
+    ///
+    /// May panic if polled without a Tokio runtime or required drivers.
     pub async fn run_async_returning(mut self) -> Result<T, DrawErr> {
         let guard = TerminalGuard::new(
             self.alt_screen,

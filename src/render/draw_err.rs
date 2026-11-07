@@ -1,3 +1,5 @@
+//! Structured drawing errors and terminal lifecycle failures.
+
 use crate::render::area::{Position, Size};
 use std::io;
 
@@ -5,20 +7,38 @@ use std::io;
 #[derive(Debug)]
 pub enum DrawErr {
     /// Position is out of bounds
-    OutOfBounds { pos: Position, bounds: Size },
+    OutOfBounds {
+        /// Rejected position in the coordinate space of the drawing operation.
+        pos: Position,
+        /// Exclusive width and height limits for that coordinate space.
+        bounds: Size,
+    },
     /// Position is already occupied by another character
-    PositionOccupied { pos: Position },
+    PositionOccupied {
+        /// Absolute buffer position occupied by a preceding wide grapheme.
+        pos: Position,
+    },
     /// Invalid area configuration
-    InvalidArea { area_size: Size, buffer_size: Size },
+    InvalidArea {
+        /// Required buffer extent, including the area's origin offset.
+        area_size: Size,
+        /// Available buffer dimensions.
+        buffer_size: Size,
+    },
     /// Invalid shrink parameters
     InvalidShrink {
+        /// Dimensions before insetting the rectangle.
         current_size: Size,
+        /// Combined horizontal and vertical margins.
         shrink_total: Size,
     },
     /// Content width exceeds available space
     ContentTooWide {
+        /// Display width of the rejected content in terminal columns.
         content_width: u16,
+        /// Total row width, before subtracting the starting column.
         available_width: u16,
+        /// Starting column within the drawing area.
         x: u16,
     },
     /// Terminal setup operation failed (enter alt screen, enable raw mode, etc.)
