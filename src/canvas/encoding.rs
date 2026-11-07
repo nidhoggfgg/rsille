@@ -12,6 +12,11 @@ pub enum Encoding {
     /// the text-width policy makes block characters wide, drawing falls back to
     /// single-column Braille equivalents of the upper/lower/full blocks.
     HalfBlock,
+    /// Four samples per cell in a 2×2 grid, rendered with quadrant blocks.
+    /// Partial cells preserve coverage and average their ink colors; fully
+    /// colored cells fit four samples to two terminal colors. Wide block
+    /// characters fall back to single-column Braille equivalents when drawn.
+    Quadrant,
 }
 
 impl Encoding {
@@ -20,6 +25,7 @@ impl Encoding {
         match self {
             Self::Braille => (2, 4),
             Self::HalfBlock => (1, 2),
+            Self::Quadrant => (2, 2),
         }
     }
 }

@@ -430,6 +430,36 @@ mod tests {
     }
 
     #[test]
+    fn quadrant_widget_shares_dimensions_and_world_coordinates() {
+        let widget = canvas::<(), _>(|surface, ctx| {
+            assert_eq!(surface.encoding(), Encoding::Quadrant);
+            assert_eq!(ctx.encoding(), Encoding::Quadrant);
+            assert_eq!((ctx.sample_width(), ctx.sample_height()), (4, 2));
+            assert_eq!(ctx.cell_to_world(0, 0), Some(CanvasPoint::new(0.5, 0.5)));
+            ctx.world(surface)
+                .color(Color::Red)
+                .point(CanvasPoint::new(0.0, 1.0));
+            ctx.world(surface)
+                .color(Color::Blue)
+                .point(CanvasPoint::new(3.0, 0.0));
+        })
+        .encoding(Encoding::Quadrant)
+        .viewport(CanvasViewport::new(0.0, 0.0, 3.0, 1.0))
+        .fixed(2, 1);
+        let buffer = render_widget(&widget, 2, 1);
+        assert_eq!(cell_char(&buffer, 0, 0), Some('▘'));
+        assert_eq!(cell_char(&buffer, 1, 0), Some('▗'));
+        assert_eq!(
+            buffer.content()[0].content.style.colors.unwrap().foreground,
+            Some(Color::Red)
+        );
+        assert_eq!(
+            buffer.content()[1].content.style.colors.unwrap().foreground,
+            Some(Color::Blue)
+        );
+    }
+
+    #[test]
     fn one_column_half_block_maps_to_world_midpoint_without_division_by_zero() {
         let ctx = CanvasContext::new(1, 1)
             .with_encoding(Encoding::HalfBlock)

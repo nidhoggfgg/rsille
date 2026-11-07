@@ -162,7 +162,7 @@ Only **`rsille`** is published. Use its three public modules:
 | --- | --- |
 | `rsille::tui` | Application, widgets, layout and effects |
 | `rsille::render` | Terminal buffers, Unicode text and rendering |
-| `rsille::canvas` | Sample graphics with Braille and Half-block encoding |
+| `rsille::canvas` | Sample graphics with Braille, Half-block and Quadrant encoding |
 
 The repository retains private `tui`, `render` and `canvas` workspace crates for
 independent development and testing. All three have `publish = false`. Their thin
@@ -191,7 +191,10 @@ render::Builder::new().size((80, 10)).append_newline(true)
 
 `Canvas::new()` defaults to Braille (2×4 samples per cell). Use
 `Canvas::with_encoding(Encoding::HalfBlock)` for two vertically stacked color
-samples per cell. `set_color(x, y, color)` retains each sample's color until
+samples per cell, or `Canvas::with_encoding(Encoding::Quadrant)` for a 2×2 grid
+of quadrant blocks (`▘ ▝ ▖ ▗`). Quadrant preserves partial coverage with one
+averaged ink color; fully colored cells fit four samples to two terminal colors.
+`set_color(x, y, color)` retains each sample's color until
 encoding; `set_background(color)` fills uncovered samples and empty cells inside
 the bounds. Both accept crossterm colors and TUI colors. Bounds and `get_size()`
 use terminal cells; drawing coordinates use samples, with y increasing upwards.
@@ -212,7 +215,7 @@ let widget = canvas::<(), _>(|surface, ctx| {
 `ctx.sample_width()` / `sample_height()` follow the selected encoding. Use an
 explicit viewport to preserve world extents when switching encodings; drawing
 and pointer messages use the same transform. Run `cargo run -p tui --example canvas`
-to compare the two encodings.
+to compare the three encodings.
 
 Validate the workspace and publish archives:
 

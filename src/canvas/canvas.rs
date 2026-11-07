@@ -37,7 +37,8 @@ impl<T: Paint + ?Sized> Paint for Box<T> {
 ///
 /// Coordinates grow right and upwards and are rounded to the nearest sample.
 /// Bounds and [`get_size`](Self::get_size) use terminal cells. Each cell holds
-/// 2×4 samples in [`Encoding::Braille`] or 1×2 in [`Encoding::HalfBlock`]. Colors
+/// 2×4 samples in [`Encoding::Braille`], 1×2 in [`Encoding::HalfBlock`], or
+/// 2×2 in [`Encoding::Quadrant`]. Colors
 /// remain attached to individual samples until encoding; empty samples expose
 /// the canvas background, or the destination background when none is specified.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -137,9 +138,9 @@ impl Canvas {
 
     /// Paints one sample, retaining its color until terminal-cell encoding.
     ///
-    /// Half-block preserves both sample colors exactly. Braille preserves the
-    /// coverage mask of partially painted cells and averages their ink colors;
-    /// fully colored cells fit their eight samples to two terminal colors.
+    /// Half-block preserves both sample colors exactly. Braille and Quadrant
+    /// preserve the coverage mask of partially painted cells and average their ink colors;
+    /// fully colored cells fit their samples to two terminal colors.
     /// Palette colors are preserved when possible; mixing uses the conventional
     /// xterm palette. Use RGB colors when exact color fitting is needed.
     pub fn set_color<T: Into<f64> + Copy>(
@@ -317,6 +318,18 @@ impl Canvas {
                 Some('▀') => '\u{281b}',
                 Some('▄') => '\u{28e4}',
                 Some('█') => '\u{28ff}',
+                Some('▖') => '\u{2844}',
+                Some('▗') => '\u{28a0}',
+                Some('▘') => '\u{2803}',
+                Some('▌') => '\u{2847}',
+                Some('▞') => '\u{28a3}',
+                Some('▙') => '\u{28e7}',
+                Some('▝') => '\u{2818}',
+                Some('▚') => '\u{285c}',
+                Some('▐') => '\u{28b8}',
+                Some('▟') => '\u{28fc}',
+                Some('▛') => '\u{285f}',
+                Some('▜') => '\u{28bb}',
                 _ => {
                     return Err(DrawErr::content_too_wide(
                         width as u16,

@@ -21,12 +21,13 @@ fn view(_: &()) -> impl Widget<()> {
             "Half-block: solid color samples",
             Encoding::HalfBlock,
         ))
+        .child(scene("Quadrant: 2×2 solid samples", Encoding::Quadrant))
 }
 
 fn scene(title: &str, encoding: Encoding) -> impl Widget<()> {
     panel().title(title).padding(Padding::uniform(1)).child(
         canvas::<(), _>(|surface, ctx| {
-            // Both encodings display the same world extent at their native
+            // All encodings display the same world extent at their native
             // sample resolutions. Color is shared with the TUI style API.
             let mut world = ctx.world(surface).color(Color::Rgb(90, 210, 255));
             for step in 0..160 {

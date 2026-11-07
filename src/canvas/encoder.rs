@@ -1,7 +1,7 @@
 use crossterm::style::{Color, Colors};
 
 use super::color::{average, distance, rgb};
-use super::sample::Samples;
+use super::sample::{Sample, Samples};
 use super::Encoding;
 use crate::render::style::{Style, Stylized};
 
@@ -9,6 +9,7 @@ pub(crate) fn encode(encoding: Encoding, samples: &Samples, background: Option<C
     match encoding {
         Encoding::Braille => braille(samples, background),
         Encoding::HalfBlock => half_block(samples, background),
+        Encoding::Quadrant => quadrant(samples, background),
     }
 }
 
@@ -38,8 +39,37 @@ fn half_block(samples: &Samples, background: Option<Color>) -> Stylized {
 fn braille(samples: &Samples, background: Option<Color>) -> Stylized {
     // Cartesian order: bottom left/right, then the three rows above them.
     const BITS: [u8; 8] = [0x40, 0x80, 0x04, 0x20, 0x02, 0x10, 0x01, 0x08];
+    patterned(
+        &samples.0,
+        BITS,
+        |mask| char::from_u32(0x2800 + u32::from(mask)).unwrap(),
+        background,
+    )
+}
+
+fn quadrant(samples: &Samples, background: Option<Color>) -> Stylized {
+    // Bits 0..4 are bottom left, bottom right, top left, top right.
+    const SYMBOLS: [char; 16] = [
+        ' ', '▖', '▗', '▄', '▘', '▌', '▞', '▙', '▝', '▚', '▐', '▟', '▀', '▛', '▜', '█',
+    ];
+    let samples = std::array::from_fn(|i| samples.0[i]);
+    patterned(
+        &samples,
+        [1, 2, 4, 8],
+        |mask| SYMBOLS[mask as usize],
+        background,
+    )
+}
+
+fn patterned<const N: usize>(
+    samples: &[Option<Sample>; N],
+    bits: [u8; N],
+    symbol: fn(u8) -> char,
+    background: Option<Color>,
+) -> Stylized {
+    let full_mask = bits.iter().fold(0, |mask, bit| mask | bit);
     let mut mask = 0;
-    for (sample, bit) in samples.0.iter().zip(BITS) {
+    for (sample, bit) in samples.iter().zip(bits) {
         if sample.is_some() {
             mask |= bit;
         }
@@ -49,20 +79,16 @@ fn braille(samples: &Samples, background: Option<Color>) -> Stylized {
     }
     // Uncovered samples reserve the background. Preserve the exact geometry and
     // reduce occupied colors to one foreground, independently of drawing order.
-    let foreground = average(samples.0.iter().flatten().filter_map(|s| s.color));
-    if mask != 255 || samples.0.iter().any(|s| s.unwrap().color.is_none()) {
-        return cell(
-            char::from_u32(0x2800 + u32::from(mask)).unwrap(),
-            foreground,
-            background,
-        );
+    let foreground = average(samples.iter().flatten().filter_map(|s| s.color));
+    if mask != full_mask || samples.iter().any(|s| s.unwrap().color.is_none()) {
+        return cell(symbol(mask), foreground, background);
     }
 
     // A fully painted RGB/palette cell can use both terminal colors. Fit two
-    // clusters to its eight samples instead of discarding their color contrast.
-    let colors = samples.0.map(|s| s.unwrap().color.unwrap());
+    // clusters to its samples instead of discarding their color contrast.
+    let colors = samples.map(|s| s.unwrap().color.unwrap());
     if colors.iter().all(|&color| color == colors[0]) {
-        return cell('\u{28ff}', foreground, foreground);
+        return cell(symbol(full_mask), foreground, foreground);
     }
     let mut low = colors[0];
     let mut high = colors[0];
@@ -76,7 +102,7 @@ fn braille(samples: &Samples, background: Option<Color>) -> Stylized {
         }
     }
     if farthest == 0 {
-        return cell('\u{28ff}', foreground, foreground);
+        return cell(symbol(full_mask), foreground, foreground);
     }
     for _ in 0..4 {
         let bright = colors.map(|c| distance(c, high) <= distance(c, low));
@@ -108,14 +134,10 @@ fn braille(samples: &Samples, background: Option<Color>) -> Stylized {
         std::mem::swap(&mut low, &mut high);
     }
     mask = 0;
-    for (color, bit) in colors.into_iter().zip(BITS) {
+    for (color, bit) in colors.into_iter().zip(bits) {
         if distance(color, high) <= distance(color, low) {
             mask |= bit;
         }
     }
-    cell(
-        char::from_u32(0x2800 + u32::from(mask)).unwrap(),
-        Some(high),
-        Some(low),
-    )
+    cell(symbol(mask), Some(high), Some(low))
 }

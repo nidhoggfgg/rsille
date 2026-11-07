@@ -140,7 +140,7 @@ let widget = visual(label::<()>("Hello"))
 | --- | --- |
 | `rsille::tui` | 应用、组件、布局、effect |
 | `rsille::render` | 终端 buffer、Unicode 文本、渲染 |
-| `rsille::canvas` | 统一 Canvas，支持 Braille 和 Half-block 编码 |
+| `rsille::canvas` | 统一 Canvas，支持 Braille、Half-block 和 Quadrant 编码 |
 
 仓库内保留 `tui`、`render`、`canvas` 三个独立 workspace crate，均设置 `publish = false`，
 仍可分别编译和测试。其入口复用 `src/tui`、`src/render`、`src/canvas` 中的实现；
@@ -148,7 +148,9 @@ let widget = visual(label::<()>("Hello"))
 v2 的根路径类型已移入相应模块。绘图通过 `render::Builder` 输出，参见英文首页的示例。
 
 `Canvas::new()` 默认使用 Braille，每个字符格含 2×4 个采样点；
-`Canvas::with_encoding(Encoding::HalfBlock)` 每格含上下两个可分别着色的采样点。
+`Canvas::with_encoding(Encoding::HalfBlock)` 每格含上下两个可分别着色的采样点；
+`Canvas::with_encoding(Encoding::Quadrant)` 使用 2×2 四分块字符（`▘ ▝ ▖ ▗`）。
+Quadrant 在部分覆盖时保留形状并平均已绘制颜色；完全着色时将四个采样点归并为前景、背景两色。
 用 `set_color(x, y, color)` 设置采样点颜色，`set_background(color)` 设置未覆盖区域的背景，
 两者都接受 crossterm 和 TUI 的颜色类型。颜色保留到输出阶段，再生成字符及前景／背景色。
 边界和 `get_size()` 使用字符格单位，绘图坐标使用采样点单位，y 轴向上。
@@ -156,7 +158,7 @@ v2 的根路径类型已移入相应模块。绘图通过 `render::Builder` 输�
 TUI 的 `canvas(...)` 通过 `.encoding(Encoding::HalfBlock)` 选择编码；
 `ctx.sample_width()`、`sample_height()` 返回对应采样尺寸。需要切换编码而保持相同场景范围时，
 设置显式 `.viewport(...)`，通过 `ctx.world(surface)` 绘图，鼠标事件使用同一坐标转换。
-运行 `cargo run -p tui --example canvas` 可对照两种编码。
+运行 `cargo run -p tui --example canvas` 可对照三种编码。
 
 默认 feature 集为空；启用 `syntax-highlighting` 后使用 Syntect 代码高亮。
 未启用时代码查看器仍提供纯文本显示、布局与键盘导航。showcase 显式启用此功能。

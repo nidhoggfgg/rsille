@@ -19,6 +19,168 @@ fn first(canvas: &mut Canvas) -> Stylized {
 }
 
 #[test]
+fn quadrant_preserves_all_coverage_patterns_and_backgrounds() {
+    // Top-left, top-right, bottom-left, bottom-right bit order.
+    let symbols = [
+        ' ', '▘', '▝', '▀', '▖', '▌', '▚', '▛', '▗', '▞', '▐', '▜', '▄', '▙', '▟', '█',
+    ];
+    for (mask, symbol) in symbols.into_iter().enumerate() {
+        for background in [None, Some(Color::Blue)] {
+            let mut canvas = Canvas::with_encoding(Encoding::Quadrant);
+            assert_eq!(canvas.encoding().samples_per_cell(), (2, 2));
+            if let Some(background) = background {
+                canvas.set_background(background);
+            }
+            for i in 0..4 {
+                if mask & (1 << i) != 0 {
+                    canvas.set(i % 2, 1 - i / 2);
+                }
+            }
+            let cell = first(&mut canvas);
+            assert_eq!(cell.as_char(), Some(symbol));
+            assert_eq!(cell.style.colors.and_then(|c| c.background), background);
+            assert_eq!(cell.style.colors.and_then(|c| c.foreground), None);
+        }
+    }
+}
+
+#[test]
+fn quadrant_preserves_every_two_color_pattern_in_either_drawing_order() {
+    let symbols = [
+        '█', '▘', '▝', '▀', '▖', '▌', '▚', '▛', '▗', '▞', '▐', '▜', '▄', '▙', '▟', '█',
+    ];
+    for (mask, symbol) in symbols.into_iter().enumerate() {
+        for reverse in [false, true] {
+            let mut canvas = Canvas::with_encoding(Encoding::Quadrant);
+            for j in 0..4 {
+                let i = if reverse { 3 - j } else { j };
+                canvas.set_color(
+                    i % 2,
+                    1 - i / 2,
+                    if mask & (1 << i) != 0 {
+                        Color::White
+                    } else {
+                        Color::Black
+                    },
+                );
+            }
+            let cell = first(&mut canvas);
+            assert_eq!(cell.as_char(), Some(symbol));
+            assert_eq!(
+                cell.style.colors.unwrap(),
+                Colors {
+                    foreground: Some(if mask == 0 {
+                        Color::Black
+                    } else {
+                        Color::White
+                    }),
+                    background: Some(if mask == 15 {
+                        Color::White
+                    } else {
+                        Color::Black
+                    }),
+                }
+            );
+        }
+    }
+}
+
+#[test]
+fn quadrant_partial_colors_average_without_covering_empty_samples() {
+    let mut canvas = Canvas::with_encoding(Encoding::Quadrant);
+    canvas.set_background(Color::Green);
+    canvas.set_color(0, 1, Color::Rgb { r: 255, g: 0, b: 0 });
+    canvas.set_color(1, 0, Color::Rgb { r: 0, g: 0, b: 255 });
+    let cell = first(&mut canvas);
+    assert_eq!(cell.as_char(), Some('▞'));
+    assert_eq!(
+        cell.style.colors.unwrap(),
+        Colors {
+            foreground: Some(Color::Rgb {
+                r: 128,
+                g: 0,
+                b: 128
+            }),
+            background: Some(Color::Green),
+        }
+    );
+    canvas.unset(0, 1);
+    assert_eq!(first(&mut canvas).as_char(), Some('▗'));
+    canvas.toggle(1, 0).toggle(0, 0);
+    let cell = first(&mut canvas);
+    assert_eq!(cell.as_char(), Some('▖'));
+    assert_eq!(cell.style.colors.unwrap().foreground, None);
+}
+
+#[test]
+fn quadrant_fits_four_colors_independently_of_drawing_order() {
+    let shades = [0, 20, 220, 240];
+    let mut cells = Vec::new();
+    for reverse in [false, true] {
+        let mut canvas = Canvas::with_encoding(Encoding::Quadrant);
+        for j in 0..4 {
+            let i = if reverse { 3 - j } else { j };
+            let c = shades[i as usize];
+            canvas.set_color(i % 2, i / 2, Color::Rgb { r: c, g: c, b: c });
+        }
+        cells.push(first(&mut canvas));
+    }
+    assert_eq!(cells[0], cells[1]);
+    assert_eq!(cells[0].as_char(), Some('▀'));
+    assert_eq!(
+        cells[0].style.colors.unwrap(),
+        Colors {
+            foreground: Some(Color::Rgb {
+                r: 230,
+                g: 230,
+                b: 230
+            }),
+            background: Some(Color::Rgb {
+                r: 10,
+                g: 10,
+                b: 10
+            }),
+        }
+    );
+}
+
+#[test]
+fn quadrant_wide_policy_preserves_geometry_and_colors_for_every_pattern() {
+    use crate::render::text::{AmbiguousWidth, TextMetrics};
+    let metrics = TextMetrics {
+        ambiguous_width: AmbiguousWidth::Wide,
+        ..TextMetrics::default()
+    };
+    for mask in 1..16 {
+        let mut canvas = Canvas::with_encoding(Encoding::Quadrant);
+        let mut braille = Canvas::new();
+        canvas.set_background(Color::Blue);
+        for i in 0..4 {
+            if mask & (1 << i) != 0 {
+                canvas.set_color(i % 2, i / 2, Color::Red);
+                braille.set(i % 2, i / 2 * 2).set(i % 2, i / 2 * 2 + 1);
+            }
+        }
+        let normal = first(&mut canvas);
+        let size = (1, 1).into();
+        let mut buffer = Buffer::new(size);
+        buffer.set_text_metrics(metrics);
+        canvas
+            .draw(Chunk::new(&mut buffer, Area::new((0, 0).into(), size)).unwrap())
+            .unwrap();
+        let wide = &buffer.content()[0].content;
+        assert_eq!(wide.width_with(metrics, 0), 1);
+        assert_eq!(wide.style, normal.style);
+        let expected = if normal.width_with(metrics, 0) == 1 {
+            normal.as_char()
+        } else {
+            first(&mut braille).as_char()
+        };
+        assert_eq!(wide.as_char(), expected);
+    }
+}
+
+#[test]
 fn default_braille_preserves_every_coverage_pattern() {
     // Compare all 256 patterns to the existing low-level Braille primitive.
     for mask in 1u16..256 {
@@ -144,8 +306,8 @@ fn braille_full_coverage_fits_two_colors_and_uniform_cells_fill_background() {
 }
 
 #[test]
-fn negative_samples_use_euclidean_cells_for_both_encodings() {
-    for encoding in [Encoding::Braille, Encoding::HalfBlock] {
+fn negative_samples_use_euclidean_cells_for_all_encodings() {
+    for encoding in [Encoding::Braille, Encoding::HalfBlock, Encoding::Quadrant] {
         let mut canvas = Canvas::with_encoding(encoding);
         canvas.set(-1, -1).set(0, 0);
         assert_eq!(canvas.get_size(), (2, 2));
@@ -158,6 +320,7 @@ fn negative_samples_use_euclidean_cells_for_both_encodings() {
         let expected = match encoding {
             Encoding::Braille => [Some(' '), Some('\u{2840}'), Some('\u{2808}'), Some(' ')],
             Encoding::HalfBlock => [Some(' '), Some('▄'), Some('▀'), Some(' ')],
+            Encoding::Quadrant => [Some(' '), Some('▖'), Some('▝'), Some(' ')],
         };
         assert_eq!(chars, expected);
     }
@@ -165,7 +328,7 @@ fn negative_samples_use_euclidean_cells_for_both_encodings() {
 
 #[test]
 fn fixed_bounds_reject_samples_before_storage_and_lines_clip() {
-    for encoding in [Encoding::Braille, Encoding::HalfBlock] {
+    for encoding in [Encoding::Braille, Encoding::HalfBlock, Encoding::Quadrant] {
         let mut canvas = Canvas::with_encoding(encoding);
         canvas.set_bound((0, 0), (0, 0));
         canvas.fixed_bound(true);
@@ -244,7 +407,7 @@ fn toggle_removes_sample_color_and_restores_default_ink() {
 
 #[test]
 fn writer_and_draw_use_the_same_encoding_and_reset_colors() {
-    for encoding in [Encoding::Braille, Encoding::HalfBlock] {
+    for encoding in [Encoding::Braille, Encoding::HalfBlock, Encoding::Quadrant] {
         let mut canvas = Canvas::with_encoding(encoding);
         canvas.set_bound((0, 1), (0, 0));
         canvas.set(0, 0);

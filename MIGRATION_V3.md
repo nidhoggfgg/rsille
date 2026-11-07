@@ -143,7 +143,8 @@ mouse messages. `CanvasContext` now has floating-point viewport data and impleme
 `Canvas` now retains coverage and color for each sample and encodes terminal
 characters only when drawn or printed. `Canvas::new()` defaults to Braille;
 `Canvas::with_encoding(Encoding::HalfBlock)` selects two vertical samples per
-cell. TUI widgets select the same encoding with `canvas(...).encoding(...)`.
+cell; `Canvas::with_encoding(Encoding::Quadrant)` selects a 2×2 grid of quadrant
+blocks. TUI widgets select the same encoding with `canvas(...).encoding(...)`.
 `Encoding` is available from `rsille::canvas` and the TUI prelude. There is one
 concrete `Canvas` type, shared by `Paint`, `CanvasWidget`, and `WorldCanvas`.
 
@@ -163,7 +164,7 @@ also restores automatic bounds while retaining encoding and background.
 
 Bounds and `get_size()` use inclusive terminal-cell coordinates, while drawing
 uses samples with y increasing upwards. `Encoding::samples_per_cell()` returns
-2×4 for Braille and 1×2 for Half-block. Fixed bounds reject offscreen samples
+2×4 for Braille, 1×2 for Half-block and 2×2 for Quadrant. Fixed bounds reject offscreen samples
 before storing them. Encoding is chosen at construction, so an existing drawing
 cannot silently change resolution. For standalone world drawing, construct
 `CanvasContext::new(width, height).with_encoding(surface.encoding())`.
@@ -172,14 +173,14 @@ An explicit viewport preserves world extents across encoding changes. Raw sample
 coordinates depend on the encoding. Rendering and pointer transforms use the
 same dimensions; a one-sample axis maps back to the world extent's midpoint.
 
-Half-block preserves its two sample colors exactly. Partially painted Braille
+Half-block preserves its two sample colors exactly. Partially painted Braille and Quadrant
 cells retain their coverage mask and average explicit ink colors into one
-foreground; fully colored cells fit eight samples to foreground/background
+foreground; fully colored cells fit their samples to foreground/background
 colors. Uncolored samples use inherited foreground. Uncovered samples expose the
 canvas/destination background. Mixed palette colors use conventional xterm RGB
 values for fitting; use RGB colors when exact fitting is needed.
 When the configured text policy treats block characters as double-width,
-Half-block output uses one-column Braille half-cell equivalents to preserve layout.
+Half-block and Quadrant output use one-column Braille equivalents to preserve layout.
 
 Image producers should write every source sample with `set_color`, rather than
 precomputing Braille masks and terminal foreground/background colors. The neon

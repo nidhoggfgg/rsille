@@ -589,7 +589,8 @@ periodic redraw is needed. Release events never dispatch commands.
 ### World-space Canvas
 
 `canvas(|surface, ctx| ...)` draws in sample coordinates. Braille is the default;
-`.encoding(Encoding::HalfBlock)` selects two vertical samples per terminal cell.
+`.encoding(Encoding::HalfBlock)` selects two vertical samples per terminal cell;
+`.encoding(Encoding::Quadrant)` selects a 2×2 grid of quadrant blocks.
 `ctx.sample_width()` and `sample_height()` follow the selected encoding.
 Attach `.viewport(CanvasViewport::new(x, y, width, height))` and draw through
 `ctx.world(surface)` for `point`, `line`, `rect`, and `circle`. Bounds are finite

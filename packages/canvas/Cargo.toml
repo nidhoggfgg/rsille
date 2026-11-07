@@ -5,7 +5,7 @@ edition = "2021"
 license = "MIT"
 publish = false
 
-description = "Sample canvas with Braille and Half-block encoding for rsille"
+description = "Sample canvas with Braille, Half-block and Quadrant encoding for rsille"
 repository = "https://github.com/nidhoggfgg/rsille.git"
 readme = "README.md"
 

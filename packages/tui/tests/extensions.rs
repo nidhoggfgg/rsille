@@ -503,7 +503,7 @@ fn runtime_commands_follow_state_and_use_injected_time_for_sequences() {
 
 #[test]
 fn canvas_world_transforms_zoom_clipping_and_pointer_hit_use_the_same_coordinates() {
-    for encoding in [Encoding::Braille, Encoding::HalfBlock] {
+    for encoding in [Encoding::Braille, Encoding::HalfBlock, Encoding::Quadrant] {
         let viewport = CanvasViewport::new(-10.0, -5.0, 20.0, 10.0);
         let context = CanvasContext::new(20, 10)
             .with_encoding(encoding)

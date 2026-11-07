@@ -4,7 +4,7 @@
 #[path = "render/api.rs"]
 pub mod render;
 
-/// Sample-based canvas with Braille and Half-block terminal encoding.
+/// Sample-based canvas with Braille, Half-block and Quadrant terminal encoding.
 #[path = "canvas/api.rs"]
 pub mod canvas;
 
