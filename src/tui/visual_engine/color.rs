@@ -1,9 +1,12 @@
+//! Terminal color conversion, capability fallbacks, and cell-style operations.
+
 use crate::render::style::Stylized;
 use crossterm::style::{Attribute, Attributes, Color as CrosstermColor, Colors};
 
 use crate::tui::style::{Color, Style};
 use crate::tui::visual_engine::{CellSample, GradientTarget, VisualCtx};
 
+/// Replace one color channel after applying the context's truecolor capability hint.
 pub(crate) fn apply_color_capable(
     content: &mut Stylized,
     color: Color,
@@ -13,6 +16,7 @@ pub(crate) fn apply_color_capable(
     apply_crossterm_color(content, capable_color(color, ctx), target);
 }
 
+/// Replace one color channel while preserving the other channel and text attributes.
 fn apply_crossterm_color(content: &mut Stylized, color: CrosstermColor, target: GradientTarget) {
     let mut colors = content.style.colors.unwrap_or(Colors {
         foreground: None,
@@ -26,16 +30,20 @@ fn apply_crossterm_color(content: &mut Stylized, color: CrosstermColor, target: 
     content.style.colors = Some(colors);
 }
 
+/// Read an explicitly assigned foreground, if the cell has one.
 fn current_foreground(content: &Stylized) -> Option<CrosstermColor> {
     content.style.colors.and_then(|colors| colors.foreground)
 }
 
+/// Add a terminal text attribute without removing existing attributes.
 pub(crate) fn add_attribute(content: &mut Stylized, attr: Attribute) {
     let mut attrs = content.style.attr.unwrap_or_else(Attributes::default);
     attrs = attrs | attr;
     content.style.attr = Some(attrs);
 }
 
+/// Darken an RGB foreground, or use the theme's muted color when none is assigned.
+/// Adds the terminal dim attribute when the clamped amount exceeds `0.25`.
 pub(crate) fn dim_foreground(sample: &mut CellSample, ctx: &VisualCtx<'_>, amount: f64) {
     let amount = amount.clamp(0.0, 1.0);
     if let Some(color) = current_foreground(&sample.content) {
@@ -58,6 +66,8 @@ pub(crate) fn dim_foreground(sample: &mut CellSample, ctx: &VisualCtx<'_>, amoun
     }
 }
 
+/// Blend toward a capability-adjusted foreground, using it directly if no color exists.
+/// RGB pairs interpolate; other pairs switch colors at half coverage.
 pub(crate) fn blend_foreground(
     sample: &mut CellSample,
     ctx: &VisualCtx<'_>,
@@ -71,6 +81,7 @@ pub(crate) fn blend_foreground(
     apply_crossterm_color(&mut sample.content, blended, GradientTarget::Foreground);
 }
 
+/// Convert a color to terminal form, quantizing to basic colors when truecolor is disabled.
 pub(super) fn capable_color(color: Color, ctx: &VisualCtx<'_>) -> CrosstermColor {
     if ctx.capabilities.truecolor {
         to_crossterm_color(color)
@@ -79,6 +90,7 @@ pub(super) fn capable_color(color: Color, ctx: &VisualCtx<'_>) -> CrosstermColor
     }
 }
 
+/// Approximate RGB using the nearest basic color; indexed colors wrap modulo eight.
 fn to_basic_color(color: Color) -> Color {
     let (r, g, b) = match color {
         Color::Black => return Color::Black,
@@ -126,6 +138,7 @@ fn to_basic_color(color: Color) -> Color {
         .unwrap_or(Color::White)
 }
 
+/// Scale RGB channels toward black, leaving named and indexed colors unchanged.
 fn dim_crossterm_color(color: CrosstermColor, amount: f64) -> CrosstermColor {
     match color {
         CrosstermColor::Rgb { r, g, b } => {
@@ -140,6 +153,7 @@ fn dim_crossterm_color(color: CrosstermColor, amount: f64) -> CrosstermColor {
     }
 }
 
+/// Interpolate RGB pairs, or choose between non-RGB colors at an amount of `0.5`.
 fn blend_crossterm_color(
     start: CrosstermColor,
     target: CrosstermColor,
@@ -173,12 +187,14 @@ fn blend_crossterm_color(
     }
 }
 
+/// Interpolate, round, and clamp one RGB channel to the byte range.
 fn lerp_u8_local(start: u8, end: u8, progress: f64) -> u8 {
     (start as f64 + (end as f64 - start as f64) * progress)
         .round()
         .clamp(0.0, 255.0) as u8
 }
 
+/// Convert through the shared TUI style mapping, falling back to terminal reset.
 fn to_crossterm_color(color: Color) -> CrosstermColor {
     let render_style = Style::default().fg(color).to_render_style();
     render_style

@@ -122,6 +122,8 @@ pub(super) struct BackdropSnapshot {
 }
 
 impl BackdropSnapshot {
+    /// Capture lower-layer colors and a clipped blur halo around the wrapper.
+    /// Wide-cell continuation positions use their owning cell's colors.
     pub(super) fn capture(buffer: &Buffer, backdrop: &Backdrop, ctx: &VisualCtx<'_>) -> Self {
         let radius = backdrop.radius as usize;
         let area = ctx.area;
@@ -164,6 +166,10 @@ impl BackdropSnapshot {
         }
     }
 
+    /// Compose the sampled scenery and tint behind an already-transformed cell.
+    ///
+    /// The caller must clip destination coordinates to the wrapper first. Masks
+    /// use source coordinates; scenery is read at the rounded destination.
     pub(super) fn apply(&self, backdrop: &Backdrop, sample: &mut CellSample, ctx: &VisualCtx<'_>) {
         let coverage = backdrop.mask.as_ref().map_or(1.0, |mask| {
             let value = mask(
@@ -228,6 +234,7 @@ impl BackdropSnapshot {
     }
 }
 
+/// Mix RGB scenery with a tint and convert using the terminal capability hints.
 fn mixed_color(start: Rgb, tint: Rgb, amount: f32, ctx: &VisualCtx<'_>) -> TerminalColor {
     let [r, g, b] = std::array::from_fn(|c| {
         (start[c] * (1.0 - amount) + tint[c] * amount)
@@ -237,12 +244,14 @@ fn mixed_color(start: Rgb, tint: Rgb, amount: f32, ctx: &VisualCtx<'_>) -> Termi
     super::color::capable_color(Color::Rgb(r, g, b), ctx)
 }
 
+/// Resolve theme foreground and background fallbacks, defaulting to white and black.
 fn theme_colors(ctx: &VisualCtx<'_>) -> (Rgb, Rgb) {
     let fg = rgb(ctx.theme.styles.text.fg_color.map(Into::into), [255.0; 3]);
     let bg = rgb(ctx.theme.styles.surface.bg_color.map(Into::into), [0.0; 3]);
     (fg, bg)
 }
 
+/// Estimate a cell's average color from glyph coverage, honoring reverse video.
 fn representative_color(cell: &Stylized, fg: Rgb, bg: Rgb) -> Rgb {
     let colors = cell.style.colors;
     let mut fg = rgb(colors.and_then(|c| c.foreground), fg);
@@ -266,6 +275,7 @@ fn representative_color(cell: &Stylized, fg: Rgb, bg: Rgb) -> Rgb {
     std::array::from_fn(|c| fg[c] * coverage + bg[c] * (1.0 - coverage))
 }
 
+/// Resolve terminal colors through RGB or the xterm palette, using a reset fallback.
 fn rgb(color: Option<TerminalColor>, fallback: Rgb) -> Rgb {
     use TerminalColor::*;
     let index = match color {

@@ -1,3 +1,5 @@
+//! Built-in effect descriptions, composition, and per-effect configuration.
+
 use crate::tui::style::Color;
 use crate::tui::visual_engine::custom::{CellEffect, CustomCellEffect};
 use crate::tui::visual_engine::math::{
@@ -6,90 +8,171 @@ use crate::tui::visual_engine::math::{
 use crate::tui::visual_engine::profile::VisualEffectCost;
 
 /// A terminal-cell visual effect.
+///
+/// Attach effects to a [`Visual`](crate::tui::widgets::Visual) wrapper to
+/// transform its rendered cells. Progress is supplied by the wrapper; creating
+/// an effect does not start a timer. Geometry changes affect painting only.
+///
+/// Builder methods configure only the matching variant and otherwise return the
+/// effect unchanged. They do not descend into composed effects: configure each
+/// child before passing it to [`Self::sequence`] or [`Self::parallel`].
+///
+/// ```
+/// use rsille::tui::prelude::*;
+///
+/// let effect = VisualEffect::parallel(vec![
+///     VisualEffect::reveal(WipeDirection::LeftToRight).softness(0.1),
+///     VisualEffect::gradient(Color::Cyan, Color::Blue, GradientDirection::Horizontal),
+/// ]);
+/// let widget = visual(label::<()>("Loading")).enter(effect);
+/// ```
 #[derive(Debug, Clone, PartialEq)]
 pub enum VisualEffect {
+    /// Reveal or hide cells using a deterministic spatial visibility threshold.
+    /// This approximates opacity by selecting whole cells, without alpha blending.
     Fade {
+        /// Initial visible coverage, conventionally in `0.0..=1.0`.
         from: f64,
+        /// Final visible coverage; interpolated coverage is clamped to `0.0..=1.0`.
         to: f64,
     },
+    /// Interpolate a color channel across destination positions, independent of progress.
     Gradient {
+        /// Color at the start of the gradient.
         start: Color,
+        /// Color at the end of the gradient.
         end: Color,
+        /// Spatial direction of interpolation.
         direction: GradientDirection,
+        /// Color channel to replace.
         target: GradientTarget,
+        /// Offset in gradient cycles; positions outside `0.0..=1.0` wrap.
         phase: f64,
     },
+    /// Scatter cells outward as progress increases, optionally hiding them.
     Shatter {
+        /// Deterministic seed for displacement and visibility noise.
         seed: u64,
+        /// Horizontal spread scale before cell-aspect adjustment.
         spread_x: f64,
+        /// Vertical spread scale in cell units.
         spread_y: f64,
+        /// Whether scattered cells also disappear as progress increases.
         fade: bool,
     },
+    /// Expand cells from a squeezed shape around an anchor as progress increases.
     MagicLamp {
+        /// Point toward which the geometry is pulled at low progress.
         anchor: VisualAnchor,
+        /// Residual scale at zero progress, normally in `0.0..=1.0`.
         squeeze: f64,
     },
+    /// Move a visibility boundary through the source area.
     Wipe {
+        /// Direction in which the boundary travels.
         direction: WipeDirection,
+        /// Whether cells behind the boundary are shown or hidden.
         mode: WipeMode,
+        /// Half-width of the dithered boundary in normalized area units; zero is sharp.
         softness: f64,
     },
+    /// Reveal or hide cells in a deterministic random order.
     Dissolve {
+        /// Seed combined with the wrapper seed to select cell thresholds.
         seed: u64,
+        /// Whether increasing progress reveals or hides cells.
         mode: DissolveMode,
     },
+    /// Displace rows or columns sinusoidally, with motion strongest at mid-progress.
     Wave {
+        /// Grouping and displacement direction of the wave.
         axis: WaveAxis,
+        /// Peak displacement scale; horizontal displacement is aspect-adjusted.
         amplitude: f64,
+        /// Distance per cycle in rows or aspect-corrected horizontal units.
         wavelength: f64,
+        /// Offset in wave cycles.
         phase: f64,
     },
+    /// Temporarily displace, recolor, and replace selected cells near mid-progress.
     Glitch {
+        /// Seed combined with the wrapper seed for repeatable corruption.
         seed: u64,
+        /// Maximum corruption strength in `0.0..=1.0`.
         intensity: f64,
     },
+    /// Dim periodic source rows, independently of progress.
     Scanline {
+        /// Row-band density in `0.0..=1.0`; zero disables the effect.
         density: f64,
+        /// Dimming strength in `0.0..=1.0`.
         intensity: f64,
+        /// Offset in row-band cycles.
         phase: f64,
     },
+    /// Reveal source cells in row-major order, optionally displaying a cursor.
     Typewriter {
+        /// Cell grouping used for the reveal.
         mode: TypewriterMode,
+        /// Whether to replace the next unrevealed sampled cell with a cursor.
         cursor: bool,
     },
+    /// Approximate blur with dimming and glyph replacement, without sampling neighbors.
     BlurLike {
+        /// Nonnegative pattern parameter; zero disables the effect.
+        /// Positive values change the noise pattern, not a convolution radius.
         radius: f64,
+        /// Whether the approximation clears or builds as progress increases.
         mode: BlurMode,
     },
+    /// Move a colored, bold highlight through destination cells.
     HighlightSweep {
+        /// Foreground color toward which highlighted cells are blended.
         color: Color,
+        /// Normalized distance from the band center to its edge, in `0.0..=1.0`.
         width: f64,
+        /// Direction of the moving band.
         direction: GradientDirection,
     },
+    /// Twinkle selected non-whitespace cells using the render frame number.
     Sparkle {
+        /// Seed combined with the wrapper seed for spatial and temporal noise.
         seed: u64,
+        /// Candidate-cell density, clamped to `0.0..=0.35` when sampled.
         density: f64,
+        /// Foreground color of active sparkles.
         color: Color,
     },
+    /// Apply children in equal progress slices; see [`Self::sequence`].
     Sequence(Vec<VisualEffect>),
+    /// Apply children in list order at shared progress; see [`Self::parallel`].
     Parallel(Vec<VisualEffect>),
+    /// Offset a child's progress according to its source position.
     Stagger {
+        /// Delay per row, column, or cell as a fraction of total progress.
+        /// The accumulated offset is capped at `0.95` so every group can finish.
         delay: f64,
+        /// Source-position grouping used to calculate the delay.
         mode: StaggerMode,
+        /// Effect sampled with the adjusted local progress.
         effect: Box<VisualEffect>,
     },
+    /// A shared user-defined effect; see [`CellEffect`].
     Custom(CustomCellEffect),
 }
 
 impl VisualEffect {
+    /// Reveal cells from zero to full coverage using deterministic dithering.
     pub fn fade_in() -> Self {
         Self::Fade { from: 0.0, to: 1.0 }
     }
 
+    /// Hide cells from full to zero coverage using deterministic dithering.
     pub fn fade_out() -> Self {
         Self::Fade { from: 1.0, to: 0.0 }
     }
 
+    /// Create a foreground gradient with zero phase offset.
     pub fn gradient(start: Color, end: Color, direction: GradientDirection) -> Self {
         Self::Gradient {
             start,
@@ -100,6 +183,7 @@ impl VisualEffect {
         }
     }
 
+    /// Create a background gradient with zero phase offset.
     pub fn background_gradient(start: Color, end: Color, direction: GradientDirection) -> Self {
         Self::Gradient {
             start,
@@ -110,6 +194,7 @@ impl VisualEffect {
         }
     }
 
+    /// Create a fading shatter with spread scales of 18 horizontally and 7 vertically.
     pub fn shatter() -> Self {
         Self::Shatter {
             seed: 0x5EED,
@@ -119,6 +204,7 @@ impl VisualEffect {
         }
     }
 
+    /// Expand from `anchor` with an initial squeeze of `0.08`.
     pub fn magic_lamp(anchor: VisualAnchor) -> Self {
         Self::MagicLamp {
             anchor,
@@ -126,6 +212,7 @@ impl VisualEffect {
         }
     }
 
+    /// Hide cells along `direction` with a sharp boundary.
     pub fn wipe(direction: WipeDirection) -> Self {
         Self::Wipe {
             direction,
@@ -134,6 +221,7 @@ impl VisualEffect {
         }
     }
 
+    /// Reveal cells along `direction` with a sharp boundary.
     pub fn reveal(direction: WipeDirection) -> Self {
         Self::Wipe {
             direction,
@@ -142,6 +230,7 @@ impl VisualEffect {
         }
     }
 
+    /// Reveal cells in a repeatable random order.
     pub fn dissolve() -> Self {
         Self::Dissolve {
             seed: 0xD155_01F3,
@@ -149,6 +238,7 @@ impl VisualEffect {
         }
     }
 
+    /// Hide cells in a repeatable random order.
     pub fn dissolve_out() -> Self {
         Self::Dissolve {
             seed: 0xD155_01F3,
@@ -156,6 +246,7 @@ impl VisualEffect {
         }
     }
 
+    /// Create a wave with amplitude `2.0`, wavelength `6.0`, and zero phase.
     pub fn wave(axis: WaveAxis) -> Self {
         Self::Wave {
             axis,
@@ -165,6 +256,7 @@ impl VisualEffect {
         }
     }
 
+    /// Create a deterministic glitch with intensity `0.42`.
     pub fn glitch() -> Self {
         Self::Glitch {
             seed: 0x6_117C_4,
@@ -172,6 +264,7 @@ impl VisualEffect {
         }
     }
 
+    /// Create scanlines with density `0.5`, intensity `0.35`, and zero phase.
     pub fn scanline() -> Self {
         Self::Scanline {
             density: 0.5,
@@ -180,6 +273,7 @@ impl VisualEffect {
         }
     }
 
+    /// Reveal individual source cells in row-major order, without a cursor.
     pub fn typewriter() -> Self {
         Self::Typewriter {
             mode: TypewriterMode::Chars,
@@ -187,6 +281,9 @@ impl VisualEffect {
         }
     }
 
+    /// Reveal groups of six source cells, without a cursor.
+    ///
+    /// Groups approximate words without examining text or word boundaries.
     pub fn typewriter_words() -> Self {
         Self::Typewriter {
             mode: TypewriterMode::Words,
@@ -194,6 +291,7 @@ impl VisualEffect {
         }
     }
 
+    /// Create a blur approximation that clears with progress, using radius `2.0`.
     pub fn blur_like() -> Self {
         Self::BlurLike {
             radius: 2.0,
@@ -201,6 +299,7 @@ impl VisualEffect {
         }
     }
 
+    /// Create a pale-yellow horizontal highlight with normalized half-width `0.18`.
     pub fn highlight_sweep() -> Self {
         Self::HighlightSweep {
             color: Color::Rgb(255, 255, 180),
@@ -209,6 +308,7 @@ impl VisualEffect {
         }
     }
 
+    /// Create pale-yellow sparkles with candidate density `0.08`.
     pub fn sparkle() -> Self {
         Self::Sparkle {
             seed: 0x5_9A4C_13,
@@ -222,7 +322,7 @@ impl VisualEffect {
         Self::custom_named("custom", effect)
     }
 
-    /// Wrap a user-defined cell effect with a stable debug/profiling name.
+    /// Wrap a user-defined cell effect with a static diagnostic name.
     pub fn custom_named(name: &'static str, effect: impl CellEffect) -> Self {
         Self::Custom(CustomCellEffect::new(name, effect))
     }
@@ -230,7 +330,8 @@ impl VisualEffect {
     /// Run child effects one after another with equal duration slices.
     ///
     /// Completed children are sampled at `1.0`; the active child receives its
-    /// local progress; pending children are skipped.
+    /// local progress; pending children are skipped. Sampling stops if a child
+    /// hides the cell. An empty sequence leaves the cell unchanged.
     pub fn sequence(effects: Vec<VisualEffect>) -> Self {
         Self::Sequence(effects)
     }
@@ -238,22 +339,32 @@ impl VisualEffect {
     /// Run child effects over the same progress range.
     ///
     /// Children are applied in list order. Later children see earlier geometry
-    /// and color changes; visibility remains hidden once any child hides a cell.
+    /// and color changes and may overwrite visibility set by earlier children.
+    /// An empty list leaves the cell unchanged.
     pub fn parallel(effects: Vec<VisualEffect>) -> Self {
         Self::Parallel(effects)
     }
 
     /// Delay a child effect by local row.
+    ///
+    /// `delay` is a fraction of total progress per row, clamped to `0.0..=1.0`;
+    /// non-finite values become zero. The total offset is capped at `0.95`, and
+    /// the child's duration is shortened so every row completes by progress `1.0`.
     pub fn stagger_rows(delay: f64, effect: VisualEffect) -> Self {
         Self::stagger(delay, StaggerMode::Rows, effect)
     }
 
     /// Delay a child effect by local column.
+    ///
+    /// Uses the same delay normalization and completion rules as [`Self::stagger_rows`].
     pub fn stagger_cols(delay: f64, effect: VisualEffect) -> Self {
         Self::stagger(delay, StaggerMode::Cols, effect)
     }
 
-    /// Delay a child effect by source character index, row-major.
+    /// Delay a child effect by source cell index, row-major.
+    ///
+    /// Uses the same delay normalization and completion rules as [`Self::stagger_rows`].
+    /// Indices include blank positions in the allocated area, not just text glyphs.
     pub fn stagger_chars(delay: f64, effect: VisualEffect) -> Self {
         Self::stagger(delay, StaggerMode::Chars, effect)
     }
@@ -268,8 +379,10 @@ impl VisualEffect {
 
     /// Return the reduced-motion form of this effect.
     ///
-    /// Spatial motion is replaced with fades, while color-only effects remain
-    /// unchanged. Composition is preserved with zero stagger delay.
+    /// Most spatial and glyph-changing effects become fades. Fade, gradient,
+    /// and scanline effects remain unchanged; highlight sweeps use a narrower
+    /// band. Composition is preserved with zero stagger delay. Custom effects
+    /// remain unchanged and must inspect the context's motion policy themselves.
     pub fn reduced(&self) -> Self {
         match self {
             Self::Fade { .. } | Self::Gradient { .. } | Self::Scanline { .. } => self.clone(),
@@ -315,6 +428,10 @@ impl VisualEffect {
     }
 
     /// Approximate cost used by degradation and profiling hooks.
+    ///
+    /// Compositions report the most expensive child, with a minimum of
+    /// [`VisualEffectCost::Moderate`] for staggered effects. This is a category,
+    /// not a measured duration or a sum of child costs.
     pub fn estimated_cost(&self) -> VisualEffectCost {
         match self {
             Self::Fade { .. }
@@ -340,6 +457,7 @@ impl VisualEffect {
         }
     }
 
+    /// Set the seed of a shatter, dissolve, glitch, or sparkle effect.
     pub fn with_seed(mut self, seed: u64) -> Self {
         match &mut self {
             Self::Shatter { seed: current, .. }
@@ -353,6 +471,9 @@ impl VisualEffect {
         self
     }
 
+    /// Set shatter spread scales, clamping each to at least zero.
+    ///
+    /// Horizontal displacement also uses the context's cell aspect ratio.
     pub fn with_spread(mut self, x: f64, y: f64) -> Self {
         if let Self::Shatter {
             spread_x, spread_y, ..
@@ -364,6 +485,7 @@ impl VisualEffect {
         self
     }
 
+    /// Choose the color channel replaced by a gradient.
     pub fn target(mut self, target: GradientTarget) -> Self {
         if let Self::Gradient {
             target: current, ..
@@ -374,6 +496,7 @@ impl VisualEffect {
         self
     }
 
+    /// Set a gradient, wave, or scanline phase in cycles; non-finite values become zero.
     pub fn phase(mut self, phase: f64) -> Self {
         match &mut self {
             Self::Gradient { phase: current, .. }
@@ -386,6 +509,7 @@ impl VisualEffect {
         self
     }
 
+    /// Set the magic-lamp residual scale, clamped to `0.0..=1.0`.
     pub fn squeeze(mut self, squeeze: f64) -> Self {
         if let Self::MagicLamp {
             squeeze: current, ..
@@ -396,6 +520,9 @@ impl VisualEffect {
         self
     }
 
+    /// Set wipe boundary softness, clamped to `0.0..=1.0`.
+    ///
+    /// Zero gives a sharp edge; non-finite values become zero.
     pub fn softness(mut self, softness: f64) -> Self {
         if let Self::Wipe {
             softness: current, ..
@@ -406,6 +533,7 @@ impl VisualEffect {
         self
     }
 
+    /// Set nonnegative wave amplitude; negative or non-finite values become zero.
     pub fn amplitude(mut self, amplitude: f64) -> Self {
         if let Self::Wave {
             amplitude: current, ..
@@ -416,6 +544,9 @@ impl VisualEffect {
         self
     }
 
+    /// Set wave wavelength, with a minimum of [`f64::EPSILON`].
+    ///
+    /// Non-finite values use the default wavelength of `6.0`.
     pub fn wavelength(mut self, wavelength: f64) -> Self {
         if let Self::Wave {
             wavelength: current,
@@ -427,6 +558,8 @@ impl VisualEffect {
         self
     }
 
+    /// Set glitch or scanline intensity, clamped to `0.0..=1.0`.
+    /// Non-finite values become zero.
     pub fn intensity(mut self, intensity: f64) -> Self {
         match &mut self {
             Self::Glitch {
@@ -442,6 +575,9 @@ impl VisualEffect {
         self
     }
 
+    /// Set scanline or sparkle density, clamped to `0.0..=1.0`.
+    ///
+    /// Non-finite values become zero. Sparkle sampling additionally caps density at `0.35`.
     pub fn density(mut self, density: f64) -> Self {
         match &mut self {
             Self::Scanline {
@@ -457,6 +593,7 @@ impl VisualEffect {
         self
     }
 
+    /// Enable or disable the typewriter cursor, using `▌` or an ASCII `|` fallback.
     pub fn cursor(mut self, cursor: bool) -> Self {
         if let Self::Typewriter {
             cursor: current, ..
@@ -467,6 +604,10 @@ impl VisualEffect {
         self
     }
 
+    /// Set the blur approximation's pattern parameter; zero disables it.
+    ///
+    /// Negative or non-finite values become zero. This does not set a spatial
+    /// sampling radius; use [`super::Backdrop::blur_radius`] for backdrop blur.
     pub fn radius(mut self, radius: f64) -> Self {
         if let Self::BlurLike {
             radius: current, ..
@@ -477,6 +618,7 @@ impl VisualEffect {
         self
     }
 
+    /// Choose whether the blur approximation clears or builds with progress.
     pub fn blur_mode(mut self, mode: BlurMode) -> Self {
         if let Self::BlurLike { mode: current, .. } = &mut self {
             *current = mode;
@@ -484,6 +626,8 @@ impl VisualEffect {
         self
     }
 
+    /// Set highlight half-width in normalized units, clamped to `f64::EPSILON..=1.0`.
+    /// Non-finite values use the default of `0.18`.
     pub fn width(mut self, width: f64) -> Self {
         if let Self::HighlightSweep { width: current, .. } = &mut self {
             *current = finite_or(width, 0.18).clamp(f64::EPSILON, 1.0);
@@ -491,6 +635,7 @@ impl VisualEffect {
         self
     }
 
+    /// Set the foreground color used by a highlight sweep or sparkle effect.
     pub fn color(mut self, color: Color) -> Self {
         match &mut self {
             Self::HighlightSweep { color: current, .. } | Self::Sparkle { color: current, .. } => {
@@ -501,6 +646,7 @@ impl VisualEffect {
         self
     }
 
+    /// Set the direction of a highlight sweep.
     pub fn direction(mut self, direction: GradientDirection) -> Self {
         if let Self::HighlightSweep {
             direction: current, ..
@@ -511,6 +657,7 @@ impl VisualEffect {
         self
     }
 
+    /// Whether unchanged source cells may be skipped when no backdrop is active.
     pub(crate) fn can_use_dirty_only(&self) -> bool {
         match self {
             Self::Gradient { .. } | Self::Scanline { .. } => true,
@@ -527,92 +674,128 @@ impl VisualEffect {
 /// Spatial axis used by staggered visual effects.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StaggerMode {
+    /// Delay each successive source row.
     Rows,
+    /// Delay each successive source column.
     Cols,
+    /// Delay each successive source cell in row-major order, including blank positions.
     Chars,
 }
 
-/// Direction used by [`VisualEffect::Gradient`].
+/// Direction used by gradients and highlight sweeps.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GradientDirection {
+    /// Interpolate from left to right.
     Horizontal,
+    /// Interpolate from top to bottom.
     Vertical,
+    /// Interpolate from top-left to bottom-right.
     Diagonal,
 }
 
 /// Which color channel a gradient should override.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GradientTarget {
+    /// Replace the glyph color while preserving its background.
     Foreground,
+    /// Replace the background color while preserving the glyph color.
     Background,
 }
 
 /// Direction used by [`VisualEffect::Wipe`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WipeDirection {
+    /// Advance from the left edge to the right edge.
     LeftToRight,
+    /// Advance from the right edge to the left edge.
     RightToLeft,
+    /// Advance from the top edge to the bottom edge.
     TopToBottom,
+    /// Advance from the bottom edge to the top edge.
     BottomToTop,
+    /// Expand radially from the center, accounting for cell aspect ratio.
     CenterOut,
+    /// Advance inward from the nearest rectangular edge.
     EdgesIn,
+    /// Advance diagonally from top-left to bottom-right.
     DiagonalDown,
+    /// Advance diagonally from bottom-left to top-right.
     DiagonalUp,
 }
 
 /// Visibility mode for wipe-style effects.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WipeMode {
+    /// Show cells behind the advancing boundary.
     Reveal,
+    /// Hide cells behind the advancing boundary.
     Hide,
 }
 
 /// Visibility mode for dissolve effects.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DissolveMode {
+    /// Increase visible coverage as progress increases.
     In,
+    /// Decrease visible coverage as progress increases.
     Out,
 }
 
 /// Visibility grouping used by [`VisualEffect::Typewriter`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TypewriterMode {
+    /// Reveal individual source-cell positions in row-major order.
     Chars,
-    /// Approximate word grouping that keeps the effect cell-local.
+    /// Reveal groups of six source-cell positions without detecting word boundaries.
     Words,
 }
 
 /// Direction of terminal-cell blur approximation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BlurMode {
+    /// Start blurred and clear the approximation as progress increases.
     In,
+    /// Start clear and increase the blur approximation with progress.
     Out,
 }
 
 /// Axis used by [`VisualEffect::Wave`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WaveAxis {
+    /// Vary the wave by source row and displace cells horizontally.
     Rows,
+    /// Vary the wave by aspect-corrected source column and displace cells vertically.
     Cols,
 }
 
 /// Anchor point for spatial effects such as magic-lamp minimization.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum VisualAnchor {
+    /// Top-left cell of the area.
     TopLeft,
+    /// Midpoint of the top edge.
     Top,
+    /// Top-right cell of the area.
     TopRight,
+    /// Midpoint of the left edge.
     Left,
+    /// Center of the area.
     Center,
+    /// Midpoint of the right edge.
     Right,
+    /// Bottom-left cell of the area.
     BottomLeft,
+    /// Midpoint of the bottom edge.
     Bottom,
+    /// Bottom-right cell of the area.
     BottomRight,
     /// Normalized coordinates where (0, 0) is top-left and (1, 1) is bottom-right.
+    /// Each component is clamped to `0.0..=1.0` when resolved.
     Relative(f64, f64),
 }
 
 impl VisualAnchor {
+    /// Resolve the anchor to local cell coordinates, using zero for an empty axis.
     pub(crate) fn resolve(self, width: u16, height: u16) -> (f64, f64) {
         let w = width.saturating_sub(1) as f64;
         let h = height.saturating_sub(1) as f64;

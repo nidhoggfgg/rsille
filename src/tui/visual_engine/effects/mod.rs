@@ -1,3 +1,5 @@
+//! Cell-local implementations of built-in effects and composition semantics.
+
 use crossterm::style::Attribute;
 
 use crate::tui::style::Color;
@@ -13,6 +15,10 @@ use crate::tui::visual_engine::{
 };
 
 impl VisualEffect {
+    /// Transform one sample using already-resolved progress and policy.
+    ///
+    /// Composition is evaluated recursively. This does not clip destinations or
+    /// enforce degradation; those steps belong to the surrounding render pipeline.
     pub(crate) fn apply(&self, sample: &mut CellSample, ctx: &VisualCtx<'_>) {
         let progress = ctx.progress;
         match self {
@@ -197,6 +203,8 @@ impl VisualEffect {
     }
 }
 
+/// Apply completed children at final progress and the active child at local progress.
+/// Future children are skipped, and a hidden sample stops the sequence.
 fn apply_sequence(effects: &[VisualEffect], sample: &mut CellSample, ctx: &VisualCtx<'_>) {
     let len = effects.len();
     if len == 0 {
@@ -226,6 +234,8 @@ fn apply_sequence(effects: &[VisualEffect], sample: &mut CellSample, ctx: &Visua
     }
 }
 
+/// Normalize a source position along a directional or radial wipe path.
+/// Horizontal distances account for terminal cell aspect ratio.
 fn wipe_position(x: f64, y: f64, ctx: &VisualCtx<'_>, direction: WipeDirection) -> f64 {
     let max_x = ctx.area.width().saturating_sub(1) as f64;
     let max_y = ctx.area.height().saturating_sub(1) as f64;
@@ -274,6 +284,8 @@ fn wipe_position(x: f64, y: f64, ctx: &VisualCtx<'_>, direction: WipeDirection) 
     }
 }
 
+/// Test visibility against a wipe boundary, dithering within its optional feather.
+/// Progress endpoints are fully hidden or visible according to the wipe mode.
 fn wipe_visible(
     position: f64,
     progress: f64,
@@ -315,6 +327,7 @@ fn wipe_visible(
     noise(x, y, seed) <= coverage
 }
 
+/// Apply deterministic displacement and glyph/color corruption under a sine envelope.
 fn apply_glitch(sample: &mut CellSample, ctx: &VisualCtx<'_>, seed: u64, intensity: f64) {
     let envelope = (ctx.progress * std::f64::consts::PI).sin().max(0.0);
     let active = finite_or(intensity, 0.0).clamp(0.0, 1.0) * envelope;
@@ -358,6 +371,7 @@ fn apply_glitch(sample: &mut CellSample, ctx: &VisualCtx<'_>, seed: u64, intensi
     apply_color_capable(&mut sample.content, color, GradientTarget::Foreground, ctx);
 }
 
+/// Dim periodic source-row bands selected by density and phase.
 fn apply_scanline(
     sample: &mut CellSample,
     ctx: &VisualCtx<'_>,
@@ -381,6 +395,8 @@ fn apply_scanline(
     }
 }
 
+/// Reveal row-major source positions individually or in groups of six.
+/// Optionally replace the next unrevealed sample with a capability-appropriate cursor.
 fn apply_typewriter(
     sample: &mut CellSample,
     ctx: &VisualCtx<'_>,
@@ -431,6 +447,8 @@ fn apply_typewriter(
     }
 }
 
+/// Approximate blur through dimming and noise-selected glyph replacement.
+/// Radius changes the noise seed; no neighboring cells are read.
 fn apply_blur_like(sample: &mut CellSample, ctx: &VisualCtx<'_>, radius: f64, mode: BlurMode) {
     let radius = finite_or(radius, 2.0).max(0.0);
     if radius <= 0.0 {
@@ -469,6 +487,7 @@ fn apply_blur_like(sample: &mut CellSample, ctx: &VisualCtx<'_>, radius: f64, mo
     }
 }
 
+/// Blend and embolden cells within a moving triangular highlight band.
 fn apply_highlight_sweep(
     sample: &mut CellSample,
     ctx: &VisualCtx<'_>,
@@ -487,6 +506,8 @@ fn apply_highlight_sweep(
     add_attribute(&mut sample.content, Attribute::Bold);
 }
 
+/// Recolor and occasionally replace selected non-whitespace glyphs.
+/// Temporal noise changes every three render frames, independently of progress.
 fn apply_sparkle(
     sample: &mut CellSample,
     ctx: &VisualCtx<'_>,
@@ -521,6 +542,10 @@ fn apply_sparkle(
     }
 }
 
+/// Offset progress by source row, column, or row-major cell index.
+///
+/// Total delay is capped at `0.95`, and all groups share a shortened duration so
+/// the last group still finishes at progress `1.0`. Nonpositive delay is a no-op.
 pub(crate) fn staggered_progress(
     sample: &CellSample,
     ctx: &VisualCtx<'_>,

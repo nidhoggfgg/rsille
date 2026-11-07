@@ -3,6 +3,18 @@
 //! This module owns visual effect data, cell sampling, degradation planning,
 //! profiling, and source-buffer blitting. Widget wrappers feed it offscreen
 //! buffers and runtime context; it does not know about widget trees.
+//!
+//! Public effect types are re-exported through [`crate::tui::widgets`] and
+//! [`crate::tui::prelude`]. Start with [`VisualEffect`] for built-in transforms,
+//! [`CellEffect`] for custom transforms, or [`Backdrop`] for lower-layer color
+//! sampling and blur.
+//!
+//! Rendering resolves [`VisualConfig`] into a [`VisualCtx`], plans each effect
+//! group according to motion and large-area policies, then applies the effects
+//! to [`CellSample`] values from the offscreen buffer. Visible destinations are
+//! rounded and clipped before being written. Backdrop composition uses a snapshot
+//! taken before any output is written, keeping reads independent of write order.
+//! Optional [`VisualProfile`] callbacks expose timings, cell counts, and degradation.
 
 mod backdrop;
 mod blit;

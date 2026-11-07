@@ -1,3 +1,5 @@
+//! Apply cell effects and optional backdrop composition while copying offscreen output.
+
 use std::time::Instant;
 
 use crate::render::buffer::Buffer;
@@ -9,6 +11,12 @@ use crate::tui::visual_engine::pipeline::{
 };
 use crate::tui::visual_engine::{Backdrop, BlitReport, CellSample, VisualCtx, VisualEffect};
 
+/// Blit one effect list at the supplied context's progress without degradation planning.
+///
+/// Effects run in order until a sample becomes hidden. Destinations are rounded
+/// and clipped to the wrapper area before backdrop composition. Without a
+/// backdrop, blank cells are skipped and dirty-only sampling is used when every
+/// effect permits it. Timing is collected only when `profile_enabled` is true.
 pub(crate) fn blit_with_effects(
     chunk: &mut crate::render::chunk::Chunk,
     source: &Buffer,
@@ -77,6 +85,12 @@ pub(crate) fn blit_with_effects(
     report
 }
 
+/// Plan and blit effect groups with independent progress values.
+///
+/// Each group receives motion-policy-adjusted progress and area-based degradation.
+/// Groups transform the same sample in order, stopping when it becomes hidden.
+/// A backdrop is sampled once before writing and composed after the effects.
+/// The report combines degradation flags across groups; timing includes planning.
 pub(crate) fn blit_with_effect_groups(
     chunk: &mut crate::render::chunk::Chunk,
     source: &Buffer,
