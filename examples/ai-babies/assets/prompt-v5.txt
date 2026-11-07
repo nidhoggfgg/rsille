@@ -1,8 +1,0 @@
-Tool: built-in imagegen (not CLI).
-Input: assets/source-v4.png
-Output: assets/source-v5.png
-
-Use case: precise-object-edit.
-Target: supplied 1536x1024 transparent sprite sheet of three chibi girls.
-Change ONLY their SIX EYES and the immediate skin surrounding each eye. Current solid dark dot eyes look lifeless. Give each eye a small lively softly rounded shape, with a dark upper rim, a clearly colored lower iris and ONE chunky ivory highlight in the upper left. A friendly attentive expression with open eyes, looking toward viewer. Left girl's irises bright blue; middle girl's irises warm honey/amber; right girl's irises violet. Each eye approximately 42 pixels wide and 42 pixels tall on this 1536x1024 canvas (about 3x3 logical pixels when the figure is reduced to 40x48); the highlight is one roughly 13x13 pixel square and the colored bottom takes about half the eye height. Intentional simple pixel clusters, no smooth curves or fine detail. Keep eyes at existing centers, maintain generous spacing. Avoid crossed diagonal pixels, x shapes, solid black dots, dead doll eyes, long lash bars, giant anime eyes, multiple sparkles, white sclera. The intended logical 3x3 eye is a dark top edge, a small light glint on one side, dark pupil on the other, and clearly blue/amber/violet bottom. More life and focus while still restrained in size.
-Preserve the entire rest of the image exactly: all three identities, facial proportions, smiles, cheeks, hairstyles, headband, flower, horns, wings, tails, costumes, hands, scale, placement and canvas size. True transparent alpha everywhere outside character silhouettes, preserve transparency, no opaque background, no haze or glow or shadows.

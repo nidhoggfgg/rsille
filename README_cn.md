@@ -65,7 +65,6 @@ cargo run --release --manifest-path examples/minecraft/Cargo.toml
 cargo run --release --manifest-path examples/clockwork/Cargo.toml
 cargo run --release --manifest-path examples/pokemon-battle/Cargo.toml
 cargo run --release --manifest-path examples/jellyfish/Cargo.toml
-cargo run --release --manifest-path examples/ai-rumble/Cargo.toml
 ```
 
 `workflow` 使用同一套应用逻辑验证 Unicode 粘贴、debounce、后台保存、键盘焦点和退出，
@@ -111,11 +110,6 @@ cargo run --release --manifest-path examples/ai-rumble/Cargo.toml
 以最多 28 行的 inline 画面展示两只放大的发光水母，上下游动、伞体收缩、触须大幅摆动，
 背景有柔和光束、浮游微粒和远处鱼群。
 没有控制面板，适合静静观看；按 `q`、Esc 或 Ctrl+C 退出。
-
-[AI 娘大乱斗](examples/ai-rumble/README.md) 将 DeepSeek 鲸鱼娘、Claude 抱书少女和 ChatGPT 白龙娘
-画成各具服饰和表情的大眼 Q 版角色，以弹性伸缩、回弹和连续追逐串起水浪、书页和龙息，
-在 inline 画面中自动播放。
-每轮 24 秒，无需操作；示例附有角色参考、署名和完整动画预览。
 
 任意组件可直接添加毛玻璃背景：
 

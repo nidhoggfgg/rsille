@@ -1,7 +1,0 @@
-Tool: built-in imagegen (not CLI).
-Input: assets/source-v5.png
-Output: assets/source-v6.png
-
-Use case: precise-object-edit.
-Edit the supplied 1536x1024 transparent three-character pixel sprite sheet. Change ONLY the cheek blush of the three girls: remove ALL SIX pink/coral blush patches, filling each former blush area with the EXACT SAME flat light peach skin color as the center of that character's face. No rosy cheeks, no orange patches, no grey or purple cheek shading, no gradients, no cheek marks.
-Preserve EVERYTHING else EXACTLY, especially each eye's size, shape, position, ivory highlight and blue/amber/purple iris, each mouth and smile, all facial proportions, face outlines, hair, clothing, silhouettes, horns, wings, tails, accessories, hands, pixel-art texture, palette and the exact original figure placement and scale. Do not redraw or redesign any other part. Keep the same 1536x1024 canvas and true transparent alpha outside the characters. No opaque background, no haze, no glow, no shadows.
