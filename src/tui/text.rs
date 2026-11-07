@@ -1,4 +1,22 @@
 //! Text primitives and the shared editing core used by both input widgets.
+//!
+//! Re-exports [`crate::render::text`] for shared width and grapheme policies.
+//! [`EditBuffer`] stores caret and selection positions as UTF-8 byte offsets,
+//! while [`TextMetrics`] translates them to terminal columns. Call
+//! [`EditBuffer::repair`] after directly modifying its public fields.
+//!
+//! # Examples
+//!
+//! ```
+//! use rsille::tui::{event::{Event, KeyCode, KeyEvent, KeyModifiers}, text::{EditBuffer, TextMetrics}};
+//!
+//! let mut editor = EditBuffer::new("你好".into(), "你好".len(), None);
+//! let backspace = Event::Key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::empty()));
+//! let result = editor.handle(&backspace, TextMetrics::default(), false);
+//! assert!(result.changed);
+//! assert_eq!(editor.value, "你");
+//! assert_eq!(editor.cursor, "你".len());
+//! ```
 
 pub use crate::render::text::*;
 use crate::tui::event::{Event, KeyCode, KeyModifiers};
@@ -6,19 +24,27 @@ use crate::tui::event::{Event, KeyCode, KeyModifiers};
 /// UTF-8 editing positions. Both positions always fall on grapheme boundaries.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct EditBuffer {
+    /// UTF-8 text being edited.
     pub value: String,
+    /// Caret position as a UTF-8 byte offset at a grapheme boundary.
     pub cursor: usize,
+    /// Optional selection anchor as a UTF-8 byte offset at a grapheme boundary.
     pub anchor: Option<usize>,
 }
 
+/// Outcome of applying one input event to an editing buffer.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct EditResult {
+    /// Whether the editing core recognized the event.
     pub handled: bool,
+    /// Whether the text changed; caret movement alone leaves this `false`.
     pub changed: bool,
+    /// Whether Enter requested submission rather than inserting a newline.
     pub submit: bool,
 }
 
 impl EditBuffer {
+    /// Creates an editor, clamping cursor and anchor down to valid grapheme boundaries.
     pub fn new(value: String, cursor: usize, anchor: Option<usize>) -> Self {
         let mut editor = Self {
             value,
@@ -29,11 +55,18 @@ impl EditBuffer {
         editor
     }
 
+    /// Clamps cursor and anchor to the text length and preceding grapheme boundaries.
+    ///
+    /// Call after directly modifying public text or position fields.
     pub fn repair(&mut self) {
         self.cursor = floor_boundary(&self.value, self.cursor);
         self.anchor = self.anchor.map(|a| floor_boundary(&self.value, a));
     }
 
+    /// Returns the nonempty selected byte range, ordered from start to end.
+    ///
+    /// Returns `None` for no anchor or an anchor equal to the cursor. Positions
+    /// are not repaired by this accessor.
     pub fn selection(&self) -> Option<std::ops::Range<usize>> {
         self.anchor
             .filter(|a| *a != self.cursor)
@@ -63,6 +96,13 @@ impl EditBuffer {
         self.anchor = None;
     }
 
+    /// Applies keyboard or paste input after repairing caret positions.
+    ///
+    /// Enter submits in single-line mode; in multiline mode it inserts a newline
+    /// unless Control is held. Shift extends selections, and Ctrl+A selects all.
+    /// Pasted line endings are normalized; newlines become spaces in single-line
+    /// mode, and control characters other than tabs and newlines are removed.
+    /// Key releases and unsupported events are unhandled.
     pub fn handle(&mut self, event: &Event, metrics: TextMetrics, multiline: bool) -> EditResult {
         self.repair();
         let original = self.value.clone();

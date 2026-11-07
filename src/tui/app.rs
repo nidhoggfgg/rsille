@@ -1,3 +1,31 @@
+//! Application configuration, view construction, and terminal execution.
+//!
+//! Start with [`App::new`], configure services and input, then install an update
+//! callback and a view using [`App::update`] and [`Application::view`]. Updates
+//! mutate application state and queue work through [`UpdateCtx`]; views describe
+//! the widget tree for that state.
+//!
+//! [`Application::run`] owns a terminal event loop and a private Tokio runtime.
+//! Use [`Application::run_async`] inside an existing Tokio runtime, or
+//! [`Application::build`] to drive input and rendering without a terminal.
+//! The configured [`Mode`] selects fullscreen or inline terminal presentation.
+//!
+//! # Examples
+//!
+//! ```
+//! use rsille::tui::{app::App, widgets::label};
+//!
+//! let mut runtime = App::new(0_u32)
+//!     .update(|count, increment, _| *count += increment)
+//!     .view(|count| label(count.to_string()))
+//!     .build()
+//!     .size(16, 1);
+//!
+//! runtime.handle().send(3).unwrap();
+//! runtime.step(&[]).unwrap();
+//! assert_eq!(*runtime.state(), 3);
+//! ```
+
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -17,11 +45,17 @@ use crate::tui::widget::Widget;
 use crate::tui::widgets::visual::TerminalVisualCapabilities;
 use crate::tui::WidgetResult;
 
+/// Callback producing an application message without an input payload.
 pub type EventHandler<M> = Box<dyn Fn() -> M>;
+/// Callback producing an application message from frame timing.
 pub type FrameHandler<M> = Box<dyn Fn(FrameInfo) -> M>;
+/// Callback observing input and optionally producing an application message.
 pub type InputHandler<M> = Box<dyn Fn(InputEvent) -> Option<M>>;
+/// Computes continuous event-source descriptions from application state.
 pub type SubscriptionResolver<State, M> = Box<dyn Fn(&State) -> Subscription<M>>;
+/// Builds the current command router from application state.
 pub type CommandResolver<State, M> = Box<dyn Fn(&State) -> CommandRouter<M>>;
+/// Computes the current rendering theme from application state.
 pub type ThemeResolver<State> = Box<dyn Fn(&State) -> Theme>;
 
 pub(crate) struct TickConfig<M> {
@@ -36,9 +70,13 @@ pub(crate) struct FrameConfig<M> {
 /// Timing information for a rendered frame.
 #[derive(Debug, Clone, Copy)]
 pub struct FrameInfo {
+    /// Monotonic instant sampled for this frame.
     pub now: Instant,
+    /// Elapsed time since the previous frame callback; zero on the first frame.
     pub delta: Duration,
+    /// Elapsed time since the first frame callback.
     pub since_start: Duration,
+    /// Zero-based frame callback counter.
     pub frame: u64,
 }
 
@@ -96,6 +134,11 @@ impl<State: std::fmt::Debug, M> std::fmt::Debug for App<State, M> {
 }
 
 impl<State, M> App<State, M> {
+    /// Creates application configuration around the initial state.
+    ///
+    /// Defaults to fullscreen presentation, a dark theme, Escape to quit, mouse
+    /// capture enabled, legacy keyboard input, normal motion, a system clock, and
+    /// a thread executor. Configure callbacks before calling [`Self::update`].
     pub fn new(state: State) -> Self {
         Self {
             state,
@@ -416,6 +459,7 @@ impl<State, M: Send + 'static> App<State, M> {
 /// Terminal presentation selected independently of update/effect handling.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Mode {
+    /// Uses the alternate terminal screen for the application (default).
     #[default]
     Fullscreen,
     /// Render in the normal screen, leaving output in terminal history.
@@ -438,7 +482,9 @@ pub enum ExitReason {
 /// Final state returned after cancellation and widget unmounting.
 #[derive(Debug)]
 pub struct AppExit<State> {
+    /// Final application state after shutdown processing.
     pub state: State,
+    /// Reason the application stopped.
     pub reason: ExitReason,
 }
 
@@ -451,6 +497,10 @@ pub struct Application<State, M, U, V = ()> {
 }
 
 impl<State, M, U, V> Application<State, M, U, V> {
+    /// Installs or replaces the function that builds widgets from application state.
+    ///
+    /// The runtime calls it when the view is rebuilt. Widget-local persistent state
+    /// is stored separately from the returned widget description.
     pub fn view<W, F>(self, view: F) -> Application<State, M, U, F>
     where
         F: Fn(&State) -> W,

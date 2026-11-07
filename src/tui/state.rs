@@ -1,3 +1,31 @@
+//! Named application state, cached derived values, and form drafts.
+//!
+//! [`Store`] holds named typed values independently of widget lifetimes. Use
+//! [`crate::tui::widget::WidgetStore`] for state attached to widget identity.
+//! [`Derived`] caches a computation by an input hash; [`FormState`] tracks a
+//! draft against a committed baseline and records validation errors supplied
+//! by application code.
+//!
+//! # Examples
+//!
+//! ```
+//! use rsille::tui::state::{FormState, Store, StoreKey};
+//!
+//! let mut store = Store::new();
+//! let count = StoreKey::<u32>::new("count");
+//! *store.get_or_default(&count) += 1;
+//! assert_eq!(store.get(&count), Some(&1));
+//!
+//! let mut form = FormState::<String>::new("draft".into());
+//! form.set_value("revised".into());
+//! assert!(form.is_dirty());
+//! form.set_error("title", "Please review".into());
+//! assert!(!form.is_valid());
+//! form.reset();
+//! assert_eq!(form.value(), "draft");
+//! assert!(form.is_valid());
+//! ```
+
 use std::any::Any;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
@@ -15,6 +43,10 @@ pub struct StoreKey<T> {
 }
 
 impl<T> StoreKey<T> {
+    /// Creates a typed key for a named slot.
+    ///
+    /// Slot identity is the name alone; using the same name with different types
+    /// does not create separate slots.
     pub fn new(name: impl Into<String>) -> Self {
         Self {
             name: name.into(),
@@ -22,6 +54,7 @@ impl<T> StoreKey<T> {
         }
     }
 
+    /// Returns the slot name.
     pub fn name(&self) -> &str {
         &self.name
     }
@@ -55,22 +88,31 @@ pub struct Store {
 }
 
 impl Store {
+    /// Creates an empty typed store.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Returns whether the name is occupied, regardless of the stored value's type.
     pub fn contains<T>(&self, key: &StoreKey<T>) -> bool {
         self.values.contains_key(key.name())
     }
 
+    /// Returns the value if the name exists and its concrete type matches `T`.
     pub fn get<T: 'static>(&self, key: &StoreKey<T>) -> Option<&T> {
         self.values.get(key.name())?.downcast_ref()
     }
 
+    /// Returns mutable access if the name exists and its concrete type matches `T`.
     pub fn get_mut<T: 'static>(&mut self, key: &StoreKey<T>) -> Option<&mut T> {
         self.values.get_mut(key.name())?.downcast_mut()
     }
 
+    /// Returns the stored value, inserting `T::default()` when the name is absent.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the name already contains a value of a different type.
     pub fn get_or_default<T: Default + 'static>(&mut self, key: &StoreKey<T>) -> &mut T {
         self.values
             .entry(key.name().to_owned())
@@ -79,6 +121,9 @@ impl Store {
             .expect("Store type mismatch: a different type was stored for this key")
     }
 
+    /// Replaces the named slot and returns the previous value if its type matches `T`.
+    ///
+    /// A previous value of another type is discarded and the return value is `None`.
     pub fn insert<T: 'static>(&mut self, key: StoreKey<T>, value: T) -> Option<T> {
         self.values
             .insert(key.name, Box::new(value))
@@ -86,6 +131,9 @@ impl Store {
             .map(|boxed| *boxed)
     }
 
+    /// Removes the named slot and returns its value if its type matches `T`.
+    ///
+    /// A value of another type is still removed, but the return value is `None`.
     pub fn remove<T: 'static>(&mut self, key: &StoreKey<T>) -> Option<T> {
         self.values
             .remove(key.name())
@@ -119,19 +167,26 @@ impl<T> Default for Derived<T> {
 }
 
 impl<T> Derived<T> {
+    /// Creates an empty derived-value cache.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Returns the cached value without recomputing it.
     pub fn get(&self) -> Option<&T> {
         self.value.as_ref()
     }
 
+    /// Clears the value and input fingerprint, forcing the next recomputation.
     pub fn invalidate(&mut self) {
         self.fingerprint = None;
         self.value = None;
     }
 
+    /// Rebuilds the cached value only when the input hash changes.
+    ///
+    /// `build` is called on the first use or after invalidation. Equality is based
+    /// on a 64-bit hash, so hash collisions can reuse a value for distinct inputs.
     pub fn recompute<I, F>(&mut self, input: &I, build: F) -> &T
     where
         I: Hash,
@@ -148,6 +203,7 @@ impl<T> Derived<T> {
             .expect("Derived value should exist after recompute")
     }
 
+    /// Consumes the cache and returns its stored value, if any.
     pub fn into_inner(self) -> Option<T> {
         self.value
     }
@@ -170,6 +226,7 @@ impl<T: Default + Clone, E> Default for FormState<T, E> {
 }
 
 impl<T: Clone, E> FormState<T, E> {
+    /// Creates an untouched, non-submitting form with `value` as both draft and baseline.
     pub fn new(value: T) -> Self {
         Self {
             initial: value.clone(),
@@ -180,20 +237,24 @@ impl<T: Clone, E> FormState<T, E> {
         }
     }
 
+    /// Returns the current draft.
     pub fn value(&self) -> &T {
         &self.value
     }
 
+    /// Marks the form touched and returns mutable access to the draft.
     pub fn value_mut(&mut self) -> &mut T {
         self.touched = true;
         &mut self.value
     }
 
+    /// Replaces the draft and marks the form touched, preserving errors and baseline.
     pub fn set_value(&mut self, value: T) {
         self.value = value;
         self.touched = true;
     }
 
+    /// Mutates the draft with a closure and marks the form touched.
     pub fn update<F>(&mut self, update: F)
     where
         F: FnOnce(&mut T),
@@ -202,17 +263,26 @@ impl<T: Clone, E> FormState<T, E> {
         self.touched = true;
     }
 
+    /// Makes the current draft the baseline and clears touched state.
+    ///
+    /// Validation errors and the submitting flag are preserved.
     pub fn commit(&mut self) {
         self.initial = self.value.clone();
         self.touched = false;
     }
 
+    /// Restores the baseline draft and clears touched state and errors.
+    ///
+    /// The submitting flag is preserved.
     pub fn reset(&mut self) {
         self.value = self.initial.clone();
         self.touched = false;
         self.errors.clear();
     }
 
+    /// Replaces both baseline and draft, clearing touched state and errors.
+    ///
+    /// The submitting flag is preserved.
     pub fn replace_initial(&mut self, value: T) {
         self.initial = value.clone();
         self.value = value;
@@ -220,6 +290,7 @@ impl<T: Clone, E> FormState<T, E> {
         self.errors.clear();
     }
 
+    /// Returns whether the draft differs from the baseline, independently of touched state.
     pub fn is_dirty(&self) -> bool
     where
         T: PartialEq,
@@ -227,54 +298,70 @@ impl<T: Clone, E> FormState<T, E> {
         self.value != self.initial
     }
 
+    /// Returns whether the draft has been marked or accessed for mutation.
     pub fn is_touched(&self) -> bool {
         self.touched
     }
 
+    /// Marks the draft as touched without changing its value.
     pub fn mark_touched(&mut self) {
         self.touched = true;
     }
 
+    /// Returns the submitting flag.
     pub fn is_submitting(&self) -> bool {
         self.submitting
     }
 
+    /// Sets the submitting flag without scheduling work.
     pub fn set_submitting(&mut self, submitting: bool) {
         self.submitting = submitting;
     }
 
+    /// Sets and returns the submitting flag from whether the task status is active.
+    ///
+    /// `None` clears the flag.
     pub fn sync_submitting_with_task(&mut self, status: Option<&TaskStatus>) -> bool {
         let submitting = status.is_some_and(TaskStatus::is_active);
         self.submitting = submitting;
         submitting
     }
 
+    /// Sets and returns the submitting flag from the request's loading phase.
     pub fn sync_submitting_with_request<V, Err>(&mut self, request: &RequestState<V, Err>) -> bool {
         let submitting = request.is_loading();
         self.submitting = submitting;
         submitting
     }
 
+    /// Appends an error to a named field; existing field errors are preserved.
     pub fn set_error(&mut self, field: impl Into<String>, error: E) {
         self.errors.entry(field.into()).or_default().push(error);
     }
 
+    /// Removes all validation errors.
     pub fn clear_errors(&mut self) {
         self.errors.clear();
     }
 
+    /// Removes every error for the named field.
     pub fn clear_field_errors(&mut self, field: &str) {
         self.errors.remove(field);
     }
 
+    /// Returns errors grouped by field name.
     pub fn errors(&self) -> &HashMap<String, Vec<E>> {
         &self.errors
     }
 
+    /// Returns the field's errors, or `None` when the field has no stored entry.
     pub fn field_errors(&self, field: &str) -> Option<&[E]> {
         self.errors.get(field).map(Vec::as_slice)
     }
 
+    /// Returns whether all stored error lists are empty.
+    ///
+    /// This checks recorded errors only; it does not run validation rules.
     pub fn is_valid(&self) -> bool {
         self.errors.values().all(Vec::is_empty)
     }

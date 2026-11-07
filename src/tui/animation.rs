@@ -1,4 +1,30 @@
 //! Animation primitives shared by TUI widgets and runtime policy.
+//!
+//! [`AnimationSpec`] combines timing, easing, repetition, and direction.
+//! [`Timeline`] composes transitions sequentially, in parallel, or with staggered
+//! starts. [`Presence`] attaches enter/exit timelines to a widget's lifecycle;
+//! [`LayoutTransition`] declares how changes in cell geometry should animate.
+//!
+//! The runtime applies [`MotionPolicy`] before sampling tracks. Widget animation
+//! hooks use [`AnimationCtx`] to update named channels; [`AnimationStore`] keeps
+//! those channels across view rebuilds. Initial scalar, style, and layout targets
+//! are stored immediately; subsequent target changes start interpolation.
+//!
+//! # Examples
+//!
+//! ```
+//! use std::time::Duration;
+//! use rsille::tui::animation::{AnimationSpec, Easing, MotionPolicy, Repeat};
+//!
+//! let spec = AnimationSpec::new(Duration::from_millis(200), Easing::Linear)
+//!     .delay(Duration::from_millis(40))
+//!     .repeat(Repeat::Count(2));
+//! let faster = MotionPolicy::new().with_speed(2.0).effective_spec(spec);
+//! assert_eq!(faster.duration, Duration::from_millis(100));
+//! assert_eq!(faster.delay, Duration::from_millis(20));
+//! assert_eq!(Easing::Linear.sample(0.5), 0.5);
+//! assert!(MotionPolicy::reduced_motion().effective_spec(spec).duration.is_zero());
+//! ```
 
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
@@ -13,14 +39,20 @@ const VALUE_EPSILON: f64 = 0.000_001;
 /// Animation timing and easing configuration.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct AnimationSpec {
+    /// Duration of one playback cycle, excluding the initial delay.
     pub duration: Duration,
+    /// Delay before the first cycle starts.
     pub delay: Duration,
+    /// Curve applied to normalized cycle progress.
     pub easing: Easing,
+    /// Number of cycles or indefinite repetition.
     pub repeat: Repeat,
+    /// Direction of progress within each cycle.
     pub direction: Direction,
 }
 
 impl AnimationSpec {
+    /// Creates a single forward cycle with the supplied duration and easing, and no delay.
     pub fn new(duration: Duration, easing: Easing) -> Self {
         Self {
             duration,
@@ -31,33 +63,47 @@ impl AnimationSpec {
         }
     }
 
+    /// Returns a 120 ms ease-out specification.
     pub fn fast() -> Self {
         Self::new(Duration::from_millis(120), Easing::EaseOut)
     }
 
+    /// Returns the default 180 ms ease-out specification.
     pub fn normal() -> Self {
         Self::default()
     }
 
+    /// Returns a 320 ms ease-in-out specification.
     pub fn slow() -> Self {
         Self::new(Duration::from_millis(320), Easing::EaseInOut)
     }
 
+    /// Sets the delay before playback begins.
     pub fn delay(mut self, delay: Duration) -> Self {
         self.delay = delay;
         self
     }
 
+    /// Sets the number of playback cycles or enables indefinite repetition.
     pub fn repeat(mut self, repeat: Repeat) -> Self {
         self.repeat = repeat;
         self
     }
 
+    /// Sets playback direction within each cycle.
     pub fn direction(mut self, direction: Direction) -> Self {
         self.direction = direction;
         self
     }
 
+    /// Divides duration and delay by `speed`, preserving other settings.
+    ///
+    /// Values at or below `0.000001` leave the specification unchanged. A speed
+    /// greater than one makes playback faster.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a scaled duration cannot be represented by [`Duration`].
     pub fn scaled(self, speed: f64) -> Self {
         if speed <= VALUE_EPSILON {
             return self;
@@ -127,15 +173,27 @@ impl Default for AnimationSpec {
 /// Built-in easing curves for component and layout animations.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Easing {
+    /// Constant-speed interpolation.
     Linear,
+    /// Quadratic acceleration from rest.
     EaseIn,
+    /// Quadratic deceleration to rest.
     EaseOut,
+    /// Quadratic acceleration followed by deceleration.
     EaseInOut,
+    /// Cubic Bezier curve specified by `(x1, y1, x2, y2)`.
+    ///
+    /// The endpoints are `(0, 0)` and `(1, 1)`; x controls and sampled output are
+    /// clamped to the unit interval.
     CubicBezier(f64, f64, f64, f64),
+    /// Rounds progress up to the next step boundary; zero steps is treated as one.
     Steps(u16),
 }
 
 impl Easing {
+    /// Samples the easing curve at normalized progress `t`.
+    ///
+    /// Finite inputs outside `0.0..=1.0` are clamped to that interval.
     pub fn sample(self, t: f64) -> f64 {
         let t = t.clamp(0.0, 1.0);
         match self {
@@ -161,16 +219,25 @@ impl Easing {
 /// Repeat behavior for a track.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Repeat {
+    /// Plays one cycle without repetition.
     Never,
+    /// Plays the specified total number of cycles, treating zero as one.
     Count(u16),
+    /// Repeats indefinitely until the track is removed or motion is disabled.
     Forever,
 }
 
 /// Playback direction for repeating tracks.
+///
+/// Direction applies within active cycles. A completed finite track resolves to
+/// its target value regardless of its last cycle's direction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Direction {
+    /// Progresses forward within each cycle.
     Normal,
+    /// Progresses backward within each cycle.
     Reverse,
+    /// Alternates forward and backward cycles, beginning forward.
     Alternate,
 }
 
@@ -180,35 +247,48 @@ pub enum Direction {
 /// as cell-area transitions and clipping policies.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Transition {
+    /// Timing, easing, repetition, and direction for this transition.
     pub spec: AnimationSpec,
+    /// Visual or spatial effect interpreted by the animation wrapper.
     pub effect: TransitionEffect,
 }
 
 impl Transition {
+    /// Combines an effect with its playback specification.
     pub fn new(effect: TransitionEffect, spec: AnimationSpec) -> Self {
         Self { effect, spec }
     }
 
+    /// Creates a fade transition with fast timing for an enter timeline.
     pub fn fade_in() -> Self {
         Self::new(TransitionEffect::Fade, AnimationSpec::fast())
     }
 
+    /// Creates a fade transition with fast timing for an exit timeline.
+    ///
+    /// This has the same declaration as [`Self::fade_in`]; the lifecycle renderer
+    /// determines how the fade is applied.
     pub fn fade_out() -> Self {
         Self::new(TransitionEffect::Fade, AnimationSpec::fast())
     }
 
+    /// Creates a vertical collapse transition with fast timing.
     pub fn collapse() -> Self {
         Self::new(TransitionEffect::Collapse, AnimationSpec::fast())
     }
 
+    /// Creates a vertical expansion transition with fast timing.
     pub fn expand() -> Self {
         Self::new(TransitionEffect::Expand, AnimationSpec::fast())
     }
 
+    /// Creates a centered size transition with normal timing.
     pub fn scale_from_center() -> Self {
         Self::new(TransitionEffect::ScaleFromCenter, AnimationSpec::normal())
     }
 
+    /// Wraps a layout transition, taking timing from position, then size, then the normal
+    /// default.
     pub fn layout(transition: LayoutTransition) -> Self {
         let spec = transition
             .position
@@ -221,39 +301,58 @@ impl Transition {
 /// Built-in transition families.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum TransitionEffect {
+    /// Declares a fade for the presence renderer without changing cell geometry.
     Fade,
+    /// Changes visible height for a collapsing surface.
     Collapse,
+    /// Changes visible height for an expanding surface.
     Expand,
+    /// Changes visible width and height around the center.
     ScaleFromCenter,
+    /// Declares a border-emphasis transition for the renderer.
     BorderEmphasis,
+    /// Applies the supplied position, size, clipping, and hit-test policy.
     Layout(LayoutTransition),
 }
 
 /// Timeline composition for animation orchestration.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Timeline {
+    /// A single transition.
     Single(Transition),
+    /// Plays children in order; an indefinitely repeating child prevents later children from
+    /// starting.
     Sequence(Vec<Timeline>),
+    /// Starts all children together and completes when every child finishes.
     Parallel(Vec<Timeline>),
+    /// Starts successive children at increasing multiples of a delay.
     Stagger {
+        /// Time between consecutive child start times.
         delay: Duration,
+        /// Timelines in start order; the first starts without a stagger delay.
         children: Vec<Timeline>,
     },
 }
 
 impl Timeline {
+    /// Wraps one transition as a timeline.
     pub fn single(transition: Transition) -> Self {
         Self::Single(transition)
     }
 
+    /// Plays child timelines one after another.
+    ///
+    /// Children after an indefinitely repeating timeline are never scheduled.
     pub fn sequence(children: Vec<Timeline>) -> Self {
         Self::Sequence(children)
     }
 
+    /// Starts all children together; an indefinitely repeating child keeps the group active.
     pub fn parallel(children: Vec<Timeline>) -> Self {
         Self::Parallel(children)
     }
 
+    /// Starts child `i` at `i * delay`, allowing their playback to overlap.
     pub fn stagger(delay: Duration, children: Vec<Timeline>) -> Self {
         Self::Stagger { delay, children }
     }
@@ -317,33 +416,42 @@ impl From<Transition> for Timeline {
 /// Whether a present widget should play its initial enter transition.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InitialAnimation {
+    /// Plays the enter transition on the initial mount.
     Play,
+    /// Skips the enter transition on the initial mount.
     Skip,
 }
 
 /// Presence declaration for widgets that need enter/exit lifecycle animation.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Presence {
+    /// Timeline for entering the widget tree, if configured.
     pub enter: Option<Timeline>,
+    /// Timeline rendered while removing the widget, if configured.
     pub exit: Option<Timeline>,
+    /// Whether to play the enter timeline on the initial mount.
     pub initial: InitialAnimation,
 }
 
 impl Presence {
+    /// Creates a declaration with no timelines and initial animation skipped.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Sets the enter timeline without changing the initial-animation policy.
     pub fn enter(mut self, timeline: impl Into<Timeline>) -> Self {
         self.enter = Some(timeline.into());
         self
     }
 
+    /// Sets the exit timeline.
     pub fn exit(mut self, timeline: impl Into<Timeline>) -> Self {
         self.exit = Some(timeline.into());
         self
     }
 
+    /// Sets whether the initial mount plays the enter timeline.
     pub fn initial(mut self, initial: InitialAnimation) -> Self {
         self.initial = initial;
         self
@@ -363,18 +471,25 @@ impl Default for Presence {
 /// Global motion behavior applied by the runtime before widget animations run.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MotionPolicy {
+    /// Whether animations and pulse intervals are enabled; defaults to `true`.
     pub enabled: bool,
+    /// Whether to remove animation durations and disable pulses; defaults to `false`.
     pub reduced_motion: bool,
+    /// Playback speed multiplier; defaults to `1.0`.
     pub speed: f64,
+    /// Whether animation time advances by fixed steps instead of elapsed wall time.
     pub deterministic: bool,
+    /// Animation-clock increment in deterministic mode; defaults to 16 ms.
     pub deterministic_step: Duration,
 }
 
 impl MotionPolicy {
+    /// Returns normal-speed motion with animations enabled and deterministic stepping disabled.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Disables motion: transitions resolve immediately and pulse intervals are disabled.
     pub fn disabled() -> Self {
         Self {
             enabled: false,
@@ -382,6 +497,7 @@ impl MotionPolicy {
         }
     }
 
+    /// Enables reduced motion: transitions resolve immediately and pulse intervals are disabled.
     pub fn reduced_motion() -> Self {
         Self {
             reduced_motion: true,
@@ -389,6 +505,7 @@ impl MotionPolicy {
         }
     }
 
+    /// Enables fixed-step animation time; a zero step is replaced with 16 ms.
     pub fn deterministic(step: Duration) -> Self {
         Self {
             deterministic: true,
@@ -401,11 +518,20 @@ impl MotionPolicy {
         }
     }
 
+    /// Sets the playback speed multiplier, clamped to at least `0.000001`.
     pub fn with_speed(mut self, speed: f64) -> Self {
         self.speed = speed.max(VALUE_EPSILON);
         self
     }
 
+    /// Applies the motion policy to a playback specification.
+    ///
+    /// Disabled or reduced motion removes delay, duration, repeats, and reverse
+    /// playback. Otherwise durations are scaled by [`Self::speed`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if scaling produces a duration that cannot be represented by [`Duration`].
     pub fn effective_spec(self, spec: AnimationSpec) -> AnimationSpec {
         if !self.enabled || self.reduced_motion {
             return AnimationSpec {
@@ -420,6 +546,11 @@ impl MotionPolicy {
         spec.scaled(self.speed)
     }
 
+    /// Scales a pulse interval, or returns `None` when motion is disabled or reduced.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the scaled interval cannot be represented by [`Duration`].
     pub fn effective_interval(self, interval: Duration) -> Option<Duration> {
         if !self.enabled || self.reduced_motion {
             return None;
@@ -447,12 +578,19 @@ impl Default for MotionPolicy {
 /// Theme-level animation defaults.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct AnimationTheme {
+    /// Timing for quick feedback; defaults to 120 ms ease-out.
     pub fast: AnimationSpec,
+    /// Timing for ordinary transitions; defaults to 180 ms ease-out.
     pub normal: AnimationSpec,
+    /// Timing for slower transitions; defaults to 320 ms ease-in-out.
     pub slow: AnimationSpec,
+    /// Focus feedback timing; defaults to 120 ms ease-out.
     pub focus: AnimationSpec,
+    /// Layout transition timing; defaults to 220 ms ease-out.
     pub layout: AnimationSpec,
+    /// Enter transition timing; defaults to 160 ms ease-out.
     pub enter: AnimationSpec,
+    /// Exit transition timing; defaults to 120 ms ease-in.
     pub exit: AnimationSpec,
 }
 
@@ -473,13 +611,18 @@ impl Default for AnimationTheme {
 /// Floating-point cell area used by layout animations before final rounding.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct AreaF {
+    /// Left edge in terminal columns.
     pub x: f64,
+    /// Top edge in terminal rows.
     pub y: f64,
+    /// Width in terminal columns before rounding.
     pub width: f64,
+    /// Height in terminal rows before rounding.
     pub height: f64,
 }
 
 impl AreaF {
+    /// Creates a floating-point cell rectangle without validating its components.
     pub fn new(x: f64, y: f64, width: f64, height: f64) -> Self {
         Self {
             x,
@@ -489,6 +632,7 @@ impl AreaF {
         }
     }
 
+    /// Linearly interpolates every component toward `target`, clamping `t` to `0.0..=1.0`.
     pub fn lerp(self, target: Self, t: f64) -> Self {
         let t = t.clamp(0.0, 1.0);
         Self {
@@ -499,6 +643,9 @@ impl AreaF {
         }
     }
 
+    /// Rounds components to terminal cells and clamps each to the `u16` range.
+    ///
+    /// NaN components become zero when converted to integers.
     pub fn to_area(self) -> Area {
         Area::new(
             Position {
@@ -527,21 +674,29 @@ impl From<Area> for AreaF {
 /// Stored target and displayed areas for layout transitions.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LayoutSnapshot {
+    /// Current logical layout target.
     pub target: Area,
+    /// Previous logical target, or `None` before the first target change.
     pub previous: Option<Area>,
+    /// Current interpolated rectangle before cell rounding.
     pub displayed: AreaF,
 }
 
-/// Layout transition declaration for future layout-aware containers.
+/// Position, size, clipping, and pointer policy for animated layout changes.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LayoutTransition {
+    /// Timing for position changes; `None` applies the target position immediately.
     pub position: Option<AnimationSpec>,
+    /// Timing for size changes; `None` applies the target size immediately.
     pub size: Option<AnimationSpec>,
+    /// Rendering bounds used while the transition is active.
     pub clip: ClipMode,
+    /// Geometry used for pointer hit testing during animation.
     pub hit_test: HitTestMode,
 }
 
 impl LayoutTransition {
+    /// Disables position and size animation, with no extra clipping and target hit testing.
     pub fn none() -> Self {
         Self {
             position: None,
@@ -551,6 +706,7 @@ impl LayoutTransition {
         }
     }
 
+    /// Animates only position, with no extra clipping and target hit testing.
     pub fn position(spec: AnimationSpec) -> Self {
         Self {
             position: Some(spec),
@@ -560,6 +716,7 @@ impl LayoutTransition {
         }
     }
 
+    /// Animates only size, clipping to animated bounds and hit testing the target.
     pub fn size(spec: AnimationSpec) -> Self {
         Self {
             position: None,
@@ -569,6 +726,7 @@ impl LayoutTransition {
         }
     }
 
+    /// Animates size and position with the same timing, clipping to animated bounds.
     pub fn size_and_position(spec: AnimationSpec) -> Self {
         Self {
             position: Some(spec),
@@ -578,6 +736,7 @@ impl LayoutTransition {
         }
     }
 
+    /// Sets which geometry receives pointer events during animation.
     pub fn hit_test(mut self, mode: HitTestMode) -> Self {
         self.hit_test = mode;
         self
@@ -593,8 +752,11 @@ impl Default for LayoutTransition {
 /// How a layout transition clips child rendering.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClipMode {
+    /// Adds no clipping policy beyond the normal rendering bounds.
     None,
+    /// Clips child rendering to the current animated rectangle.
     ClipToAnimatedBounds,
+    /// Clips child rendering to the logical target rectangle.
     ClipToTargetBounds,
 }
 
@@ -623,11 +785,14 @@ impl Default for HitTestMode {
 /// one subtree to another, such as a selected list row becoming a detail panel.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SharedTransition {
+    /// Stable name connecting the same visual element across different widget paths.
     pub id: String,
+    /// Position, size, clipping, and hit-test policy for the shared element.
     pub layout: LayoutTransition,
 }
 
 impl SharedTransition {
+    /// Associates a stable shared-element name with a layout transition.
     pub fn new(id: impl Into<String>, layout: LayoutTransition) -> Self {
         Self {
             id: id.into(),
@@ -639,8 +804,11 @@ impl SharedTransition {
 /// A transition that is active at a specific timeline instant.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TimelineFrame {
+    /// Transition sampled for this frame.
     pub transition: Transition,
+    /// Eased playback progress for the transition.
     pub progress: f64,
+    /// Whether this transition has completed its finite playback.
     pub complete: bool,
 }
 
@@ -1116,6 +1284,7 @@ pub struct AnimationStore {
 }
 
 impl AnimationStore {
+    /// Creates an empty animation store.
     pub fn new() -> Self {
         Self::default()
     }
@@ -1150,6 +1319,9 @@ impl AnimationStore {
         extracted
     }
 
+    /// Returns the last displayed scalar or pulse counter for an identity and channel.
+    ///
+    /// A scalar track takes precedence if both kinds use the same channel.
     pub fn value(&self, id: impl Into<WidgetId>, channel: &str) -> Option<f64> {
         let id = id.into();
         let key = AnimationKey::new(&id, channel);
@@ -1159,6 +1331,7 @@ impl AnimationStore {
             .or_else(|| self.pulses.get(&key).map(|state| state.value))
     }
 
+    /// Returns logical and displayed geometry for an identity and channel.
     pub fn layout_snapshot(
         &self,
         id: impl Into<WidgetId>,
@@ -1169,12 +1342,14 @@ impl AnimationStore {
         self.layouts.get(&key).map(LayoutAnimation::snapshot)
     }
 
+    /// Returns the layout snapshot for a shared-element name.
     pub fn shared_layout_snapshot(&self, id: &str) -> Option<LayoutSnapshot> {
         self.shared_layouts
             .get(id)
             .map(|state| state.layout.snapshot())
     }
 
+    /// Returns the last displayed style for an identity and channel.
     pub fn style(&self, id: impl Into<WidgetId>, channel: &str) -> Option<Style> {
         let id = id.into();
         let key = AnimationKey::new(&id, channel);
@@ -1283,6 +1458,10 @@ impl AnimationStore {
         self.layouts.remove(&key);
     }
 
+    /// Tracks a layout target and returns `(displayed_area, needs_update)`.
+    ///
+    /// The first call initializes at the target without animating. Later target
+    /// changes continue from the currently displayed area using the motion policy.
     pub fn track_layout(
         &mut self,
         id: impl Into<WidgetId>,
@@ -1312,6 +1491,10 @@ impl AnimationStore {
         (state.displayed.to_area(), changed || state.active)
     }
 
+    /// Tracks a shared-element target across widget paths.
+    ///
+    /// Returns `(displayed_area, needs_update)`. A new ID initializes at the target;
+    /// reusing an ID allows movement to continue when its widget path changes.
     pub fn track_shared_layout(
         &mut self,
         id: &str,
@@ -1382,6 +1565,7 @@ impl AnimationStore {
         active
     }
 
+    /// Returns whether any track is active or any pulse channel remains registered.
     pub fn has_active_animations(&self) -> bool {
         self.values.values().any(|value| value.active)
             || self.layouts.values().any(|layout| layout.active)
@@ -1413,6 +1597,9 @@ impl AnimationStore {
         self.timelines.retain(|key, _| is_active(&key.path));
     }
 
+    /// Drops shared layouts rejected by the predicate once their animation is inactive.
+    ///
+    /// Active transitions remain stored even when their ID is no longer present.
     pub fn retain_shared_layouts<F>(&mut self, mut is_active: F)
     where
         F: FnMut(&str) -> bool,
@@ -1436,6 +1623,7 @@ pub struct AnimationCtx<'a> {
 }
 
 impl<'a> AnimationCtx<'a> {
+    /// Creates a context with path-derived identity, default motion policy, and default timings.
     pub fn new(
         store: &'a mut AnimationStore,
         path: WidgetPath,
@@ -1455,6 +1643,9 @@ impl<'a> AnimationCtx<'a> {
         )
     }
 
+    /// Creates a context with explicit motion policy and theme timings.
+    ///
+    /// Widget and focus identities are derived from their paths.
     pub fn with_policy(
         store: &'a mut AnimationStore,
         path: WidgetPath,
@@ -1534,26 +1725,32 @@ impl<'a> AnimationCtx<'a> {
         self.invalidation
     }
 
+    /// Returns the current widget path.
     pub fn path(&self) -> &WidgetPath {
         &self.path
     }
 
+    /// Returns the identity used to store this widget's animation channels.
     pub fn id(&self) -> &WidgetId {
         &self.id
     }
 
+    /// Returns the animation-clock instant used for this update.
     pub fn now(&self) -> Instant {
         self.now
     }
 
+    /// Returns the effective global motion settings.
     pub fn motion_policy(&self) -> MotionPolicy {
         self.motion_policy
     }
 
+    /// Returns theme-level default animation timings.
     pub fn animation_theme(&self) -> AnimationTheme {
         self.animation_theme
     }
 
+    /// Returns whether this widget identity currently owns keyboard focus.
     pub fn is_focused(&self) -> bool {
         self.focused_id
             .as_ref()
@@ -1561,18 +1758,30 @@ impl<'a> AnimationCtx<'a> {
             .unwrap_or(false)
     }
 
+    /// Tracks a scalar target on a named channel and reports whether it needs an update.
+    ///
+    /// The first value initializes immediately. Later changes animate from the
+    /// current displayed value; timing is adjusted by the motion policy.
     pub fn track_value(&mut self, channel: &str, target: f64, spec: AnimationSpec) -> bool {
         let spec = self.motion_policy.effective_spec(spec);
         self.store
             .track_value(&self.id, channel, target, spec, self.now)
     }
 
+    /// Tracks a target style and reports whether the channel needs an update.
+    ///
+    /// The first style initializes immediately; subsequent changes use the motion policy.
     pub fn track_style(&mut self, channel: &str, target: Style, spec: AnimationSpec) -> bool {
         let spec = self.motion_policy.effective_spec(spec);
         self.store
             .track_style(&self.id, channel, target, spec, self.now)
     }
 
+    /// Advances a named pulse counter and returns whether it remains enabled.
+    ///
+    /// Elapsed intervals may advance the counter by multiple steps. A zero interval
+    /// advances once per call. Disabled or reduced motion removes the channel and
+    /// returns `false`.
     pub fn pulse(&mut self, channel: &str, interval: Duration) -> bool {
         let Some(interval) = self.motion_policy.effective_interval(interval) else {
             self.store.remove_channel(&self.id, channel);

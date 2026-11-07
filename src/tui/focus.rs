@@ -1,3 +1,27 @@
+//! Keyboard focus targets, scope-entry policies, and modal-aware navigation.
+//!
+//! Widgets declare [`FocusConfig`]; [`FocusAnalysis`] records targets in tree
+//! traversal order. [`FocusManager`] keeps a stable identity focused across
+//! rebuilds, restores scope history, and confines navigation to active modal
+//! boundaries. Scope widgets group descendants without becoming leaf targets.
+//!
+//! # Examples
+//!
+//! ```
+//! use rsille::tui::{focus::FocusManager, widgets::{button, panel}};
+//!
+//! let view = panel::<()>()
+//!     .child(button("First").key("first"))
+//!     .child(button("Second").key("second"));
+//! let mut focus = FocusManager::new();
+//! focus.rebuild(&view);
+//! let first = focus.current_id().cloned().unwrap();
+//! focus.next();
+//! assert_ne!(focus.current_id(), Some(&first));
+//! focus.prev();
+//! assert_eq!(focus.current_id(), Some(&first));
+//! ```
+
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::tui::widget::{Widget, WidgetId, WidgetKey, WidgetPath};
@@ -50,29 +74,36 @@ impl Default for FocusScope {
 }
 
 impl FocusScope {
+    /// Creates an untrapped scope that remembers focus and initially prefers its first target.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Sets whether Tab navigation cycles within this scope.
     pub fn trap_tab(mut self, trap_tab: bool) -> Self {
         self.trap_tab = trap_tab;
         self
     }
 
+    /// Sets whether entry may fall back to the remembered descendant.
     pub fn restore_focus(mut self, restore_focus: bool) -> Self {
         self.restore_focus = restore_focus;
         self
     }
 
+    /// Sets the preferred target-selection policy when entering this scope.
     pub fn entry(mut self, entry: ScopeEntry) -> Self {
         self.entry = entry;
         self
     }
 }
 
+/// A focusable widget's stable identity and current structural path.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FocusTarget {
+    /// Stable identity used to preserve focus across tree rebuilds.
     pub id: WidgetId,
+    /// Current structural path used to route focus and input.
     pub path: WidgetPath,
 }
 
@@ -98,6 +129,12 @@ pub struct FocusAnalysis {
 }
 
 impl FocusAnalysis {
+    /// Walks the widget tree and records live identities, focus targets, scopes, and modals.
+    ///
+    /// # Panics
+    ///
+    /// Panics when multiple widget paths resolve to the same identity. Keys must be
+    /// unique within the nearest keyed ancestor.
     pub fn analyze<M>(root: &dyn Widget<M>) -> Self {
         let mut analysis = Self::default();
         let mut path = WidgetPath::root();
@@ -163,34 +200,42 @@ impl FocusAnalysis {
         }
     }
 
+    /// Returns paths of all widgets visited in the current tree.
     pub fn live_paths(&self) -> &FxHashSet<WidgetPath> {
         &self.live_paths
     }
 
+    /// Returns identities of all widgets visited in the current tree.
     pub fn live_ids(&self) -> &FxHashSet<WidgetId> {
         &self.live_ids
     }
 
+    /// Returns leaf and composite targets in depth-first traversal order.
     pub fn focus_targets(&self) -> &[FocusTarget] {
         &self.focus_targets
     }
 
+    /// Returns whether the path belongs to the analyzed tree.
     pub fn is_live(&self, path: &WidgetPath) -> bool {
         self.live_paths.contains(path)
     }
 
+    /// Resolves a structural path to its stable identity, if present.
     pub fn id_for_path(&self, path: &WidgetPath) -> Option<&WidgetId> {
         self.id_by_path.get(path)
     }
 
+    /// Resolves a stable identity to its current structural path, if present.
     pub fn path_for_id(&self, id: &WidgetId) -> Option<&WidgetPath> {
         self.path_by_id.get(id)
     }
 
+    /// Returns whether the identity is a leaf or composite focus target.
     pub fn is_focus_target_id(&self, id: &WidgetId) -> bool {
         self.focus_target_ids.contains(id)
     }
 
+    /// Returns the focus-scope policy declared at this exact path.
     pub fn scope(&self, path: &WidgetPath) -> Option<&FocusScope> {
         self.scopes_by_path.get(path).map(|node| &node.scope)
     }
@@ -203,6 +248,9 @@ impl FocusAnalysis {
         self.scopes_by_id.get(id)
     }
 
+    /// Iterates focus targets whose paths start with `scope_path`, in traversal order.
+    ///
+    /// The target at `scope_path` itself is included if it is focusable.
     pub fn descendant_targets<'a>(
         &'a self,
         scope_path: &'a WidgetPath,
@@ -212,6 +260,7 @@ impl FocusAnalysis {
             .filter(move |target| target.path.starts_with(scope_path))
     }
 
+    /// Returns the first focus target at or below `path`, in traversal order.
     pub fn first_descendant_target(&self, path: &WidgetPath) -> Option<&FocusTarget> {
         self.focus_targets
             .iter()
@@ -229,6 +278,7 @@ pub struct FocusManager {
 }
 
 impl FocusManager {
+    /// Creates a manager with no analyzed tree or focused widget.
     pub fn new() -> Self {
         Self::default()
     }
@@ -242,6 +292,14 @@ impl FocusManager {
             .retain(|scope, target| scope != id && target != id);
     }
 
+    /// Reanalyzes the tree and reconciles focus, scope memory, and modal history.
+    ///
+    /// Preserves live focused identities when possible and constrains focus to the
+    /// topmost modal. Otherwise falls back to an available focus target.
+    ///
+    /// # Panics
+    ///
+    /// Panics for duplicate widget identities, as described by [`FocusAnalysis::analyze`].
     pub fn rebuild<M>(&mut self, root: &dyn Widget<M>) {
         let mut old_focus = self.focused_id.clone();
         self.analysis = FocusAnalysis::analyze(root);
@@ -300,24 +358,32 @@ impl FocusManager {
         self.analysis.id_for_path(path)
     }
 
+    /// Returns the currently focused stable identity, if any.
     pub fn current_id(&self) -> Option<&WidgetId> {
         self.focused_id.as_ref()
     }
 
+    /// Returns the focused widget's current structural path, if any.
     pub fn current_path(&self) -> Option<&WidgetPath> {
         self.focused_id
             .as_ref()
             .and_then(|id| self.analysis.path_for_id(id))
     }
 
+    /// Returns live widget paths from the last rebuild.
     pub fn live_paths(&self) -> &FxHashSet<WidgetPath> {
         self.analysis.live_paths()
     }
 
+    /// Returns live widget identities from the last rebuild.
     pub fn live_ids(&self) -> &FxHashSet<WidgetId> {
         self.analysis.live_ids()
     }
 
+    /// Requests a target at `path`, resolving scope-entry policies or a focusable descendant.
+    ///
+    /// Returns `true` only when focus changes. Invalid targets, the current target,
+    /// and requests outside the active modal return `false`.
     pub fn request_focus(&mut self, path: &WidgetPath) -> bool {
         let Some(next) = self.resolve_requested_path(path) else {
             return false;
@@ -332,6 +398,9 @@ impl FocusManager {
         self.set_focus(Some(next.id))
     }
 
+    /// Clears focus and returns whether it changed.
+    ///
+    /// An active modal prevents clearing and causes `false` to be returned.
     pub fn clear(&mut self) -> bool {
         if self.modal_path().is_some() {
             return false;
@@ -350,6 +419,7 @@ impl FocusManager {
         }
     }
 
+    /// Moves forward with wraparound, respecting the active trapping scope and modal.
     pub fn next(&mut self) {
         if let Some(scope) = self.constrain_to_modal(self.active_trapping_scope()) {
             self.move_within_scope(&scope, true);
@@ -358,6 +428,7 @@ impl FocusManager {
         }
     }
 
+    /// Moves backward with wraparound, respecting the active trapping scope and modal.
     pub fn prev(&mut self) {
         if let Some(scope) = self.constrain_to_modal(self.active_trapping_scope()) {
             self.move_within_scope(&scope, false);
@@ -366,6 +437,9 @@ impl FocusManager {
         }
     }
 
+    /// Moves forward within the requested scope, constrained by the active modal.
+    ///
+    /// `None` uses the focused widget's nearest ancestor scope, otherwise global order.
     pub fn next_in_scope(&mut self, scope: Option<&WidgetPath>) {
         if let Some(scope_path) = self.constrain_to_modal(self.resolve_scope_path(scope)) {
             self.move_within_scope(&scope_path, true);
@@ -374,6 +448,9 @@ impl FocusManager {
         }
     }
 
+    /// Moves backward within the requested scope, constrained by the active modal.
+    ///
+    /// `None` uses the focused widget's nearest ancestor scope, otherwise global order.
     pub fn prev_in_scope(&mut self, scope: Option<&WidgetPath>) {
         if let Some(scope_path) = self.constrain_to_modal(self.resolve_scope_path(scope)) {
             self.move_within_scope(&scope_path, false);
@@ -382,6 +459,7 @@ impl FocusManager {
         }
     }
 
+    /// Returns whether focus is at `path` or within its subtree.
     pub fn is_focus_within(&self, path: &WidgetPath) -> bool {
         self.current_path()
             .map(|focused| focused.starts_with(path))

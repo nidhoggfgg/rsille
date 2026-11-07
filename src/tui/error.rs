@@ -18,13 +18,22 @@ pub enum WidgetError {
     WidgetNotFound(String),
 
     /// Error during widget rendering
-    RenderError { message: String },
+    RenderError {
+        /// Description of the failed operation.
+        message: String,
+    },
 
     /// Error during layout calculation
-    LayoutError { source: taffy::TaffyError },
+    LayoutError {
+        /// Underlying layout-engine error.
+        source: taffy::TaffyError,
+    },
 
     /// Error during event handling
-    EventError { message: String },
+    EventError {
+        /// Description of the failed operation.
+        message: String,
+    },
 
     /// IO error from underlying operations
     Io(std::io::Error),

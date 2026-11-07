@@ -1,18 +1,50 @@
+//! Application helpers for shortcuts, commands, modal stacks, notices, and routes.
+//!
+//! [`HotkeyRegistry`] resolves individual keys; [`CommandRouter`] also supports
+//! scoped commands and multi-key sequences. Install a router on an application
+//! to share command metadata with a palette and route keyboard input consistently.
+//! [`ModalManager`], [`NotificationCenter`], and [`Navigator`] store application
+//! state; the application chooses how to render their contents.
+//!
+//! # Examples
+//!
+//! ```
+//! use rsille::tui::{
+//!     event::{KeyCode, KeyEvent, KeyModifiers},
+//!     shell::{CommandRouter, Navigator},
+//! };
+//!
+//! let mut commands = CommandRouter::new();
+//! commands.register("settings", "Open settings", || "settings")
+//!     .hotkey(KeyEvent::new(KeyCode::Char(','), KeyModifiers::CONTROL));
+//! let mut routes = Navigator::new("home");
+//! routes.push(commands.dispatch("settings").unwrap());
+//! assert_eq!(routes.current(), &"settings");
+//! assert_eq!(routes.go_back(), Some("settings"));
+//! assert_eq!(routes.current(), &"home");
+//! ```
+
 use std::fmt;
 use std::time::{Duration, Instant};
 
 use crate::tui::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use crate::tui::widget::WidgetId;
 
+/// Single-key shortcut metadata, including exact modifiers and help text.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Hotkey {
+    /// Application-defined binding identifier.
     pub id: String,
+    /// Key code and exact modifier combination used for matching.
     pub key_event: KeyEvent,
+    /// Short display label for help or status UI.
     pub label: String,
+    /// Optional longer explanation of the binding.
     pub description: Option<String>,
 }
 
 impl Hotkey {
+    /// Creates shortcut metadata with an explicit key event and no description.
     pub fn new(id: impl Into<String>, key_event: KeyEvent, label: impl Into<String>) -> Self {
         Self {
             id: id.into(),
@@ -22,10 +54,12 @@ impl Hotkey {
         }
     }
 
+    /// Creates a shortcut for a key code with no modifiers.
     pub fn simple(id: impl Into<String>, key_code: KeyCode, label: impl Into<String>) -> Self {
         Self::new(id, KeyEvent::new(key_code, KeyModifiers::empty()), label)
     }
 
+    /// Sets the optional help description.
     pub fn description(mut self, description: impl Into<String>) -> Self {
         self.description = Some(description.into());
         self
@@ -38,6 +72,10 @@ struct HotkeyBinding<M> {
     handler: Box<dyn Fn() -> M>,
 }
 
+/// Ordered single-key bindings that produce application messages.
+///
+/// The first matching enabled binding wins. Matching compares key code and
+/// modifiers, accepts presses and repeats, and ignores releases.
 pub struct HotkeyRegistry<M> {
     bindings: Vec<HotkeyBinding<M>>,
 }
@@ -51,10 +89,12 @@ impl<M> Default for HotkeyRegistry<M> {
 }
 
 impl<M> HotkeyRegistry<M> {
+    /// Creates an empty binding registry.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Appends an enabled binding; earlier matches take precedence.
     pub fn bind<F>(&mut self, hotkey: Hotkey, handler: F) -> &mut Self
     where
         F: Fn() -> M + 'static,
@@ -67,6 +107,7 @@ impl<M> HotkeyRegistry<M> {
         self
     }
 
+    /// Appends a binding without modifiers, generating its ID and display label.
     pub fn bind_key<F>(&mut self, key_code: KeyCode, handler: F) -> &mut Self
     where
         F: Fn() -> M + 'static,
@@ -76,6 +117,9 @@ impl<M> HotkeyRegistry<M> {
         self.bind(Hotkey::simple(id, key_code, label), handler)
     }
 
+    /// Invokes the first matching enabled binding and returns its message.
+    ///
+    /// Press and repeat events match by code and modifiers; releases never match.
     pub fn resolve(&self, key_event: &KeyEvent) -> Option<M> {
         self.bindings
             .iter()
@@ -83,6 +127,7 @@ impl<M> HotkeyRegistry<M> {
             .map(|binding| (binding.handler)())
     }
 
+    /// Returns cloned metadata in registration order.
     pub fn bindings(&self) -> Vec<Hotkey> {
         self.bindings
             .iter()
@@ -99,33 +144,45 @@ impl<M> fmt::Debug for HotkeyRegistry<M> {
     }
 }
 
+/// Display metadata, shortcuts, availability, and focus scope of a command.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandDescriptor {
+    /// Unique command identifier within the router.
     pub id: String,
+    /// User-visible command title.
     pub title: String,
+    /// Optional help text, also used as a command-palette search keyword.
     pub description: Option<String>,
+    /// Single-key shortcuts in registration order.
     pub hotkeys: Vec<KeyEvent>,
+    /// Nonempty key sequences in registration order.
     pub sequences: Vec<Vec<KeyEvent>>,
+    /// Whether the command can be dispatched.
     pub enabled: bool,
+    /// Optional widget identity subtree in which keyboard routing is available.
     pub scope: Option<WidgetId>,
 }
 
+/// A registered command with mutable metadata and a message-producing handler.
 pub struct CommandEntry<M> {
     descriptor: CommandDescriptor,
     handler: Box<dyn Fn() -> M>,
 }
 
 impl<M> CommandEntry<M> {
+    /// Sets help text also exposed as a command-palette keyword.
     pub fn description(&mut self, description: impl Into<String>) -> &mut Self {
         self.descriptor.description = Some(description.into());
         self
     }
 
+    /// Appends a single-key shortcut.
     pub fn hotkey(&mut self, key_event: KeyEvent) -> &mut Self {
         self.descriptor.hotkeys.push(key_event);
         self
     }
 
+    /// Sets whether this command is available for dispatch.
     pub fn enabled(&mut self, enabled: bool) -> &mut Self {
         self.descriptor.enabled = enabled;
         self
@@ -137,6 +194,11 @@ impl<M> CommandEntry<M> {
         self
     }
 
+    /// Appends a multi-key shortcut in input order.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `keys` is empty.
     pub fn sequence(&mut self, keys: impl IntoIterator<Item = KeyEvent>) -> &mut Self {
         let keys: Vec<_> = keys.into_iter().collect();
         assert!(!keys.is_empty(), "a command sequence cannot be empty");
@@ -144,6 +206,7 @@ impl<M> CommandEntry<M> {
         self
     }
 
+    /// Returns this command's current metadata.
     pub fn descriptor(&self) -> &CommandDescriptor {
         &self.descriptor
     }
@@ -152,11 +215,19 @@ impl<M> CommandEntry<M> {
 /// Result of a shortcut/sequence lookup. A prefix consumes input until it
 /// completes, mismatches, changes focus, or expires before the next key.
 pub enum CommandMatch<M> {
+    /// No shortcut or sequence prefix matched; input may continue to other handlers.
     Ignored,
+    /// A sequence prefix matched and consumed the key, awaiting another key.
     Pending,
+    /// A command matched and produced an application message.
     Message(M),
 }
 
+/// Routes command IDs, shortcuts, and key sequences to application messages.
+///
+/// Scoped commands take precedence over less-specific scopes during keyboard
+/// routing. Prefixes are held until completion, mismatch, focus change, or
+/// expiry. The default interval between sequence keys is one second.
 pub struct CommandRouter<M> {
     commands: Vec<CommandEntry<M>>,
     pending: Vec<KeyEvent>,
@@ -178,10 +249,16 @@ impl<M> Default for CommandRouter<M> {
 }
 
 impl<M> CommandRouter<M> {
+    /// Creates an empty router with a one-second sequence timeout.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Registers an enabled global command and returns its configurable entry.
+    ///
+    /// # Panics
+    ///
+    /// Panics if another command already has the same ID.
     pub fn register<F>(
         &mut self,
         id: impl Into<String>,
@@ -211,6 +288,9 @@ impl<M> CommandRouter<M> {
         self.commands.last_mut().expect("command was just inserted")
     }
 
+    /// Invokes an enabled command by ID, returning `None` when absent or disabled.
+    ///
+    /// This direct dispatch does not check focus scopes or modal boundaries.
     pub fn dispatch(&self, id: &str) -> Option<M> {
         self.commands
             .iter()
@@ -241,6 +321,7 @@ impl<M> CommandRouter<M> {
             .map(|entry| (entry.handler)())
     }
 
+    /// Clears the current sequence prefix, deadline, and remembered focus.
     pub fn cancel_pending(&mut self) {
         self.pending.clear();
         self.deadline = None;
@@ -271,6 +352,9 @@ impl<M> CommandRouter<M> {
         true
     }
 
+    /// Updates availability and clears the pending prefix.
+    ///
+    /// Returns `false` if the ID is unknown; otherwise returns `true`.
     pub fn set_enabled(&mut self, id: &str, enabled: bool) -> bool {
         let Some(entry) = self
             .commands
@@ -284,6 +368,9 @@ impl<M> CommandRouter<M> {
         true
     }
 
+    /// Sets the allowed interval between sequence keys.
+    ///
+    /// Expiry is checked on subsequent input rather than by a background timer.
     pub fn sequence_timeout(&mut self, timeout: Duration) -> &mut Self {
         self.sequence_timeout = timeout;
         self
@@ -312,6 +399,11 @@ impl<M> CommandRouter<M> {
             .collect()
     }
 
+    /// Routes a key using the focused identity, without a modal boundary.
+    ///
+    /// Presses and repeats can match; releases are ignored. Deeper eligible scopes
+    /// win, with registration order breaking ties. A mismatched sequence retries
+    /// its final key as the start of a new shortcut.
     pub fn handle_key(
         &mut self,
         key: &KeyEvent,
@@ -406,6 +498,7 @@ impl<M> CommandRouter<M> {
         CommandMatch::Ignored
     }
 
+    /// Returns cloned command metadata in registration order.
     pub fn commands(&self) -> Vec<CommandDescriptor> {
         self.commands
             .iter()
@@ -422,6 +515,10 @@ impl<M> fmt::Debug for CommandRouter<M> {
     }
 }
 
+/// Application-owned stack of modal descriptions.
+///
+/// The last item is active. This helper stores state; the view must render the
+/// corresponding modal widgets and focus boundaries.
 #[derive(Debug, Clone)]
 pub struct ModalManager<T> {
     stack: Vec<T>,
@@ -434,14 +531,17 @@ impl<T> Default for ModalManager<T> {
 }
 
 impl<T> ModalManager<T> {
+    /// Creates an empty modal stack.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Pushes a modal and makes it active.
     pub fn open(&mut self, modal: T) {
         self.stack.push(modal);
     }
 
+    /// Replaces and returns the active modal, or pushes one and returns `None` when empty.
     pub fn replace_top(&mut self, modal: T) -> Option<T> {
         if let Some(top) = self.stack.last_mut() {
             Some(std::mem::replace(top, modal))
@@ -451,54 +551,77 @@ impl<T> ModalManager<T> {
         }
     }
 
+    /// Removes and returns the active modal, revealing the previous one.
     pub fn close_top(&mut self) -> Option<T> {
         self.stack.pop()
     }
 
+    /// Removes every modal.
     pub fn clear(&mut self) {
         self.stack.clear();
     }
 
+    /// Returns the top modal, or `None` when empty.
     pub fn active(&self) -> Option<&T> {
         self.stack.last()
     }
 
+    /// Returns mutable access to the top modal, or `None` when empty.
     pub fn active_mut(&mut self) -> Option<&mut T> {
         self.stack.last_mut()
     }
 
+    /// Returns the number of open modal descriptions.
     pub fn len(&self) -> usize {
         self.stack.len()
     }
 
+    /// Returns whether the modal stack is nonempty.
     pub fn is_open(&self) -> bool {
         !self.stack.is_empty()
     }
 
+    /// Iterates from the oldest modal to the active one; reverse iteration starts at the top.
     pub fn iter(&self) -> impl DoubleEndedIterator<Item = &T> {
         self.stack.iter()
     }
 }
 
+/// Numeric notification identity allocated by a notification center.
 pub type NotificationId = u64;
 
+/// Semantic severity or outcome attached to a notification.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NotificationLevel {
+    /// Informational update.
     Info,
+    /// Successful completion.
     Success,
+    /// Condition requiring attention.
     Warning,
+    /// Failed operation or error.
     Error,
 }
 
+/// Notification payload with identity, severity, and optional expiry.
 #[derive(Debug, Clone)]
 pub struct Notification<T> {
+    /// Identifier assigned by the owning center.
     pub id: NotificationId,
+    /// Severity or result classification.
     pub level: NotificationLevel,
+    /// Application-defined notification content.
     pub payload: T,
+    /// Wall-clock instant when the notification was added.
     pub created_at: Instant,
+    /// Optional deadline used by explicit expiry pruning.
     pub expires_at: Option<Instant>,
 }
 
+/// Application-owned notification list with explicit expiry pruning.
+///
+/// Timed entries remain visible until [`Self::prune_expired`] is called. This
+/// helper does not install timers, render widgets, or send notifications itself.
 #[derive(Debug, Clone)]
 pub struct NotificationCenter<T> {
     next_id: NotificationId,
@@ -515,14 +638,23 @@ impl<T> Default for NotificationCenter<T> {
 }
 
 impl<T> NotificationCenter<T> {
+    /// Creates an empty center whose first allocated ID is zero.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Adds a persistent notification and returns its ID.
     pub fn push(&mut self, level: NotificationLevel, payload: T) -> NotificationId {
         self.push_for(level, payload, None)
     }
 
+    /// Adds a notification expiring `ttl` after the current wall-clock instant.
+    ///
+    /// Call [`Self::prune_expired`] to remove expired entries.
+    ///
+    /// # Panics
+    ///
+    /// Panics if adding `ttl` exceeds the representable range of [`Instant`].
     pub fn push_timed(
         &mut self,
         level: NotificationLevel,
@@ -551,15 +683,18 @@ impl<T> NotificationCenter<T> {
         id
     }
 
+    /// Removes and returns a notification by ID, or `None` if absent.
     pub fn dismiss(&mut self, id: NotificationId) -> Option<Notification<T>> {
         let index = self.items.iter().position(|item| item.id == id)?;
         Some(self.items.remove(index))
     }
 
+    /// Removes all notifications without resetting the ID counter.
     pub fn clear(&mut self) {
         self.items.clear();
     }
 
+    /// Removes entries whose expiry is at or before `now`, retaining persistent entries.
     pub fn prune_expired(&mut self, now: Instant) {
         self.items.retain(|item| {
             item.expires_at
@@ -568,43 +703,54 @@ impl<T> NotificationCenter<T> {
         });
     }
 
+    /// Returns stored notifications in insertion order, including unpruned expired entries.
     pub fn items(&self) -> &[Notification<T>] {
         &self.items
     }
 
+    /// Returns the most recently added remaining notification, even if expired but unpruned.
     pub fn latest(&self) -> Option<&Notification<T>> {
         self.items.last()
     }
 }
 
+/// Application-owned route history that always retains at least one route.
+///
+/// The view renders the current route; pushing or replacing routes only changes
+/// this stored history.
 #[derive(Debug, Clone)]
 pub struct Navigator<Route> {
     stack: Vec<Route>,
 }
 
 impl<Route> Navigator<Route> {
+    /// Creates a history containing only `initial`.
     pub fn new(initial: Route) -> Self {
         Self {
             stack: vec![initial],
         }
     }
 
+    /// Returns the current route.
     pub fn current(&self) -> &Route {
         self.stack
             .last()
             .expect("Navigator always keeps at least one route")
     }
 
+    /// Returns mutable access to the current route.
     pub fn current_mut(&mut self) -> &mut Route {
         self.stack
             .last_mut()
             .expect("Navigator always keeps at least one route")
     }
 
+    /// Appends a route and makes it current.
     pub fn push(&mut self, route: Route) {
         self.stack.push(route);
     }
 
+    /// Replaces the current route without adding a history entry.
     pub fn replace(&mut self, route: Route) {
         if let Some(current) = self.stack.last_mut() {
             *current = route;
@@ -613,15 +759,18 @@ impl<Route> Navigator<Route> {
         }
     }
 
+    /// Replaces all history with one route.
     pub fn reset(&mut self, route: Route) {
         self.stack.clear();
         self.stack.push(route);
     }
 
+    /// Returns whether the history has more than one entry.
     pub fn can_go_back(&self) -> bool {
         self.stack.len() > 1
     }
 
+    /// Removes and returns the current route, or returns `None` at the initial route.
     pub fn go_back(&mut self) -> Option<Route> {
         if self.can_go_back() {
             self.stack.pop()
@@ -630,6 +779,7 @@ impl<Route> Navigator<Route> {
         }
     }
 
+    /// Returns history from the oldest route to the current route.
     pub fn stack(&self) -> &[Route] {
         &self.stack
     }
