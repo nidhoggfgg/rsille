@@ -1,7 +1,11 @@
+//! Color conversion and fitting helpers used by terminal-cell encoders.
+
 use crossterm::style::Color;
 
-// Palette colors depend on the user's terminal theme. Preserve them exactly
-// when possible; use the conventional xterm palette only when mixing is needed.
+/// Converts a color to RGB using the conventional xterm palette.
+///
+/// Returns `None` for [`Color::Reset`], whose value depends on the terminal.
+/// Palette colors may differ from these RGB values in a customized theme.
 pub(crate) fn rgb(color: Color) -> Option<[u8; 3]> {
     let index = match color {
         Color::Reset => return None,
@@ -52,6 +56,7 @@ pub(crate) fn rgb(color: Color) -> Option<[u8; 3]> {
     })
 }
 
+/// Returns squared RGB distance, or 0/1 equality distance for unknown colors.
 pub(crate) fn distance(a: Color, b: Color) -> u32 {
     match (rgb(a), rgb(b)) {
         (Some(a), Some(b)) => a
@@ -63,6 +68,10 @@ pub(crate) fn distance(a: Color, b: Color) -> u32 {
     }
 }
 
+/// Averages RGB channels, preserving identical input colors without conversion.
+///
+/// Returns `None` for an empty iterator. If any color has an unknown RGB value,
+/// returns the first color instead of guessing the terminal's default color.
 pub(crate) fn average(colors: impl Iterator<Item = Color> + Clone) -> Option<Color> {
     let first = colors.clone().next()?;
     if colors.clone().all(|color| color == first) {

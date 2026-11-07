@@ -1,3 +1,9 @@
+//! Conversion of sample coverage and colors into styled terminal characters.
+//!
+//! Half-block cells retain their two sample colors. Braille and Quadrant cells
+//! preserve partial coverage using a shared foreground; fully colored cells
+//! fit their samples to foreground and background color clusters.
+
 use crossterm::style::{Color, Colors};
 
 use super::color::{average, distance, rgb};
@@ -5,6 +11,7 @@ use super::sample::{Sample, Samples};
 use super::Encoding;
 use crate::render::style::{Style, Stylized};
 
+/// Encodes one cell, using `background` for uncovered samples.
 pub(crate) fn encode(encoding: Encoding, samples: &Samples, background: Option<Color>) -> Stylized {
     match encoding {
         Encoding::Braille => braille(samples, background),
@@ -13,6 +20,7 @@ pub(crate) fn encode(encoding: Encoding, samples: &Samples, background: Option<C
     }
 }
 
+/// Builds a styled character, leaving unspecified colors inherited.
 fn cell(symbol: char, foreground: Option<Color>, background: Option<Color>) -> Stylized {
     let style = if foreground.is_some() || background.is_some() {
         Style::with_colors(Colors {
@@ -25,6 +33,7 @@ fn cell(symbol: char, foreground: Option<Color>, background: Option<Color>) -> S
     Stylized::new(symbol, style)
 }
 
+/// Encodes the bottom and top samples as a space, half block or full block.
 fn half_block(samples: &Samples, background: Option<Color>) -> Stylized {
     match (samples.0[0], samples.0[1]) {
         (None, None) => cell(' ', None, background),
@@ -36,6 +45,7 @@ fn half_block(samples: &Samples, background: Option<Color>) -> Stylized {
     }
 }
 
+/// Maps eight Cartesian sample slots to Unicode Braille dot bits.
 fn braille(samples: &Samples, background: Option<Color>) -> Stylized {
     // Cartesian order: bottom left/right, then the three rows above them.
     const BITS: [u8; 8] = [0x40, 0x80, 0x04, 0x20, 0x02, 0x10, 0x01, 0x08];
@@ -47,6 +57,7 @@ fn braille(samples: &Samples, background: Option<Color>) -> Stylized {
     )
 }
 
+/// Maps four Cartesian sample slots to quadrant-block glyphs.
 fn quadrant(samples: &Samples, background: Option<Color>) -> Stylized {
     // Bits 0..4 are bottom left, bottom right, top left, top right.
     const SYMBOLS: [char; 16] = [
@@ -61,6 +72,12 @@ fn quadrant(samples: &Samples, background: Option<Color>) -> Stylized {
     )
 }
 
+/// Preserves partial coverage or fits fully colored samples to two colors.
+///
+/// `bits` maps sample slots to glyph-mask bits, and `symbol` maps each mask to
+/// its character. An empty cell becomes a space. Full cells with explicit
+/// colors use up to four clustering iterations, assigning the brighter cluster
+/// to the foreground.
 fn patterned<const N: usize>(
     samples: &[Option<Sample>; N],
     bits: [u8; N],
