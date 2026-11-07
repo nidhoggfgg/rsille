@@ -1,4 +1,40 @@
-//! Built-in widgets
+//! Built-in terminal widgets, their builders, and persistent state types.
+//!
+//! Constructors and types are re-exported here for convenient access. The
+//! submodules group widgets by purpose:
+//!
+//! - [`controls`]: buttons, toggles, text editors, and date or option selection.
+//! - [`collections`]: lists, tables, trees, file entries, and virtualized rows.
+//! - [`display`]: text, content viewers, progress indicators, and sample canvases.
+//! - [`layout`]: panels, dialogs, collapsible sections, and draggable windows.
+//! - [`navigation`]: tabs, menus, and searchable command palettes.
+//! - [`motion`]: layout animation, presence transitions, and visual effects.
+//!
+//! Widgets are rebuilt as view descriptions. Interactive builders take callbacks
+//! that produce application messages of type `M`; the runtime delivers those
+//! messages to the application's update function. Widgets with controlled values,
+//! such as [`TextInput`] and [`Checkbox`], need the updated value supplied on the
+//! next rebuild. Caret, scrolling, and other internal state live in the
+//! [`WidgetStore`](crate::tui::widget::WidgetStore). Stable widget keys preserve
+//! identity when siblings are reordered.
+//!
+//! Layout dimensions are in terminal cells unless an API explicitly names another
+//! unit. Import [`VariantWidget`] to use the `.variant(...)` builder on widgets
+//! with visual variants.
+//!
+//! # Examples
+//!
+//! ```
+//! use rsille::tui::widgets::{button, label, panel, ButtonVariant, VariantWidget};
+//!
+//! enum Message { Save }
+//!
+//! let view = panel()
+//!     .title("Document")
+//!     .child(label("Ready to save"))
+//!     .child(button("Save").variant(ButtonVariant::Primary).on_click(|| Message::Save));
+//! # let _ = view;
+//! ```
 
 pub mod collections;
 pub mod controls;

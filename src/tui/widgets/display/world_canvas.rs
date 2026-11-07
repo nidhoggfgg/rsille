@@ -3,12 +3,18 @@ use super::canvas::CanvasContext;
 use crate::canvas::Canvas;
 use crossterm::style::Color;
 
+/// A floating-point coordinate in world or sample space.
+///
+/// World coordinates use a Cartesian axis: x increases rightward and y upward.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CanvasPoint {
+    /// Horizontal coordinate.
     pub x: f64,
+    /// Vertical coordinate.
     pub y: f64,
 }
 impl CanvasPoint {
+    /// Creates a coordinate without validating whether its components are finite.
     pub fn new(x: f64, y: f64) -> Self {
         Self { x, y }
     }
@@ -27,6 +33,12 @@ pub struct CanvasViewport {
     height: f64,
 }
 impl CanvasViewport {
+    /// Creates world bounds from the lower-left corner and positive extents.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a component is non-finite, an extent is not positive, or either
+    /// upper bound is non-finite or does not exceed its lower bound.
     pub fn new(x: f64, y: f64, width: f64, height: f64) -> Self {
         assert!(
             x.is_finite()
@@ -48,18 +60,23 @@ impl CanvasViewport {
             height,
         }
     }
+    /// Returns the left edge in world coordinates.
     pub fn x(self) -> f64 {
         self.x
     }
+    /// Returns the bottom edge in world coordinates.
     pub fn y(self) -> f64 {
         self.y
     }
+    /// Returns the horizontal extent in world units.
     pub fn width(self) -> f64 {
         self.width
     }
+    /// Returns the vertical extent in world units.
     pub fn height(self) -> f64 {
         self.height
     }
+    /// Returns whether a finite point lies inside or on the viewport boundaries.
     pub fn contains(self, point: CanvasPoint) -> bool {
         point.finite()
             && point.x >= self.x
@@ -67,10 +84,20 @@ impl CanvasViewport {
             && point.y >= self.y
             && point.y <= self.y + self.height
     }
+    /// Translates the viewport by world-space offsets without changing its size.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the translated bounds are invalid under [`Self::new`].
     pub fn pan(self, dx: f64, dy: f64) -> Self {
         Self::new(self.x + dx, self.y + dy, self.width, self.height)
     }
     /// A factor above one zooms in while keeping the anchor at the same screen position.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `factor` is non-finite or not positive, `anchor` is non-finite,
+    /// or the resulting viewport is invalid under [`Self::new`].
     pub fn zoom_at(self, factor: f64, anchor: CanvasPoint) -> Self {
         assert!(
             factor.is_finite() && factor > 0.0 && anchor.finite(),
@@ -105,6 +132,7 @@ impl<'a> WorldCanvas<'a> {
             color: None,
         }
     }
+    /// Sets the color for subsequent drawing operations.
     pub fn color(mut self, color: impl Into<Color>) -> Self {
         self.color = Some(color.into());
         self
@@ -119,6 +147,7 @@ impl<'a> WorldCanvas<'a> {
             self.canvas.set(p.x, p.y);
         }
     }
+    /// Draws a point if it is finite and within the viewport.
     pub fn point(&mut self, point: CanvasPoint) -> &mut Self {
         if self.ctx.viewport().contains(point) {
             if let Some(dot) = self.ctx.world_to_sample(point) {
@@ -127,6 +156,9 @@ impl<'a> WorldCanvas<'a> {
         }
         self
     }
+    /// Draws a line clipped to the viewport.
+    ///
+    /// Non-finite endpoints or non-finite endpoint differences are ignored.
     pub fn line(&mut self, from: CanvasPoint, to: CanvasPoint) -> &mut Self {
         if !from.finite() || !to.finite() {
             return self;
@@ -182,6 +214,7 @@ impl<'a> WorldCanvas<'a> {
         }
         self
     }
+    /// Draws the outline of world-space bounds, clipped to the viewport.
     pub fn rect(&mut self, bounds: CanvasViewport) -> &mut Self {
         let a = CanvasPoint::new(bounds.x, bounds.y);
         let b = CanvasPoint::new(bounds.x + bounds.width, bounds.y);
@@ -189,6 +222,9 @@ impl<'a> WorldCanvas<'a> {
         let d = CanvasPoint::new(bounds.x, bounds.y + bounds.height);
         self.line(a, b).line(b, c).line(c, d).line(d, a)
     }
+    /// Draws an approximated circle outline, clipped to the viewport.
+    ///
+    /// Non-finite centers or radii and non-positive radii are ignored.
     pub fn circle(&mut self, center: CanvasPoint, radius: f64) -> &mut Self {
         if !center.finite() || !radius.is_finite() || radius <= 0.0 {
             return self;

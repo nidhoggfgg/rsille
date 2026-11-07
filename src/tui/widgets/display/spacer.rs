@@ -13,6 +13,7 @@ pub struct Spacer<M = ()> {
 }
 
 impl<M> Spacer<M> {
+    /// Creates an empty spacer with content-sized constraints.
     pub fn new() -> Self {
         Self {
             constraints: Constraints::content(),
@@ -21,38 +22,45 @@ impl<M> Spacer<M> {
         }
     }
 
+    /// Sets the stable widget key used to identify this widget across view rebuilds.
     pub fn key(mut self, name: impl Into<String>) -> Self {
         self.widget_key = Some(name.into());
         self
     }
 
+    /// Replaces layout constraints with a fixed width and height in terminal cells.
     pub fn fixed(mut self, width: u16, height: u16) -> Self {
         self.constraints = Constraints::fixed(width, height);
         self
     }
 
+    /// Replaces layout constraints with minimum dimensions in terminal cells.
     pub fn min(mut self, width: u16, height: u16) -> Self {
         self.constraints = Constraints::min(width, height);
         self
     }
 
+    /// Fixes the width in terminal columns.
     pub fn width(mut self, width: u16) -> Self {
         self.constraints.min_width = width;
         self.constraints.max_width = Some(width);
         self
     }
 
+    /// Fixes the height in terminal rows.
     pub fn height(mut self, height: u16) -> Self {
         self.constraints.min_height = height;
         self.constraints.max_height = Some(height);
         self
     }
 
+    /// Sets the weight used to distribute available space in a flex layout.
     pub fn flex(mut self, flex: f32) -> Self {
         self.constraints.flex = Some(flex);
         self
     }
 
+    /// Replaces layout constraints with flexible constraints that fill available space.
     pub fn fill(mut self) -> Self {
         self.constraints = Constraints::fill();
         self

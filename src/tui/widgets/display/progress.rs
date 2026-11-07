@@ -35,6 +35,10 @@ pub struct ProgressBar<M = ()> {
 }
 
 impl<M> ProgressBar<M> {
+    /// Creates a 24-column progress bar using the default line variant.
+    ///
+    /// `value` is a completion fraction; finite values are clamped to `0.0..=1.0`
+    /// when rendered.
     pub fn new(value: f64) -> Self {
         Self {
             value,
@@ -48,31 +52,39 @@ impl<M> ProgressBar<M> {
         }
     }
 
+    /// Sets the stable widget key used to identify this widget across view rebuilds.
     pub fn key(mut self, name: impl Into<String>) -> Self {
         self.widget_key = Some(name.into());
         self
     }
 
+    /// Sets the completion fraction, clamped to `0.0..=1.0` when rendered.
     pub fn value(mut self, value: f64) -> Self {
         self.value = value;
         self
     }
 
+    /// Sets text centered over the progress bar.
     pub fn label(mut self, label: impl Into<String>) -> Self {
         self.label = Some(label.into());
         self
     }
 
+    /// Sets the minimum width in terminal columns, clamped to at least 3.
+    ///
+    /// The bar can grow to fill additional horizontal space.
     pub fn width(mut self, width: u16) -> Self {
         self.width = width.max(3);
         self
     }
 
+    /// Sets the custom rendering style.
     pub fn style(mut self, style: Style) -> Self {
         self.custom_style = Some(style);
         self
     }
 
+    /// Sets the style of the completed portion of the bar.
     pub fn fill_style(mut self, style: Style) -> Self {
         self.fill_style = Some(style);
         self
@@ -264,6 +276,9 @@ pub struct LoadingIndicator<M = ()> {
 }
 
 impl<M> LoadingIndicator<M> {
+    /// Creates an unlabeled spinner at frame zero.
+    ///
+    /// Advance [`Self::frame`] from application updates to animate it.
     pub fn new() -> Self {
         Self {
             label: None,
@@ -274,21 +289,27 @@ impl<M> LoadingIndicator<M> {
         }
     }
 
+    /// Sets the stable widget key used to identify this widget across view rebuilds.
     pub fn key(mut self, name: impl Into<String>) -> Self {
         self.widget_key = Some(name.into());
         self
     }
 
+    /// Sets text displayed beside the spinner.
     pub fn label(mut self, label: impl Into<String>) -> Self {
         self.label = Some(label.into());
         self
     }
 
+    /// Sets the spinner frame index, wrapped modulo the ten available frames.
+    ///
+    /// The application must advance this value to animate the indicator.
     pub fn frame(mut self, frame: usize) -> Self {
         self.frame = frame;
         self
     }
 
+    /// Sets the custom rendering style.
     pub fn style(mut self, style: Style) -> Self {
         self.custom_style = Some(style);
         self
@@ -367,10 +388,12 @@ fn truncate_to_width(
     metrics.clip(text, 0, max_width)
 }
 
+/// Creates a [`ProgressBar`] for a completion fraction from zero to one.
 pub fn progress_bar<M>(value: f64) -> ProgressBar<M> {
     ProgressBar::new(value)
 }
 
+/// Creates a [`LoadingIndicator`] at frame zero.
 pub fn loading_indicator<M>() -> LoadingIndicator<M> {
     LoadingIndicator::new()
 }

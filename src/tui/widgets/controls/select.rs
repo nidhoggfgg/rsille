@@ -15,12 +15,16 @@ use crate::tui::widgets::collections::selection::SelectionState;
 /// A single select option.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SelectOption {
+    /// Stable option value passed to selection callbacks.
     pub value: String,
+    /// User-visible text for this item.
     pub label: String,
+    /// Whether this item is skipped by navigation and activation.
     pub disabled: bool,
 }
 
 impl SelectOption {
+    /// Creates an enabled option with a stable value and a visible label.
     pub fn new(value: impl Into<String>, label: impl Into<String>) -> Self {
         Self {
             value: value.into(),
@@ -29,6 +33,7 @@ impl SelectOption {
         }
     }
 
+    /// Sets whether this item is skipped by navigation and activation.
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
         self
@@ -50,19 +55,27 @@ impl From<String> for SelectOption {
 /// Search strategy used by searchable selects and command palettes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SelectSearchMode {
+    /// Matches a case-insensitive substring (default).
     #[default]
     Contains,
+    /// Matches query characters in order, allowing gaps between them.
     Fuzzy,
 }
 
 /// Persistent select state stored in the widget store.
 #[derive(Debug, Clone, Default)]
 pub struct SelectState {
+    /// Whether the inline option menu is expanded.
     pub is_open: bool,
+    /// Value at the navigation cursor in the option menu.
     pub active_option: Option<String>,
+    /// Committed option value, if any.
     pub selected_option: Option<String>,
+    /// Current query used when searchable mode is enabled.
     pub search_query: String,
+    /// Navigation cursor and committed selection for this widget.
     pub selection: SelectionState,
+    /// Zero-based index of the first visible row.
     pub scroll_offset: usize,
 }
 
@@ -98,6 +111,9 @@ impl<M> std::fmt::Debug for Select<M> {
 }
 
 impl<M> Select<M> {
+    /// Creates an empty select with a single border and searching disabled.
+    ///
+    /// The expanded height defaults to seven terminal rows.
     pub fn new() -> Self {
         Self {
             options: Vec::new(),
@@ -115,16 +131,19 @@ impl<M> Select<M> {
         }
     }
 
+    /// Sets the stable widget key used to identify this widget across view rebuilds.
     pub fn key(mut self, name: impl Into<String>) -> Self {
         self.widget_key = Some(name.into());
         self
     }
 
+    /// Appends an option to the end of the group.
     pub fn option(mut self, option: impl Into<SelectOption>) -> Self {
         self.options.push(option.into());
         self
     }
 
+    /// Appends options in iteration order, preserving existing options.
     pub fn options<I>(mut self, options: I) -> Self
     where
         I: IntoIterator,
@@ -134,56 +153,67 @@ impl<M> Select<M> {
         self
     }
 
+    /// Sets the height in terminal rows, clamped to at least 4.
     pub fn height(mut self, height: u16) -> Self {
         self.height = height.max(4);
         self
     }
 
+    /// Sets the border drawn around the widget.
     pub fn border(mut self, border: BorderStyle) -> Self {
         self.border = Some(border);
         self
     }
 
+    /// Removes the border and its reserved space.
     pub fn borderless(mut self) -> Self {
         self.border = None;
         self
     }
 
+    /// Sets the hint shown before an option has been selected.
     pub fn placeholder(mut self, placeholder: impl Into<String>) -> Self {
         self.placeholder = placeholder.into();
         self
     }
 
+    /// Sets whether this widget ignores input and is excluded from keyboard focus.
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
         self
     }
 
+    /// Enables typing a search query while the option menu is open.
     pub fn searchable(mut self, searchable: bool) -> Self {
         self.searchable = searchable;
         self
     }
 
+    /// Sets the matching strategy used to filter items by the search query.
     pub fn search_mode(mut self, mode: SelectSearchMode) -> Self {
         self.search_mode = mode;
         self
     }
 
+    /// Sets the message displayed when the search query matches no options.
     pub fn empty_search_message(mut self, message: impl Into<String>) -> Self {
         self.empty_search_message = message.into();
         self
     }
 
+    /// Sets the custom rendering style.
     pub fn style(mut self, style: Style) -> Self {
         self.custom_style = Some(style);
         self
     }
 
+    /// Sets the style used to highlight the active item or control while focused.
     pub fn focus_style(mut self, style: Style) -> Self {
         self.custom_focus_style = Some(style);
         self
     }
 
+    /// Sets the callback receiving the committed option value.
     pub fn on_change<F>(mut self, handler: F) -> Self
     where
         F: Fn(String) -> M + 'static,

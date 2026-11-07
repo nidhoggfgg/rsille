@@ -10,14 +10,21 @@ use crate::tui::style::{BorderStyle, Style};
 use crate::tui::widget::{EventCtx, EventPhase, RenderCtx, Widget};
 use crate::tui::widgets::pointer;
 
+/// An action with a stable ID and a visible label.
+///
+/// Converting a string uses it for both the ID and label.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MenuItem {
+    /// Stable item identifier used by navigation and message callbacks.
     pub id: String,
+    /// User-visible text for this item.
     pub label: String,
+    /// Whether this item is skipped by navigation and activation.
     pub disabled: bool,
 }
 
 impl MenuItem {
+    /// Creates an enabled menu action with a stable ID and label.
     pub fn new(id: impl Into<String>, label: impl Into<String>) -> Self {
         Self {
             id: id.into(),
@@ -26,6 +33,7 @@ impl MenuItem {
         }
     }
 
+    /// Sets whether this item is skipped by navigation and activation.
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
         self
@@ -44,12 +52,19 @@ impl From<String> for MenuItem {
     }
 }
 
+/// Persistent active item and scroll position for a menu.
 #[derive(Debug, Clone, Default)]
 pub struct MenuState {
+    /// ID of the item at the navigation cursor, if initialized.
     pub active_item: Option<String>,
+    /// Zero-based index of the first visible row.
     pub scroll_offset: usize,
 }
 
+/// A vertical action menu with keyboard navigation and mouse activation.
+///
+/// Use [`Self::on_select`] for activation and [`Self::on_close`] for Escape.
+/// The application owns whether the menu remains in the view.
 pub struct Menu<M = ()> {
     items: Vec<MenuItem>,
     height: u16,
@@ -76,6 +91,7 @@ impl<M> std::fmt::Debug for Menu<M> {
 }
 
 impl<M> Menu<M> {
+    /// Creates an empty, six-row-high menu with a single border.
     pub fn new() -> Self {
         Self {
             items: Vec::new(),
@@ -90,16 +106,19 @@ impl<M> Menu<M> {
         }
     }
 
+    /// Sets the stable widget key used to identify this widget across view rebuilds.
     pub fn key(mut self, name: impl Into<String>) -> Self {
         self.widget_key = Some(name.into());
         self
     }
 
+    /// Appends an item to the end of the collection.
     pub fn item(mut self, item: impl Into<MenuItem>) -> Self {
         self.items.push(item.into());
         self
     }
 
+    /// Appends items in iteration order, preserving existing items.
     pub fn items<I>(mut self, items: I) -> Self
     where
         I: IntoIterator,
@@ -109,36 +128,43 @@ impl<M> Menu<M> {
         self
     }
 
+    /// Sets the height in terminal rows, clamped to at least 1.
     pub fn height(mut self, height: u16) -> Self {
         self.height = height.max(1);
         self
     }
 
+    /// Sets the border drawn around the widget.
     pub fn border(mut self, border: BorderStyle) -> Self {
         self.border = Some(border);
         self
     }
 
+    /// Removes the border and its reserved space.
     pub fn borderless(mut self) -> Self {
         self.border = None;
         self
     }
 
+    /// Sets whether this widget ignores input and is excluded from keyboard focus.
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
         self
     }
 
+    /// Sets the custom rendering style.
     pub fn style(mut self, style: Style) -> Self {
         self.custom_style = Some(style);
         self
     }
 
+    /// Sets the style used to highlight the active item or control while focused.
     pub fn focus_style(mut self, style: Style) -> Self {
         self.custom_focus_style = Some(style);
         self
     }
 
+    /// Sets the callback receiving the action ID when activated by keyboard or mouse.
     pub fn on_select<F>(mut self, handler: F) -> Self
     where
         F: Fn(String) -> M + 'static,
@@ -147,6 +173,7 @@ impl<M> Menu<M> {
         self
     }
 
+    /// Sets the message callback invoked when Escape requests dismissal.
     pub fn on_close<F>(mut self, handler: F) -> Self
     where
         F: Fn() -> M + 'static,
@@ -458,6 +485,7 @@ fn truncate_to_width(
     metrics.clip(text, 0, max_width)
 }
 
+/// Creates an empty [`Menu`] with its default configuration.
 pub fn menu<M>() -> Menu<M> {
     Menu::new()
 }

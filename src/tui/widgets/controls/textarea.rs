@@ -14,26 +14,41 @@ use crate::tui::widget::{EventCtx, EventPhase, Lifecycle, RenderCtx, StateCtx, W
 use crate::tui::widgets::pointer::{self, EditorPointer};
 use crate::tui::widgets::VariantWidget;
 
+/// Border treatments for a multiline editor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TextAreaVariant {
+    /// A multiline editor with a border (default).
     #[default]
     Default,
+    /// A multiline editor without a border.
     Borderless,
 }
 
+/// Persistent caret, selection, editing buffer, and viewport state.
+///
+/// The cached value allows multiple input events in one frame to build on earlier edits.
 #[derive(Debug, Clone, Default)]
 pub struct TextAreaState {
     /// Keep the wheel-scrolled viewport independent of the caret until editing resumes.
     pub viewport_scrolled: bool,
     /// Whether a left-button selection gesture is in progress.
     pub dragging: bool,
+    /// Caret position as a UTF-8 byte offset at a grapheme boundary.
     pub cursor_position: usize,
+    /// UTF-8 byte offset of the selection anchor, or `None` for no selection.
     pub selection_anchor: Option<usize>,
+    /// Horizontal viewport offset in terminal columns.
     pub horizontal_offset: usize,
+    /// Zero-based index of the first visible row.
     pub scroll_offset: usize,
+    /// Cached editing value synchronized from application text before input.
     pub value: Option<String>,
 }
 
+/// A multiline editor with application-controlled text and persistent caret state.
+///
+/// Pass application text to [`Self::value`] and store [`Self::on_change`] messages.
+/// Enter inserts a newline; Ctrl+Enter submits the current text.
 pub struct TextArea<M = ()> {
     value: String,
     placeholder: Option<String>,
@@ -62,6 +77,7 @@ impl<M> std::fmt::Debug for TextArea<M> {
 }
 
 impl<M> TextArea<M> {
+    /// Creates an empty, enabled editor with a border and a height of five rows.
     pub fn new() -> Self {
         Self {
             value: String::new(),
@@ -77,41 +93,53 @@ impl<M> TextArea<M> {
         }
     }
 
+    /// Sets the stable widget key used to identify this widget across view rebuilds.
     pub fn key(mut self, name: impl Into<String>) -> Self {
         self.widget_key = Some(name.into());
         self
     }
 
+    /// Sets the application-controlled text.
+    ///
+    /// Store text emitted by `on_change` and pass it back on the next view rebuild.
     pub fn value(mut self, value: impl Into<String>) -> Self {
         self.value = value.into();
         self
     }
 
+    /// Sets the hint shown when the value is empty.
     pub fn placeholder(mut self, placeholder: impl Into<String>) -> Self {
         self.placeholder = Some(placeholder.into());
         self
     }
 
+    /// Sets the height in terminal rows, clamped to at least 3.
     pub fn height(mut self, height: u16) -> Self {
         self.height = height.max(3);
         self
     }
 
+    /// Sets whether this widget ignores input and is excluded from keyboard focus.
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
         self
     }
 
+    /// Sets the custom rendering style.
     pub fn style(mut self, style: Style) -> Self {
         self.custom_style = Some(style);
         self
     }
 
+    /// Sets the style used to highlight the active item or control while focused.
     pub fn focus_style(mut self, style: Style) -> Self {
         self.custom_focus_style = Some(style);
         self
     }
 
+    /// Sets the callback receiving the complete edited text.
+    ///
+    /// Update application state and pass the text back through [`Self::value`].
     pub fn on_change<F>(mut self, handler: F) -> Self
     where
         F: Fn(String) -> M + 'static,
@@ -120,6 +148,7 @@ impl<M> TextArea<M> {
         self
     }
 
+    /// Sets the callback receiving the current text when Ctrl+Enter is pressed.
     pub fn on_submit<F>(mut self, handler: F) -> Self
     where
         F: Fn(String) -> M + 'static,
@@ -521,6 +550,7 @@ impl<M: 'static> Widget<M> for TextArea<M> {
     }
 }
 
+/// Creates an empty [`TextArea`] with its default configuration.
 pub fn textarea<M>() -> TextArea<M> {
     TextArea::new()
 }

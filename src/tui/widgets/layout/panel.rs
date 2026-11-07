@@ -38,6 +38,7 @@ impl<M> std::fmt::Debug for Panel<M> {
 }
 
 impl<M> Panel<M> {
+    /// Creates an empty panel with a single border, one-cell padding, and no child gap.
     pub fn new() -> Self {
         Self {
             children: Vec::new(),
@@ -51,36 +52,43 @@ impl<M> Panel<M> {
         }
     }
 
+    /// Sets the stable widget key used to identify this widget across view rebuilds.
     pub fn key(mut self, name: impl Into<String>) -> Self {
         self.widget_key = Some(name.into());
         self
     }
 
+    /// Sets the title displayed in the top border.
     pub fn title(mut self, title: impl Into<String>) -> Self {
         self.title = Some(title.into());
         self
     }
 
+    /// Sets the border drawn around the widget.
     pub fn border(mut self, border: BorderStyle) -> Self {
         self.border = Some(border);
         self
     }
 
+    /// Removes the border and its reserved space.
     pub fn borderless(mut self) -> Self {
         self.border = None;
         self
     }
 
+    /// Sets interior spacing in terminal cells.
     pub fn padding(mut self, padding: Padding) -> Self {
         self.padding = padding;
         self
     }
 
+    /// Sets the number of terminal rows between consecutive children.
     pub fn gap(mut self, gap: u16) -> Self {
         self.gap = gap;
         self
     }
 
+    /// Sets the custom rendering style.
     pub fn style(mut self, style: Style) -> Self {
         self.style = style;
         self
@@ -93,11 +101,13 @@ impl<M> Panel<M> {
         self
     }
 
+    /// Appends a child after the existing children.
     pub fn child(mut self, widget: impl IntoWidget<M>) -> Self {
         self.children.push(widget.into_widget());
         self
     }
 
+    /// Appends children in iteration order, preserving existing children.
     pub fn children<I>(mut self, widgets: I) -> Self
     where
         I: IntoIterator,
@@ -353,6 +363,7 @@ fn truncate_to_width(
     metrics.clip(text, 0, max_width)
 }
 
+/// Creates an empty [`Panel`] with its default configuration.
 pub fn panel<M>() -> Panel<M> {
     Panel::new()
 }

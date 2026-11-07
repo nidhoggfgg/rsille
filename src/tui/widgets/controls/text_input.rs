@@ -17,9 +17,12 @@ use crate::tui::widgets::VariantWidget;
 /// Text input style variants.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TextInputVariant {
+    /// A single-line input with a border (default).
     #[default]
     Default,
+    /// A single-line input without a border.
     Borderless,
+    /// A bordered input with visually masked text; callbacks still receive plain text.
     Password,
 }
 
@@ -36,7 +39,9 @@ pub enum TextInputVariant {
 pub struct TextInputState {
     /// Whether a left-button selection gesture is in progress.
     pub dragging: bool,
+    /// Caret position as a UTF-8 byte offset at a grapheme boundary.
     pub cursor_position: usize,
+    /// UTF-8 byte offset of the selection anchor, or `None` for no selection.
     pub selection_anchor: Option<usize>,
     /// Horizontal viewport offset in terminal columns.
     pub horizontal_offset: usize,
@@ -74,6 +79,7 @@ impl<M> std::fmt::Debug for TextInput<M> {
 }
 
 impl<M> TextInput<M> {
+    /// Creates an empty, enabled text input with the default border treatment.
     pub fn new() -> Self {
         Self {
             value: String::new(),
@@ -88,36 +94,47 @@ impl<M> TextInput<M> {
         }
     }
 
+    /// Sets the stable widget key used to identify this widget across view rebuilds.
     pub fn key(mut self, name: impl Into<String>) -> Self {
         self.widget_key = Some(name.into());
         self
     }
 
+    /// Sets the application-controlled text.
+    ///
+    /// Store text emitted by `on_change` and pass it back on the next view rebuild.
     pub fn value(mut self, value: impl Into<String>) -> Self {
         self.value = value.into();
         self
     }
 
+    /// Sets the hint shown when the value is empty.
     pub fn placeholder(mut self, placeholder: impl Into<String>) -> Self {
         self.placeholder = Some(placeholder.into());
         self
     }
 
+    /// Sets whether this widget ignores input and is excluded from keyboard focus.
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
         self
     }
 
+    /// Sets the custom rendering style.
     pub fn style(mut self, style: Style) -> Self {
         self.custom_style = Some(style);
         self
     }
 
+    /// Sets the style used to highlight the active item or control while focused.
     pub fn focus_style(mut self, style: Style) -> Self {
         self.custom_focus_style = Some(style);
         self
     }
 
+    /// Sets the callback receiving the complete edited text.
+    ///
+    /// Update application state and pass the text back through [`Self::value`].
     pub fn on_change<F>(mut self, handler: F) -> Self
     where
         F: Fn(String) -> M + 'static,
@@ -126,6 +143,7 @@ impl<M> TextInput<M> {
         self
     }
 
+    /// Sets the callback receiving the current text when Enter is pressed.
     pub fn on_submit<F>(mut self, handler: F) -> Self
     where
         F: Fn(String) -> M + 'static,

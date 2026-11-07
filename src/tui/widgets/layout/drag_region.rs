@@ -6,6 +6,10 @@ use crate::tui::{
     layout::{Constraints, Layout, LayoutStyle, MeasuredSize, SizeProposal},
     widget::{EventCtx, EventPhase, IntoWidget, MeasureCtx, RenderCtx, Widget},
 };
+/// Wraps a child with pointer-drag recognition and emits drag lifecycle messages.
+///
+/// Configure [`Self::axis`] and [`Self::threshold_cells`] to constrain recognition.
+/// The callback reports gestures; application code decides how to move content.
 pub struct DragRegion<M = ()> {
     children: Vec<Box<dyn Widget<M>>>,
     key: Option<String>,
@@ -14,6 +18,7 @@ pub struct DragRegion<M = ()> {
     disabled: bool,
     on_drag: Option<Box<dyn Fn(DragEvent) -> M>>,
 }
+/// Wraps content in a [`DragRegion`] with both axes enabled and a one-cell threshold.
 pub fn drag_region<M>(content: impl IntoWidget<M>) -> DragRegion<M> {
     DragRegion {
         children: vec![content.into_widget()],
@@ -25,22 +30,27 @@ pub fn drag_region<M>(content: impl IntoWidget<M>) -> DragRegion<M> {
     }
 }
 impl<M> DragRegion<M> {
+    /// Sets the stable widget key used to identify this widget across view rebuilds.
     pub fn key(mut self, key: impl Into<String>) -> Self {
         self.key = Some(key.into());
         self
     }
+    /// Sets permitted drag axes; defaults to both axes.
     pub fn axis(mut self, axis: DragAxis) -> Self {
         self.axis = axis;
         self
     }
+    /// Sets pointer travel in terminal cells required to start dragging; defaults to one.
     pub fn threshold_cells(mut self, threshold: u16) -> Self {
         self.threshold = threshold;
         self
     }
+    /// Disables drag recognition for this region.
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
         self
     }
+    /// Sets the callback receiving drag start, update, end, and cancellation events.
     pub fn on_drag(mut self, handler: impl Fn(DragEvent) -> M + 'static) -> Self {
         self.on_drag = Some(Box::new(handler));
         self

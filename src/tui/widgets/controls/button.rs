@@ -11,11 +11,16 @@ use crate::tui::widgets::VariantWidget;
 /// Button style variants.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ButtonVariant {
+    /// A filled primary-action button (default).
     #[default]
     Primary,
+    /// A filled secondary-action button.
     Secondary,
+    /// A bordered button without a solid background.
     Ghost,
+    /// An underlined text button.
     Link,
+    /// A filled button styled for destructive actions.
     Destructive,
 }
 
@@ -45,6 +50,7 @@ impl<M> std::fmt::Debug for Button<M> {
 }
 
 impl<M> Button<M> {
+    /// Creates an enabled, focusable primary button with no click callback.
     pub fn new(label: impl Into<String>) -> Self {
         Self {
             label: label.into(),
@@ -56,11 +62,13 @@ impl<M> Button<M> {
         }
     }
 
+    /// Sets the stable widget key used to identify this widget across view rebuilds.
     pub fn key(mut self, name: impl Into<String>) -> Self {
         self.widget_key = Some(name.into());
         self
     }
 
+    /// Sets whether this widget ignores input and is excluded from keyboard focus.
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
         self
@@ -73,6 +81,7 @@ impl<M> Button<M> {
         self
     }
 
+    /// Sets the message callback invoked by Enter, Space, or a left mouse press.
     pub fn on_click<F>(mut self, handler: F) -> Self
     where
         F: Fn() -> M + 'static,

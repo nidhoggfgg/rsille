@@ -32,15 +32,18 @@ impl CanvasContext {
         }
     }
 
+    /// Sets the terminal encoding used to compute sample dimensions.
     pub fn with_encoding(mut self, encoding: Encoding) -> Self {
         self.encoding = encoding;
         self
     }
 
+    /// Returns the encoding used for sample dimensions and drawing.
     pub fn encoding(self) -> Encoding {
         self.encoding
     }
 
+    /// Sets explicit world bounds for coordinate transforms.
     pub fn with_viewport(mut self, viewport: CanvasViewport) -> Self {
         self.viewport = Some(viewport);
         self
@@ -59,6 +62,9 @@ impl CanvasContext {
         })
     }
 
+    /// Maps a finite world coordinate to sample coordinates without clipping.
+    ///
+    /// Returns `None` for an empty canvas, non-finite input, or a non-finite result.
     pub fn world_to_sample(self, point: CanvasPoint) -> Option<CanvasPoint> {
         if self.cell_width == 0
             || self.cell_height == 0
@@ -114,6 +120,11 @@ impl CanvasContext {
         ))
     }
 
+    /// Borrows a canvas for clipped drawing in this context's world coordinates.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the canvas encoding differs from this context's encoding.
     pub fn world<'a>(self, canvas: &'a mut crate::canvas::Canvas) -> WorldCanvas<'a> {
         WorldCanvas::new(canvas, self)
     }
@@ -142,8 +153,11 @@ impl CanvasContext {
 /// A pointer event translated through the same viewport used for drawing.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CanvasPointer {
+    /// Pointer position in world coordinates at the terminal-cell center.
     pub position: CanvasPoint,
+    /// Mouse action reported by the terminal.
     pub kind: MouseEventKind,
+    /// Keyboard modifiers held during the pointer event.
     pub modifiers: KeyModifiers,
 }
 
@@ -177,6 +191,9 @@ impl<M, F> CanvasWidget<M, F>
 where
     F: Fn(&mut crate::canvas::Canvas, CanvasContext),
 {
+    /// Creates a drawing widget using Braille encoding and a flex weight of one.
+    ///
+    /// The callback receives a fresh canvas and its dimensions whenever rendered.
     pub fn new(draw: F) -> Self {
         Self {
             draw,
@@ -201,6 +218,7 @@ where
         self
     }
 
+    /// Sets explicit world bounds for drawing and pointer coordinate conversion.
     pub fn viewport(mut self, viewport: CanvasViewport) -> Self {
         self.viewport = Some(viewport);
         self
@@ -211,39 +229,46 @@ where
         self
     }
 
+    /// Sets the stable widget key used to identify this widget across view rebuilds.
     pub fn key(mut self, name: impl Into<String>) -> Self {
         self.widget_key = Some(name.into());
         self
     }
 
+    /// Replaces the widget's layout constraints.
     pub fn constraints(mut self, constraints: Constraints) -> Self {
         self.constraints = constraints;
         self
     }
 
+    /// Sets minimum width and height in terminal cells.
     pub fn min_size(mut self, width: u16, height: u16) -> Self {
         self.constraints.min_width = width;
         self.constraints.min_height = height;
         self
     }
 
+    /// Replaces layout constraints with a fixed width and height in terminal cells.
     pub fn fixed(mut self, width: u16, height: u16) -> Self {
         self.constraints = Constraints::fixed(width, height);
         self
     }
 
+    /// Fixes the width in terminal columns.
     pub fn width(mut self, width: u16) -> Self {
         self.constraints.min_width = width;
         self.constraints.max_width = Some(width);
         self
     }
 
+    /// Fixes the height in terminal rows.
     pub fn height(mut self, height: u16) -> Self {
         self.constraints.min_height = height;
         self.constraints.max_height = Some(height);
         self
     }
 
+    /// Sets the weight used to distribute available space in a flex layout.
     pub fn flex(mut self, flex: f32) -> Self {
         self.constraints.flex = Some(flex);
         self

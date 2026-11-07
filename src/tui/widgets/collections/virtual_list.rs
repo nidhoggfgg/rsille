@@ -16,8 +16,11 @@ use std::sync::Arc;
 /// be returned by the row builder for `Failed`, using normal widget messages.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RowData<T> {
+    /// A loaded row payload.
     Ready(T),
+    /// A row whose payload has not arrived yet.
     Loading,
+    /// A row that failed to load, with an error message for display or retry UI.
     Failed(String),
 }
 
@@ -25,13 +28,23 @@ pub enum RowData<T> {
 /// sorting, filtering and insertion. Implement `index_of` using an index for large
 /// collections; the widget never enumerates the complete source.
 pub trait DataSource {
+    /// The loaded payload type for each row.
     type Item;
+    /// Returns the number of addressable rows, including rows still loading.
     fn len(&self) -> usize;
+    /// Returns whether the source has no rows.
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
+    /// Returns the stable, unique key for a row index.
+    ///
+    /// The widget calls this only for indices less than [`Self::len`].
     fn key(&self, index: usize) -> String;
+    /// Resolves a stable key to its current index, or `None` if it no longer exists.
     fn index_of(&self, key: &str) -> Option<usize>;
+    /// Returns the payload or loading/failure status for a valid row index.
+    ///
+    /// The widget requests only rows within the viewport and overscan margin.
     fn get(&self, index: usize) -> RowData<Self::Item>;
 }
 
@@ -39,11 +52,18 @@ pub trait DataSource {
 /// selection clears and the anchor falls back to its clamped previous index.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct VirtualListState {
+    /// Stable key of the selected row, if any.
     pub selected: Option<String>,
+    /// Stable key of the first visible row, used to preserve position after reordering.
     pub anchor: Option<String>,
+    /// Zero-based first visible row index; fallback when the anchor disappears.
     pub offset: usize,
 }
 impl VirtualListState {
+    /// Reconciles selection and the first-row anchor with an updated source.
+    ///
+    /// `rows` is the viewport capacity in items, treated as at least one. A missing
+    /// selection is cleared; a missing anchor falls back to the clamped offset.
     pub fn reconcile<S: DataSource + ?Sized>(&mut self, source: &S, rows: usize) {
         if self
             .selected
@@ -59,6 +79,10 @@ impl VirtualListState {
             .unwrap_or_else(|| self.offset.min(source.len().saturating_sub(rows.max(1))));
         self.anchor = (self.offset < source.len()).then(|| source.key(self.offset));
     }
+    /// Selects an index and scrolls just enough to keep it visible.
+    ///
+    /// `rows` is the viewport capacity in items, treated as at least one. An index
+    /// outside the source leaves the state unchanged.
     pub fn select<S: DataSource + ?Sized>(&mut self, source: &S, index: usize, rows: usize) {
         if index >= source.len() {
             return;
@@ -74,8 +98,11 @@ impl VirtualListState {
 /// receiving lifecycle synchronization but no focus, events or animation updates.
 #[derive(Debug, Clone, Copy)]
 pub struct VirtualListConfig {
+    /// Viewport height in terminal rows; defaults to 10 and is clamped to at least 1.
     pub height: u16,
+    /// Fixed item height in terminal rows; defaults to 1 and is clamped to at least 1.
     pub row_height: u16,
+    /// Number of retained rows on each side of the viewport; defaults to 2.
     pub overscan: usize,
 }
 impl Default for VirtualListConfig {
@@ -94,6 +121,49 @@ struct Interaction {
     controlled: Option<VirtualListState>,
 }
 
+/// A controlled list that builds only visible rows and an overscan margin.
+///
+/// Keep [`VirtualListState`] in application state and update it from
+/// [`Self::on_change`] messages before rebuilding the view. Source keys identify
+/// rows across sorting and insertion; rows outside the retained window are unmounted.
+///
+/// # Examples
+///
+/// ```
+/// use std::sync::Arc;
+/// use rsille::tui::widgets::{
+///     label, DataSource, RowData, VirtualList, VirtualListConfig, VirtualListState,
+/// };
+///
+/// struct Rows(Vec<String>);
+/// impl DataSource for Rows {
+///     type Item = String;
+///     fn len(&self) -> usize { self.0.len() }
+///     // The values in this example are unique and also serve as stable keys.
+///     fn key(&self, index: usize) -> String { self.0[index].clone() }
+///     fn index_of(&self, key: &str) -> Option<usize> {
+///         self.0.iter().position(|value| value == key)
+///     }
+///     fn get(&self, index: usize) -> RowData<String> {
+///         RowData::Ready(self.0[index].clone())
+///     }
+/// }
+///
+/// let source = Arc::new(Rows(vec!["Alpha".into(), "Beta".into(), "Gamma".into()]));
+/// let state = VirtualListState::default();
+/// let config = VirtualListConfig { height: 2, row_height: 1, overscan: 1 };
+/// let view = VirtualList::new(source, &state, config, |_, data, selected| {
+///     let text = match data {
+///         RowData::Ready(text) => text,
+///         RowData::Loading => "Loading...".into(),
+///         RowData::Failed(error) => error,
+///     };
+///     let row = label::<VirtualListState>(text);
+///     if selected { row.bold() } else { row }
+/// }).on_change(|next| next);
+/// assert_eq!(view.window(), 0..2);
+/// // Store emitted VirtualListState messages before constructing the next view.
+/// ```
 pub struct VirtualList<M, S: DataSource + ?Sized> {
     source: Arc<S>,
     state: VirtualListState,
@@ -106,6 +176,10 @@ pub struct VirtualList<M, S: DataSource + ?Sized> {
 impl<M: 'static, S: DataSource + ?Sized + 'static> VirtualList<M, S> {
     /// Builds only the viewport and overscan. Store emitted state in your update
     /// function so the next description constructs the newly visible window.
+    ///
+    /// The row builder receives the source index, payload status, and whether the
+    /// row is selected. It also runs for overscan rows. Heights are normalized to
+    /// at least one terminal row before the visible range is computed.
     pub fn new<W: IntoWidget<M> + 'static>(
         source: Arc<S>,
         state: &VirtualListState,
@@ -142,14 +216,22 @@ impl<M: 'static, S: DataSource + ?Sized + 'static> VirtualList<M, S> {
             key: None,
         }
     }
+    /// Sets the stable widget key used to identify this widget across view rebuilds.
     pub fn key(mut self, key: impl Into<String>) -> Self {
         self.key = Some(key.into());
         self
     }
+    /// Sets the callback receiving proposed selection and scroll state.
+    ///
+    /// Store this state in the application before rebuilding the list. Setting a
+    /// callback also enables focus and interaction.
     pub fn on_change(mut self, handler: impl Fn(VirtualListState) -> M + 'static) -> Self {
         self.on_change = Some(Box::new(handler));
         self
     }
+    /// Returns the half-open range of source indices built for visible rows.
+    ///
+    /// The range excludes retained overscan rows.
     pub fn window(&self) -> std::ops::Range<usize> {
         self.state.offset..self.state.offset + self.children.len()
     }

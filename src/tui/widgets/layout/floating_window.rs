@@ -17,16 +17,23 @@ use crate::tui::{
 };
 use std::{cell::Cell, rc::Rc, time::Duration};
 
+/// Whether a floating window shows its body, only its title, or no surface.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum WindowVisibility {
+    /// Shows the title, body, and resize area (default).
     #[default]
     Expanded,
+    /// Shows only the title area while retaining body state.
     Collapsed,
+    /// Hides the window while retaining its state.
     Hidden,
 }
+/// Persistent geometry, visibility, and gesture state for a floating window.
 #[derive(Debug, Clone, Default)]
 pub struct FloatingWindowState {
+    /// Outer geometry relative to the window host.
     pub rect: WindowRect,
+    /// Current expanded, collapsed, or hidden state.
     pub visibility: WindowVisibility,
     drag: DragState,
     start_rect: WindowRect,
@@ -60,6 +67,11 @@ impl Default for WindowProjection {
     }
 }
 
+/// A movable, resizable window intended for a window host.
+///
+/// Use [`Self::default_rect`] and [`Self::default_visibility`] for internal state,
+/// or supply [`Self::rect`] and [`Self::visibility`] on each view rebuild to
+/// control them from application state. Change callbacks report user proposals.
 pub struct FloatingWindow<M = ()> {
     children: Vec<Box<dyn Widget<M>>>,
     key: Option<String>,
@@ -86,6 +98,7 @@ pub struct FloatingWindow<M = ()> {
     on_close: Option<Box<dyn Fn() -> M>>,
 }
 
+/// Wraps content in a movable, resizable [`FloatingWindow`].
 pub fn floating_window<M: 'static>(content: impl IntoWidget<M>) -> FloatingWindow<M> {
     let projection = WindowProjection::default();
     FloatingWindow {
@@ -144,10 +157,12 @@ pub fn floating_window<M: 'static>(content: impl IntoWidget<M>) -> FloatingWindo
     }
 }
 impl<M: 'static> FloatingWindow<M> {
+    /// Sets the stable widget key used to identify this widget across view rebuilds.
     pub fn key(mut self, key: impl Into<String>) -> Self {
         self.key = Some(key.into());
         self
     }
+    /// Sets the title-bar text.
     pub fn title(mut self, title: impl Into<String>) -> Self {
         self.title = title.into();
         self.refresh_title();
@@ -168,6 +183,7 @@ impl<M: 'static> FloatingWindow<M> {
             projection: self.projection.clone(),
         });
     }
+    /// Sets the stable key for the title-bar child.
     pub fn title_key(mut self, key: impl Into<String>) -> Self {
         self.children[0] = Box::new(Chrome::<M> {
             actions: self.title_actions.clone(),
@@ -192,6 +208,7 @@ impl<M: 'static> FloatingWindow<M> {
         self.refresh_title();
         self
     }
+    /// Sets the stable key for the resize-grip child.
     pub fn resize_key(mut self, key: impl Into<String>) -> Self {
         self.children[2] = Box::new(Chrome::<M> {
             actions: Rc::new(vec![]),
@@ -204,68 +221,88 @@ impl<M: 'static> FloatingWindow<M> {
         });
         self
     }
+    /// Sets application-controlled geometry relative to the window host.
+    ///
+    /// Store [`Self::on_rect_change`] proposals and feed them back on rebuild.
     pub fn rect(mut self, rect: WindowRect) -> Self {
         self.rect = Some(rect);
         self
     }
+    /// Sets the initial geometry for internally managed state, applied on mount.
     pub fn default_rect(mut self, rect: WindowRect) -> Self {
         self.default_rect = rect;
         self
     }
+    /// Sets application-controlled visibility.
+    ///
+    /// Store [`Self::on_visibility_change`] proposals and feed them back on rebuild.
     pub fn visibility(mut self, value: WindowVisibility) -> Self {
         self.visibility = Some(value);
         self
     }
+    /// Sets initial visibility for internally managed state, applied on mount.
     pub fn default_visibility(mut self, value: WindowVisibility) -> Self {
         self.default_visibility = value;
         self
     }
+    /// Sets minimum width and height in terminal cells.
     pub fn min_size(mut self, w: u16, h: u16) -> Self {
         self.min = (w, h);
         self
     }
+    /// Sets maximum outer width and height in terminal cells.
     pub fn max_size(mut self, w: u16, h: u16) -> Self {
         self.max = (w, h);
         self
     }
+    /// Sets whether the title bar can be dragged to move the window.
     pub fn movable(mut self, value: bool) -> Self {
         self.movable = value;
         self
     }
+    /// Sets whether the resize grip can change window dimensions.
     pub fn resizable(mut self, value: bool) -> Self {
         self.resizable = value;
         self
     }
+    /// Sets whether title-bar controls can collapse and expand the window.
     pub fn collapsible(mut self, value: bool) -> Self {
         self.collapsible = value;
         self.refresh_title();
         self
     }
+    /// Sets whether the title bar offers a hide control.
     pub fn hideable(mut self, value: bool) -> Self {
         self.hideable = value;
         self.refresh_title();
         self
     }
+    /// Sets the border drawn around the widget.
     pub fn border(mut self, value: BorderStyle) -> Self {
         self.border = value;
         self
     }
+    /// Sets the custom rendering style.
     pub fn style(mut self, value: Style) -> Self {
         self.style = Some(value);
         self
     }
+    /// Sets the style used for the active window.
     pub fn active_style(mut self, value: Style) -> Self {
         self.active_style = Some(value);
         self
     }
+    /// Sets the animation policy for changes in window geometry.
     pub fn layout_transition(mut self, value: LayoutTransition) -> Self {
         self.transition = value;
         self
     }
+    /// Sets the callback receiving constrained geometry after user movement or resizing.
     pub fn on_rect_change(mut self, handler: impl Fn(WindowRect) -> M + 'static) -> Self {
         self.on_rect = Some(Box::new(handler));
         self
     }
+    /// Sets the callback receiving proposed expanded, collapsed, or hidden state.
     pub fn on_visibility_change(
         mut self,
         handler: impl Fn(WindowVisibility) -> M + 'static,
@@ -273,6 +310,9 @@ impl<M: 'static> FloatingWindow<M> {
         self.on_visibility = Some(Box::new(handler));
         self
     }
+    /// Adds a close control and sets the callback for close requests.
+    ///
+    /// The application removes the window from its view in response.
     pub fn on_close(mut self, handler: impl Fn() -> M + 'static) -> Self {
         self.on_close = Some(Box::new(handler));
         self.refresh_title();

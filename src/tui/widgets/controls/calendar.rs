@@ -8,14 +8,33 @@ use crate::tui::style::{BorderStyle, Style};
 use crate::tui::widget::{EventCtx, EventPhase, RenderCtx, Widget};
 
 /// A simple date value used by the calendar widget.
+///
+/// Prefer [`Self::new`] to validate month and day combinations before passing a
+/// date to [`Calendar`]. Direct field construction does not validate the date.
+///
+/// # Examples
+///
+/// ```
+/// use rsille::tui::widgets::CalendarDate;
+///
+/// assert!(CalendarDate::new(2024, 2, 29).is_some());
+/// assert!(CalendarDate::new(2023, 2, 29).is_none());
+/// assert!(CalendarDate::new(2024, 13, 1).is_none());
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CalendarDate {
+    /// Gregorian calendar year.
     pub year: i32,
+    /// Month number from 1 (January) through 12 (December).
     pub month: u32,
+    /// Day of the month, starting at 1; must be valid for the year and month.
     pub day: u32,
 }
 
 impl CalendarDate {
+    /// Creates a date, returning `None` for an invalid month or day.
+    ///
+    /// Months are 1 through 12. Day validation uses Gregorian leap-year rules.
     pub fn new(year: i32, month: u32, day: u32) -> Option<Self> {
         if !(1..=12).contains(&month) {
             return None;
@@ -33,8 +52,11 @@ impl CalendarDate {
 /// Persistent calendar state stored in the widget store.
 #[derive(Debug, Clone, Default)]
 pub struct CalendarState {
+    /// Year displayed by the calendar, or `None` to use the initial date.
     pub visible_year: Option<i32>,
+    /// Displayed month from 1 through 12, or `None` to use the initial date.
     pub visible_month: Option<u32>,
+    /// Date reached by navigation, or `None` to use the initial date.
     pub selected_date: Option<CalendarDate>,
 }
 
@@ -63,6 +85,9 @@ impl<M> std::fmt::Debug for Calendar<M> {
 }
 
 impl<M> Calendar<M> {
+    /// Creates a calendar initially showing and selecting `initial_date`.
+    ///
+    /// Use [`CalendarDate::new`] to construct a valid date. A single border is enabled.
     pub fn new(initial_date: CalendarDate) -> Self {
         Self {
             initial_date,
@@ -76,36 +101,43 @@ impl<M> Calendar<M> {
         }
     }
 
+    /// Sets the stable widget key used to identify this widget across view rebuilds.
     pub fn key(mut self, name: impl Into<String>) -> Self {
         self.widget_key = Some(name.into());
         self
     }
 
+    /// Sets the border drawn around the widget.
     pub fn border(mut self, border: BorderStyle) -> Self {
         self.border = Some(border);
         self
     }
 
+    /// Removes the border and its reserved space.
     pub fn borderless(mut self) -> Self {
         self.border = None;
         self
     }
 
+    /// Sets whether this widget ignores input and is excluded from keyboard focus.
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
         self
     }
 
+    /// Sets the custom rendering style.
     pub fn style(mut self, style: Style) -> Self {
         self.custom_style = Some(style);
         self
     }
 
+    /// Sets the style used to highlight the active item or control while focused.
     pub fn focus_style(mut self, style: Style) -> Self {
         self.custom_focus_style = Some(style);
         self
     }
 
+    /// Sets the callback receiving the date reached by navigation or a mouse press.
     pub fn on_change<F>(mut self, handler: F) -> Self
     where
         F: Fn(CalendarDate) -> M + 'static,
@@ -114,6 +146,7 @@ impl<M> Calendar<M> {
         self
     }
 
+    /// Sets the callback receiving the selected date when Enter or Space confirms it.
     pub fn on_submit<F>(mut self, handler: F) -> Self
     where
         F: Fn(CalendarDate) -> M + 'static,

@@ -15,25 +15,40 @@ use super::selection::{SelectionMode, SelectionState};
 /// Column alignment within a data table.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TableAlign {
+    /// Aligns cell text to the left (default).
     #[default]
     Left,
+    /// Centers cell text.
     Center,
+    /// Aligns cell text to the right.
     Right,
 }
 
 /// Data table column definition.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DataTableColumn {
+    /// Stable column ID used by sorting, hiding, and cell callbacks.
     pub id: String,
+    /// Header text.
     pub title: String,
+    /// Column width in terminal cells.
     pub width: u16,
+    /// Horizontal alignment of cell text.
     pub align: TableAlign,
+    /// Sorting metadata; explicit table sorting does not require this flag.
     pub sortable: bool,
+    /// Whether queries search this column; all cells are searched if no columns opt in.
     pub filterable: bool,
+    /// Whether the column is eligible for display.
     pub visible: bool,
 }
 
 impl DataTableColumn {
+    /// Creates a visible, left-aligned column.
+    ///
+    /// The ID is the lowercased title with whitespace replaced by hyphens. Width
+    /// defaults to the title width or eight columns, whichever is larger. Sorting
+    /// and filtering flags default to `false`.
     pub fn new(title: impl Into<String>) -> Self {
         let title = title.into();
         let id = title.to_lowercase().replace(char::is_whitespace, "-");
@@ -49,31 +64,41 @@ impl DataTableColumn {
         }
     }
 
+    /// Sets the stable column ID used by sorting, visibility, and cell callbacks.
     pub fn id(mut self, id: impl Into<String>) -> Self {
         self.id = id.into();
         self
     }
 
+    /// Sets the width in terminal columns, clamped to at least 3.
     pub fn width(mut self, width: u16) -> Self {
         self.width = width.max(3);
         self
     }
 
+    /// Sets horizontal alignment of cell text.
     pub fn align(mut self, align: TableAlign) -> Self {
         self.align = align;
         self
     }
 
+    /// Sets the column's sortable metadata flag.
+    ///
+    /// Sorting is applied through [`DataTable::sort`] regardless of this flag.
     pub fn sortable(mut self, sortable: bool) -> Self {
         self.sortable = sortable;
         self
     }
 
+    /// Marks this column as participating in query filtering.
+    ///
+    /// When no columns are marked filterable, all cells are searched.
     pub fn filterable(mut self, filterable: bool) -> Self {
         self.filterable = filterable;
         self
     }
 
+    /// Sets whether the column is displayed; hidden columns keep their cell indices.
     pub fn visible(mut self, visible: bool) -> Self {
         self.visible = visible;
         self
@@ -83,12 +108,16 @@ impl DataTableColumn {
 /// A single row in the data table.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DataTableRow {
+    /// Stable item identifier used by navigation and message callbacks.
     pub id: String,
+    /// Cell text in original column-definition order, including hidden columns.
     pub cells: Vec<String>,
+    /// Whether this item is skipped by navigation and activation.
     pub disabled: bool,
 }
 
 impl DataTableRow {
+    /// Creates an enabled row with cells in column-definition order.
     pub fn new(id: impl Into<String>, cells: impl IntoIterator<Item = impl Into<String>>) -> Self {
         Self {
             id: id.into(),
@@ -97,6 +126,7 @@ impl DataTableRow {
         }
     }
 
+    /// Sets whether this item is skipped by navigation and activation.
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
         self
@@ -108,10 +138,15 @@ impl DataTableRow {
 pub struct DataTableState {
     /// Active resize gesture: column id, initial pointer column, and initial width.
     pub resizing_column: Option<(String, u16, u16)>,
+    /// ID of the active navigation row, if any.
     pub active_row: Option<String>,
+    /// Zero-based index into the visible columns.
     pub active_column: usize,
+    /// Navigation cursor and committed selection for this widget.
     pub selection: SelectionState,
+    /// User-resized widths as `(column_id, terminal_columns)` pairs.
     pub column_widths: Vec<(String, u16)>,
+    /// Zero-based index of the first visible row.
     pub scroll_offset: usize,
     #[doc(hidden)]
     pub controlled_active: Option<Option<String>>,
@@ -124,26 +159,33 @@ pub struct DataTableState {
 /// Data table sort direction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DataTableSortDirection {
+    /// Orders values from smallest to largest.
     Asc,
+    /// Orders values from largest to smallest.
     Desc,
 }
 
 /// Controlled sort state for a data table.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DataTableSort {
+    /// ID of the column whose cell text is compared.
     pub column_id: String,
+    /// Ordering applied to the column values.
     pub direction: DataTableSortDirection,
 }
 
 /// Keyboard navigation model for a data table.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum DataTableNavigationMode {
+    /// Moves between rows; horizontal arrow keys do not change the column (default).
     #[default]
     Row,
+    /// Moves between rows and visible columns.
     Cell,
 }
 
 impl DataTableSort {
+    /// Creates a sort specification for the column with the given ID.
     pub fn new(column_id: impl Into<String>, direction: DataTableSortDirection) -> Self {
         Self {
             column_id: column_id.into(),
@@ -153,6 +195,29 @@ impl DataTableSort {
 }
 
 /// Focusable data table widget with internal row navigation.
+///
+/// Rows are addressed by stable IDs. Navigation and committed selection can be
+/// managed internally or supplied through [`Self::active_row`] and
+/// [`Self::selected_ids`]. In controlled mode, store callback payloads in application
+/// state and pass them back on the next view rebuild. Sorting and filtering affect
+/// display order without changing the row IDs or the original cell order.
+///
+/// # Examples
+///
+/// ```
+/// use rsille::tui::widgets::{data_table, DataTableColumn, DataTableRow};
+///
+/// enum Message { ActiveRowChanged(Option<String>) }
+///
+/// let active_row = Some(String::from("alpha"));
+/// let table = data_table()
+///     .column(DataTableColumn::new("Name").id("name").width(16))
+///     .row(DataTableRow::new("alpha", ["Alpha"]))
+///     .row(DataTableRow::new("beta", ["Beta"]))
+///     .active_row(active_row)
+///     .on_active_row_change(Message::ActiveRowChanged);
+/// # let _ = table;
+/// ```
 pub struct DataTable<M = ()> {
     columns: Vec<DataTableColumn>,
     rows: Vec<DataTableRow>,
@@ -392,6 +457,9 @@ impl<M: 'static> DataTable<M> {
 }
 
 impl<M> DataTable<M> {
+    /// Creates an empty, ten-row-high table with a single border and visible header.
+    ///
+    /// Navigation and selection both default to row-based, single selection.
     pub fn new() -> Self {
         Self {
             columns: Vec::new(),
@@ -421,16 +489,19 @@ impl<M> DataTable<M> {
         }
     }
 
+    /// Sets the stable widget key used to identify this widget across view rebuilds.
     pub fn key(mut self, name: impl Into<String>) -> Self {
         self.widget_key = Some(name.into());
         self
     }
 
+    /// Appends a column definition.
     pub fn column(mut self, column: DataTableColumn) -> Self {
         self.columns.push(column);
         self
     }
 
+    /// Appends column definitions in iteration order.
     pub fn columns<I>(mut self, columns: I) -> Self
     where
         I: IntoIterator<Item = DataTableColumn>,
@@ -439,11 +510,13 @@ impl<M> DataTable<M> {
         self
     }
 
+    /// Appends a row.
     pub fn row(mut self, row: DataTableRow) -> Self {
         self.rows.push(row);
         self
     }
 
+    /// Appends rows in iteration order.
     pub fn rows<I>(mut self, rows: I) -> Self
     where
         I: IntoIterator<Item = DataTableRow>,
@@ -452,56 +525,74 @@ impl<M> DataTable<M> {
         self
     }
 
+    /// Sets the height in terminal rows, clamped to at least 4.
     pub fn height(mut self, height: u16) -> Self {
         self.height = height.max(4);
         self
     }
 
+    /// Sets the border drawn around the widget.
     pub fn border(mut self, border: BorderStyle) -> Self {
         self.border = Some(border);
         self
     }
 
+    /// Removes the border and its reserved space.
     pub fn borderless(mut self) -> Self {
         self.border = None;
         self
     }
 
+    /// Sets whether this widget ignores input and is excluded from keyboard focus.
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
         self
     }
 
+    /// Sets the text shown when there are no items to display.
     pub fn empty_message(mut self, message: impl Into<String>) -> Self {
         self.empty_message = message.into();
         self
     }
 
+    /// Filters rows by a trimmed, case-insensitive substring query.
+    ///
+    /// Only columns marked filterable are searched, or all cells if none are marked.
+    /// An empty or whitespace-only query shows all rows.
     pub fn filter_query(mut self, query: impl Into<String>) -> Self {
         self.filter_query = Some(query.into());
         self
     }
 
+    /// Sets an optional filter query; `None` disables filtering.
+    ///
+    /// See [`Self::filter_query`] for matching rules.
     pub fn filter_query_opt(mut self, query: Option<String>) -> Self {
         self.filter_query = query;
         self
     }
 
+    /// Sorts displayed rows by case-insensitive cell text in the specified column.
+    ///
+    /// Values are compared lexicographically. An unknown column ID leaves input order unchanged.
     pub fn sort(mut self, sort: DataTableSort) -> Self {
         self.sort = Some(sort);
         self
     }
 
+    /// Sets an optional sort specification; `None` preserves input order.
     pub fn sort_opt(mut self, sort: Option<DataTableSort>) -> Self {
         self.sort = sort;
         self
     }
 
+    /// Adds a column ID to the hidden-column list without removing its row cells.
     pub fn hidden_column(mut self, column_id: impl Into<String>) -> Self {
         self.hidden_columns.push(column_id.into());
         self
     }
 
+    /// Appends column IDs to the hidden-column list.
     pub fn hidden_columns<I, S>(mut self, column_ids: I) -> Self
     where
         I: IntoIterator<Item = S>,
@@ -512,21 +603,27 @@ impl<M> DataTable<M> {
         self
     }
 
+    /// Sets whether the header and separator are shown above scrolling rows.
+    ///
+    /// Passing `false` hides the header entirely.
     pub fn sticky_header(mut self, sticky: bool) -> Self {
         self.sticky_header = sticky;
         self
     }
 
+    /// Sets whether arrow keys navigate rows only or individual cells.
     pub fn navigation_mode(mut self, mode: DataTableNavigationMode) -> Self {
         self.navigation_mode = mode;
         self
     }
 
+    /// Sets single or multiple selection independently of the navigation cursor.
     pub fn selection_mode(mut self, mode: SelectionMode) -> Self {
         self.selection_mode = mode;
         self
     }
 
+    /// Enables multiple selection when `true`, or single selection when `false`.
     pub fn multi_select(mut self, multi_select: bool) -> Self {
         self.selection_mode = if multi_select {
             SelectionMode::Multiple
@@ -536,11 +633,13 @@ impl<M> DataTable<M> {
         self
     }
 
+    /// Sets the custom rendering style.
     pub fn style(mut self, style: Style) -> Self {
         self.custom_style = Some(style);
         self
     }
 
+    /// Sets the style used to highlight the active item or control while focused.
     pub fn focus_style(mut self, style: Style) -> Self {
         self.custom_focus_style = Some(style);
         self
@@ -555,6 +654,9 @@ impl<M> DataTable<M> {
         self
     }
 
+    /// Sets the initial cursor for uncontrolled state.
+    ///
+    /// `None` starts with no active row. This seed is applied once when state initializes.
     pub fn default_active_row(mut self, id: Option<String>) -> Self {
         self.default_active_row = Some(id);
         self
@@ -567,6 +669,9 @@ impl<M> DataTable<M> {
         self
     }
 
+    /// Sets the initial selected row IDs for uncontrolled state.
+    ///
+    /// The seed is applied once when state initializes.
     pub fn default_selected_ids(mut self, ids: impl IntoIterator<Item = String>) -> Self {
         self.default_selected_ids = ids.into_iter().collect();
         self
@@ -579,6 +684,10 @@ impl<M> DataTable<M> {
         self
     }
 
+    /// Sets the legacy callback receiving the active row ID after navigation.
+    ///
+    /// This can fire when movement is clamped. Use [`Self::on_active_row_change`]
+    /// for semantic changes, including clearing the cursor.
     pub fn on_change<F>(mut self, handler: F) -> Self
     where
         F: Fn(String) -> M + 'static,
@@ -587,6 +696,7 @@ impl<M> DataTable<M> {
         self
     }
 
+    /// Sets the message callback receiving the active item's ID on activation.
     pub fn on_submit<F>(mut self, handler: F) -> Self
     where
         F: Fn(String) -> M + 'static,
@@ -595,6 +705,7 @@ impl<M> DataTable<M> {
         self
     }
 
+    /// Sets the message callback receiving `(row_id, column_id)` after cell navigation.
     pub fn on_cell_change<F>(mut self, handler: F) -> Self
     where
         F: Fn(String, String) -> M + 'static,
@@ -603,6 +714,7 @@ impl<M> DataTable<M> {
         self
     }
 
+    /// Sets the message callback receiving the complete list of selected IDs.
     pub fn on_selection_change<F>(mut self, handler: F) -> Self
     where
         F: Fn(Vec<String>) -> M + 'static,

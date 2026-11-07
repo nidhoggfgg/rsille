@@ -37,6 +37,7 @@ pub enum TextWrap {
 }
 
 impl<M> Label<M> {
+    /// Creates an unwrapped label aligned to the top left with content-sized constraints.
     pub fn new(content: impl Into<String>) -> Self {
         Self {
             content: content.into(),
@@ -51,11 +52,13 @@ impl<M> Label<M> {
         }
     }
 
+    /// Sets the stable widget key used to identify this widget across view rebuilds.
     pub fn key(mut self, name: impl Into<String>) -> Self {
         self.widget_key = Some(name.into());
         self
     }
 
+    /// Sets the custom rendering style.
     pub fn style(mut self, style: Style) -> Self {
         self.style = style;
         self
@@ -127,31 +130,37 @@ impl<M> Label<M> {
         self
     }
 
+    /// Sets the foreground text color.
     pub fn fg(mut self, color: Color) -> Self {
         self.style = self.style.fg(color);
         self
     }
 
+    /// Sets the background color.
     pub fn bg(mut self, color: Color) -> Self {
         self.style = self.style.bg(color);
         self
     }
 
+    /// Enables bold text.
     pub fn bold(mut self) -> Self {
         self.style = self.style.bold();
         self
     }
 
+    /// Enables italic text.
     pub fn italic(mut self) -> Self {
         self.style = self.style.italic();
         self
     }
 
+    /// Enables underlined text.
     pub fn underline(mut self) -> Self {
         self.style = self.style.underlined();
         self
     }
 
+    /// Returns the original label text.
     pub fn content(&self) -> &str {
         &self.content
     }

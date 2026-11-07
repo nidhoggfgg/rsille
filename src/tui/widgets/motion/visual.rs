@@ -96,11 +96,13 @@ impl LifecycleVisualEffect {
 
 /// Input accepted by [`Visual::enter`].
 pub trait IntoVisualEnter {
+    /// Applies this enter timeline, theme slot, or visual effect to the wrapper.
     fn apply_to<M>(self, visual: Visual<M>) -> Visual<M>;
 }
 
 /// Input accepted by [`Visual::exit`].
 pub trait IntoVisualExit {
+    /// Applies this exit timeline, theme slot, or visual effect to the wrapper.
     fn apply_to<M>(self, visual: Visual<M>) -> Visual<M>;
 }
 
@@ -149,6 +151,7 @@ impl IntoVisualExit for Timeline {
 }
 
 impl<M> Visual<M> {
+    /// Wraps a child with no effects and the default visual configuration.
     pub fn new(child: impl IntoWidget<M>) -> Self {
         Self {
             child: child.into_widget(),
@@ -171,11 +174,13 @@ impl<M> Visual<M> {
         }
     }
 
+    /// Sets the stable widget key used to identify this widget across view rebuilds.
     pub fn key(mut self, name: impl Into<String>) -> Self {
         self.widget_key = Some(name.into());
         self
     }
 
+    /// Appends an effect to the rendering pipeline.
     pub fn effect(mut self, effect: VisualEffect) -> Self {
         self.effects.push(effect);
         self
@@ -204,6 +209,7 @@ impl<M> Visual<M> {
         self
     }
 
+    /// Appends effects in iteration order.
     pub fn effects<I>(mut self, effects: I) -> Self
     where
         I: IntoIterator<Item = VisualEffect>,
@@ -247,62 +253,97 @@ impl<M> Visual<M> {
         self
     }
 
+    /// Appends the default fade-in effect.
+    ///
+    /// Configure [`Self::animation`] or [`Self::progress`] to drive effect progress.
     pub fn fade_in(self) -> Self {
         self.effect(VisualEffect::fade_in())
     }
 
+    /// Appends the default fade-out effect.
+    ///
+    /// Configure [`Self::animation`] or [`Self::progress`] to drive effect progress.
     pub fn fade_out(self) -> Self {
         self.effect(VisualEffect::fade_out())
     }
 
+    /// Appends a gradient between the supplied colors along `direction`.
     pub fn gradient(self, start: Color, end: Color, direction: GradientDirection) -> Self {
         self.effect(VisualEffect::gradient(start, end, direction))
     }
 
+    /// Appends the default shatter effect.
+    ///
+    /// Configure [`Self::animation`] or [`Self::progress`] to drive effect progress.
     pub fn shatter(self) -> Self {
         self.effect(VisualEffect::shatter())
     }
 
+    /// Appends a magic-lamp distortion toward `anchor`.
     pub fn magic_lamp(self, anchor: VisualAnchor) -> Self {
         self.effect(VisualEffect::magic_lamp(anchor))
     }
 
+    /// Appends a wipe effect in the supplied direction.
     pub fn wipe(self, direction: WipeDirection) -> Self {
         self.effect(VisualEffect::wipe(direction))
     }
 
+    /// Appends a reveal effect in the supplied direction.
     pub fn reveal(self, direction: WipeDirection) -> Self {
         self.effect(VisualEffect::reveal(direction))
     }
 
+    /// Appends the default dissolve effect.
+    ///
+    /// Configure [`Self::animation`] or [`Self::progress`] to drive effect progress.
     pub fn dissolve(self) -> Self {
         self.effect(VisualEffect::dissolve())
     }
 
+    /// Appends a wave distortion along the supplied axis.
     pub fn wave(self, axis: WaveAxis) -> Self {
         self.effect(VisualEffect::wave(axis))
     }
 
+    /// Appends the default glitch effect.
+    ///
+    /// Configure [`Self::animation`] or [`Self::progress`] to drive effect progress.
     pub fn glitch(self) -> Self {
         self.effect(VisualEffect::glitch())
     }
 
+    /// Appends the default scanline effect.
+    ///
+    /// Configure [`Self::animation`] or [`Self::progress`] to drive effect progress.
     pub fn scanline(self) -> Self {
         self.effect(VisualEffect::scanline())
     }
 
+    /// Appends the default typewriter effect.
+    ///
+    /// Configure [`Self::animation`] or [`Self::progress`] to drive effect progress.
     pub fn typewriter(self) -> Self {
         self.effect(VisualEffect::typewriter())
     }
 
+    /// Appends the default blur-like effect.
+    ///
+    /// Configure [`Self::animation`] or [`Self::progress`] to drive effect progress.
     pub fn blur_like(self) -> Self {
         self.effect(VisualEffect::blur_like())
     }
 
+    /// Appends the default highlight-sweep effect.
+    ///
+    /// Configure [`Self::animation`] or [`Self::progress`] to drive effect progress.
     pub fn highlight_sweep(self) -> Self {
         self.effect(VisualEffect::highlight_sweep())
     }
 
+    /// Appends the default sparkle effect.
+    ///
+    /// Configure [`Self::animation`] or [`Self::progress`] to drive effect progress.
     pub fn sparkle(self) -> Self {
         self.effect(VisualEffect::sparkle())
     }
@@ -397,6 +438,7 @@ impl<M> Visual<M> {
         self
     }
 
+    /// Alias for [`Self::hit_test_mode`].
     pub fn hit_test(self, mode: HitTestMode) -> Self {
         self.hit_test_mode(mode)
     }

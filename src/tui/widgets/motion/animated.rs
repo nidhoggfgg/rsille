@@ -39,6 +39,7 @@ impl<M> std::fmt::Debug for Animated<M> {
 }
 
 impl<M> Animated<M> {
+    /// Wraps a child with default presence settings and no layout or shared transition.
     pub fn new(child: impl IntoWidget<M>) -> Self {
         Self {
             child: child.into_widget(),
@@ -50,11 +51,15 @@ impl<M> Animated<M> {
         }
     }
 
+    /// Sets the stable widget key used to identify this widget across view rebuilds.
     pub fn key(mut self, name: impl Into<String>) -> Self {
         self.widget_key = Some(name.into());
         self
     }
 
+    /// Animates both size and position using the supplied specification.
+    ///
+    /// Also updates an existing shared transition to use the same layout policy.
     pub fn layout(mut self, spec: AnimationSpec) -> Self {
         let transition = LayoutTransition::size_and_position(spec).hit_test(self.hit_test_mode);
         self.layout_transition = Some(transition);
@@ -64,6 +69,9 @@ impl<M> Animated<M> {
         self
     }
 
+    /// Sets the layout transition and adopts its hit-test policy.
+    ///
+    /// Also updates the layout policy of an existing shared transition.
     pub fn layout_transition(mut self, transition: LayoutTransition) -> Self {
         self.hit_test_mode = transition.hit_test;
         self.layout_transition = Some(transition);
@@ -73,6 +81,9 @@ impl<M> Animated<M> {
         self
     }
 
+    /// Identifies this widget for shared-element transitions across view locations.
+    ///
+    /// Uses the configured layout transition, or a normal size-and-position transition.
     pub fn shared(mut self, id: impl Into<String>) -> Self {
         self.shared_transition = Some(SharedTransition::new(
             id,
@@ -84,6 +95,7 @@ impl<M> Animated<M> {
         self
     }
 
+    /// Sets an explicit shared-element ID and transition, adopting its hit-test policy.
     pub fn shared_transition(
         mut self,
         id: impl Into<String>,
@@ -94,6 +106,9 @@ impl<M> Animated<M> {
         self
     }
 
+    /// Sets whether pointer hit testing follows target or animated geometry.
+    ///
+    /// Updates existing layout and shared transitions to use the same policy.
     pub fn hit_test_mode(mut self, mode: HitTestMode) -> Self {
         self.hit_test_mode = mode;
         if let Some(transition) = self.layout_transition.as_mut() {
@@ -105,26 +120,31 @@ impl<M> Animated<M> {
         self
     }
 
+    /// Alias for [`Self::hit_test_mode`].
     pub fn hit_test(self, mode: HitTestMode) -> Self {
         self.hit_test_mode(mode)
     }
 
+    /// Sets the enter timeline and enables playback on the initial mount.
     pub fn enter(mut self, timeline: impl Into<Timeline>) -> Self {
         self.presence = self.presence.enter(timeline);
         self.presence.initial = InitialAnimation::Play;
         self
     }
 
+    /// Sets the exit timeline used while removing the child.
     pub fn exit(mut self, timeline: impl Into<Timeline>) -> Self {
         self.presence = self.presence.exit(timeline);
         self
     }
 
+    /// Replaces the full enter/exit presence configuration.
     pub fn presence(mut self, presence: Presence) -> Self {
         self.presence = presence;
         self
     }
 
+    /// Returns the configured presence policy.
     pub fn presence_config(&self) -> &Presence {
         &self.presence
     }

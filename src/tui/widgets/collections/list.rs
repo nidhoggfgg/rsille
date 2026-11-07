@@ -13,12 +13,16 @@ use super::selection::{SelectionMode, SelectionState};
 /// A single list item.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ListItem {
+    /// Stable item identifier used by navigation and message callbacks.
     pub id: String,
+    /// User-visible text for this item.
     pub label: String,
+    /// Whether this item is skipped by navigation and activation.
     pub disabled: bool,
 }
 
 impl ListItem {
+    /// Creates an enabled item with a stable ID and a visible label.
     pub fn new(id: impl Into<String>, label: impl Into<String>) -> Self {
         Self {
             id: id.into(),
@@ -27,6 +31,7 @@ impl ListItem {
         }
     }
 
+    /// Sets whether this item is skipped by navigation and activation.
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
         self
@@ -48,8 +53,11 @@ impl From<String> for ListItem {
 /// Persistent list state stored in the widget store.
 #[derive(Debug, Clone, Default)]
 pub struct ListState {
+    /// ID of the item at the navigation cursor, if initialized.
     pub active_item: Option<String>,
+    /// Navigation cursor and committed selection for this widget.
     pub selection: SelectionState,
+    /// Zero-based index of the first visible row.
     pub scroll_offset: usize,
 }
 
@@ -84,6 +92,7 @@ impl<M> std::fmt::Debug for List<M> {
 }
 
 impl<M> List<M> {
+    /// Creates an empty, six-row-high list with a single border and single selection.
     pub fn new() -> Self {
         Self {
             items: Vec::new(),
@@ -100,16 +109,19 @@ impl<M> List<M> {
         }
     }
 
+    /// Sets the stable widget key used to identify this widget across view rebuilds.
     pub fn key(mut self, name: impl Into<String>) -> Self {
         self.widget_key = Some(name.into());
         self
     }
 
+    /// Appends an item to the end of the collection.
     pub fn item(mut self, item: impl Into<ListItem>) -> Self {
         self.items.push(item.into());
         self
     }
 
+    /// Appends items in iteration order, preserving existing items.
     pub fn items<I>(mut self, items: I) -> Self
     where
         I: IntoIterator,
@@ -119,31 +131,37 @@ impl<M> List<M> {
         self
     }
 
+    /// Sets the height in terminal rows, clamped to at least 1.
     pub fn height(mut self, height: u16) -> Self {
         self.height = height.max(1);
         self
     }
 
+    /// Sets the border drawn around the widget.
     pub fn border(mut self, border: BorderStyle) -> Self {
         self.border = Some(border);
         self
     }
 
+    /// Removes the border and its reserved space.
     pub fn borderless(mut self) -> Self {
         self.border = None;
         self
     }
 
+    /// Sets whether this widget ignores input and is excluded from keyboard focus.
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
         self
     }
 
+    /// Sets single or multiple selection independently of the navigation cursor.
     pub fn selection_mode(mut self, mode: SelectionMode) -> Self {
         self.selection_mode = mode;
         self
     }
 
+    /// Enables multiple selection when `true`, or single selection when `false`.
     pub fn multi_select(mut self, multi_select: bool) -> Self {
         self.selection_mode = if multi_select {
             SelectionMode::Multiple
@@ -153,16 +171,19 @@ impl<M> List<M> {
         self
     }
 
+    /// Sets the custom rendering style.
     pub fn style(mut self, style: Style) -> Self {
         self.custom_style = Some(style);
         self
     }
 
+    /// Sets the style used to highlight the active item or control while focused.
     pub fn focus_style(mut self, style: Style) -> Self {
         self.custom_focus_style = Some(style);
         self
     }
 
+    /// Sets the message callback receiving the active item's ID after navigation.
     pub fn on_change<F>(mut self, handler: F) -> Self
     where
         F: Fn(String) -> M + 'static,
@@ -171,6 +192,7 @@ impl<M> List<M> {
         self
     }
 
+    /// Sets the message callback receiving the active item's ID on activation.
     pub fn on_submit<F>(mut self, handler: F) -> Self
     where
         F: Fn(String) -> M + 'static,
@@ -179,6 +201,7 @@ impl<M> List<M> {
         self
     }
 
+    /// Sets the message callback receiving the complete list of selected IDs.
     pub fn on_selection_change<F>(mut self, handler: F) -> Self
     where
         F: Fn(Vec<String>) -> M + 'static,

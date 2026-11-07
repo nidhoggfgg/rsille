@@ -13,40 +13,60 @@ use crate::tui::widgets::pointer;
 
 use super::selection::{SelectionMode, SelectionState};
 
+/// Kind of entry and how its children become available.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileExplorerItemKind {
+    /// A file entry.
     File,
+    /// A directory with application-supplied children.
     Directory,
+    /// A directory that can request children through a load callback.
     LazyDirectory,
 }
 
+/// An application-supplied file or directory entry.
+///
+/// IDs should remain stable and unique within the explorer. No filesystem I/O is
+/// performed by the widget; provide children directly or handle lazy-load messages.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileExplorerItem {
+    /// Stable item identifier used by navigation and message callbacks.
     pub id: String,
+    /// User-visible text for this item.
     pub label: String,
+    /// Entry kind, including whether children are loaded lazily.
     pub kind: FileExplorerItemKind,
+    /// Child items in display order.
     pub children: Vec<FileExplorerItem>,
+    /// Whether this item is skipped by navigation and activation.
     pub disabled: bool,
 }
 
 impl FileExplorerItem {
+    /// Creates an enabled file entry with no children.
     pub fn file(id: impl Into<String>, label: impl Into<String>) -> Self {
         Self::new(id, label, FileExplorerItemKind::File)
     }
 
+    /// Creates an enabled directory whose children are supplied by the application.
     pub fn directory(id: impl Into<String>, label: impl Into<String>) -> Self {
         Self::new(id, label, FileExplorerItemKind::Directory)
     }
 
+    /// Creates a directory whose children can be requested on expansion.
+    ///
+    /// Handle [`FileExplorer::on_load_children`] to load and provide the children.
     pub fn lazy_directory(id: impl Into<String>, label: impl Into<String>) -> Self {
         Self::new(id, label, FileExplorerItemKind::LazyDirectory)
     }
 
+    /// Appends a child after the existing children.
     pub fn child(mut self, child: FileExplorerItem) -> Self {
         self.children.push(child);
         self
     }
 
+    /// Appends children in iteration order, preserving existing children.
     pub fn children<I>(mut self, children: I) -> Self
     where
         I: IntoIterator<Item = FileExplorerItem>,
@@ -55,6 +75,7 @@ impl FileExplorerItem {
         self
     }
 
+    /// Sets whether this item is skipped by navigation and activation.
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
         self
@@ -71,11 +92,16 @@ impl FileExplorerItem {
     }
 }
 
+/// Persistent navigation, expansion, and selection state in the widget store.
 #[derive(Debug, Clone, Default)]
 pub struct FileExplorerState {
+    /// ID of the item at the navigation cursor, if initialized.
     pub active_item: Option<String>,
+    /// IDs of expanded nodes whose children are visible.
     pub expanded_items: FxHashSet<String>,
+    /// Navigation cursor and committed selection for this widget.
     pub selection: SelectionState,
+    /// Zero-based index of the first visible row.
     pub scroll_offset: usize,
 }
 
@@ -90,6 +116,10 @@ struct VisibleFileRow {
     disabled: bool,
 }
 
+/// A navigable file hierarchy backed by application-supplied entries.
+///
+/// Use [`Self::on_load_children`] to populate lazy directories and [`Self::on_open`]
+/// to handle activation. The widget itself does not read the filesystem.
 pub struct FileExplorer<M = ()> {
     items: Vec<FileExplorerItem>,
     height: u16,
@@ -122,6 +152,7 @@ impl<M> std::fmt::Debug for FileExplorer<M> {
 }
 
 impl<M> FileExplorer<M> {
+    /// Creates an empty, twelve-row-high explorer with a single border and single selection.
     pub fn new() -> Self {
         Self {
             items: Vec::new(),
@@ -139,16 +170,19 @@ impl<M> FileExplorer<M> {
         }
     }
 
+    /// Sets the stable widget key used to identify this widget across view rebuilds.
     pub fn key(mut self, name: impl Into<String>) -> Self {
         self.widget_key = Some(name.into());
         self
     }
 
+    /// Appends an item to the end of the collection.
     pub fn item(mut self, item: FileExplorerItem) -> Self {
         self.items.push(item);
         self
     }
 
+    /// Appends items in iteration order, preserving existing items.
     pub fn items<I>(mut self, items: I) -> Self
     where
         I: IntoIterator<Item = FileExplorerItem>,
@@ -157,31 +191,37 @@ impl<M> FileExplorer<M> {
         self
     }
 
+    /// Sets the height in terminal rows, clamped to at least 1.
     pub fn height(mut self, height: u16) -> Self {
         self.height = height.max(1);
         self
     }
 
+    /// Sets the border drawn around the widget.
     pub fn border(mut self, border: BorderStyle) -> Self {
         self.border = Some(border);
         self
     }
 
+    /// Removes the border and its reserved space.
     pub fn borderless(mut self) -> Self {
         self.border = None;
         self
     }
 
+    /// Sets whether this widget ignores input and is excluded from keyboard focus.
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
         self
     }
 
+    /// Sets single or multiple selection independently of the navigation cursor.
     pub fn selection_mode(mut self, mode: SelectionMode) -> Self {
         self.selection_mode = mode;
         self
     }
 
+    /// Enables multiple selection when `true`, or single selection when `false`.
     pub fn multi_select(mut self, multi_select: bool) -> Self {
         self.selection_mode = if multi_select {
             SelectionMode::Multiple
@@ -191,16 +231,19 @@ impl<M> FileExplorer<M> {
         self
     }
 
+    /// Sets the custom rendering style.
     pub fn style(mut self, style: Style) -> Self {
         self.custom_style = Some(style);
         self
     }
 
+    /// Sets the style used to highlight the active item or control while focused.
     pub fn focus_style(mut self, style: Style) -> Self {
         self.custom_focus_style = Some(style);
         self
     }
 
+    /// Sets the message callback receiving the active item's ID after navigation.
     pub fn on_change<F>(mut self, handler: F) -> Self
     where
         F: Fn(String) -> M + 'static,
@@ -209,6 +252,7 @@ impl<M> FileExplorer<M> {
         self
     }
 
+    /// Sets the message callback receiving the activated entry's ID.
     pub fn on_open<F>(mut self, handler: F) -> Self
     where
         F: Fn(String) -> M + 'static,
@@ -217,6 +261,9 @@ impl<M> FileExplorer<M> {
         self
     }
 
+    /// Sets the message callback receiving the ID of a lazy directory to populate.
+    ///
+    /// The application loads children and supplies updated entries on the next rebuild.
     pub fn on_load_children<F>(mut self, handler: F) -> Self
     where
         F: Fn(String) -> M + 'static,
@@ -225,6 +272,7 @@ impl<M> FileExplorer<M> {
         self
     }
 
+    /// Sets the message callback receiving the complete list of selected IDs.
     pub fn on_selection_change<F>(mut self, handler: F) -> Self
     where
         F: Fn(Vec<String>) -> M + 'static,
@@ -686,6 +734,7 @@ fn truncate_to_width(
     metrics.clip(text, 0, max_width)
 }
 
+/// Creates an empty [`FileExplorer`] with its default configuration.
 pub fn file_explorer<M>() -> FileExplorer<M> {
     FileExplorer::new()
 }

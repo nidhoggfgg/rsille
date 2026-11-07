@@ -31,6 +31,7 @@ impl<M> std::fmt::Debug for Switch<M> {
 }
 
 impl<M> Switch<M> {
+    /// Creates an enabled, unchecked switch with the supplied label.
     pub fn new(label: impl Into<String>) -> Self {
         Self {
             label: label.into(),
@@ -43,31 +44,41 @@ impl<M> Switch<M> {
         }
     }
 
+    /// Sets the stable widget key used to identify this widget across view rebuilds.
     pub fn key(mut self, name: impl Into<String>) -> Self {
         self.widget_key = Some(name.into());
         self
     }
 
+    /// Sets the application-controlled checked value.
+    ///
+    /// Store values emitted by `on_change` and pass them back on the next view rebuild.
     pub fn checked(mut self, checked: bool) -> Self {
         self.checked = checked;
         self
     }
 
+    /// Sets whether this widget ignores input and is excluded from keyboard focus.
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
         self
     }
 
+    /// Sets the custom rendering style.
     pub fn style(mut self, style: Style) -> Self {
         self.custom_style = Some(style);
         self
     }
 
+    /// Sets the style used to highlight the active item or control while focused.
     pub fn focus_style(mut self, style: Style) -> Self {
         self.custom_focus_style = Some(style);
         self
     }
 
+    /// Sets the callback receiving the proposed checked value.
+    ///
+    /// The widget does not retain this value; feed it back through [`Self::checked`].
     pub fn on_change<F>(mut self, handler: F) -> Self
     where
         F: Fn(bool) -> M + 'static,

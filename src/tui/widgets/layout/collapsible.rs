@@ -13,6 +13,10 @@ use crate::tui::widget::{EventCtx, EventPhase, IntoWidget, MeasureCtx, RenderCtx
 
 use super::panel::{container_constraints, layout_children_vertical};
 
+/// A titled section whose expanded state is controlled by the application.
+///
+/// Feed [`Self::on_toggle`] values back through [`Self::expanded`]. Collapsed
+/// children are unmounted unless [`Self::retain_state`] is enabled.
 pub struct Collapsible<M = ()> {
     title: String,
     expanded: bool,
@@ -42,6 +46,9 @@ impl<M> std::fmt::Debug for Collapsible<M> {
 }
 
 impl<M> Collapsible<M> {
+    /// Creates an empty, collapsed section with no padding or gap.
+    ///
+    /// Hidden child state is not retained by default.
     pub fn new(title: impl Into<String>) -> Self {
         Self {
             title: title.into(),
@@ -58,11 +65,13 @@ impl<M> Collapsible<M> {
         }
     }
 
+    /// Sets the stable widget key used to identify this widget across view rebuilds.
     pub fn key(mut self, name: impl Into<String>) -> Self {
         self.widget_key = Some(name.into());
         self
     }
 
+    /// Sets the application-controlled expansion state.
     pub fn expanded(mut self, expanded: bool) -> Self {
         self.expanded = expanded;
         self
@@ -77,36 +86,43 @@ impl<M> Collapsible<M> {
         self
     }
 
+    /// Sets whether this widget ignores input and is excluded from keyboard focus.
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
         self
     }
 
+    /// Sets interior spacing in terminal cells.
     pub fn padding(mut self, padding: Padding) -> Self {
         self.padding = padding;
         self
     }
 
+    /// Sets the number of terminal rows between consecutive children.
     pub fn gap(mut self, gap: u16) -> Self {
         self.gap = gap;
         self
     }
 
+    /// Sets the custom rendering style.
     pub fn style(mut self, style: Style) -> Self {
         self.custom_style = Some(style);
         self
     }
 
+    /// Sets the style used to highlight the active item or control while focused.
     pub fn focus_style(mut self, style: Style) -> Self {
         self.custom_focus_style = Some(style);
         self
     }
 
+    /// Appends a child after the existing children.
     pub fn child(mut self, widget: impl IntoWidget<M>) -> Self {
         self.children.push(widget.into_widget());
         self
     }
 
+    /// Appends children in iteration order, preserving existing children.
     pub fn children<I>(mut self, widgets: I) -> Self
     where
         I: IntoIterator,
@@ -117,6 +133,9 @@ impl<M> Collapsible<M> {
         self
     }
 
+    /// Sets the callback receiving the proposed expansion state.
+    ///
+    /// Feed the value back through [`Self::expanded`] on the next view rebuild.
     pub fn on_toggle<F>(mut self, handler: F) -> Self
     where
         F: Fn(bool) -> M + 'static,
@@ -252,6 +271,7 @@ fn truncate_to_width(
     metrics.clip(text, 0, max_width)
 }
 
+/// Creates a collapsed [`Collapsible`] section with the supplied title.
 pub fn collapsible<M>(title: impl Into<String>) -> Collapsible<M> {
     Collapsible::new(title)
 }

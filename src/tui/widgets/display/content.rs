@@ -1,4 +1,4 @@
-//! Content viewers for code, logs, and diffs.
+//! Scrollable, read-only viewers for code, logs, diffs, and Markdown.
 
 use crate::render::text::TextWidth;
 #[cfg(feature = "syntax-highlighting")]
@@ -22,27 +22,42 @@ static SYNTAX_SET: Lazy<SyntaxSet> = Lazy::new(SyntaxSet::load_defaults_newlines
 #[cfg(feature = "syntax-highlighting")]
 static THEME_SET: Lazy<ThemeSet> = Lazy::new(ThemeSet::load_defaults);
 
+/// Persistent vertical scroll position shared by the content viewers.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ContentViewerState {
+    /// Zero-based index of the first visible row.
     pub scroll_offset: usize,
 }
 
+/// Severity used to style a log entry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LogLevel {
+    /// Fine-grained diagnostic detail.
     Trace,
+    /// Debugging information.
     Debug,
+    /// Informational messages.
     Info,
+    /// Warnings requiring attention.
     Warn,
+    /// Errors or failed operations.
     Error,
 }
 
+/// A log message paired with its severity.
+///
+/// String conversions infer severity by looking for ERROR, WARN, DEBUG, or TRACE
+/// (case-insensitively, in that order), otherwise choosing [`LogLevel::Info`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LogLine {
+    /// Severity used to choose the line style.
     pub level: LogLevel,
+    /// Text of the log entry.
     pub message: String,
 }
 
 impl LogLine {
+    /// Creates a log entry with an explicit severity and message.
     pub fn new(level: LogLevel, message: impl Into<String>) -> Self {
         Self {
             level,
@@ -82,6 +97,10 @@ enum ContentKind {
     Markdown,
 }
 
+/// A scrollable, read-only source-code viewer with optional line numbers.
+///
+/// Enable the `syntax-highlighting` feature for syntect highlighting. Without it,
+/// the viewer uses its built-in lightweight styling.
 pub struct CodeViewer<M = ()> {
     code: String,
     language: Option<String>,
@@ -105,6 +124,7 @@ impl<M> std::fmt::Debug for CodeViewer<M> {
 }
 
 impl<M> CodeViewer<M> {
+    /// Creates a twelve-row-high code viewer with a single border and line numbers.
     pub fn new(code: impl Into<String>) -> Self {
         Self {
             code: code.into(),
@@ -118,36 +138,46 @@ impl<M> CodeViewer<M> {
         }
     }
 
+    /// Sets the stable widget key used to identify this widget across view rebuilds.
     pub fn key(mut self, name: impl Into<String>) -> Self {
         self.widget_key = Some(name.into());
         self
     }
 
+    /// Sets the syntax token used for highlighting, such as `"rs"` or `"python"`.
+    ///
+    /// With `syntax-highlighting`, this is resolved by syntect. Without that feature,
+    /// the language setting is ignored by the built-in lightweight highlighter.
     pub fn language(mut self, language: impl Into<String>) -> Self {
         self.language = Some(language.into());
         self
     }
 
+    /// Sets the height in terminal rows, clamped to at least 1.
     pub fn height(mut self, height: u16) -> Self {
         self.height = height.max(1);
         self
     }
 
+    /// Sets the border drawn around the widget.
     pub fn border(mut self, border: BorderStyle) -> Self {
         self.border = Some(border);
         self
     }
 
+    /// Removes the border and its reserved space.
     pub fn borderless(mut self) -> Self {
         self.border = None;
         self
     }
 
+    /// Sets whether line numbers are displayed; enabled by default.
     pub fn line_numbers(mut self, show: bool) -> Self {
         self.show_line_numbers = show;
         self
     }
 
+    /// Sets the custom rendering style.
     pub fn style(mut self, style: Style) -> Self {
         self.custom_style = Some(style);
         self
@@ -212,6 +242,7 @@ impl<M: 'static> Widget<M> for CodeViewer<M> {
     }
 }
 
+/// A scrollable, read-only list of severity-styled log messages.
 pub struct LogViewer<M = ()> {
     lines: Vec<LogLine>,
     height: u16,
@@ -232,6 +263,7 @@ impl<M> std::fmt::Debug for LogViewer<M> {
 }
 
 impl<M> LogViewer<M> {
+    /// Creates an empty, twelve-row-high log viewer with a single border.
     pub fn new() -> Self {
         Self {
             lines: Vec::new(),
@@ -243,16 +275,19 @@ impl<M> LogViewer<M> {
         }
     }
 
+    /// Sets the stable widget key used to identify this widget across view rebuilds.
     pub fn key(mut self, name: impl Into<String>) -> Self {
         self.widget_key = Some(name.into());
         self
     }
 
+    /// Appends a log entry; strings infer severity as described by [`LogLine`].
     pub fn line(mut self, line: impl Into<LogLine>) -> Self {
         self.lines.push(line.into());
         self
     }
 
+    /// Appends log entries in iteration order.
     pub fn lines<I>(mut self, lines: I) -> Self
     where
         I: IntoIterator,
@@ -262,21 +297,25 @@ impl<M> LogViewer<M> {
         self
     }
 
+    /// Sets the height in terminal rows, clamped to at least 1.
     pub fn height(mut self, height: u16) -> Self {
         self.height = height.max(1);
         self
     }
 
+    /// Sets the border drawn around the widget.
     pub fn border(mut self, border: BorderStyle) -> Self {
         self.border = Some(border);
         self
     }
 
+    /// Removes the border and its reserved space.
     pub fn borderless(mut self) -> Self {
         self.border = None;
         self
     }
 
+    /// Sets the custom rendering style.
     pub fn style(mut self, style: Style) -> Self {
         self.custom_style = Some(style);
         self
@@ -331,6 +370,10 @@ impl<M: 'static> Widget<M> for LogViewer<M> {
     }
 }
 
+/// A scrollable, read-only viewer for precomputed diff text.
+///
+/// Added, removed, and hunk-header lines receive distinct styles; this widget
+/// does not compute a diff between files.
 pub struct DiffViewer<M = ()> {
     diff: String,
     height: u16,
@@ -350,6 +393,7 @@ impl<M> std::fmt::Debug for DiffViewer<M> {
 }
 
 impl<M> DiffViewer<M> {
+    /// Creates a twelve-row-high viewer for existing diff text with a single border.
     pub fn new(diff: impl Into<String>) -> Self {
         Self {
             diff: diff.into(),
@@ -361,32 +405,41 @@ impl<M> DiffViewer<M> {
         }
     }
 
+    /// Sets the stable widget key used to identify this widget across view rebuilds.
     pub fn key(mut self, name: impl Into<String>) -> Self {
         self.widget_key = Some(name.into());
         self
     }
 
+    /// Sets the height in terminal rows, clamped to at least 1.
     pub fn height(mut self, height: u16) -> Self {
         self.height = height.max(1);
         self
     }
 
+    /// Sets the border drawn around the widget.
     pub fn border(mut self, border: BorderStyle) -> Self {
         self.border = Some(border);
         self
     }
 
+    /// Removes the border and its reserved space.
     pub fn borderless(mut self) -> Self {
         self.border = None;
         self
     }
 
+    /// Sets the custom rendering style.
     pub fn style(mut self, style: Style) -> Self {
         self.custom_style = Some(style);
         self
     }
 }
 
+/// A scrollable viewer with lightweight, line-based Markdown styling.
+///
+/// Headings, lists, quotes, and lines starting with backticks receive styles.
+/// Markdown delimiters remain visible; fenced blocks are not parsed as a unit.
 pub struct MarkdownViewer<M = ()> {
     markdown: String,
     height: u16,
@@ -406,6 +459,7 @@ impl<M> std::fmt::Debug for MarkdownViewer<M> {
 }
 
 impl<M> MarkdownViewer<M> {
+    /// Creates a twelve-row-high Markdown viewer with a single border.
     pub fn new(markdown: impl Into<String>) -> Self {
         Self {
             markdown: markdown.into(),
@@ -417,26 +471,31 @@ impl<M> MarkdownViewer<M> {
         }
     }
 
+    /// Sets the stable widget key used to identify this widget across view rebuilds.
     pub fn key(mut self, name: impl Into<String>) -> Self {
         self.widget_key = Some(name.into());
         self
     }
 
+    /// Sets the height in terminal rows, clamped to at least 1.
     pub fn height(mut self, height: u16) -> Self {
         self.height = height.max(1);
         self
     }
 
+    /// Sets the border drawn around the widget.
     pub fn border(mut self, border: BorderStyle) -> Self {
         self.border = Some(border);
         self
     }
 
+    /// Removes the border and its reserved space.
     pub fn borderless(mut self) -> Self {
         self.border = None;
         self
     }
 
+    /// Sets the custom rendering style.
     pub fn style(mut self, style: Style) -> Self {
         self.custom_style = Some(style);
         self
@@ -997,18 +1056,22 @@ mod tests {
     }
 }
 
+/// Creates a [`CodeViewer`] for source text.
 pub fn code_viewer<M>(code: impl Into<String>) -> CodeViewer<M> {
     CodeViewer::new(code)
 }
 
+/// Creates an empty [`LogViewer`].
 pub fn log_viewer<M>() -> LogViewer<M> {
     LogViewer::new()
 }
 
+/// Creates a [`DiffViewer`] for precomputed diff text.
 pub fn diff_viewer<M>(diff: impl Into<String>) -> DiffViewer<M> {
     DiffViewer::new(diff)
 }
 
+/// Creates a [`MarkdownViewer`] for Markdown source text.
 pub fn markdown_viewer<M>(markdown: impl Into<String>) -> MarkdownViewer<M> {
     MarkdownViewer::new(markdown)
 }

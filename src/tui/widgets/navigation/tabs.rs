@@ -8,14 +8,21 @@ use crate::tui::layout::Constraints;
 use crate::tui::style::Style;
 use crate::tui::widget::{EventCtx, EventPhase, RenderCtx, Widget};
 
+/// A tab with a stable value and a display label.
+///
+/// Converting a string uses it for both the value and label.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TabItem {
+    /// Stable option value passed to selection callbacks.
     pub value: String,
+    /// User-visible text for this item.
     pub label: String,
+    /// Whether this item is skipped by navigation and activation.
     pub disabled: bool,
 }
 
 impl TabItem {
+    /// Creates an enabled tab with a stable value and a visible label.
     pub fn new(value: impl Into<String>, label: impl Into<String>) -> Self {
         Self {
             value: value.into(),
@@ -24,6 +31,7 @@ impl TabItem {
         }
     }
 
+    /// Sets whether this item is skipped by navigation and activation.
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
         self
@@ -42,11 +50,17 @@ impl From<String> for TabItem {
     }
 }
 
+/// Persistent internal navigation state for a tab strip.
 #[derive(Debug, Clone, Default)]
 pub struct TabsState {
+    /// Value at the internal navigation cursor, if initialized.
     pub active_value: Option<String>,
 }
 
+/// A horizontal tab strip that emits the active tab value.
+///
+/// The application renders the corresponding content separately. Internal
+/// navigation state takes precedence over the preferred [`Self::selected`] value.
 pub struct Tabs<M = ()> {
     items: Vec<TabItem>,
     selected_value: Option<String>,
@@ -69,6 +83,7 @@ impl<M> std::fmt::Debug for Tabs<M> {
 }
 
 impl<M> Tabs<M> {
+    /// Creates an empty tab strip with no preferred selected value.
     pub fn new() -> Self {
         Self {
             items: Vec::new(),
@@ -81,16 +96,19 @@ impl<M> Tabs<M> {
         }
     }
 
+    /// Sets the stable widget key used to identify this widget across view rebuilds.
     pub fn key(mut self, name: impl Into<String>) -> Self {
         self.widget_key = Some(name.into());
         self
     }
 
+    /// Appends a tab to the strip.
     pub fn tab(mut self, item: impl Into<TabItem>) -> Self {
         self.items.push(item.into());
         self
     }
 
+    /// Appends tabs in iteration order, preserving existing tabs.
     pub fn tabs<I>(mut self, items: I) -> Self
     where
         I: IntoIterator,
@@ -100,31 +118,39 @@ impl<M> Tabs<M> {
         self
     }
 
+    /// Sets the preferred selected value, used when no valid internal active value exists.
     pub fn selected(mut self, value: impl Into<String>) -> Self {
         self.selected_value = Some(value.into());
         self
     }
 
+    /// Sets or clears the preferred selected value.
+    ///
+    /// `None` leaves selection to internal navigation state and the first enabled item.
     pub fn selected_opt(mut self, value: Option<String>) -> Self {
         self.selected_value = value;
         self
     }
 
+    /// Sets whether this widget ignores input and is excluded from keyboard focus.
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
         self
     }
 
+    /// Sets the custom rendering style.
     pub fn style(mut self, style: Style) -> Self {
         self.custom_style = Some(style);
         self
     }
 
+    /// Sets the style used to highlight the active item or control while focused.
     pub fn focus_style(mut self, style: Style) -> Self {
         self.custom_focus_style = Some(style);
         self
     }
 
+    /// Sets the callback receiving the active option's value after user selection.
     pub fn on_change<F>(mut self, handler: F) -> Self
     where
         F: Fn(String) -> M + 'static,
@@ -365,6 +391,7 @@ fn truncate_to_width(
     metrics.clip(text, 0, max_width)
 }
 
+/// Creates an empty [`Tabs`] strip.
 pub fn tabs<M>() -> Tabs<M> {
     Tabs::new()
 }

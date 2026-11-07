@@ -42,6 +42,9 @@ impl<M> std::fmt::Debug for Dialog<M> {
 }
 
 impl<M> Dialog<M> {
+    /// Creates an empty dialog with a double border, one-cell padding, and a one-row gap.
+    ///
+    /// Its focus scope traps Tab navigation and restores the last focused descendant.
     pub fn new() -> Self {
         Self {
             children: Vec::new(),
@@ -59,52 +62,62 @@ impl<M> Dialog<M> {
         }
     }
 
+    /// Sets the stable widget key used to identify this widget across view rebuilds.
     pub fn key(mut self, name: impl Into<String>) -> Self {
         self.widget_key = Some(name.into());
         self
     }
 
+    /// Sets the title displayed in the top border.
     pub fn title(mut self, title: impl Into<String>) -> Self {
         self.title = Some(title.into());
         self
     }
 
+    /// Sets the border drawn around the widget.
     pub fn border(mut self, border: BorderStyle) -> Self {
         self.border = border;
         self
     }
 
+    /// Sets interior spacing in terminal cells.
     pub fn padding(mut self, padding: Padding) -> Self {
         self.padding = padding;
         self
     }
 
+    /// Sets the number of terminal rows between consecutive children.
     pub fn gap(mut self, gap: u16) -> Self {
         self.gap = gap;
         self
     }
 
+    /// Fixes the outer width and height in terminal cells.
     pub fn size(mut self, width: u16, height: u16) -> Self {
         self.width = Some(width);
         self.height = Some(height);
         self
     }
 
+    /// Sets the custom rendering style.
     pub fn style(mut self, style: Style) -> Self {
         self.style = style;
         self
     }
 
+    /// Replaces the dialog's focus-scope policy, including Tab trapping and entry behavior.
     pub fn focus_scope(mut self, scope: FocusScope) -> Self {
         self.focus_scope = scope;
         self
     }
 
+    /// Appends a child after the existing children.
     pub fn child(mut self, widget: impl IntoWidget<M>) -> Self {
         self.children.push(widget.into_widget());
         self
     }
 
+    /// Appends children in iteration order, preserving existing children.
     pub fn children<I>(mut self, widgets: I) -> Self
     where
         I: IntoIterator,
@@ -199,6 +212,7 @@ fn truncate_to_width(
     metrics.clip(text, 0, max_width)
 }
 
+/// Creates an empty [`Dialog`] with its default configuration.
 pub fn dialog<M>() -> Dialog<M> {
     Dialog::new()
 }

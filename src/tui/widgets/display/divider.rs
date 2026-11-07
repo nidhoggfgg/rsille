@@ -6,28 +6,42 @@ use crate::tui::style::Style;
 use crate::tui::widget::{EventCtx, RenderCtx, Widget};
 use crate::tui::widgets::VariantWidget;
 
+/// Orientation of a separator line.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DividerDirection {
+    /// Draws across terminal columns.
     Horizontal,
+    /// Draws down terminal rows.
     Vertical,
 }
 
+/// Horizontal placement of text within a horizontal divider.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DividerTextPosition {
+    /// Places text at the left edge of the line.
     Left,
+    /// Centers text on the line (default).
     #[default]
     Center,
+    /// Places text at the right edge of the line.
     Right,
 }
 
+/// Character sets used to draw separator lines.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DividerVariant {
+    /// Thin continuous line characters (default).
     #[default]
     Solid,
+    /// Dashed line characters.
     Dashed,
+    /// Dotted line characters.
     Dotted,
+    /// Heavy continuous line characters.
     Heavy,
+    /// Double line characters.
     Double,
+    /// Light broken line characters.
     Faded,
 }
 
@@ -44,6 +58,7 @@ impl DividerVariant {
     }
 }
 
+/// A non-interactive separator with optional text on horizontal lines.
 #[derive(Debug, Clone)]
 pub struct Divider<M = ()> {
     direction: DividerDirection,
@@ -58,6 +73,7 @@ pub struct Divider<M = ()> {
 }
 
 impl<M> Divider<M> {
+    /// Creates a horizontal solid divider with centered text placement and one-cell text spacing.
     pub fn new() -> Self {
         Self {
             direction: DividerDirection::Horizontal,
@@ -72,58 +88,69 @@ impl<M> Divider<M> {
         }
     }
 
+    /// Sets the stable widget key used to identify this widget across view rebuilds.
     pub fn key(mut self, name: impl Into<String>) -> Self {
         self.widget_key = Some(name.into());
         self
     }
 
+    /// Draws a horizontal separator, optionally containing text.
     pub fn horizontal(mut self) -> Self {
         self.direction = DividerDirection::Horizontal;
         self
     }
 
+    /// Draws a vertical separator; text is ignored in this orientation.
     pub fn vertical(mut self) -> Self {
         self.direction = DividerDirection::Vertical;
         self
     }
 
+    /// Sets the text embedded in a horizontal separator.
     pub fn text(mut self, text: impl Into<String>) -> Self {
         self.text = Some(text.into());
         self
     }
 
+    /// Sets horizontal placement of the embedded text.
     pub fn text_position(mut self, position: DividerTextPosition) -> Self {
         self.text_position = position;
         self
     }
 
+    /// Sets blank terminal columns reserved on each side of embedded text.
     pub fn text_spacing(mut self, spacing: u16) -> Self {
         self.text_spacing = spacing;
         self
     }
 
+    /// Sets the custom rendering style.
     pub fn style(mut self, style: Style) -> Self {
         self.style = style;
         self
     }
 
+    /// Fixes the width in terminal columns.
     pub fn width(mut self, width: u16) -> Self {
         self.constraints.min_width = width;
         self.constraints.max_width = Some(width);
         self
     }
 
+    /// Fixes the height in terminal rows.
     pub fn height(mut self, height: u16) -> Self {
         self.constraints.min_height = height;
         self.constraints.max_height = Some(height);
         self
     }
 
+    /// Sets the weight used to distribute available space in a flex layout.
     pub fn flex(mut self, flex: f32) -> Self {
         self.constraints.flex = Some(flex);
         self
     }
 
+    /// Replaces layout constraints with flexible constraints that fill available space.
     pub fn fill(mut self) -> Self {
         self.constraints = Constraints::fill();
         self

@@ -16,13 +16,18 @@ use crate::tui::widgets::controls::select::{match_search_score, SelectSearchMode
 /// A searchable command palette entry.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandItem {
+    /// Stable item identifier used by navigation and message callbacks.
     pub id: String,
+    /// User-visible text for this item.
     pub label: String,
+    /// Additional strings matched alongside the command label and ID.
     pub keywords: Vec<String>,
+    /// Whether this item is skipped by navigation and activation.
     pub disabled: bool,
 }
 
 impl CommandItem {
+    /// Creates an enabled command with a stable ID, label, and no extra keywords.
     pub fn new(id: impl Into<String>, label: impl Into<String>) -> Self {
         Self {
             id: id.into(),
@@ -32,11 +37,13 @@ impl CommandItem {
         }
     }
 
+    /// Appends an additional searchable keyword.
     pub fn keyword(mut self, keyword: impl Into<String>) -> Self {
         self.keywords.push(keyword.into());
         self
     }
 
+    /// Appends searchable keywords in iteration order.
     pub fn keywords<I, S>(mut self, keywords: I) -> Self
     where
         I: IntoIterator<Item = S>,
@@ -46,6 +53,7 @@ impl CommandItem {
         self
     }
 
+    /// Sets whether this item is skipped by navigation and activation.
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
         self
@@ -55,8 +63,11 @@ impl CommandItem {
 /// Persistent command palette state stored in the widget store.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CommandPaletteState {
+    /// Current text used to filter commands.
     pub query: String,
+    /// Navigation cursor and committed selection for this widget.
     pub selection: SelectionState,
+    /// Zero-based index of the first visible row.
     pub scroll_offset: usize,
 }
 
@@ -99,6 +110,9 @@ impl<M> std::fmt::Debug for CommandPalette<M> {
 }
 
 impl<M> CommandPalette<M> {
+    /// Creates an empty palette with fuzzy matching and a double border.
+    ///
+    /// Its height defaults to ten terminal rows.
     pub fn new() -> Self {
         Self {
             items: Vec::new(),
@@ -119,16 +133,19 @@ impl<M> CommandPalette<M> {
         }
     }
 
+    /// Sets the stable widget key used to identify this widget across view rebuilds.
     pub fn key(mut self, name: impl Into<String>) -> Self {
         self.widget_key = Some(name.into());
         self
     }
 
+    /// Appends an item to the end of the collection.
     pub fn item(mut self, item: CommandItem) -> Self {
         self.items.push(item);
         self
     }
 
+    /// Appends items in iteration order, preserving existing items.
     pub fn items<I>(mut self, items: I) -> Self
     where
         I: IntoIterator<Item = CommandItem>,
@@ -137,61 +154,73 @@ impl<M> CommandPalette<M> {
         self
     }
 
+    /// Sets the height in terminal rows, clamped to at least 5.
     pub fn height(mut self, height: u16) -> Self {
         self.height = height.max(5);
         self
     }
 
+    /// Sets the border drawn around the widget.
     pub fn border(mut self, border: BorderStyle) -> Self {
         self.border = border;
         self
     }
 
+    /// Sets the title displayed in the top border.
     pub fn title(mut self, title: impl Into<String>) -> Self {
         self.title = Some(title.into());
         self
     }
 
+    /// Sets the title, or removes it with `None`.
     pub fn title_opt(mut self, title: Option<String>) -> Self {
         self.title = title;
         self
     }
 
+    /// Sets the prefix displayed before the search query.
     pub fn prompt(mut self, prompt: impl Into<String>) -> Self {
         self.prompt = prompt.into();
         self
     }
 
+    /// Sets the hint shown when the search query is empty.
     pub fn placeholder(mut self, placeholder: impl Into<String>) -> Self {
         self.placeholder = placeholder.into();
         self
     }
 
+    /// Sets the text shown when there are no items to display.
     pub fn empty_message(mut self, message: impl Into<String>) -> Self {
         self.empty_message = message.into();
         self
     }
 
+    /// Sets whether this widget ignores input and is excluded from keyboard focus.
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
         self
     }
 
+    /// Sets the matching strategy used to filter items by the search query.
     pub fn search_mode(mut self, mode: SelectSearchMode) -> Self {
         self.search_mode = mode;
         self
     }
 
+    /// Sets the custom rendering style.
     pub fn style(mut self, style: Style) -> Self {
         self.custom_style = Some(style);
         self
     }
 
+    /// Sets the style used to highlight the active item or control while focused.
     pub fn focus_style(mut self, style: Style) -> Self {
         self.custom_focus_style = Some(style);
         self
     }
 
+    /// Sets the callback receiving the active command ID after search or navigation.
     pub fn on_change<F>(mut self, handler: F) -> Self
     where
         F: Fn(String) -> M + 'static,
@@ -200,6 +229,7 @@ impl<M> CommandPalette<M> {
         self
     }
 
+    /// Sets the callback receiving the command ID when activated.
     pub fn on_submit<F>(mut self, handler: F) -> Self
     where
         F: Fn(String) -> M + 'static,
@@ -208,6 +238,7 @@ impl<M> CommandPalette<M> {
         self
     }
 
+    /// Sets the message callback invoked when Escape requests dismissal.
     pub fn on_close<F>(mut self, handler: F) -> Self
     where
         F: Fn() -> M + 'static,
