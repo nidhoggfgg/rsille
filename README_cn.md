@@ -2,38 +2,46 @@
 
 [English](README.md) · 中文
 
-面向 Rust 的终端应用与图形框架。既可以用组件、布局和后台任务构建交互工具，也可以通过
-渲染器和采样画布直接绘制终端字符。
+<img align="right" src="examples/ai-babies/preview-deepseek.gif" width="96" alt="">
 
-当前仓库使用 **v3 API**（`Cargo.toml` 中版本为 `3.0.0`）。从 v2 升级请阅读
-[迁移指南](MIGRATION_V3.md)。
+**让终端，惊艳起来。**
 
-![使用 rsille 构建的 Lumen 工作台](examples/lumen/preview.png)
+画出发光的深海，让机械生物拆解重组，把可拖动的窗口和三维场景放进同一个终端。
+**rsille 是 Rust 终端应用与图形框架**，把渲染、TUI、动画和交互放进同一套可组合的 API。
 
-## 可以做什么
+## 一个终端，可以有多少种模样？
 
-- **终端应用**：表单、Unicode 文本编辑、表格、树、文件浏览器、命令面板和内容查看器。
-- **交互布局**：Flex、Grid、滚动、可调分栏、模态 Portal、可拖动浮窗、指针捕获和键盘焦点。
-- **动画与图形**：过渡、视觉特效、毛玻璃背景，以及支持盲文、半块和四分块编码的彩色 Canvas。
-- **可测试的流程**：消息、后台任务、防抖、带作用域的订阅，以及无需终端即可驱动的运行时。
+点击预览，查看源码、运行命令和操作方式。
 
-[示例目录](examples/README_cn.md) 包含工具、游戏和动画。完整应用可以从
-[Lumen](examples/lumen/README_cn.md) 开始，组件展示看
-[TUI showcase](examples/tui-showcase/README_cn.md)，单项 API 用法看
-[TUI 小示例](packages/tui/examples/README_cn.md)。
+| Jellyfish · 把深海装进终端 | Lumen · 像桌面一样操作 |
+| --- | --- |
+| [![终端中发光的水母、光束与漂浮微粒](examples/jellyfish/preview.gif)](examples/jellyfish/README_cn.md) | [![Lumen 的三维画布、实时曲线和可拖动浮窗](examples/lumen/preview-desk.png)](examples/lumen/README_cn.md) |
+| **渲染。** 全彩采样、Half-block 编码和连续重绘，呈现程序生成的水母、柔和光束与漂浮微粒。 | **TUI。** 画布与原生组件共处一个布局；窗口可拖动、缩放、收起和恢复，配合焦点管理与命令面板。 |
 
-## 先运行看看
+| Clockwork · 让零件自己组装 | Pokémon Battle · 亲手打一场 |
+| --- | --- |
+| [![132 个零件拆解、组装并变形成机械生物](examples/clockwork/preview.gif)](examples/clockwork/README_cn.md) | [![三维战场中的皮卡丘、水箭龟与招式按钮](examples/pokemon-battle/preview.png)](examples/pokemon-battle/README_cn.md) |
+| **动画。** 示例用弹簧驱动 132 个零件，在三种形态间拆解重组；rsille 负责逐帧绘制和输入，还能边播放边转动相机。 | **图形 × TUI × 交互。** 三维场景叠加原生招式按钮、血条与毛玻璃背景；点击出招，拖动镜头，看攻击演出。 |
 
-使用当前稳定版 Rust 工具链，在仓库根目录执行：
+预览由渲染后的终端字符格导出；Clockwork 的 GIF 做了加速。
+场景和模拟逻辑由示例提供，rsille 负责画布、编码、组件、渲染与事件循环。
 
-```bash
-cargo run -p tui --example hello
-cargo run --release --manifest-path examples/lumen/Cargo.toml
-cargo run --release --manifest-path examples/pokemon-battle/Cargo.toml
-```
+## 效果惊艳，写起来也顺手
 
-交互示例需要终端。图形示例建议使用 Unicode 等宽字体与 True Color；各示例文档列出了
-推荐窗口尺寸和操作方式。首次运行会编译依赖，图形示例建议加 `--release`。
+<img align="right" src="examples/ai-babies/preview-pet.gif" width="96" alt="">
+
+- **给组件加上特效。** 用 `visual(...)` 包住按钮、面板或画布，链式叠加渐变、扫光、
+  溶解与波浪，还能加上毛玻璃背景和入场、退场过渡。动画由运行时驱动。
+- **把一个世界放进界面。** 用盲文、半块或四分块绘制彩色图形。把 `canvas(...)` 放入布局，
+  使用世界坐标和配套的指针转换；也可以直接用渲染器绘制整个场景。
+- **应用代码保持简单。** `view` 描述界面，`update` 修改状态。组合 Flex/Grid 布局、
+  文本编辑器、表格和可拖动浮窗，焦点、输入、后台任务与退出清理由运行时处理。
+
+继续逛 **[示例画廊](examples/README_cn.md)**：
+[方块沙盒](examples/minecraft/README_cn.md)、
+[拖放文件管理器](examples/orbit-files/README_cn.md)、
+[七页组件展厅](examples/tui-showcase/README_cn.md)。
+想一次学一个 API，可以从 [TUI 小示例](packages/tui/examples/README_cn.md) 开始。
 
 ## 在应用中引入 rsille
 
@@ -56,22 +64,46 @@ rsille = { path = "../rsille", features = ["syntax-highlighting"] }
 
 未启用时，代码查看器仍支持纯文本显示和导航。
 
-## 第一个应用
+## 第一个应用，就带动画
 
 ```rust,no_run
+use std::time::Duration;
 use rsille::tui::prelude::*;
 
 fn main() -> WidgetResult<()> {
     let exit = App::new(0_u32)
         .mode(Mode::Inline)
         .update(|count, (), _ctx| *count += 1)
-        .view(|count| button(format!("计数：{count}")).on_click(|| ()))
+        .view(|count| {
+            visual(
+                button(format!("计数：{count}"))
+                    .variant(ButtonVariant::Ghost)
+                    .on_click(|| ()),
+            )
+                .gradient(
+                    Color::Rgb(70, 220, 255),
+                    Color::Rgb(240, 110, 255),
+                    GradientDirection::Horizontal,
+                )
+                .highlight_sweep()
+                .animation(looping_visual_spec(Duration::from_secs(2)))
+        })
         .run()?;
 
     println!("最终计数：{}", exit.state);
     Ok(())
 }
 ```
+
+<img src="imgs/readme-counter-cn.gif" width="424" alt="渐变计数按钮的循环扫光与按 Enter 后的计数变化">
+
+预览由上述代码的 32 × 3 字符格运行时导出，回放 Enter 展示从 0 到 2 的计数变化。
+
+<img align="right" src="examples/ai-babies/preview-claude.gif" width="96" alt="">
+
+这是一个可点击的计数按钮，自带青色到品红的渐变和循环扫光。
+三个链式调用就加上了颜色与动画，无需手写逐帧循环。
+`visual(...)` 包裹交互组件，按钮仍保留原本的输入行为。
 
 Tab 切换焦点，Enter 或空格激活按钮，默认按 Esc 退出。`view` 根据状态描述组件，
 组件产生的消息交给 `update`。更新函数的第三个参数 `UpdateCtx` 可调度任务、发送消息，
@@ -111,6 +143,19 @@ cargo run -p tui --example workflow -- --headless
 
 ## 使用 Canvas 绘图
 
+**一个字符格，也能画出更多细节。** `Encoding::Quadrant` 将每个终端字符格细分为
+**2 × 2 个采样位置**，通过四分块字符与前景、背景颜色组合，在有限的行列里表现更细的轮廓。
+120 × 20 个字符格，对应 240 × 40 的采样网格。
+
+[![120 × 20 字符格中使用 2 × 2 四分块编码渲染的像素角色](imgs/readme-canvas-quadrant.png)](examples/ai-babies/README_cn.md)
+
+上图是 [AI Babies 静态模式](examples/ai-babies/README_cn.md) 的实际 Canvas 输出，
+仅占 **20 行**；预览按字符格比例放大，便于查看细节。
+
+```bash
+cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --static --height 20
+```
+
 不需要组件树时，可以直接使用渲染器：
 
 ```rust,no_run
@@ -136,7 +181,7 @@ fn main() -> std::io::Result<()> {
 | `Encoding::HalfBlock` | 1 × 2 | 上下两个可独立着色的采样点 |
 | `Encoding::Quadrant` | 2 × 2 | 四分块形状，采样颜色拟合为终端颜色 |
 
-通过 `Canvas::with_encoding(...)` 选择编码。绘图坐标以采样点为单位，y 轴向上；
+通过 `Canvas::with_encoding(Encoding::Quadrant)` 选择编码。绘图坐标以采样点为单位，y 轴向上；
 边界与输出尺寸以终端字符格为单位。`set_color` 设置采样点颜色，`set_background`
 填充未覆盖区域。每个字符格最多使用一个前景色和一个背景色，因此盲文和四分块编码可能合并采样颜色。
 
@@ -145,6 +190,9 @@ TUI 的 `canvas(...)` 组件把同一套绘图能力嵌入布局。通过 `.view
 运行 `cargo run -p tui --example canvas` 可对比三种编码。
 
 ## API 与源码入口
+
+当前仓库使用 **v3 API**（`Cargo.toml` 中版本为 `3.0.0`）。从 v2 升级请阅读
+[迁移指南](MIGRATION_V3.md)。
 
 | 公开模块 | 职责 | 共用实现 |
 | --- | --- | --- |
