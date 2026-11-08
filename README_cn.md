@@ -45,11 +45,11 @@
 
 ## 在应用中引入 rsille
 
-如果要在另一个项目中使用当前源码，添加路径依赖，并替换为本地仓库的位置：
+在应用中添加 rsille `3.0.0` 依赖：
 
 ```toml
 [dependencies]
-rsille = { path = "../rsille" }
+rsille = "3.0.0"
 ```
 
 对外的包名是 `rsille`。仓库中的 `tui`、`render`、`canvas` 都是内部开发用 crate，
@@ -59,10 +59,13 @@ rsille = { path = "../rsille" }
 
 ```toml
 [dependencies]
-rsille = { path = "../rsille", features = ["syntax-highlighting"] }
+rsille = { version = "3.0.0", features = ["syntax-highlighting"] }
 ```
 
 未启用时，代码查看器仍支持纯文本显示和导航。
+
+本地开发时，可改用 `rsille = { path = "../rsille" }`，将路径替换为本地仓库的位置。
+从 v2 升级前，请阅读[迁移指南](MIGRATION_V3.md)。
 
 ## 第一个应用，就带动画
 

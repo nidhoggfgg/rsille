@@ -50,12 +50,11 @@ For one API at a time, start with the [small TUI examples](packages/tui/examples
 
 ## Add rsille to an application
 
-To use this checkout from another project, add a path dependency, replacing the path
-with the location of your clone:
+Add rsille `3.0.0` to your application:
 
 ```toml
 [dependencies]
-rsille = { path = "../rsille" }
+rsille = "3.0.0"
 ```
 
 The public package is `rsille`. The repository's `tui`, `render` and `canvas` crates
@@ -66,10 +65,13 @@ code viewers:
 
 ```toml
 [dependencies]
-rsille = { path = "../rsille", features = ["syntax-highlighting"] }
+rsille = { version = "3.0.0", features = ["syntax-highlighting"] }
 ```
 
 Without that feature, code viewers still support plain text and navigation.
+
+For local development, replace the registry dependency with `rsille = { path = "../rsille" }`,
+adjusting the path to your checkout. Upgrading from v2? Read the [migration guide](MIGRATION_V3.md).
 
 ## Your first application, already animated
 

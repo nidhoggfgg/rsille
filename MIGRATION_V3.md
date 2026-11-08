@@ -1,7 +1,8 @@
 # Migrating to rsille v3
 
-v3 is under development. These contracts describe this branch; `3.0.0` is the
-release version configured for `rsille`. Package checks do not publish it.
+This guide describes the API and migration contracts for rsille `3.0.0`.
+v3 is a breaking release; applications using v2 should review the import and
+Canvas changes below before upgrading.
 
 ## Application entry and exit
 
@@ -76,7 +77,7 @@ closures because it stores them. Views still return owned widget descriptions.
 
 ## Imports, package names and features
 
-Only `rsille` version `3.0.0` is published. Its public modules are `rsille::tui`,
+The public package is `rsille` version `3.0.0`. Its modules are `rsille::tui`,
 `rsille::render`, and `rsille::canvas`. No separate rsille component packages are
 needed or published. For example:
 
