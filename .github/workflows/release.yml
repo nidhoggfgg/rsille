@@ -67,6 +67,16 @@ jobs:
         working-directory: target/package
         run: sha256sum "rsille-${RELEASE_TAG#v}.crate" > SHA256SUMS
 
+      - name: Publish to crates.io
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          if [ -z "$CARGO_REGISTRY_TOKEN" ]; then
+            echo "::error::Set the CARGO_REGISTRY_TOKEN repository secret to a crates.io API token with publish access to rsille."
+            exit 1
+          fi
+          cargo publish -p rsille --all-features --registry crates-io
+
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
