@@ -16,7 +16,7 @@ const SOURCE_HEIGHT: usize = 80;
 const RGB: &[u8; SOURCE_WIDTH * SOURCE_HEIGHT * 3] =
     include_bytes!("../assets/chibi-trio-240x80.rgb");
 // Canvas mask order: bottom left, bottom right, top left, top right.
-const SYMBOLS: &str = " ▖▗▄▘▌▞▙▝▚▐▟▀▛▜█";
+const SYMBOLS: &str = " ▖▗▄▘▌▚▙▝▞▐▟▀▛▜█";
 
 fn frame(rows: u16) -> Result<Buffer, Box<dyn Error>> {
     // 3:1 image aspect with 1:2 terminal cells requires six columns per row.

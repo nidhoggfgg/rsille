@@ -61,7 +61,7 @@ fn braille(samples: &Samples, background: Option<Color>) -> Stylized {
 fn quadrant(samples: &Samples, background: Option<Color>) -> Stylized {
     // Bits 0..4 are bottom left, bottom right, top left, top right.
     const SYMBOLS: [char; 16] = [
-        ' ', '▖', '▗', '▄', '▘', '▌', '▞', '▙', '▝', '▚', '▐', '▟', '▀', '▛', '▜', '█',
+        ' ', '▖', '▗', '▄', '▘', '▌', '▚', '▙', '▝', '▞', '▐', '▟', '▀', '▛', '▜', '█',
     ];
     let samples = std::array::from_fn(|i| samples.0[i]);
     patterned(

@@ -22,12 +22,14 @@ cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --character
 cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --character claude --height 24
 ```
 
-动画使用 inline 模式、True Color 和 Half-block 编码。默认高度上限为 32 行，
-`--height ROWS` 接受 1–128，播放时受实际终端高度限制。
-推荐 80 × 34 的终端，为 shell 提示符留出空间；透明像素沿用终端默认背景。
+动画使用 inline 模式、True Color 和 2 × 2 Quadrant 编码。默认高度上限为 24 行，
+`--height ROWS` 仅接受 24 或 32，播放时受实际终端高度限制。
+推荐 80 × 26 的终端，为 shell 提示符留出空间；透明像素沿用终端默认背景。
 
-24 行使用 48 像素图集，32 行使用 64 像素图集，小窗口会缩小显示。
-更高的区域只增加留白，角色不会超过 64 × 64 像素。像素数据内嵌在二进制中，
+24 行使用 96 × 48 帧，32 行使用 128 × 64 帧，均从原图直接采样。
+横向采样翻倍，实际显示比例不变；小窗口会缩小显示，更高的区域只增加留白，
+角色不会超过 128 × 64 个采样。每格归并为终端支持的两种颜色；部分透明的格子
+使用一种前景色并保留终端背景。像素数据内嵌在二进制中，
 播放无需网络、Python 或图片解码器。
 
 ## 操作
@@ -96,9 +98,9 @@ cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --static --
 | 文件 | 用途 |
 | --- | --- |
 | [chibi-trio-source.png](assets/chibi-trio-source.png) | 三角色原始参考图 |
-| [dragon-actions-source.png](assets/dragon-actions-source.png) | ChatGPT 动作源图 |
+| [chatgpt-actions-source.png](assets/chatgpt-actions-source.png) | ChatGPT 动作源图 |
 | `assets/{deepseek,claude}-actions-clean-source.png` | 另外两个角色的动作源图 |
-| `assets/*-actions-*.png` 和 `.rgba`（48/64） | 当前预览图集与内嵌动画像素 |
+| `assets/*-actions-*.png` 和 `.rgba`（96x48/128x64） | 当前预览图集与内嵌动画像素 |
 | `assets/chibi-trio-240x80.png` 和 `.rgb` | 静态源图与内嵌像素 |
 | `assets/*-prompt.txt` | 生成与清理提示词 |
 

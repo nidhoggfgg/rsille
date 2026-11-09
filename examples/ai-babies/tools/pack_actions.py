@@ -2,7 +2,8 @@
 
 Use one explicit palette, no dithering, binary coverage, and fixed source-space
 motion masks. The idle/wave body is shared; runtime still only plays full frames.
-Both supported display sizes are sampled directly from the 256px source cells.
+Quadrant frames are sampled directly at 96x48 and 128x64 from the 256px
+source cells, preserving real horizontal detail. Legacy square assets are untouched.
 """
 from collections import Counter
 from pathlib import Path
@@ -10,7 +11,7 @@ from PIL import Image, ImageDraw
 
 ASSETS = Path(__file__).resolve().parent.parent / "assets"
 COLUMNS, ROWS = 4, 6
-SIZES = (48, 64)
+SIZES = ((96, 48), (128, 64))
 # Reserve iris, skin and gold colors, which an automatic frequency-based palette
 # otherwise sacrifices in favor of dozens of almost identical lavender shades.
 COLORS = [
@@ -79,10 +80,11 @@ ARM = [[(68, 140), (84, 124), (108, 124), (116, 144), (112, 188), (100, 200), (6
 
 
 def motion_mask(size, polygons):
-    mask = Image.new("L", (size, size))
+    width, height = size
+    mask = Image.new("L", size)
     draw = ImageDraw.Draw(mask)
     for polygon in polygons:
-        draw.polygon([(round(x * size / 256), round(y * size / 256)) for x, y in polygon], fill=255)
+        draw.polygon([(round(x * width / 256), round(y * height / 256)) for x, y in polygon], fill=255)
     return mask
 
 
@@ -90,11 +92,11 @@ def clean_specks(frame):
     """Remove only isolated near-color interior noise; protect face and accents."""
     original = frame.copy()
     pixels, output = original.load(), frame.load()
-    size = frame.width
-    for y in range(1, size - 1):
-        for x in range(1, size - 1):
+    width, height = frame.size
+    for y in range(1, height - 1):
+        for x in range(1, width - 1):
             # Preserve eye glints, facial lines and small gold decorations.
-            if 80 <= x * 256 / size <= 176 and 100 <= y * 256 / size <= 150:
+            if 80 <= x * 256 / width <= 176 and 100 <= y * 256 / height <= 150:
                 continue
             pixel = pixels[x, y]
             if pixel[3] != 255 or pixel[:3] in COLORS[18:23]:
@@ -116,7 +118,7 @@ def build_frames(source, size):
     for row in range(ROWS):
         for col in range(COLUMNS):
             tile = source.crop((col * 256, row * 256, (col + 1) * 256, (row + 1) * 256))
-            tile = tile.resize((size, size), Image.Resampling.NEAREST)
+            tile = tile.resize(size, Image.Resampling.NEAREST)
             sampled = tile.copy()
             alpha = tile.getchannel("A").point(lambda a: 255 if a >= 128 else 0)
             tile = tile.convert("RGB").quantize(palette=palette, dither=Image.Dither.NONE).convert("RGBA")
@@ -138,7 +140,13 @@ def build_frames(source, size):
 
 def validate_frames(frames, size):
     allowed_colors = set(COLORS + [SKIN_HIGHLIGHT])
+    width, height = size
     for i, frame in enumerate(frames):
+        if frame.size != size:
+            raise ValueError(f"Frame {i}: unexpected dimensions {frame.size}")
+        bounds = frame.getchannel("A").getbbox()
+        if not bounds or bounds[0] == 0 or bounds[1] == 0 or bounds[2] == width or bounds[3] == height:
+            raise ValueError(f"Frame {i}: missing art or sprite touches cell edge")
         visible = [p for p in frame.get_flattened_data() if p[3]]
         if not visible or not all(p[3] == 255 and p[:3] in allowed_colors for p in visible):
             raise ValueError(f"Frame {i}: invalid palette or alpha")
@@ -156,20 +164,21 @@ def validate_frames(frames, size):
 
 
 def main():
-    source = Image.open(ASSETS / "dragon-actions-source.png")
+    source = Image.open(ASSETS / "chatgpt-actions-source.png")
     if source.mode != "RGBA" or source.size != (1024, 1536):
         raise ValueError("Expected the original 1024x1536 RGBA atlas")
     for size in SIZES:
         frames = build_frames(source, size)
         validate_frames(frames, size)
-        atlas = Image.new("RGBA", (COLUMNS * size, ROWS * size))
+        width, height = size
+        atlas = Image.new("RGBA", (COLUMNS * width, ROWS * height))
         for i, frame in enumerate(frames):
-            atlas.paste(frame, ((i % COLUMNS) * size, (i // COLUMNS) * size))
-        stem = ASSETS / f"dragon-actions-v2-{size}"
+            atlas.paste(frame, ((i % COLUMNS) * width, (i // COLUMNS) * height))
+        stem = ASSETS / f"chatgpt-actions-v2-{width}x{height}"
         atlas.save(stem.with_suffix(".png"))
         data = b"".join(frame.tobytes() for frame in frames)
         stem.with_suffix(".rgba").write_bytes(data)
-        print(f"Packed {len(frames)} frames at {size}px: {len(data):,} bytes; palette/motion checks passed")
+        print(f"Packed {len(frames)} frames at {width}x{height}px: {len(data):,} bytes; palette/motion/bounds checks passed")
 
 
 if __name__ == "__main__":

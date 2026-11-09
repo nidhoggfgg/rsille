@@ -1,10 +1,11 @@
 """Pack the generated DeepSeek/Claude sheets for runtime playback (Pillow only).
 
-Each source is a 4x6 grid of 256px cells. Sample both display sizes directly
-from the cleaned source with an explicit material palette and binary alpha.
+Each source is a 4x6 grid of 256px cells. Sample 96x48 and 128x64 Quadrant
+frames directly from the cleaned source for real horizontal detail, with an
+explicit material palette and binary alpha. Legacy square assets are untouched.
 Idle/wave share stationary pixels; only authored eyes/arm/expression move.
 No per-frame crop or recentering: authored walking/jumping offsets survive.
-ChatGPT's existing, separately tuned pack_actions.py pipeline stays intact.
+ChatGPT uses the separately tuned pack_actions.py pipeline.
 """
 from collections import Counter
 from pathlib import Path
@@ -52,10 +53,12 @@ def motion_mask(name, size, frame):
     boxes = regions["eyes"] if frame == 2 else (
         regions["arm"] + (regions["face"] if frame == 6 else [])
         if frame in (5, 6, 7) else [])
-    mask = Image.new("L", (size, size))
+    width, height = size
+    mask = Image.new("L", size)
     draw = ImageDraw.Draw(mask)
     for box in boxes:
-        draw.rectangle([round((v + 16) * size / (CELL + 32)) for v in box], fill=255)
+        draw.rectangle([round((v + 16) * axis / (CELL + 32))
+                                for v, axis in zip(box, (width, height, width, height))], fill=255)
     return mask
 
 
@@ -88,7 +91,8 @@ def pack(name):
         colors = PALETTES[name]
         palette = Image.new("P", (1, 1))
         palette.putpalette([v for rgb in colors + [colors[0]] * (256 - len(colors)) for v in rgb])
-        for size in (48, 64):
+        for size in ((96, 48), (128, 64)):
+            width, height = size
             frames = []
             for row in range(ROWS):
                 for col in range(COLUMNS):
@@ -99,7 +103,7 @@ def pack(name):
                     padded = Image.new("RGBA", (CELL + 32, CELL + 32))
                     padded.paste(tile, (16, 16))
                     tile = padded
-                    tile = tile.resize((size, size), Image.Resampling.NEAREST)
+                    tile = tile.resize(size, Image.Resampling.NEAREST)
                     alpha = tile.getchannel("A").point(lambda a: 255 if a >= 128 else 0)
                     tile = tile.convert("RGB").quantize(palette=palette,
                             dither=Image.Dither.NONE).convert("RGBA")
@@ -122,21 +126,23 @@ def pack(name):
                 if len({f.tobytes() for f in clip}) != (2 if row == 0 else 4):
                     raise ValueError(f"{name}/{size}: missing poses in action {row}")
             for index, frame in enumerate(frames):
+                if frame.size != size:
+                    raise ValueError(f"{name}/{index}: unexpected dimensions {frame.size}")
                 alpha = frame.getchannel("A")
                 bounds = alpha.getbbox()
                 if not bounds or alpha.getextrema() != (0, 255):
                     raise ValueError(f"{name}/{size}/{index}: missing art or transparency")
-                if bounds[0] == 0 or bounds[1] == 0 or bounds[2] == size or bounds[3] == size:
+                if bounds[0] == 0 or bounds[1] == 0 or bounds[2] == width or bounds[3] == height:
                     raise ValueError(f"{name}/{size}/{index}: sprite touches cell edge")
-            atlas = Image.new("RGBA", (COLUMNS * size, ROWS * size))
+            atlas = Image.new("RGBA", (COLUMNS * width, ROWS * height))
             for index, frame in enumerate(frames):
-                atlas.paste(frame, (index % COLUMNS * size, index // COLUMNS * size))
-            stem = ASSETS / f"{name}-actions-{size}"
+                atlas.paste(frame, (index % COLUMNS * width, index // COLUMNS * height))
+            stem = ASSETS / f"{name}-actions-{width}x{height}"
             atlas.save(stem.with_suffix(".png"))
             data = b"".join(frame.tobytes() for frame in frames)
             stem.with_suffix(".rgba").write_bytes(data)
-            print(f"Packed {name}: 24 frames at {size}px, {len(colors)} colors, "
-                  f"{len(data):,} bytes; motion checks passed")
+            print(f"Packed {name}: 24 frames at {width}x{height}px, {len(colors)} colors, "
+                  f"{len(data):,} bytes; motion/bounds checks passed")
 
 
 if __name__ == "__main__":

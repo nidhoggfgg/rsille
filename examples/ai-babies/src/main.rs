@@ -10,7 +10,7 @@ use rsille::{
 };
 use std::{error::Error, time::Instant};
 
-const INLINE_HEIGHT: u16 = 32;
+const INLINE_HEIGHT: u16 = 24;
 const PREVIEW_WIDTH: u16 = 80;
 
 struct Nursery {
@@ -32,7 +32,7 @@ impl Default for Nursery {
             paused: false,
             action: None,
             character: scene::Character::default(),
-            canvas: Canvas::with_encoding(Encoding::HalfBlock),
+            canvas: Canvas::with_encoding(Encoding::Quadrant),
         }
     }
 }
@@ -101,7 +101,7 @@ impl Draw for Nursery {
         if size.width == 0 || size.height == 0 {
             return Ok(size);
         }
-        let w = size.width as usize;
+        let w = size.width as usize * 2;
         let h = size.height as usize * 2;
         let pixels = scene::render(w, h, self.time, self.action, self.character);
         self.canvas.clear();
@@ -137,10 +137,10 @@ fn animation_args(
             "--height" => {
                 height = args
                     .get(1)
-                    .ok_or("--height requires ROWS (1..128)")?
+                    .ok_or("--height requires ROWS (24 or 32)")?
                     .parse()?;
-                if !(1..=128).contains(&height) {
-                    return Err("--height must be within 1..128 rows".into());
+                if ![24, 32].contains(&height) {
+                    return Err("--height must be 24 or 32 rows".into());
                 }
             }
             _ => break,

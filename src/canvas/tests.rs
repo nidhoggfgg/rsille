@@ -22,7 +22,7 @@ fn first(canvas: &mut Canvas) -> Stylized {
 fn quadrant_preserves_all_coverage_patterns_and_backgrounds() {
     // Top-left, top-right, bottom-left, bottom-right bit order.
     let symbols = [
-        ' ', '▘', '▝', '▀', '▖', '▌', '▚', '▛', '▗', '▞', '▐', '▜', '▄', '▙', '▟', '█',
+        ' ', '▘', '▝', '▀', '▖', '▌', '▞', '▛', '▗', '▚', '▐', '▜', '▄', '▙', '▟', '█',
     ];
     for (mask, symbol) in symbols.into_iter().enumerate() {
         for background in [None, Some(Color::Blue)] {
@@ -47,7 +47,7 @@ fn quadrant_preserves_all_coverage_patterns_and_backgrounds() {
 #[test]
 fn quadrant_preserves_every_two_color_pattern_in_either_drawing_order() {
     let symbols = [
-        '█', '▘', '▝', '▀', '▖', '▌', '▚', '▛', '▗', '▞', '▐', '▜', '▄', '▙', '▟', '█',
+        '█', '▘', '▝', '▀', '▖', '▌', '▞', '▛', '▗', '▚', '▐', '▜', '▄', '▙', '▟', '█',
     ];
     for (mask, symbol) in symbols.into_iter().enumerate() {
         for reverse in [false, true] {
@@ -92,7 +92,7 @@ fn quadrant_partial_colors_average_without_covering_empty_samples() {
     canvas.set_color(0, 1, Color::Rgb { r: 255, g: 0, b: 0 });
     canvas.set_color(1, 0, Color::Rgb { r: 0, g: 0, b: 255 });
     let cell = first(&mut canvas);
-    assert_eq!(cell.as_char(), Some('▞'));
+    assert_eq!(cell.as_char(), Some('▚'));
     assert_eq!(
         cell.style.colors.unwrap(),
         Colors {

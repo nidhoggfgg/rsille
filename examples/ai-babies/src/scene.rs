@@ -1,12 +1,14 @@
 use crossterm::style::Color;
 
-pub const WIDTH: usize = 64;
+pub const WIDTH: usize = 128;
 pub const HEIGHT: usize = 64;
 pub const FRAME_BYTES: usize = WIDTH * HEIGHT * 4;
-pub const SPRITES: &[u8; FRAME_BYTES * 24] = include_bytes!("../assets/dragon-actions-v2-64.rgba");
-pub const SMALL_WIDTH: usize = 48;
-pub const SMALL_SPRITES: &[u8; SMALL_WIDTH * SMALL_WIDTH * 4 * 24] =
-    include_bytes!("../assets/dragon-actions-v2-48.rgba");
+pub const SPRITES: &[u8; FRAME_BYTES * 24] =
+    include_bytes!("../assets/chatgpt-actions-v2-128x64.rgba");
+pub const SMALL_WIDTH: usize = 96;
+pub const SMALL_HEIGHT: usize = 48;
+pub const SMALL_SPRITES: &[u8; SMALL_WIDTH * SMALL_HEIGHT * 4 * 24] =
+    include_bytes!("../assets/chatgpt-actions-v2-96x48.rgba");
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Character {
@@ -44,20 +46,21 @@ impl Character {
 
     pub fn atlas(self, display_height: usize) -> (&'static [u8], usize) {
         const DEEPSEEK: &[u8; FRAME_BYTES * 24] =
-            include_bytes!("../assets/deepseek-actions-64.rgba");
-        const DEEPSEEK_SMALL: &[u8; SMALL_WIDTH * SMALL_WIDTH * 4 * 24] =
-            include_bytes!("../assets/deepseek-actions-48.rgba");
-        const CLAUDE: &[u8; FRAME_BYTES * 24] = include_bytes!("../assets/claude-actions-64.rgba");
-        const CLAUDE_SMALL: &[u8; SMALL_WIDTH * SMALL_WIDTH * 4 * 24] =
-            include_bytes!("../assets/claude-actions-48.rgba");
-        if display_height <= SMALL_WIDTH {
+            include_bytes!("../assets/deepseek-actions-128x64.rgba");
+        const DEEPSEEK_SMALL: &[u8; SMALL_WIDTH * SMALL_HEIGHT * 4 * 24] =
+            include_bytes!("../assets/deepseek-actions-96x48.rgba");
+        const CLAUDE: &[u8; FRAME_BYTES * 24] =
+            include_bytes!("../assets/claude-actions-128x64.rgba");
+        const CLAUDE_SMALL: &[u8; SMALL_WIDTH * SMALL_HEIGHT * 4 * 24] =
+            include_bytes!("../assets/claude-actions-96x48.rgba");
+        if display_height <= SMALL_HEIGHT {
             (
                 match self {
                     Self::ChatGpt => SMALL_SPRITES,
                     Self::DeepSeek => DEEPSEEK_SMALL,
                     Self::Claude => CLAUDE_SMALL,
                 },
-                SMALL_WIDTH,
+                SMALL_HEIGHT,
             )
         } else {
             (
@@ -66,7 +69,7 @@ impl Character {
                     Self::DeepSeek => DEEPSEEK,
                     Self::Claude => CLAUDE,
                 },
-                WIDTH,
+                HEIGHT,
             )
         }
     }
@@ -217,22 +220,23 @@ pub fn render(
     if w == 0 || h == 0 {
         return pixels;
     }
-    // Half-block samples are physically square with typical 1:2 terminal cells.
-    // 24- and 32-row displays use atlases baked directly from the original art.
-    let dh = h.min(w).min(HEIGHT);
-    let dw = dh;
+    // Quadrant samples are half as wide as they are tall in 1:2 terminal cells.
+    // Rectangular atlases preserve the artwork's physical aspect and finer detail.
+    let dh = h.min(w / 2).min(HEIGHT);
+    let dw = dh * 2;
     let (sprites, source_size) = character.atlas(dh);
     let left = (w - dw) / 2;
     let top = (h - dh) / 2;
-    let frame = current_frame(time, action) * source_size * source_size * 4;
+    let source_width = source_size * 2;
+    let frame = current_frame(time, action) * source_width * source_size * 4;
     for dy in 0..dh {
         for dx in 0..dw {
-            let sx = (2 * dx + 1) * source_size / (2 * dw);
+            let sx = (2 * dx + 1) * source_width / (2 * dw);
             let sy = (2 * dy + 1) * source_size / (2 * dh);
-            let offset = frame + (sy * source_size + sx) * 4;
+            let offset = frame + (sy * source_width + sx) * 4;
             let rgba = &sprites[offset..offset + 4];
             // Packed alpha is binary. Leave transparent samples absent so the
-            // terminal supplies its own background, including at half-cell edges.
+            // terminal supplies its own background, including at quadrant edges.
             if rgba[3] != 0 {
                 pixels[(top + dy) * w + left + dx] = Some([rgba[0], rgba[1], rgba[2]]);
             }

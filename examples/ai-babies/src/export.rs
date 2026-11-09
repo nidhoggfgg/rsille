@@ -1,4 +1,4 @@
-//! Export actual Half-block terminal cells at the same scale as static previews.
+//! Export actual Quadrant terminal cells at the same scale as static previews.
 use std::{error::Error, fs, time::Instant};
 
 use crossterm::style::Color;
@@ -15,14 +15,18 @@ pub fn frame(nursery: &mut Nursery, size: Size) -> Result<Buffer, Box<dyn Error>
 pub fn rgba(buffer: &Buffer) -> Vec<[u8; 4]> {
     let size = buffer.size();
     // Two output pixels across a cell and four down it, matching the static
-    // Quadrant export. Every Half-block sample occupies a 2x2 output square.
+    // Quadrant export. Every Quadrant sample occupies a 1x2 output rectangle.
     let mut pixels = Vec::with_capacity(usize::from(size.width) * usize::from(size.height) * 8);
     for y in 0..size.height * 4 {
         for x in 0..size.width * 2 {
             let cell = buffer.get((x / 2, y / 4).into()).unwrap();
-            let foreground = cell.as_char() == Some('█')
-                || (cell.as_char() == Some('▀') && y % 4 < 2)
-                || (cell.as_char() == Some('▄') && y % 4 >= 2);
+            // Mask bits run bottom-left, bottom-right, top-left, top-right.
+            let mask = " ▖▗▄▘▌▚▙▝▞▐▟▀▛▜█"
+                .chars()
+                .position(|symbol| Some(symbol) == cell.as_char())
+                .expect("Quadrant canvas symbol");
+            let bit = (1 - (y / 2) % 2) * 2 + x % 2;
+            let foreground = mask & (1 << bit) != 0;
             let color = cell.style.colors.and_then(|colors| {
                 if foreground {
                     colors.foreground
@@ -119,7 +123,7 @@ pub fn command(
             println!("90 frames passed at {PREVIEW_WIDTH}x{height}; mean {:.2} ms/frame (drawing + encoding; no terminal I/O)", start.elapsed().as_secs_f64() * 1000.0 / 90.0);
         }
         "--help" | "-h" if args.len() == 1 => println!(
-            "AI BABIES / ChatGPT, DeepSeek and Claude pets\n\nRun without arguments for automatic inline playback (up to 32 rows). Use --height ROWS to set the height (1..128, limited by the terminal during playback).\nTab: next character; g: ChatGPT; d: DeepSeek; c: Claude; q / Esc / Ctrl+C: exit; Space: pause; 1: idle; 2: wave; 3: walk; 4: hop; 5: think; 6: sleep; 0: automatic\n\n--static [--height ROWS] [--snapshot FILE.ppm]  (default: 144 columns × 24 rows; height: 1..40)\n[--character chatgpt|deepseek|claude] [--height ROWS] [EXPORT OPTION]  (either order, before export options; defaults: chatgpt, 32 rows)\n--headless\n--snapshot FILE.ppm [SECONDS [COLUMNS ROWS]]  (explicit dimensions override --height)\n--frames DIRECTORY  (one complete action playlist at 24 FPS)\n--action idle|wave|walk|hop|think|sleep DIRECTORY"
+            "AI BABIES / ChatGPT, DeepSeek and Claude pets\n\nRun without arguments for automatic inline playback (up to 24 rows). Use --height ROWS to set the height (24 or 32, limited by the terminal during playback).\nTab: next character; g: ChatGPT; d: DeepSeek; c: Claude; q / Esc / Ctrl+C: exit; Space: pause; 1: idle; 2: wave; 3: walk; 4: hop; 5: think; 6: sleep; 0: automatic\n\n--static [--height ROWS] [--snapshot FILE.ppm]  (default: 144 columns × 24 rows; height: 1..40)\n[--character chatgpt|deepseek|claude] [--height ROWS] [EXPORT OPTION]  (either order, before export options; defaults: chatgpt, 24 rows)\n--headless\n--snapshot FILE.ppm [SECONDS [COLUMNS ROWS]]  (explicit dimensions override --height)\n--frames DIRECTORY  (one complete action playlist at 24 FPS)\n--action idle|wave|walk|hop|think|sleep DIRECTORY"
         ),
         _ => return Err("Unknown or incomplete arguments; use --help".into()),
     }

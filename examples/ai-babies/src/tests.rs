@@ -7,7 +7,7 @@ fn every_character_has_complete_transparent_clips_at_both_sizes() {
     for character in Character::ALL {
         for display_height in [48, 64] {
             let (atlas, size) = character.atlas(display_height);
-            let bytes = size * size * 4;
+            let bytes = size * 2 * size * 4;
             assert_eq!(size, display_height);
             assert_eq!(atlas.len(), bytes * 24);
             let colors: std::collections::BTreeSet<_> = atlas
@@ -44,6 +44,141 @@ fn every_character_has_complete_transparent_clips_at_both_sizes() {
     }
     for pair in Character::ALL.windows(2) {
         assert_ne!(pair[0].atlas(64).0, pair[1].atlas(64).0);
+    }
+}
+
+#[test]
+fn quadrant_atlases_and_exports_preserve_genuine_horizontal_detail() {
+    assert_eq!((scene::WIDTH, scene::HEIGHT), (128, 64));
+    assert_eq!((scene::SMALL_WIDTH, scene::SMALL_HEIGHT), (96, 48));
+    assert_eq!(scene::FRAME_BYTES, 128 * 64 * 4);
+    for character in Character::ALL {
+        for height in [48, 64] {
+            let (atlas, source_height) = character.atlas(height);
+            assert_eq!(source_height, height);
+            assert!(
+                atlas.chunks_exact(8).any(|pair| pair[..4] != pair[4..]),
+                "{character:?}/{height}: atlas only duplicates horizontal samples"
+            );
+            let mut nursery = Nursery {
+                character,
+                ..Nursery::default()
+            };
+            let pixels = export::rgba(
+                &export::frame(&mut nursery, (80, (height / 2) as u16).into()).unwrap(),
+            );
+            assert!(
+                pixels.chunks_exact(2).any(|pair| pair[0] != pair[1]),
+                "{character:?}/{height}: encoding erased horizontal detail"
+            );
+        }
+    }
+}
+
+#[test]
+fn scene_centers_and_resamples_a_physically_square_sprite() {
+    for character in Character::ALL {
+        for (w, h) in [
+            (128, 64),
+            (96, 48),
+            (160, 64),
+            (65, 120),
+            (17, 13),
+            (1, 1),
+            (0, 8),
+            (8, 0),
+        ] {
+            let pixels = scene::render(w, h, 0.75, Some(Action::Wave), character);
+            assert_eq!(pixels.len(), w * h);
+            let dh = h.min(w / 2).min(64);
+            let dw = dh * 2;
+            let left = (w - dw) / 2;
+            let top = (h - dh) / 2;
+            let (atlas, source_height) = character.atlas(dh);
+            let source_width = source_height * 2;
+            let frame = Action::Wave.frame(0.75);
+            for y in 0..h {
+                for x in 0..w {
+                    let expected = if x >= left && x < left + dw && y >= top && y < top + dh {
+                        let sx = (2 * (x - left) + 1) * source_width / (2 * dw);
+                        let sy = (2 * (y - top) + 1) * source_height / (2 * dh);
+                        let offset =
+                            (frame * source_width * source_height + sy * source_width + sx) * 4;
+                        let rgba = &atlas[offset..offset + 4];
+                        (rgba[3] != 0).then_some([rgba[0], rgba[1], rgba[2]])
+                    } else {
+                        None
+                    };
+                    assert_eq!(
+                        pixels[y * w + x],
+                        expected,
+                        "{character:?}/{w}x{h} at {x},{y}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn rgba_export_reconstructs_all_quadrant_masks() {
+    use crossterm::style::{Color, Colors};
+    use rsille::render::{
+        buffer::Buffer,
+        style::{Style, Stylized},
+    };
+    // Bits are top-left, top-right, bottom-left, bottom-right.
+    let symbols = [
+        ' ', '▘', '▝', '▀', '▖', '▌', '▞', '▛', '▗', '▚', '▐', '▜', '▄', '▙', '▟', '█',
+    ];
+    let foreground = Color::Rgb {
+        r: 231,
+        g: 57,
+        b: 19,
+    };
+    for background in [
+        None,
+        Some(Color::Rgb {
+            r: 13,
+            g: 71,
+            b: 203,
+        }),
+    ] {
+        let mut buffer = Buffer::new((16, 1).into());
+        for (mask, symbol) in symbols.into_iter().enumerate() {
+            buffer
+                .set(
+                    (mask as u16, 0).into(),
+                    Stylized::new(
+                        symbol,
+                        Style::with_colors(Colors {
+                            foreground: Some(foreground),
+                            background,
+                        }),
+                    ),
+                )
+                .unwrap();
+        }
+        let pixels = export::rgba(&buffer);
+        assert_eq!(pixels.len(), 32 * 4);
+        for mask in 0..16 {
+            for y in 0..4 {
+                for x in 0..2 {
+                    let expected = if mask & (1 << (y / 2 * 2 + x)) != 0 {
+                        [231, 57, 19, 255]
+                    } else if background.is_some() {
+                        [13, 71, 203, 255]
+                    } else {
+                        [0; 4]
+                    };
+                    assert_eq!(
+                        pixels[y * 32 + mask * 2 + x],
+                        expected,
+                        "mask {mask:04b}, pixel {x},{y}"
+                    );
+                }
+            }
+        }
     }
 }
 
@@ -159,6 +294,7 @@ fn character_cli_selection_applies_to_playback_and_exports() {
 
 #[test]
 fn animation_height_accepts_either_option_order_and_rejects_invalid_rows() {
+    assert_eq!(animation_args(&[]).unwrap().1, 24);
     for args in [
         vec!["--height", "24", "--character", "claude", "--frames", "out"],
         vec!["--character", "claude", "--height", "24", "--frames", "out"],
@@ -169,11 +305,13 @@ fn animation_height_accepts_either_option_order_and_rejects_invalid_rows() {
         assert_eq!(height, 24);
         assert_eq!(remaining, &["--frames", "out"]);
     }
-    for value in ["0", "129", "-1", "abc", "65536"] {
+    for value in [
+        "0", "1", "23", "25", "31", "33", "128", "129", "-1", "abc", "65536",
+    ] {
         assert!(animation_args(&["--height".into(), value.into()]).is_err());
     }
     assert!(animation_args(&["--height".into()]).is_err());
-    for height in [1, 24, 32, 128] {
+    for height in [24, 32] {
         assert_eq!(
             animation_args(&["--height".into(), height.to_string()])
                 .unwrap()
@@ -317,15 +455,16 @@ fn pause_action_restart_and_exit_controls_work() {
 #[test]
 fn idle_and_wave_keep_hair_and_lower_body_identical() {
     for (atlas, size) in [Character::ChatGpt.atlas(48), Character::ChatGpt.atlas(64)] {
-        let bytes = size * size * 4;
+        let width = size * 2;
+        let bytes = width * size * 4;
         let base = &atlas[..bytes];
         for frame in 1..8 {
             let pixels = &atlas[frame * bytes..(frame + 1) * bytes];
             for y in 0..size {
                 if y < size / 4 || y > size * 4 / 5 {
                     assert_eq!(
-                        &base[y * size * 4..(y + 1) * size * 4],
-                        &pixels[y * size * 4..(y + 1) * size * 4],
+                        &base[y * width * 4..(y + 1) * width * 4],
+                        &pixels[y * width * 4..(y + 1) * width * 4],
                         "stationary region changed in frame {frame}, row {y}, size {size}"
                     );
                 }
@@ -350,21 +489,24 @@ fn facial_skin_highlights_stay_warm_and_eye_glints_stay_white() {
         (64, [(32, 28), (33, 30), (25, 34), (32, 35)], (24, 30)),
         (48, [(24, 21), (24, 25), (24, 26), (25, 26)], (18, 22)),
     ] {
-        let (atlas, width) = Character::ChatGpt.atlas(size);
+        let (atlas, height) = Character::ChatGpt.atlas(size);
+        let width = height * 2;
         let pixel = |frame: usize, x: usize, y: usize| {
-            let offset = (frame * width * width + y * width + x) * 4;
+            let offset = (frame * width * height + y * width + x) * 4;
             &atlas[offset..offset + 4]
         };
         for frame in [0, 1, 3, 4, 5, 7] {
             for (x, y) in skin_points {
-                let rgba = pixel(frame, x, y);
+                let rgba = pixel(frame, x * 2 + 1, y);
                 assert_eq!(rgba[3], 255);
                 assert!(
                     rgba[0] >= 239 && rgba[0] - rgba[2] >= 20,
                     "skin turned white at frame {frame}, {x},{y}, size {size}: {rgba:?}"
                 );
             }
-            let rgba = pixel(frame, glint.0, glint.1);
+            // Direct resampling resolves the glint on the left of the old sample.
+            let rgba = pixel(frame, glint.0 * 2, glint.1);
+            assert_eq!(rgba[3], 255);
             assert!(
                 rgba[..3].iter().all(|&channel| channel >= 245),
                 "eye glint was recolored at frame {frame}, size {size}"
@@ -374,7 +516,7 @@ fn facial_skin_highlights_stay_warm_and_eye_glints_stay_white() {
 }
 
 #[test]
-fn terminal_encoding_preserves_every_sample_color() {
+fn terminal_encoding_preserves_transparency_and_representable_colors() {
     for character in Character::ALL {
         for (w, h) in [(80u16, 32u16), (80, 24), (51, 23), (32, 60)] {
             for action in Action::ALL {
@@ -385,7 +527,7 @@ fn terminal_encoding_preserves_every_sample_color() {
                     ..Nursery::default()
                 };
                 let expected = scene::render(
-                    w as usize,
+                    w as usize * 2,
                     h as usize * 2,
                     nursery.time,
                     nursery.action,
@@ -393,12 +535,41 @@ fn terminal_encoding_preserves_every_sample_color() {
                 );
                 let buffer = export::frame(&mut nursery, (w, h).into()).unwrap();
                 let actual = export::rgba(&buffer);
-                for y in 0..usize::from(h) * 4 {
-                    for x in 0..usize::from(w) * 2 {
-                        let offset = y * usize::from(w) * 2 + x;
-                        let expected = expected[(y / 2) * usize::from(w) + x / 2]
-                            .map_or([0, 0, 0, 0], |[r, g, b]| [r, g, b, 255]);
-                        assert_eq!(actual[offset], expected);
+                let width = usize::from(w) * 2;
+                assert_eq!(actual.len(), width * usize::from(h) * 4);
+                for y in 0..usize::from(h) {
+                    for x in 0..usize::from(w) {
+                        let samples = [
+                            expected[y * 2 * width + x * 2],
+                            expected[y * 2 * width + x * 2 + 1],
+                            expected[(y * 2 + 1) * width + x * 2],
+                            expected[(y * 2 + 1) * width + x * 2 + 1],
+                        ];
+                        let colors: std::collections::BTreeSet<_> =
+                            samples.iter().flatten().copied().collect();
+                        let partial = samples.iter().any(Option::is_none);
+                        let representable = colors.len() <= if partial { 1 } else { 2 };
+                        let mut encoded = std::collections::BTreeSet::new();
+                        for (quadrant, sample) in samples.into_iter().enumerate() {
+                            for repeat in 0..2 {
+                                let pixel = actual[(y * 4 + quadrant / 2 * 2 + repeat) * width
+                                    + x * 2
+                                    + quadrant % 2];
+                                assert_eq!(pixel[3], if sample.is_some() { 255 } else { 0 });
+                                if pixel[3] != 0 {
+                                    encoded.insert(pixel);
+                                } else {
+                                    assert_eq!(pixel, [0; 4]);
+                                }
+                                if representable {
+                                    assert_eq!(
+                                        pixel,
+                                        sample.map_or([0; 4], |[r, g, b]| [r, g, b, 255])
+                                    );
+                                }
+                            }
+                        }
+                        assert!(encoded.len() <= if partial { 1 } else { 2 });
                     }
                 }
             }
@@ -425,23 +596,29 @@ fn transparent_cells_and_edges_inherit_terminal_background_without_trails() {
             nursery
                 .draw(Chunk::new(&mut buffer, size.into()).unwrap())
                 .unwrap();
-            let pixels = scene::render(80, 64, time, None, nursery.character);
+            let pixels = scene::render(160, 64, time, None, nursery.character);
             for y in 0..32 {
                 for x in 0..80 {
                     let cell = buffer.get((x as u16, y as u16).into()).unwrap();
-                    let top = pixels[(y * 2) * 80 + x];
-                    let bottom = pixels[(y * 2 + 1) * 80 + x];
-                    if top.is_none() || bottom.is_none() {
+                    let samples = [
+                        pixels[y * 2 * 160 + x * 2],
+                        pixels[y * 2 * 160 + x * 2 + 1],
+                        pixels[(y * 2 + 1) * 160 + x * 2],
+                        pixels[(y * 2 + 1) * 160 + x * 2 + 1],
+                    ];
+                    let partial = samples.iter().any(Option::is_none);
+                    let occupied = samples.iter().any(Option::is_some);
+                    if partial {
                         assert_eq!(cell.style.colors.and_then(|c| c.background), None);
                     }
-                    if top.is_none() && bottom.is_none() {
+                    if !occupied {
                         assert_eq!(cell.as_char(), Some(' '));
                         assert_eq!(cell.style.colors.and_then(|c| c.foreground), None);
                         saw_cleared |= previous[y * 80 + x];
-                    } else if top.is_none() || bottom.is_none() {
+                    } else if partial {
                         saw_partial = true;
                     }
-                    previous[y * 80 + x] = top.is_some() || bottom.is_some();
+                    previous[y * 80 + x] = occupied;
                 }
             }
         }

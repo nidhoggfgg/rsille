@@ -23,13 +23,16 @@ cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --character
 cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --character claude --height 24
 ```
 
-Animated playback uses inline mode, True Color and Half-block encoding. The default
-height cap is 32 terminal rows; `--height ROWS` accepts 1–128 and is limited by the actual
-terminal during playback. An 80 × 34 terminal is recommended, allowing room for the
+Animated playback uses inline mode, True Color and 2 × 2 Quadrant encoding. The default
+height cap is 24 terminal rows; `--height ROWS` accepts only 24 or 32 and is limited by
+the actual terminal during playback. An 80 × 26 terminal is recommended, allowing room for the
 shell prompt. Transparent pixels use the terminal's default background.
 
-24 rows use the 48-pixel atlas; 32 rows use the 64-pixel atlas. Smaller windows scale
-down; more height adds space without enlarging the character beyond 64 × 64 pixels.
+24 rows use 96 × 48 frames; 32 rows use 128 × 64 frames, sampled directly from the
+original art. Horizontal sampling is doubled while the displayed proportions stay
+unchanged. Smaller windows scale down; more height adds space without enlarging the
+character beyond 128 × 64 samples. Each cell fits its samples to two terminal colors;
+partially transparent cells use one foreground color and the terminal background.
 The binary embeds the pixel data, so playback needs no network, Python or image decoder.
 
 ## Controls
@@ -104,9 +107,9 @@ Previews reconstruct block cells and may differ from a terminal font's seams or 
 | Files | Purpose |
 | --- | --- |
 | [chibi-trio-source.png](assets/chibi-trio-source.png) | Original three-character reference |
-| [dragon-actions-source.png](assets/dragon-actions-source.png) | ChatGPT action source |
+| [chatgpt-actions-source.png](assets/chatgpt-actions-source.png) | ChatGPT action source |
 | `assets/{deepseek,claude}-actions-clean-source.png` | Companion action sources |
-| `assets/*-actions-*.png` and `.rgba` (48/64) | Current preview atlases and embedded animation pixels |
+| `assets/*-actions-*.png` and `.rgba` (96x48/128x64) | Current preview atlases and embedded animation pixels |
 | `assets/chibi-trio-240x80.png` and `.rgb` | Static source and embedded pixels |
 | `assets/*-prompt.txt` | Generation and cleanup prompts |
 
