@@ -45,11 +45,11 @@
 
 ## 在应用中引入 rsille
 
-在应用中添加 rsille `3.0.0` 依赖：
+在应用中添加 rsille `3.0.1` 依赖：
 
 ```toml
 [dependencies]
-rsille = "3.0.0"
+rsille = "3.0.1"
 ```
 
 对外的包名是 `rsille`。仓库中的 `tui`、`render`、`canvas` 都是内部开发用 crate，
@@ -59,7 +59,7 @@ rsille = "3.0.0"
 
 ```toml
 [dependencies]
-rsille = { version = "3.0.0", features = ["syntax-highlighting"] }
+rsille = { version = "3.0.1", features = ["syntax-highlighting"] }
 ```
 
 未启用时，代码查看器仍支持纯文本显示和导航。
@@ -194,7 +194,7 @@ TUI 的 `canvas(...)` 组件把同一套绘图能力嵌入布局。通过 `.view
 
 ## API 与源码入口
 
-当前仓库使用 **v3 API**（`Cargo.toml` 中版本为 `3.0.0`）。从 v2 升级请阅读
+当前仓库使用 **v3 API**（`Cargo.toml` 中版本为 `3.0.1`）。从 v2 升级请阅读
 [迁移指南](MIGRATION_V3.md)。
 
 | 公开模块 | 职责 | 共用实现 |

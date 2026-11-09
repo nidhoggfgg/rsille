@@ -2,7 +2,7 @@
 
 use crate::render::text::TextWidth;
 #[cfg(feature = "syntax-highlighting")]
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 #[cfg(feature = "syntax-highlighting")]
 use syntect::easy::HighlightLines;
 #[cfg(feature = "syntax-highlighting")]
@@ -18,9 +18,9 @@ use crate::tui::style::{BorderStyle, Color, Style};
 use crate::tui::widget::{EventCtx, EventPhase, MeasureCtx, RenderCtx, Widget};
 
 #[cfg(feature = "syntax-highlighting")]
-static SYNTAX_SET: Lazy<SyntaxSet> = Lazy::new(SyntaxSet::load_defaults_newlines);
+static SYNTAX_SET: LazyLock<SyntaxSet> = LazyLock::new(SyntaxSet::load_defaults_newlines);
 #[cfg(feature = "syntax-highlighting")]
-static THEME_SET: Lazy<ThemeSet> = Lazy::new(ThemeSet::load_defaults);
+static THEME_SET: LazyLock<ThemeSet> = LazyLock::new(ThemeSet::load_defaults);
 
 /// Persistent vertical scroll position shared by the content viewers.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

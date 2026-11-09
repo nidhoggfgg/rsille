@@ -181,7 +181,7 @@ where
 
     /// Run and return the application after terminal cleanup.
     ///
-    /// Creates a current-thread Tokio runtime with time and I/O enabled.
+    /// Creates a current-thread Tokio runtime with the time driver enabled.
     ///
     /// # Errors
     ///
@@ -197,7 +197,7 @@ where
         rt.block_on(self.run_async_returning())
     }
 
-    /// Run on an existing Tokio runtime with time and I/O drivers enabled.
+    /// Run on an existing Tokio runtime with the time driver enabled.
     ///
     /// Discards the application after cleanup. Returns the same startup errors
     /// as [`run_async_returning`](Self::run_async_returning).

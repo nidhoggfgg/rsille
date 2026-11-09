@@ -19,13 +19,12 @@ rsille-canvas = { package = "canvas", path = "../canvas" }
 crossterm = { workspace = true }
 taffy = { workspace = true }
 syntect = { workspace = true, optional = true }
-once_cell = { workspace = true, optional = true }
 rustc-hash = "2.0"
 smallvec = "1.13"
 
 [features]
 default = []
-syntax-highlighting = ["dep:syntect", "dep:once_cell"]
+syntax-highlighting = ["dep:syntect"]
 
 [dev-dependencies]
 tokio = { workspace = true }

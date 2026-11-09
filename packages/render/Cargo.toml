@@ -16,16 +16,13 @@ doctest = false
 [dependencies]
 crossterm = { workspace = true }
 tokio = { workspace = true }
-async-trait = { workspace = true }
 futures = { workspace = true }
-rayon = { workspace = true }
 unicode-width = { workspace = true }
 unicode-segmentation = { workspace = true }
 log = { workspace = true }
 
 [dev-dependencies]
 criterion = { version = "0.7", features = ["html_reports"] }
-env_logger = "0.11"
 
 [[bench]]
 name = "buffer_bench"
