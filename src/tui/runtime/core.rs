@@ -394,7 +394,7 @@ impl<State, M: Send + 'static> Runtime<State, M> {
 
     /// Runs the terminal event loop on the calling Tokio runtime.
     ///
-    /// The Tokio runtime must have time and I/O drivers enabled. Uses the app's
+    /// The Tokio runtime must have the time driver enabled. Uses the app's
     /// configured terminal mode and returns the final state and exit reason.
     ///
     /// # Errors

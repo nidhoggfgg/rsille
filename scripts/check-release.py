@@ -48,6 +48,10 @@ def main():
                 assert dependency.get("package", name) not in private_packages, (name, dependency)
         assert set(source.rglob("Cargo.toml")) == {manifest}, "only the rsille manifest belongs in the archive"
         assert not (source / "packages").exists(), "archive must not contain workspace crate manifests"
+        assert not (source / ".dev").exists(), "archive must not contain development records"
+        assert {path.relative_to(source).as_posix() for path in source.rglob("README*")} == {
+            "README.md", "README_cn.md",
+        }, "only root READMEs belong in the archive"
         for filename in ("README.md", "LICENCE", "src/render/api.rs", "src/canvas/api.rs", "src/tui/api.rs"):
             assert (source / filename).is_file(), filename
         # Cargo archives normalize file timestamps. A reused target directory

@@ -537,7 +537,7 @@ where
         .run_terminal(mouse_capture, inline_mouse_mode)
     }
 
-    /// Run on the calling Tokio runtime (time and I/O drivers must be enabled).
+    /// Run on the calling Tokio runtime with the time driver enabled.
     /// The future runs on the UI thread and need not be `Send`.
     pub async fn run_async(self) -> WidgetResult<AppExit<State>> {
         let mouse_capture = self.app.mouse_capture;

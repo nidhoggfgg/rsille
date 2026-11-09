@@ -113,7 +113,7 @@ Tab 切换焦点，Enter 或空格激活按钮，默认按 Esc 退出。`view` �
 
 主题、快捷键、订阅和时间相关配置放在 `.update()` 之前。默认全屏；`Mode::Inline`
 使用普通终端屏幕。`run()` 在清理后返回 `AppExit`，其中包含最终状态和退出原因。
-在已有的、启用了 I/O 与时间驱动的 Tokio runtime 中使用 `.run_async().await`。
+在已有的、启用了时间驱动的 Tokio runtime 中使用 `.run_async().await`。
 
 ## 无需终端的测试
 

@@ -50,8 +50,8 @@ cargo run -p tui --features syntax-highlighting --example code_viewer
 Use `App::new(state).update(update).view(view).run()`. Configure mode, theme, hotkeys,
 subscriptions, clock and executor before `.update()`. Every update receives `UpdateCtx`;
 `ctx.exit()` requests exit. Fullscreen is the default; `.mode(Mode::Inline)` uses the
-normal screen. `.run_async().await` runs inside an existing Tokio runtime with I/O and
-time enabled.
+normal screen. `.run_async().await` runs inside an existing Tokio runtime with the
+time driver enabled.
 
 Use `.build().size(width, height)` for a runtime without a terminal. `step(&events)`
 processes input, messages, timers and drawing. Inspect `state()`, `frame()`,

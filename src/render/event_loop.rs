@@ -204,15 +204,17 @@ where
     ///
     /// # Panics
     ///
-    /// May panic if polled without a Tokio runtime or required drivers.
+    /// May panic if polled outside a Tokio runtime or with its time driver disabled.
     pub async fn run_async(self) -> Result<(), DrawErr> {
         self.run_async_returning().await.map(|_| ())
     }
 
     /// Run on the caller's runtime and return the application after cleanup.
     ///
-    /// The runtime must have time and I/O drivers enabled. Actual enabled input
-    /// capabilities are delivered to the application before event dispatch.
+    /// Enable the runtime's time driver with `tokio::runtime::Builder::enable_time`.
+    /// Terminal input uses Crossterm's reader thread and does not require Tokio's
+    /// I/O driver. Actual enabled input capabilities are delivered to the
+    /// application before event dispatch.
     ///
     /// # Errors
     ///
@@ -222,7 +224,7 @@ where
     ///
     /// # Panics
     ///
-    /// May panic if polled without a Tokio runtime or required drivers.
+    /// May panic if polled outside a Tokio runtime or with its time driver disabled.
     pub async fn run_async_returning(mut self) -> Result<T, DrawErr> {
         let guard = TerminalGuard::new(
             self.alt_screen,

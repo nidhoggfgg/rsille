@@ -122,7 +122,7 @@ argument, `UpdateCtx`, schedules work, emits messages and requests exit with
 Configure themes, hotkeys, subscriptions and timing before `.update()`. Fullscreen is
 the default; `Mode::Inline` uses the normal terminal screen. `run()` returns an
 `AppExit` containing the final state and exit reason after cleanup. Inside an existing
-Tokio runtime with I/O and time enabled, use `.run_async().await`.
+Tokio runtime with the time driver enabled, use `.run_async().await`.
 
 ## Test without a terminal
 

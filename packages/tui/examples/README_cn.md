@@ -47,7 +47,7 @@ cargo run -p tui --features syntax-highlighting --example code_viewer
 
 使用 `App::new(state).update(update).view(view).run()`。在 `.update()` 之前配置模式、
 主题、快捷键、订阅、时钟和执行器。每次更新都接收 `UpdateCtx`，调用 `ctx.exit()` 请求退出。
-默认全屏，`.mode(Mode::Inline)` 使用普通屏幕。在已有的、启用了 I/O 和时间驱动的
+默认全屏，`.mode(Mode::Inline)` 使用普通屏幕。在已有的、启用了时间驱动的
 Tokio runtime 中使用 `.run_async().await`。
 
 `.build().size(width, height)` 创建无需终端的运行时。`step(&events)` 处理输入、消息、

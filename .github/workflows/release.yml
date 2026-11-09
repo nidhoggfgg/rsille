@@ -50,6 +50,13 @@ jobs:
           cargo test --workspace --all-features
           cargo check --workspace --all-targets --all-features
 
+      - name: Check API documentation
+        env:
+          RUSTDOCFLAGS: "-D warnings"
+        run: |
+          cargo doc -p rsille --no-default-features --no-deps
+          cargo doc -p rsille --all-features --no-deps
+
       - name: Verify package and independent consumers
         run: python3 scripts/check-release.py
 

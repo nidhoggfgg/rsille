@@ -45,8 +45,8 @@
 //! screen; the default mode is fullscreen.
 //!
 //! [`Application::run`](tui::app::Application::run) returns the final state and
-//! exit reason after terminal cleanup. Inside an existing Tokio runtime with I/O
-//! and time enabled, use [`run_async`](tui::app::Application::run_async).
+//! exit reason after terminal cleanup. Inside an existing Tokio runtime with the
+//! time driver enabled, use [`run_async`](tui::app::Application::run_async).
 //!
 //! # API reference by task
 //!
