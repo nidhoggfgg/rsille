@@ -2,7 +2,7 @@
 
 use crossterm::{
     cursor::{MoveTo, MoveToNextLine, MoveToPreviousLine},
-    style::{Attribute, Print, ResetColor, SetAttribute},
+    style::{Attribute, Attributes, Color, Colors, Print, ResetColor, SetAttributes, SetColors},
     terminal::{Clear, ClearType},
 };
 use log::debug;
@@ -11,8 +11,65 @@ use crate::render::{
     area::{Position, Size},
     buffer::Buffer,
     chunk::Chunk,
+    style::Stylized,
     Builder, Draw, DrawErr, DrawUpdate,
 };
+
+/// Tracks the style actually written to the terminal within one frame.
+/// Missing cell colors mean terminal defaults, not inheritance from the
+/// previously emitted cell (which may be far away during a sparse diff).
+#[derive(Default)]
+struct TerminalStyleState {
+    foreground: Option<Color>,
+    background: Option<Color>,
+    attributes: Attributes,
+}
+
+impl TerminalStyleState {
+    fn reset(&mut self, out: &mut impl std::io::Write) -> std::io::Result<()> {
+        crossterm::queue!(out, ResetColor)?;
+        *self = Self::default();
+        Ok(())
+    }
+
+    fn queue(&mut self, cell: &Stylized, out: &mut impl std::io::Write) -> std::io::Result<()> {
+        if cell.is_empty() || cell.width() == 0 {
+            return Ok(());
+        }
+
+        let attributes = cell.style.attr.unwrap_or_default();
+        if attributes != self.attributes || attributes.has(Attribute::Reset) {
+            // SGR 0 also clears colors. Apply attributes first and reapply
+            // colors afterwards, including when the cell explicitly resets.
+            if !self.attributes.is_empty() || attributes.has(Attribute::Reset) {
+                self.reset(out)?;
+            }
+            crossterm::queue!(out, SetAttributes(attributes))?;
+            self.attributes = attributes;
+        }
+
+        let foreground = cell
+            .style
+            .colors
+            .and_then(|c| c.foreground)
+            .filter(|c| *c != Color::Reset);
+        let background = cell
+            .style
+            .colors
+            .and_then(|c| c.background)
+            .filter(|c| *c != Color::Reset);
+        let changes = Colors {
+            foreground: (foreground != self.foreground)
+                .then_some(foreground.unwrap_or(Color::Reset)),
+            background: (background != self.background)
+                .then_some(background.unwrap_or(Color::Reset)),
+        };
+        crossterm::queue!(out, SetColors(changes))?;
+        self.foreground = foreground;
+        self.background = background;
+        cell.queue_symbol(out)
+    }
+}
 
 /// Draws `T` into a reusable buffer and writes terminal commands to `W`.
 ///
@@ -38,6 +95,10 @@ where
     T: Draw,
 {
     /// Draws a complete frame, writes its changes, and flushes the writer.
+    ///
+    /// Resets terminal colors and attributes before any drawing or clearing.
+    /// Each emitted cell uses its resolved buffer style; unspecified colors
+    /// and attributes use terminal defaults rather than the preceding cell.
     ///
     /// On success, saves the frame for comparison and clears the working
     /// buffer. The size returned by [`Draw::draw`] is ignored.
@@ -71,6 +132,10 @@ where
         };
         let chunk = Chunk::new(&mut self.buffer, render_size.into())?;
         self.thing.draw(chunk)?;
+
+        // Match the frame-local style cache to the real terminal before
+        // drawing or erasing. Cursor movement and clearing do not reset SGR.
+        crossterm::queue!(self.out, ResetColor)?;
 
         if self.clear && self.buffer.previous().is_none() {
             crossterm::queue!(self.out, Clear(ClearType::All))?;
@@ -121,8 +186,7 @@ where
                 target: "render::diff",
                 "using differential rendering (fullscreen)"
             );
-            let mut has_color_cache = false;
-            let mut has_attr_cache = false;
+            let mut style = TerminalStyleState::default();
             for (x, y, cell) in diff_iter {
                 if y >= buffer_size.height {
                     break;
@@ -131,19 +195,7 @@ where
                 // Move cursor to this position (absolute positioning)
                 crossterm::queue!(self.out, MoveTo(self.pos.x + x, self.pos.y + y))?;
 
-                // Reset color if we had color before but current cell doesn't
-                if has_color_cache && !cell.has_color() {
-                    crossterm::queue!(self.out, ResetColor)?;
-                }
-
-                // Reset attributes if we had attributes before but current cell doesn't
-                if has_attr_cache && !cell.has_attr() {
-                    crossterm::queue!(self.out, SetAttribute(Attribute::Reset))?;
-                }
-
-                cell.queue(&mut self.out)?;
-                has_color_cache = cell.has_color();
-                has_attr_cache = cell.has_attr();
+                style.queue(&cell.content, &mut self.out)?;
             }
         } else {
             // First render or no previous buffer, do full render
@@ -152,8 +204,7 @@ where
                 "using full rendering (fullscreen)"
             );
             // Optimize by rendering line by line instead of cell by cell
-            let mut has_color_cache = false;
-            let mut has_attr_cache = false;
+            let mut style = TerminalStyleState::default();
             let mut current_line = 0u16;
             let mut need_move = true;
 
@@ -174,19 +225,7 @@ where
                     need_move = false;
                 }
 
-                // Reset color if we had color before but current cell doesn't
-                if has_color_cache && !cell.has_color() {
-                    crossterm::queue!(self.out, ResetColor)?;
-                }
-
-                // Reset attributes if we had attributes before but current cell doesn't
-                if has_attr_cache && !cell.has_attr() {
-                    crossterm::queue!(self.out, SetAttribute(Attribute::Reset))?;
-                }
-
-                cell.queue(&mut self.out)?;
-                has_color_cache = cell.has_color();
-                has_attr_cache = cell.has_attr();
+                style.queue(&cell.content, &mut self.out)?;
             }
         }
         Ok(())
@@ -244,8 +283,7 @@ where
         }
 
         // Render with line-level diffing
-        let mut has_color_cache = false;
-        let mut has_attr_cache = false;
+        let mut style = TerminalStyleState::default();
         for line_diff in self.buffer.diff_lines() {
             if line_diff.line_num >= current_height {
                 break;
@@ -268,23 +306,12 @@ where
                 } => {
                     // Line has changed, render it with smart overwrite
                     for cell in cells {
-                        // Reset color if we had color before but current cell doesn't
-                        if has_color_cache && !cell.has_color() {
-                            crossterm::queue!(self.out, ResetColor)?;
-                        }
-
-                        // Reset attributes if we had attributes before but current cell doesn't
-                        if has_attr_cache && !cell.has_attr() {
-                            crossterm::queue!(self.out, SetAttribute(Attribute::Reset))?;
-                        }
-
-                        cell.queue(&mut self.out)?;
-                        has_color_cache = cell.has_color();
-                        has_attr_cache = cell.has_attr();
+                        style.queue(&cell.content, &mut self.out)?;
                     }
 
                     // If current line is shorter than previous, clear trailing spaces
                     if current_len < previous_len {
+                        style.reset(&mut self.out)?;
                         let trailing_spaces = previous_len - current_len;
                         for _ in 0..trailing_spaces {
                             crossterm::queue!(self.out, Print(' '))?;
@@ -408,6 +435,10 @@ where
 }
 
 #[cfg(test)]
+#[path = "render_tests.rs"]
+mod style_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::render::{area::Size, style::Stylized, Draw, DrawErr};
@@ -458,7 +489,10 @@ mod tests {
 
         let result = String::from_utf8(buffer).unwrap();
 
-        assert_eq!(result, "\u{1b}[1;1HHello, wor\u{1b}[2;1HHello, wor");
+        assert_eq!(
+            result,
+            "\u{1b}[0m\u{1b}[1;1HHello, wor\u{1b}[2;1HHello, wor"
+        );
     }
 
     #[test]
@@ -472,7 +506,7 @@ mod tests {
         render.render().unwrap();
 
         let result = String::from_utf8(buffer).unwrap();
-        assert_eq!(result, "\u{1b}[2J\u{1b}[1;1HHello, world!       ");
+        assert_eq!(result, "\u{1b}[0m\u{1b}[2J\u{1b}[1;1HHello, world!       ");
     }
 
     #[test]
@@ -486,7 +520,7 @@ mod tests {
         render.render().unwrap();
 
         let result = String::from_utf8(buffer).unwrap();
-        assert_eq!(result, "\u{1b}[1;1H你好 ");
+        assert_eq!(result, "\u{1b}[0m\u{1b}[1;1H你好 ");
     }
 
     #[test]
@@ -501,6 +535,9 @@ mod tests {
         render.render().unwrap();
 
         let result = String::from_utf8(buffer).unwrap();
-        assert_eq!(result, "\u{1b}[11;11Htest line \u{1b}[12;11Htest line ");
+        assert_eq!(
+            result,
+            "\u{1b}[0m\u{1b}[11;11Htest line \u{1b}[12;11Htest line "
+        );
     }
 }

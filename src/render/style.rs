@@ -284,6 +284,11 @@ impl Stylized {
         if let Some(attr) = self.style.attr {
             crossterm::queue!(buffer, SetAttributes(attr))?;
         }
+        self.queue_symbol(buffer)
+    }
+
+    // The renderer manages complete terminal style transitions itself.
+    pub(crate) fn queue_symbol(&self, buffer: &mut impl io::Write) -> io::Result<()> {
         match &self.symbol {
             Symbol::Empty => {}
             Symbol::Scalar('\t') => {
