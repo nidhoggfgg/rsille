@@ -50,11 +50,11 @@ For one API at a time, start with the [small TUI examples](packages/tui/examples
 
 ## Add rsille to an application
 
-Add rsille `3.0.3` to your application:
+Add rsille `3.0.4` to your application:
 
 ```toml
 [dependencies]
-rsille = "3.0.3"
+rsille = "3.0.4"
 ```
 
 The public package is `rsille`. The repository's `tui`, `render` and `canvas` crates
@@ -65,7 +65,7 @@ code viewers:
 
 ```toml
 [dependencies]
-rsille = { version = "3.0.3", features = ["syntax-highlighting"] }
+rsille = { version = "3.0.4", features = ["syntax-highlighting"] }
 ```
 
 Without that feature, code viewers still support plain text and navigation.
@@ -232,7 +232,7 @@ Compare encodings with `cargo run -p tui --example canvas`.
 
 ## API and source map
 
-This checkout contains the **v3 API** (`3.0.3` in `Cargo.toml`).
+This checkout contains the **v3 API** (`3.0.4` in `Cargo.toml`).
 
 | Public module | Responsibility | Shared implementation |
 | --- | --- | --- |
