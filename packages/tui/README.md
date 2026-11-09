@@ -18,4 +18,4 @@ cargo test -p tui
 
 See the [small example guide](examples/README.md) for runnable widget and runtime examples.
 
-[Project README](../../README.md) · [Migration guide](../../MIGRATION_V3.md)
+[Project README](../../README.md)

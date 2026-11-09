@@ -18,4 +18,4 @@ cargo test -p tui
 
 可运行的组件和运行时示例见[小示例指南](examples/README_cn.md)。
 
-[项目首页](../../README_cn.md) · [迁移指南](../../MIGRATION_V3.md)
+[项目首页](../../README_cn.md)

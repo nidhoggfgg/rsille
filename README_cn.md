@@ -65,7 +65,6 @@ rsille = { version = "3.0.1", features = ["syntax-highlighting"] }
 未启用时，代码查看器仍支持纯文本显示和导航。
 
 本地开发时，可改用 `rsille = { path = "../rsille" }`，将路径替换为本地仓库的位置。
-从 v2 升级前，请阅读[迁移指南](MIGRATION_V3.md)。
 
 ## 第一个应用，就带动画
 
@@ -194,8 +193,7 @@ TUI 的 `canvas(...)` 组件把同一套绘图能力嵌入布局。通过 `.view
 
 ## API 与源码入口
 
-当前仓库使用 **v3 API**（`Cargo.toml` 中版本为 `3.0.1`）。从 v2 升级请阅读
-[迁移指南](MIGRATION_V3.md)。
+当前仓库使用 **v3 API**（`Cargo.toml` 中版本为 `3.0.1`）。
 
 | 公开模块 | 职责 | 共用实现 |
 | --- | --- | --- |
@@ -229,4 +227,4 @@ cargo check --workspace --all-targets --all-features
 不会上传。需要 Python 3.12+ 和已缓存的依赖；允许下载依赖时去掉 `--offline`。
 
 [示例目录](examples/README_cn.md) · [TUI 小示例](packages/tui/examples/README_cn.md) ·
-[迁移指南](MIGRATION_V3.md) · [MIT 许可](LICENCE)
+[MIT 许可](LICENCE)

@@ -80,8 +80,7 @@ cargo test -p tui
 
 详细契约见 [app](../../../src/tui/app.rs)、[runtime](../../../src/tui/runtime.rs)、
 [widget](../../../src/tui/widget.rs)、[effect](../../../src/tui/effect.rs)、
-[subscription](../../../src/tui/subscription.rs) 的源码文档和
-[迁移指南](../../../MIGRATION_V3.md)。
+[subscription](../../../src/tui/subscription.rs) 的源码文档。
 
 ## 添加小示例
 

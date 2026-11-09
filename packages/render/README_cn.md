@@ -16,4 +16,4 @@ cargo check -p render
 cargo test -p render
 ```
 
-[项目首页](../../README_cn.md) · [迁移指南](../../MIGRATION_V3.md)
+[项目首页](../../README_cn.md)

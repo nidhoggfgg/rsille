@@ -86,7 +86,6 @@ fn view(state: &State) -> impl Widget<Msg> {
                         )
                         .child(FileExplorerItem::directory("packages/render", "render"))
                         .child(FileExplorerItem::directory("packages/canvas", "canvas")),
-                    FileExplorerItem::file("MIGRATION_V3.md", "MIGRATION_V3.md"),
                     FileExplorerItem::file("Cargo.toml", "Cargo.toml"),
                 ])
                 .on_change(Msg::Focused)

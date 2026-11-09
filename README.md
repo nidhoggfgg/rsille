@@ -71,7 +71,7 @@ rsille = { version = "3.0.1", features = ["syntax-highlighting"] }
 Without that feature, code viewers still support plain text and navigation.
 
 For local development, replace the registry dependency with `rsille = { path = "../rsille" }`,
-adjusting the path to your checkout. Upgrading from v2? Read the [migration guide](MIGRATION_V3.md).
+adjusting the path to your checkout.
 
 ## Your first application, already animated
 
@@ -206,8 +206,7 @@ Compare encodings with `cargo run -p tui --example canvas`.
 
 ## API and source map
 
-This checkout contains the **v3 API** (`3.0.1` in `Cargo.toml`). For changes from v2,
-see the [migration guide](MIGRATION_V3.md).
+This checkout contains the **v3 API** (`3.0.1` in `Cargo.toml`).
 
 | Public module | Responsibility | Shared implementation |
 | --- | --- | --- |
@@ -243,4 +242,4 @@ and an independent consumer without uploading anything. It requires Python 3.12+
 cached dependencies; omit `--offline` to allow dependency downloads.
 
 [Example gallery](examples/README.md) · [TUI examples](packages/tui/examples/README.md) ·
-[Migration guide](MIGRATION_V3.md) · [MIT license](LICENCE)
+[MIT license](LICENCE)

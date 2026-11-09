@@ -17,4 +17,4 @@ cargo check -p canvas
 cargo test -p canvas
 ```
 
-[Project README](../../README.md) · [Migration guide](../../MIGRATION_V3.md)
+[Project README](../../README.md)

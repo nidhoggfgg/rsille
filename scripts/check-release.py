@@ -48,7 +48,7 @@ def main():
                 assert dependency.get("package", name) not in private_packages, (name, dependency)
         assert set(source.rglob("Cargo.toml")) == {manifest}, "only the rsille manifest belongs in the archive"
         assert not (source / "packages").exists(), "archive must not contain workspace crate manifests"
-        for filename in ("README.md", "LICENCE", "MIGRATION_V3.md", "src/render/api.rs", "src/canvas/api.rs", "src/tui/api.rs"):
+        for filename in ("README.md", "LICENCE", "src/render/api.rs", "src/canvas/api.rs", "src/tui/api.rs"):
             assert (source / filename).is_file(), filename
         # Cargo archives normalize file timestamps. A reused target directory
         # can otherwise consider an older build of this version up to date.

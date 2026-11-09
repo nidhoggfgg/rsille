@@ -90,8 +90,7 @@ cargo test -p tui
 
 For the detailed contracts, see the source documentation in [app](../../../src/tui/app.rs),
 [runtime](../../../src/tui/runtime.rs), [widgets](../../../src/tui/widget.rs),
-[effects](../../../src/tui/effect.rs), [subscriptions](../../../src/tui/subscription.rs)
-and the [migration guide](../../../MIGRATION_V3.md).
+[effects](../../../src/tui/effect.rs) and [subscriptions](../../../src/tui/subscription.rs).
 
 ## Add a focused example
 

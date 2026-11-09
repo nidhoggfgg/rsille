@@ -8,7 +8,7 @@ keywords = ["braille", "terminal", "tui", "cli", "animation"]
 readme = "README.md"
 license = "MIT"
 repository = "https://github.com/nidhoggfgg/rsille.git"
-include = ["src/**", "examples/basic_canvas.rs", "README*", "MIGRATION_V3.md", "LICENCE", "Cargo.toml"]
+include = ["src/**", "examples/basic_canvas.rs", "README*", "LICENCE", "Cargo.toml"]
 
 [dependencies]
 crossterm = { workspace = true }

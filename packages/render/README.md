@@ -16,4 +16,4 @@ cargo check -p render
 cargo test -p render
 ```
 
-[Project README](../../README.md) · [Migration guide](../../MIGRATION_V3.md)
+[Project README](../../README.md)
