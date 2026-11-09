@@ -73,6 +73,32 @@ Without that feature, code viewers still support plain text and navigation.
 For local development, replace the registry dependency with `rsille = { path = "../rsille" }`,
 adjusting the path to your checkout.
 
+## Develop with an AI coding agent
+
+The [rsille skill](https://github.com/nidhoggfgg/rsille.skills/blob/main/rsille/SKILL.md) teaches coding agents the v3 API,
+including widgets and layouts, background tasks, input handling, Canvas graphics,
+animation, and headless testing. Its [component catalog](https://github.com/nidhoggfgg/rsille.skills/blob/main/rsille/references/components.md)
+maps UI requirements to built-in components and examples. It also includes a
+standalone application starter.
+
+Install it from your application directory using the
+[Skills CLI](https://github.com/vercel-labs/skills):
+
+```bash
+npx skills add nidhoggfgg/rsille.skills --skill rsille
+```
+
+Choose your coding agent when prompted; add `-g` to install across projects.
+For a local checkout, replace `nidhoggfgg/rsille.skills` with the skills repository's
+absolute path. This repository includes it as the `skills/` Git submodule; run
+`git submodule update --init skills` to fetch it. You can also copy the complete
+`skills/rsille` directory into your agent's skills directory.
+
+Then ask your agent, for example:
+
+> Use the rsille skill to build a terminal task manager with a filter input,
+> keyboard navigation, and headless tests.
+
 ## Your first application, already animated
 
 ```rust,no_run

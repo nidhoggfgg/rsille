@@ -66,6 +66,28 @@ rsille = { version = "3.0.1", features = ["syntax-highlighting"] }
 
 本地开发时，可改用 `rsille = { path = "../rsille" }`，将路径替换为本地仓库的位置。
 
+## 配合 AI 编程助手开发
+
+独立仓库提供 [rsille skill](https://github.com/nidhoggfgg/rsille.skills/blob/main/rsille/SKILL.md)，帮助编程助手使用 v3 API 开发终端应用，
+涵盖组件与布局、后台任务、输入处理、Canvas 图形、动画和无终端测试。
+[组件索引](https://github.com/nidhoggfgg/rsille.skills/blob/main/rsille/references/components.md) 按用途列出内置组件、关键用法和对应示例，
+并附带可独立运行的应用模板。
+
+在你的应用目录中，通过 [Skills CLI](https://github.com/vercel-labs/skills) 安装：
+
+```bash
+npx skills add nidhoggfgg/rsille.skills --skill rsille
+```
+
+按提示选择使用的编程助手；加上 `-g` 可跨项目使用。从本地仓库安装时，将
+`nidhoggfgg/rsille.skills` 替换为 skills 仓库的绝对路径。本仓库通过 `skills/` Git 子模块
+引用它，运行 `git submodule update --init skills` 即可拉取。也可以把整个 `skills/rsille`
+目录复制到所用助手的 skills 目录。
+
+安装后，可以这样提出需求：
+
+> 使用 rsille skill 开发一个终端任务管理器，支持输入筛选、键盘导航，并提供无终端测试。
+
 ## 第一个应用，就带动画
 
 ```rust,no_run
