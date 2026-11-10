@@ -83,12 +83,7 @@ impl TerminalBackend for SystemTerminal {
         }
     }
     fn keyboard_supported(&mut self) -> io::Result<bool> {
-        #[cfg(unix)]
-        if super::terminal_query::is_active() {
-            return super::terminal_query::keyboard_supported();
-        }
-        #[cfg(unix)]
-        super::terminal_query::reserve_crossterm_input()?;
+        super::terminal_probe::reserve_input()?;
         crossterm::terminal::supports_keyboard_enhancement()
     }
     fn native_key_releases(&self) -> bool {
@@ -123,6 +118,8 @@ impl TerminalGuard {
         keyboard_mode: KeyboardMode,
         focus_events: bool,
     ) -> Result<Self, DrawErr> {
+        // Reserve before any mode changes, not just before the first input read.
+        super::terminal_probe::reserve_input().map_err(DrawErr::TerminalSetup)?;
         Self::with_backend(
             SystemTerminal,
             alt_screen,

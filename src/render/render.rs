@@ -278,34 +278,6 @@ where
         self.raster.stats()
     }
 
-    /// Reserve the managed input owner before terminal negotiation or any
-    /// EventStream is created. Automatic native output can then query safely
-    /// even if OS metrics become unavailable later in the session.
-    pub(crate) fn prepare_terminal_input(&self, alternate_screen: bool) {
-        #[cfg(all(unix, feature = "sixel"))]
-        {
-            use super::raster_output::RasterPolicy;
-            let config = self.raster.config;
-            let capabilities = config.capabilities;
-            if alternate_screen
-                && !self.inline_mode
-                && !self.append_newline
-                && config.policy != RasterPolicy::TextOnly
-                && capabilities.sixel
-                && capabilities.reliable_erase
-                && capabilities.no_scroll
-                && capabilities.cell_pixels.is_none()
-            {
-                // Failure only disables the query fallback. OS metrics may
-                // still work, and Auto must remain free to use character output.
-                if let Err(error) = super::terminal_query::prepare_input() {
-                    debug!("Terminal metric query unavailable: {error}");
-                }
-            }
-        }
-        let _ = alternate_screen;
-    }
-
     pub(crate) fn set_alternate_screen(&mut self, enabled: bool) {
         self.raster.alternate_screen = enabled;
     }

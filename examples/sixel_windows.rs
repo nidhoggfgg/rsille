@@ -40,9 +40,8 @@ Omit --cell-pixels to try OS window metrics first. Unavailable, zero, non-integr
 or unsupported OS dimensions trigger CSI 16 t on Unix (including WSL), with a
 500 ms absolute timeout. Stdin/stdout must be TTYs on the controlling terminal.
 The CSI 6 ; height ; width t reply is pixels per cell directly, not window pixels;
-do not divide it by columns/rows. Query successes/failures are cached per terminal
-grid and refreshed when columns/rows change. OS metrics remain live, but the query
-cache cannot detect same-grid font changes: supply an override or restart.
+do not divide it by columns/rows. The result is stored once at startup, not refreshed
+while running. After font or DPI changes, restart to measure again.
 Native Windows has no query fallback; explicit dimensions are still needed there.
 If both automatic sources fail, --sixel startup fails: measure text-area pixels /
 columns and rows; do not guess 8x18. Explicit overrides skip all OS metric lookup
@@ -50,11 +49,10 @@ and terminal queries, and stay fixed after font changes. An override matching th
 grid requires --force-cell-pixels; use it only for a verified unusual cell size.
 Dimensions must be 1..=1024 with area <=65536 pixels per character cell.
 --text-only does not query cell pixels. Metric queries do not detect Sixel support.
-The managed event loop uses a unified input broker for automatic native metrics;
-startup query fallback activates it too. Normal events are preserved while replies
-are parsed, including existing keyboard/cursor queries. Do not mix crossterm or
-other stdin readers after fallback. Standalone/embedded hosts should preflight
-CellPixels::resolve(None) before starting any input reader.
+Startup probing must precede any input reader. It may consume unrelated input;
+late replies after timeout may reach the subsequent reader. Runtime input uses
+native crossterm. Standalone/embedded hosts can call CellPixels::probe(timeout)
+before starting input and store the result as Some(pixels) in their configuration.
 Incorrect metrics can distort images and misalign graphics while dragging.
 
 --sixel is your explicit assertion that the terminal AND any multiplexer support
@@ -136,7 +134,7 @@ impl Options {
                 "native output needs --features sixel; alternatively use --text-only".into(),
             );
         }
-        // Preflight only: the renderer resolves automatic metrics for each frame.
+        // Resolve once before starting input; rendering only uses this snapshot.
         let pixels = resolve(self.pixels).map_err(|error| error.to_string())?;
         if self.pixels.is_some() && (pixels.width, pixels.height) == grid && !self.force_cell_pixels
         {
@@ -153,9 +151,7 @@ impl Options {
                 sixel: true,
                 reliable_erase: true,
                 no_scroll: true,
-                // Keep automatic metrics live after resize; explicit overrides
-                // remain authoritative and must be kept accurate by the user.
-                cell_pixels: self.pixels,
+                cell_pixels: Some(pixels),
             },
         })
     }
@@ -695,7 +691,7 @@ mod tests {
 
     #[cfg(feature = "sixel")]
     #[test]
-    fn automatic_metrics_are_validated_but_remain_live() {
+    fn startup_metrics_are_validated_and_stored_in_configuration() {
         let opts = options(&["--sixel"]).unwrap();
         for pixels in [
             CellPixels {
@@ -718,7 +714,7 @@ mod tests {
                 })
                 .unwrap();
             assert_eq!(config.policy, RasterPolicy::RequireSixel);
-            assert_eq!(config.capabilities.cell_pixels, None);
+            assert_eq!(config.capabilities.cell_pixels, Some(pixels));
         }
         let error = opts
             .native_config_with_resolver((120, 36), |explicit| {

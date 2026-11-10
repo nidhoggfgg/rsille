@@ -97,41 +97,40 @@ There is **no DA or Sixel capability negotiation** in this release. The `sixel`,
 Terminal names/environment heuristics and measured cell dimensions are not
 positive evidence of Sixel support.
 
-`CellPixels::resolve` is shared by startup preflight and eligible native frames:
+`CellPixels::probe(timeout: std::time::Duration) -> std::io::Result<CellPixels>`
+is an explicit startup operation, never a renderer operation:
 
-1. An explicit `CellPixels` override is validated without any OS metric lookup or
-   terminal query. Invalid overrides do not request automatic discovery.
-2. Without an override, read OS window metrics first and divide text-area pixels
-   by columns/rows. `CellPixels::from_terminal` remains the raw optional OS-only
-   helper, without backend-limit validation or query fallback.
-3. If OS dimensions are unavailable, zero, non-integral, or unsupported by the
-   backend, Unix (including WSL) falls back to `CSI 16 t`. Stdin and stdout must
-   be TTYs attached to the controlling terminal. The absolute timeout is 500 ms,
-   not extended by interleaved input. `CSI 6 ; height ; width t` reports pixels
-   **per cell directly**; do not divide this reply by columns/rows. Apply the same
-   backend dimension limits to query results.
-4. Cache query success and failure per terminal grid, refreshing when columns/rows
-   change. This discovery cache is separate from the rendering caches above.
-   OS metrics are still checked first on eligible frames. A same-grid font change
-   is not detected by the query cache: use an explicit override or restart.
-5. Native Windows has no query fallback; explicit dimensions are still needed
-   there. If both automatic sources fail, `RequireSixel` errors before frame output
-   and `Auto` uses character fallback.
+1. Read OS `window_size` first and divide text-area pixels by columns/rows.
+2. If dimensions are unavailable, zero, non-integral, or backend-unsupported,
+   Unix/WSL falls back to `CSI 16 t`. Stdin/stdout must be TTYs attached to the
+   controlling terminal. `CSI 6 ; height ; width t` reports pixels **per cell
+   directly**; do not divide by the grid. Validate the same backend limits.
+3. Return immediately on a valid reply. The caller-configured timeout bounds
+   waiting, is not extended by unrelated input, and does not guarantee exact
+   elapsed milliseconds. Native Windows has no query fallback. Return an error
+   if neither source supplies usable dimensions.
+4. The caller must probe **before any input reader starts** and store the result
+   as `RasterCapabilities.cell_pixels: Some(pixels)`. This is a startup snapshot,
+   not a live cache: font, DPI, and resize changes do not refresh it. Supply
+   updated dimensions explicitly or restart.
 
-Automatic discovery is gated to eligible native raster frames without an override.
-`TextOnly`, default/unknown `Auto`, unused raster paths, and unsupported output modes
-perform no automatic cell-metric discovery. Explicitly calling
-`CellPixels::resolve(None)` requests discovery independently of renderer policy.
-Keep `cell_pixels: None` after automatic preflight rather than freezing the result
-into an override.
+`CellPixels::resolve(Some(pixels))` validates only, without OS reads or queries;
+`resolve(None)` calls `probe(Duration::from_millis(500))` for compatibility.
+`CellPixels::from_terminal()` remains a raw optional OS-only read callable at
+runtime, without backend-limit validation, terminal input, or query fallback.
 
-The managed event loop uses a unified input broker when automatic native metrics
-are enabled. Startup `CellPixels::resolve(None)` also activates it when entering
-query fallback. Query replies are parsed while ordinary keyboard, mouse, paste,
-and other events are preserved; existing keyboard/cursor queries use the same
-broker. **Do not mix crossterm input readers or any other stdin reader with the
-broker after fallback activation.** Standalone/embedded hosts must preflight before
-starting any input reader and coordinate subsequent input through the broker.
+The renderer **never discovers pixels or reads terminal input**. Eligible native
+raster frames require stored valid pixels. `None` means character fallback for
+`Auto` or an error for `RequireSixel`; text-only and unused raster paths are
+unaffected. Invalid dimensions never request discovery either.
+
+Probing is permanently rejected after managed input initialization, even after
+that loop exits. External reader state cannot be detected: standalone/embedded
+hosts can probe before starting their readers, but must enforce that ordering.
+The startup query may consume unrelated input; late replies can arrive after
+timeout, and no input is flushed. Event preservation is not promised. Native
+crossterm `EventStream` handles all managed runtime input, with no runtime pixel
+queries. Pixel probing does not establish Sixel support.
 
 ## Encoder and budgets
 
@@ -185,7 +184,7 @@ scroll behavior. No real-terminal configuration is currently certified.
 | TUI composition | Callback cache/invalidation, resize, borders/padding, scroll blits, opaque coverage, text snapshots, effect flattening | Interactive checks with representative layouts |
 | Policy / renderer | Unknown Auto fallback, TextOnly, strict rejection, feature/mode/metric gates, injected-writer bytes and invalidation | Actual terminal behavior, interrupted output, recovery |
 | Encoder / cache | RGB332 tile bytes, bounds, deterministic output, cache keys/eviction | Terminal decoding and palette interaction |
-| Metric discovery / input | OS-first lookup, bounded Unix cell-pixel query, grid-keyed success/failure cache, unified reply/event routing | Real-terminal input interleaving and resize/font-change checks; DA/Sixel capability negotiation remains unimplemented |
+| Startup metrics / input | OS-first probe, bounded Unix query, return-on-reply, configurable timeout, permanent managed-input guard, renderer uses stored pixels only | Real-terminal late replies, unrelated-input consumption, and explicit snapshot updates; DA/Sixel capability negotiation remains unimplemented |
 
 ### Terminal candidates — all UNVERIFIED
 
@@ -209,10 +208,10 @@ reject an unsupported configuration.
 
 - [ ] Establish the exact environment and alternate-screen lifecycle; verify
       Sixel DCS/RGB palettes reach the terminal through every intermediary.
-- [ ] Measure actual cell pixels, verify integral dimensions in 1..=1024 and a
-      product at most 65,536; repeat after resize and font changes. Do not round
-      measured heights to complete six-row bands. If using query fallback, a
-      same-grid font change requires an explicit override or restart.
+- [ ] Before any reader starts, probe or validate measured cell pixels in
+      1..=1024 with product at most 65,536, then store `Some(pixels)`. Do not round
+      heights to complete six-row bands. After font/DPI/resize changes, verify
+      that no automatic refresh occurs; update dimensions explicitly or restart.
 - [ ] With actual partial-band metrics such as 10×20, verify exact raster height
       and transparent unset padding, especially at cell boundaries and the last
       row; confirm no extra painting or scrolling.
@@ -227,17 +226,25 @@ reject an unsupported configuration.
       retain their colors. This is part of the `no_scroll` assertion's contract.
 - [ ] Switch native to text and back; check full cleanup and stable source/layout.
       Inline must use text or return a strict error, never native output.
-- [ ] Verify empty/unknown capability settings stay on text, and strict mode
-      rejects missing safety conditions before frame output.
+- [ ] Verify empty/unknown capabilities stay on text. With other native conditions
+      satisfied but `cell_pixels: None`, `Auto` must fall back and `RequireSixel`
+      must error before frame output, without OS reads or queries. Text-only and
+      unused raster paths must remain unaffected.
 - [ ] Exercise visual effects and explicit text snapshots; do not silently drop
       content or retain unsupported native ownership under a character effect.
 - [ ] Exit normally, interrupt execution, and inject recoverable writer failures;
       check cursor/style/modes, alternate-screen restoration, and graphics residue.
-- [ ] Confirm ordinary keyboard/paste/mouse input is preserved during cell-pixel,
-      keyboard, and cursor queries through the unified broker; do not mix input
-      readers. Exercise the 500 ms absolute deadline and cached failures, then
-      change the terminal grid to refresh discovery. DA/Sixel capability
-      negotiation remains unimplemented.
+- [ ] In isolated startup-probe runs, exercise OS success, Unix/WSL fallback,
+      fragmented replies, invalid replies, and no reply. Confirm prompt return
+      on a valid reply and configurable timeout without assuming exact elapsed
+      milliseconds. Check terminal/raw-mode restoration on success and failure.
+- [ ] Exercise unrelated input and delayed replies: input may be consumed,
+      no flush occurs, and replies may arrive after timeout. Do not assert event
+      preservation. Start external readers only after probing completes.
+- [ ] Verify probes are rejected after managed input initialization and remain
+      rejected after loop exit. Exercise normal keyboard/paste/mouse input via
+      native crossterm `EventStream`; rendering must never read input or re-probe.
+      DA/Sixel capability negotiation remains unimplemented.
 
 ### Repeatable automated commands
 
@@ -275,9 +282,11 @@ is no live animation. No flags shows help; `--text-only` is an explicit preview.
 erasure, non-scrolling positioned output and stable palettes. It selects
 `RequireSixel`, never silent fallback. Startup checks the feature and current
 backend cell-metric limits (1..=1024 per dimension, at most 65,536 pixels) before
-entering the managed terminal session. The default tries OS metrics, then the
-bounded Unix cell-pixel query (including WSL); native Windows still needs explicit
-dimensions. Optional `--cell-pixels 10x20` bypasses both sources and must describe
+entering the managed terminal session. Without an override, startup explicitly
+probes OS metrics, then the bounded Unix/WSL cell-pixel query, before input starts
+and stores `Some(pixels)`. Native Windows has no query fallback. The query returns
+on reply; its configurable timeout is not a guaranteed elapsed time. Optional
+`--cell-pixels 10x20` bypasses probing and must describe
 **actual font metrics**, not arbitrary dimensions;
 there is no need to round the height to 18 or 24. Transparent partial-band padding
 must be honored along with the erase/no-scroll assertions above;

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify automatic Sixel cell metrics and input ownership using a Unix PTY.
+"""Verify startup-only Sixel pixel probing and native input using a Unix PTY.
 
 This tests protocol transport, not a real terminal's Sixel visual rendering.
 Run from any directory; --binary skips the debug example build.
@@ -28,6 +28,7 @@ TILE = b'\x1bP0;1;0q"1;1;10;20'
 
 def check(binary, mode):
     master, slave = pty.openpty()
+    os.set_blocking(master, False)
     pixels = (1100, 720) if mode == "os" else (0, 0)
     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 36, 110, *pixels))
     screen = bytearray()
@@ -67,70 +68,101 @@ sys.exit(child.returncode if restored else 1)
                     raise
         return False
 
-    def wait_until(predicate, description, timeout=5):
+    def send_input(data):
+        deadline = time.monotonic() + 1
+        while data:
+            assert time.monotonic() < deadline, f"{mode}: terminal input write timed out"
+            if select.select([], [master], [], 0.02)[1]:
+                try:
+                    written = os.write(master, data)
+                    assert written > 0, f"{mode}: terminal input disconnected"
+                    data = data[written:]
+                except BlockingIOError:
+                    pass
+
+    def wait_until(predicate, description, timeout=5, noise=False):
         deadline = time.monotonic() + timeout
         while not predicate():
             pump()
+            if noise and process.poll() is None:
+                # Keep input arriving well inside the probe's 500 ms deadline.
+                # A stalled/finished reader must never block this test driver.
+                try:
+                    os.write(master, b"x" * 256)
+                except BlockingIOError:
+                    pass
             if time.monotonic() >= deadline:
                 raise AssertionError(
                     f"{mode}: timed out waiting for {description}; "
                     f"output suffix: {bytes(screen[-1200:])!r}"
                 )
 
-    def plain_text():
-        data = re.sub(rb"\x1bP.*?\x1b\\", b"", bytes(screen), flags=re.S)
+    def plain_text(start=0):
+        data = re.sub(rb"\x1bP.*?\x1b\\", b"", bytes(screen[start:]), flags=re.S)
         return re.sub(rb"\x1b\[[0-?]*[ -/]*[@-~]", b"", data)
 
     try:
-        if mode in ("query", "resize", "timeout", "invalid"):
-            wait_until(lambda: QUERY in screen, "cell-size query")
+        if mode in ("query", "resize", "timeout", "noise", "invalid"):
+            wait_until(lambda: QUERY in screen, "startup cell-size query", timeout=3)
             if mode in ("query", "resize"):
-                # Ordinary input before/during the reply must survive. A pasted
-                # reply-shaped string must not be mistaken for a measurement.
-                os.write(master, b"e\x1b[200~\x1b[6;88;99t\x1b[201~")
-                os.write(master, b"\x1b[<0;110;36M\x1b[<0;110;36m")
-                for fragment in (b"\x1b[6;", b"20;", b"10t"):
-                    os.write(master, fragment)
+                # The startup scan may consume ordinary input. Only reply
+                # matching is tested here, not key/paste preservation.
+                for fragment in (b"xyz", b"\x1b[6;", b"20;", b"10t"):
+                    send_input(fragment)
                     time.sleep(0.005)
             elif mode == "invalid":
-                os.write(master, b"\x1b[6;0;10t")
+                send_input(b"\x1b[6;0;10t\x1b[6;20;0t\x1b[6;65536;10t\x1b[6;20;t")
 
-        if mode in ("timeout", "invalid", "mismatched-tty"):
-            wait_until(lambda: process.poll() is not None, "bounded failure", timeout=3)
+        if mode in ("timeout", "noise", "invalid", "mismatched-tty"):
+            wait_until(
+                lambda: process.poll() is not None,
+                "bounded startup failure", timeout=3, noise=mode == "noise",
+            )
             while pump():
                 pass
             assert process.returncode != 0
             assert TILE not in screen
+            assert FRAME_END not in screen, "failed startup must not render a frame"
             assert b"CSI 16 t query" in screen
             assert b"RSILLE_TTY_RESTORED=True" in screen
             assert screen.count(QUERY) == (0 if mode == "mismatched-tty" else 1)
             if mode == "mismatched-tty":
                 assert b"same controlling terminal" in screen
                 assert not select.select([master], [], [], 0.05)[0], "queried the unrelated terminal"
-            print(f"PASS {mode}: actionable error and raw-mode restoration")
+            else:
+                assert b"timed out" in screen, "invalid/noisy input must not complete the probe"
+            print(f"PASS {mode}: bounded startup failure and raw-mode restoration")
             return
 
         wait_until(lambda: FRAME_END in screen, "first complete frame")
         assert TILE in screen, "must render actual 10x20 tiles without rounding"
-        if mode in ("query", "resize"):
-            assert b"Braille" in plain_text(), "preflight key was swallowed"
         expected_queries = 1 if mode in ("query", "resize") else 0
         assert screen.count(QUERY) == expected_queries
 
-        # Another input-driven frame must reuse measurements, not probe again.
-        frames = screen.count(FRAME_END)
-        os.write(master, b"e")
-        wait_until(lambda: screen.count(FRAME_END) > frames, "input after query")
+        # Only keys sent after startup belong to native Crossterm input. Verify
+        # the state change as well as a frame, so an unrelated redraw cannot pass.
+        # HalfBlock -> Braille changes the first four letters; differential
+        # output may omit an unchanged 'l', so do not require the entire word.
+        start = len(screen)
+        send_input(b"e")
+        wait_until(
+            lambda: FRAME_END in screen[start:] and b"Brai" in plain_text(start),
+            "native key event after the initial frame",
+        )
         assert screen.count(QUERY) == expected_queries
 
         if mode == "resize":
+            start = len(screen)
             fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 32, 100, 0, 0))
-            wait_until(lambda: screen.count(QUERY) == 2, "query after grid change")
-            os.write(master, b"\x1b[6;24;12t")
-            wait_until(lambda: b'\x1bP0;1;0q"1;1;12;24' in screen, "resized tiles")
-            expected_queries = 2
+            # No OS pixels and no second reply: the renderer must retain the
+            # explicit 10x20 snapshot returned by startup preflight.
+            wait_until(
+                lambda: FRAME_END in screen[start:] and TILE in screen[start:],
+                "resize redraw with the original 10x20 pixel snapshot",
+            )
+            assert screen.count(QUERY) == expected_queries, "resize must not query cell pixels"
 
-        os.write(master, b"q")
+        send_input(b"q")
         wait_until(lambda: process.poll() is not None, "clean keyboard exit")
         while pump():
             pass
@@ -138,7 +170,7 @@ sys.exit(child.returncode if restored else 1)
         assert screen.count(QUERY) == expected_queries
         assert b"RSILLE_TTY_RESTORED=True" in screen
         assert b"\x1b[?1049l" in screen, "alternate screen was not restored"
-        print(f"PASS {mode}: metrics, input, caching and terminal restoration")
+        print(f"PASS {mode}: startup snapshot, native input and terminal restoration")
     finally:
         if process.poll() is None:
             try:
@@ -164,7 +196,7 @@ def main():
             cwd=ROOT, check=True, timeout=120,
         )
         binary = ROOT / "target/debug/examples/sixel_windows"
-    for mode in ("explicit", "os", "query", "resize", "timeout", "invalid", "mismatched-tty"):
+    for mode in ("explicit", "os", "query", "resize", "timeout", "noise", "invalid", "mismatched-tty"):
         check(binary.resolve(), mode)
 
 

@@ -1,11 +1,11 @@
 //! Conservative terminal policy for opaque raster frames.
 //!
-//! Unknown graphics capabilities always use character fallback. On Unix, automatic
-//! cell metrics try OS information then CSI 16 t through a shared terminal input
-//! owner. Measuring pixels does not negotiate Sixel support. No terminal names or
-//! environment heuristics are treated as proof of graphics support.
+//! Unknown graphics capabilities always use character fallback. Native output
+//! requires explicit cell metrics, optionally obtained with a startup probe.
+//! Rendering never reads terminal input or discovers dimensions. Measuring pixels
+//! does not negotiate Sixel support.
 
-use std::io;
+use std::{io, time::Duration};
 
 /// Selects native raster output or the always-available character representation.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
@@ -35,29 +35,17 @@ impl CellPixels {
         Self::read_terminal().ok()
     }
 
-    /// Resolves and validates physical cell pixels for native raster output.
+    /// Validates explicit pixels, or probes once at startup with a 500 ms timeout.
     ///
-    /// `Some(pixels)` uses only the explicit value, without reading OS information.
-    /// `None` first reads OS window pixels and divides them by columns and rows.
-    /// If unusable, Unix terminals (including WSL) are queried with CSI 16 t with
-    /// a 500 ms deadline. Query results, including failures, are cached until the
-    /// terminal grid changes; dimensions are never guessed or rounded. Native
-    /// Windows currently supports only OS information or an explicit override.
-    ///
-    /// Call before starting an input reader. The Unix fallback takes ownership
-    /// of terminal input; managed rsille event loops then use the same reader,
-    /// preserving keys/mouse events received during the query. Do not mix this
-    /// with external Crossterm `read`/`poll`/`EventStream` or another stdin reader.
-    /// The renderer uses this rule too. Keep `RasterCapabilities::cell_pixels`
-    /// as `None` for automatic updates rather than storing a startup measurement.
+    /// `Some(pixels)` performs validation only and is safe after input starts.
+    /// `None` calls [`Self::probe`]; its startup-only restrictions apply. Store the
+    /// result in [`RasterCapabilities::cell_pixels`] as `Some(pixels)` before
+    /// running the application. Rendering never calls this function implicitly.
     ///
     /// # Errors
     ///
-    /// Returns an error if neither OS information nor the terminal query provides
-    /// usable metrics, or if explicit dimensions exceed native raster limits
-    /// (1..=1024 per dimension and at most 65,536 pixels). Querying requires a
-    /// controlling terminal with terminal stdin/stdout. Metrics do not establish
-    /// Sixel support.
+    /// Returns a probe error or rejects dimensions outside native raster limits
+    /// (1..=1024 per dimension and at most 65,536 pixels).
     ///
     /// ```
     /// use rsille::render::raster_output::CellPixels;
@@ -65,7 +53,48 @@ impl CellPixels {
     /// assert_eq!(CellPixels::resolve(Some(pixels)).unwrap(), pixels);
     /// ```
     pub fn resolve(explicit: Option<Self>) -> io::Result<Self> {
-        Self::resolve_with(explicit, Self::read_automatic)
+        Self::resolve_with(explicit, || Self::probe(Duration::from_millis(500)))
+    }
+
+    /// Measures physical pixels per character cell once, before starting input.
+    ///
+    /// Reads OS window pixels first. If unavailable or invalid, Unix/WSL falls
+    /// back to `CSI 16 t`, returning on the first valid reply or after `timeout`.
+    /// The timeout bounds the terminal exchange, not a mandatory waiting period.
+    /// Native Windows currently has no pixel-size discovery implementation.
+    /// Store the returned snapshot as `Some(pixels)` in the raster configuration;
+    /// font, DPI, and window changes do not automatically update it.
+    ///
+    /// Call before **any** terminal input reader, including external Crossterm
+    /// readers. The query may consume unrelated input; it neither preserves keys
+    /// nor flushes the input queue. A reply arriving after timeout may reach the
+    /// subsequent reader. Terminal modes are restored before returning.
+    ///
+    /// # Errors
+    ///
+    /// Returns `AlreadyExists` after managed rsille input has been initialized,
+    /// even if that loop has ended. External readers cannot be detected. Returns
+    /// an error if neither source provides valid dimensions; the query requires
+    /// stdin/stdout on the controlling terminal. Metrics do not prove Sixel support.
+    /// Use [`Self::from_terminal`] for an OS-only lookup without input restrictions.
+    ///
+    /// ```no_run
+    /// use std::time::Duration;
+    /// use rsille::render::raster_output::{CellPixels, RasterCapabilities};
+    /// let pixels = CellPixels::probe(Duration::from_millis(500))?;
+    /// let capabilities = RasterCapabilities {
+    ///     cell_pixels: Some(pixels),
+    ///     ..Default::default() // Sixel safety capabilities must be verified separately.
+    /// };
+    /// # Ok::<(), std::io::Error>(())
+    /// ```
+    pub fn probe(timeout: Duration) -> io::Result<Self> {
+        super::terminal_probe::before_input(|| {
+            Self::detect_with(Self::read_terminal, || {
+                let (width, height) = super::terminal_probe::cell_pixels(timeout)?;
+                Ok(Self { width, height })
+            })
+        })
     }
 
     fn resolve_with(
@@ -93,21 +122,6 @@ impl CellPixels {
         Ok(pixels)
     }
 
-    fn read_automatic() -> io::Result<Self> {
-        Self::detect_with(Self::read_terminal, || {
-            #[cfg(unix)]
-            {
-                let (width, height) = super::terminal_query::cell_pixels()?;
-                Ok(Self { width, height })
-            }
-            #[cfg(not(unix))]
-            Err(io::Error::new(
-                io::ErrorKind::Unsupported,
-                "CSI 16 t input routing is currently supported only on Unix/WSL",
-            ))
-        })
-    }
-
     fn detect_with(
         read_os: impl FnOnce() -> io::Result<Self>,
         query: impl FnOnce() -> io::Result<Self>,
@@ -116,7 +130,7 @@ impl CellPixels {
             Ok(pixels) => Ok(pixels),
             Err(os_error) => query().and_then(Self::validate).map_err(|query_error| {
                 io::Error::new(
-                    io::ErrorKind::Unsupported,
+                    query_error.kind(),
                     format!("OS metrics: {os_error}; CSI 16 t query: {query_error}"),
                 )
             }),
@@ -173,11 +187,10 @@ pub struct RasterCapabilities {
     /// This includes transparent padding in a partial final six-pixel band:
     /// unset bits must not erase adjacent cells or cause bottom-edge scrolling.
     pub no_scroll: bool,
-    /// Optional physical pixels per character cell. `Some` uses only that value;
-    /// `None` (the default) tries OS window metrics, then a bounded CSI 16 t query
-    /// on Unix/WSL. Query results are cached until the character grid changes.
-    /// Unavailable/invalid metrics fail `RequireSixel`; `Auto` falls back to text.
-    /// Use [`CellPixels::resolve`] for optional startup validation.
+    /// Physical pixels per character cell, required for native Sixel output.
+    /// Set `Some(pixels)` explicitly or store the result of [`CellPixels::probe`]
+    /// before starting input. Rendering never measures or refreshes this value.
+    /// Missing/invalid metrics fail `RequireSixel`; `Auto` falls back to text.
     pub cell_pixels: Option<CellPixels>,
 }
 
@@ -209,23 +222,6 @@ impl RasterOutput {
         alternate_screen: bool,
         inline: bool,
     ) -> std::io::Result<Option<CellPixels>> {
-        self.resolve_with(
-            has_raster,
-            unsupported_composition,
-            alternate_screen,
-            inline,
-            CellPixels::read_automatic,
-        )
-    }
-
-    fn resolve_with(
-        self,
-        has_raster: bool,
-        unsupported_composition: bool,
-        alternate_screen: bool,
-        inline: bool,
-        read_os: impl FnOnce() -> io::Result<CellPixels>,
-    ) -> io::Result<Option<CellPixels>> {
         if self.policy == RasterPolicy::TextOnly || (!has_raster && !unsupported_composition) {
             return Ok(None);
         }
@@ -248,7 +244,13 @@ impl RasterOutput {
             }
             Some(_) => Ok(None),
             None if has_raster => {
-                match CellPixels::resolve_with(self.capabilities.cell_pixels, read_os) {
+                let pixels = self.capabilities.cell_pixels.ok_or_else(|| {
+                    io::Error::new(
+                        io::ErrorKind::Unsupported,
+                        "native Sixel requires RasterCapabilities.cell_pixels: set Some(CellPixels { width, height }) explicitly or call CellPixels::probe before starting input",
+                    )
+                }).and_then(CellPixels::validate);
+                match pixels {
                     Ok(pixels) => Ok(Some(pixels)),
                     Err(error) if self.policy == RasterPolicy::RequireSixel => Err(error),
                     Err(_) => Ok(None),
@@ -335,17 +337,7 @@ mod tests {
                 2 => config.capabilities.no_scroll = false,
                 _ => config.capabilities.cell_pixels = None,
             }
-            assert_eq!(
-                config
-                    .resolve_with(true, false, true, false, || {
-                        Err(io::Error::new(
-                            io::ErrorKind::Unsupported,
-                            "no OS metrics (test)",
-                        ))
-                    })
-                    .unwrap(),
-                None
-            );
+            assert_eq!(config.resolve(true, false, true, false).unwrap(), None);
         }
     }
 
@@ -472,7 +464,7 @@ mod tests {
             },
         )
         .unwrap_err();
-        assert_eq!(error.kind(), io::ErrorKind::Unsupported);
+        assert_eq!(error.kind(), io::ErrorKind::TimedOut);
         assert!(error.to_string().contains("OS gave zero pixels"));
         assert!(error
             .to_string()
@@ -488,7 +480,7 @@ mod tests {
     }
 
     #[test]
-    fn non_native_paths_do_not_read_os_metrics() {
+    fn non_native_paths_do_not_require_pixels() {
         for policy in [
             RasterPolicy::Auto,
             RasterPolicy::TextOnly,
@@ -496,112 +488,49 @@ mod tests {
         ] {
             let mut config = verified(policy);
             config.capabilities.cell_pixels = None;
-            assert_eq!(
-                config
-                    .resolve_with(false, false, true, false, || panic!(
-                        "no raster, no OS lookup"
-                    ))
-                    .unwrap(),
-                None
-            );
+            assert_eq!(config.resolve(false, false, true, false).unwrap(), None);
             if policy == RasterPolicy::TextOnly {
-                assert_eq!(
-                    config
-                        .resolve_with(true, false, true, false, || panic!(
-                            "text only must not query OS"
-                        ))
-                        .unwrap(),
-                    None
-                );
+                assert_eq!(config.resolve(true, false, true, false).unwrap(), None);
             }
-            config.capabilities.sixel = false;
-            let _ = config.resolve_with(true, false, true, false, || {
-                panic!("unknown Sixel capability must not query OS")
-            });
-            config.capabilities.sixel = true;
-            let _ = config.resolve_with(true, false, false, false, || {
-                panic!("non-alternate screen must not query OS")
-            });
-            let _ = config.resolve_with(true, false, true, true, || {
-                panic!("inline output must not query OS")
-            });
-            config.capabilities.no_scroll = false;
-            let _ = config.resolve_with(true, false, true, false, || {
-                panic!("unverified graphics must not query OS")
-            });
-        }
-        #[cfg(not(feature = "sixel"))]
-        {
-            let mut config = verified(RasterPolicy::Auto);
-            config.capabilities.cell_pixels = None;
-            assert_eq!(
-                config
-                    .resolve_with(true, false, true, false, || panic!(
-                        "disabled feature must not query OS"
-                    ))
-                    .unwrap(),
-                None
-            );
         }
     }
 
     #[cfg(feature = "sixel")]
     #[test]
-    fn automatic_policy_resolution_stays_live_and_recovers_after_missing_metrics() {
+    fn native_output_requires_explicit_valid_pixels_and_never_discovers_them() {
         for policy in [RasterPolicy::Auto, RasterPolicy::RequireSixel] {
             let mut config = verified(policy);
-            config.capabilities.cell_pixels = None;
             for pixels in [
-                CellPixels {
-                    width: 10,
+                None,
+                Some(CellPixels {
+                    width: 0,
                     height: 20,
-                },
-                CellPixels {
-                    width: 12,
-                    height: 24,
-                },
+                }),
             ] {
-                assert_eq!(
-                    config
-                        .resolve_with(true, false, true, false, || Ok(pixels))
-                        .unwrap(),
-                    Some(pixels)
-                );
-                assert_eq!(config.capabilities.cell_pixels, None);
-            }
-            let missing = config.resolve_with(true, false, true, false, || {
-                Err(io::Error::new(
-                    io::ErrorKind::Unsupported,
-                    "OS metrics disappeared",
-                ))
-            });
-            if policy == RasterPolicy::RequireSixel {
-                assert!(missing
-                    .unwrap_err()
-                    .to_string()
-                    .contains("OS metrics disappeared"));
-            } else {
-                assert_eq!(missing.unwrap(), None);
+                config.capabilities.cell_pixels = pixels;
+                let result = config.resolve(true, false, true, false);
+                if policy == RasterPolicy::RequireSixel {
+                    let error = result.unwrap_err();
+                    assert!(error.to_string().contains(if pixels.is_none() {
+                        "CellPixels::probe before starting input"
+                    } else {
+                        "unsupported cell pixels"
+                    }));
+                } else {
+                    assert_eq!(result.unwrap(), None);
+                }
             }
             let pixels = CellPixels {
                 width: 10,
                 height: 20,
             };
-            assert_eq!(
-                config
-                    .resolve_with(true, false, true, false, || Ok(pixels))
-                    .unwrap(),
-                Some(pixels)
-            );
             config.capabilities.cell_pixels = Some(pixels);
-            assert_eq!(
-                config
-                    .resolve_with(true, false, true, false, || panic!(
-                        "explicit mode must not query OS"
-                    ))
-                    .unwrap(),
-                Some(pixels)
-            );
+            for _ in 0..3 {
+                assert_eq!(
+                    config.resolve(true, false, true, false).unwrap(),
+                    Some(pixels)
+                );
+            }
         }
     }
 

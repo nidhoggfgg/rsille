@@ -57,13 +57,14 @@ smaller terminals and terminal resizing are supported.
 
 `--sixel` is your explicit assertion that the entire terminal/multiplexer path
 supports Sixel, graphics ED 2 erasure, no scrolling and stable palettes. It uses
-`RequireSixel`, with no silent fallback. Cell pixels use OS window metrics first;
+`RequireSixel`, with no silent fallback. Startup probing uses OS window metrics first;
 unusable OS dimensions trigger a `CSI 16 t` query on Unix (including WSL), requiring
 stdin/stdout TTYs attached to the controlling terminal and a 500 ms absolute timeout.
 Native Windows has no query fallback and still needs explicit dimensions. Optional
 `--cell-pixels 8x18` skips both sources and must match **actual font metrics**, not
-an arbitrary size. Query success/failure is cached per terminal grid and refreshed
-on grid changes; use an explicit override or restart after a same-grid font change.
+an arbitrary size. Measured dimensions are stored as a startup snapshot and are
+not refreshed on resize; restart after font or DPI changes. Probing precedes all
+input readers and may consume unrelated input. Runtime input uses native crossterm.
 This query does not negotiate Sixel support. `--text-only` sends no cell-pixel query.
 The feature and backend limits (1..=1024 per dimension, at most 65,536 pixels)
 are checked before entering the managed terminal session. Actual 10×20 cells are supported with

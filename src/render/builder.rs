@@ -111,12 +111,15 @@ impl Builder {
 
     /// Configures raster presentation. Unknown capabilities default to text.
     ///
-    /// `config.capabilities.cell_pixels` defaults to `None`: OS metrics first,
-    /// then a bounded terminal query on Unix/WSL. `Some` bypasses both. Managed
-    /// loops coordinate query replies with input. Standalone hosts using external
-    /// input readers must supply explicit or OS-only metrics; they cannot share
-    /// the managed query broker with Crossterm or another stdin reader.
-    /// Missing metrics fail `RequireSixel`; `Auto` uses character fallback.
+    /// The renderer never discovers cell pixels or reads terminal input. Native
+    /// output requires valid `config.capabilities.cell_pixels: Some(pixels)`.
+    /// Call `CellPixels::probe(timeout)` before starting any input reader and
+    /// store the result, or supply measured dimensions. This also works for
+    /// standalone hosts with external readers. Probing is permanently rejected
+    /// after managed input initialization; external readers cannot be detected.
+    /// The startup snapshot is not refreshed after font, DPI, or resize changes.
+    /// Missing metrics fail `RequireSixel` on eligible native raster frames;
+    /// `Auto` uses character fallback. Text-only and unused paths are unaffected.
     /// A standalone renderer does not enter an alternate screen: when enabling
     /// native output, the caller must establish the configured terminal modes.
     pub fn raster_output(

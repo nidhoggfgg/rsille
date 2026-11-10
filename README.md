@@ -83,7 +83,7 @@ coverage retain raster metadata; HalfBlock (or Braille) fallback is always
 available, including headless frames.
 
 The optional `sixel` feature enables native encoding. `Auto` defaults to text for
-unknown terminals; neither unknown `Auto` nor `TextOnly` sends cell-pixel queries.
+unknown terminals. The renderer never discovers cell pixels or reads terminal input.
 `TextOnly` disables native output, and `RequireSixel` returns an error when safety
 conditions are missing. Native output currently requires
 explicit verified capabilities, alternate-screen mode and supported cell-pixel
@@ -105,16 +105,24 @@ cargo run --release --example sixel_windows -- --text-only
 
 `--sixel` explicitly asserts that the whole terminal path supports Sixel, graphics
 ED 2 erasure, non-scrolling output and stable palettes; `RequireSixel` never silently
-falls back. Automatic cell pixels use OS window metrics first, then a `CSI 16 t`
-query on Unix (including WSL) if OS dimensions are unusable. The query requires
-stdin/stdout TTYs attached to the controlling terminal and has a 500 ms absolute
-timeout. Native Windows has no query fallback and still needs explicit dimensions.
-An optional `--cell-pixels 8x18` skips both sources and must match **actual font
-metrics**, not arbitrary dimensions. Query successes/failures are cached per
-terminal grid and refreshed on grid changes; after a same-grid font change, use
-an explicit override or restart. Feature and backend metric checks (1..=1024 per
-dimension, at most 65,536 pixels) run before entering the managed terminal session.
-The query measures cells, not Sixel support; capability flags remain host assertions.
+falls back. Before starting **any input reader**, call `CellPixels::probe(timeout)`
+and store the result as `RasterCapabilities.cell_pixels: Some(pixels)`. The probe
+tries OS window metrics first, then a bounded `CSI 16 t` query on Unix/WSL with
+stdin/stdout TTYs attached to the controlling terminal. It returns on reply; the
+timeout is configurable, not a guaranteed elapsed time. `resolve(None)` retains
+a 500 ms timeout for compatibility; `resolve(Some(pixels))` only validates.
+Native Windows has no query fallback. Optional `--cell-pixels 8x18` bypasses
+probing and must match **actual font metrics** (1..=1024 per dimension, at most
+65,536 pixels). With no stored pixels, eligible native rendering falls back to
+text in `Auto` or errors in `RequireSixel`; text/unused paths are unaffected.
+
+Probing is permanently rejected after managed input initialization; external
+readers cannot be detected, so standalone hosts must probe before starting theirs.
+The probe may consume unrelated input; late replies can arrive after timeout,
+and no input is flushed. Native crossterm `EventStream` handles all managed runtime
+input. Stored pixels are a startup snapshot, not refreshed on font/DPI/resize
+changes; update them explicitly or restart. `CellPixels::from_terminal()` remains
+an optional OS-only read usable at runtime. Probing does not establish Sixel support.
 Actual 10×20 cells are supported with `--cell-pixels 10x20`, without rounding the
 height to 18 or 24. The terminal must honor transparent partial-band padding as
 well as the erase/no-scroll assertions; this is not real-terminal certification.

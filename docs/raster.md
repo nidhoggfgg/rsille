@@ -35,12 +35,14 @@ not a silent character fallback. The feature and current backend cell-metric
 requirements are checked **before entering the managed terminal session**: each dimension must
 be 1..=1024 and the product at most 65,536. Cell height need not be divisible by six.
 
-By default, cell pixels come first from the OS window-size API, then from a
-bounded `CSI 16 t` query on Unix (including WSL) if OS measurements are unusable.
-The query requires stdin and stdout to be TTYs attached to the controlling terminal
-and has a 500 ms absolute timeout. Native Windows has no query fallback; explicit
-cell dimensions are still needed there. If automatic discovery fails, supply a
-measured override:
+Without an override, startup explicitly probes cell pixels before any input reader
+starts and stores the result as `Some(pixels)` in the raster configuration. The
+probe tries the OS window-size API first, then a bounded `CSI 16 t` query on
+Unix/WSL if OS measurements are unusable. The query requires stdin/stdout TTYs
+attached to the controlling terminal and returns on reply. The API accepts a
+configurable timeout (`resolve(None)` uses 500 ms for compatibility); this is not
+a guaranteed elapsed time. Native Windows has no query fallback. If probing
+fails, supply a measured override:
 
 ```sh
 cargo run --release --features sixel --example sixel_windows -- --sixel --cell-pixels 8x18
@@ -55,11 +57,11 @@ Neither measured pixels nor the feature flag proves graphics support.
 text area containing 120 columns and 36 rows has 8×18-pixel cells, not 120×36.
 Using 120×36 for that terminal makes each tile too wide and tall; adjacent tiles
 then overlap, compressing the visible image and spilling beyond window borders.
-Prefer omitting the override when automatic discovery supplies correct metrics.
-OS metrics are refreshed on eligible frames; query successes and failures are
-cached per terminal grid and refreshed when columns/rows change. A font change
-without a grid change is not detected by that query cache: use an explicit override
-or restart. The example rejects an override equal to the terminal grid unless
+Prefer omitting the override when the startup probe supplies correct metrics.
+Stored pixels are a startup snapshot: font, DPI, and resize changes do not refresh
+them automatically. Update the configured dimensions explicitly or restart; the
+renderer never discovers pixels or reads terminal input. The example rejects an
+override equal to the terminal grid unless
 `--force-cell-pixels` explicitly confirms an unusual, measured cell size. Explicit
 overrides skip both OS metric lookup and terminal queries, so they are not compared
 against automatic measurements.
@@ -102,9 +104,12 @@ cargo test --example sixel_windows --features sixel
 cargo test --example sixel_windows --no-default-features
 ```
 
-On Unix, `python3 scripts/check-sixel-query.py` runs a bounded PTY transport check
-for explicit/OS/query selection, fragmented replies, interleaved input, caching,
-resize, timeout, invalid replies, terminal identity and raw-mode restoration.
+On Unix, `python3 scripts/check-sixel-query.py` is the PTY transport check entry
+point. The startup-probe validation targets are explicit/OS/query selection,
+fragmented replies, return-on-reply, configurable timeout, invalid replies,
+terminal identity, raw-mode restoration, and rejection after managed input starts.
+Do not expect preservation of unrelated input or automatic refresh after resize;
+see the [manual checklist](raster-design.md#manual-checklist-for-a-prospective-native-configuration).
 
 Headless checks, unit tests and PTY transport checks do **not** validate real-terminal
 graphics, erasure, palette behavior, scrolling safety, or negotiation. The showcase replaces
@@ -268,12 +273,12 @@ or change a renderer with `Render::set_raster_output(config)`:
 
 | Policy | Behavior |
 | --- | --- |
-| `RasterPolicy::Auto` (default) | Native only when all safety conditions are known; otherwise character fallback. Unknown capabilities do not trigger cell-pixel queries. |
+| `RasterPolicy::Auto` (default) | Native only when all safety conditions, including stored valid pixels, are known; otherwise character fallback. |
 | `RasterPolicy::TextOnly` | No cell-pixel queries or Sixel output. Use `RasterOutput::text_only()`. |
 | `RasterPolicy::RequireSixel` | Reject unsupported raster frames before frame output, rather than silently falling back. Text-only frames need not satisfy native conditions. |
 
 Build with `--features sixel` to include the native encoder. The encoder uses no
-external encoding library; Unix terminal input/query handling uses `libc`.
+external encoding library; the Unix startup pixel query uses `libc`.
 It uses a fixed 256-color **RGB332** palette (3 red, 3 green, 2 blue bits), not
 lossless 24-bit output or adaptive image quantization.
 
@@ -283,7 +288,8 @@ Native output additionally requires all of the following:
    are unsupported (an ordinary linefeed can scroll even when Sixel does not).
 2. Explicit `RasterCapabilities.sixel`, `.reliable_erase`, and `.no_scroll`
    assertions for the **whole terminal/multiplexer path**.
-3. Valid actual `cell_pixels`: dimensions 1..=1024 and product at most 65,536.
+3. Stored `cell_pixels: Some(pixels)` with actual dimensions in 1..=1024 and
+   product at most 65,536.
    Heights not divisible by six, including 10×20 cells, are supported without
    rounding; the terminal must honor transparent padding in partial bands.
 4. Supported composition and the resource budgets below.
@@ -296,15 +302,15 @@ use rsille::tui::prelude::*;
 
 // Call only AFTER validating the active terminal, font, modes, and multiplexer.
 // These true values are host assertions, NOT detection results or mode setters.
-fn output_after_host_validation(explicit: Option<CellPixels>) -> RasterOutput {
+fn output_after_host_validation(pixels: CellPixels) -> RasterOutput {
     RasterOutput {
         policy: RasterPolicy::RequireSixel,
         capabilities: RasterCapabilities {
             sixel: true,
             reliable_erase: true,
             no_scroll: true,
-            // None: OS metrics, then Unix query. Some(pixels): skip both.
-            cell_pixels: explicit,
+            // Store validated explicit dimensions or the startup probe result.
+            cell_pixels: Some(pixels),
         },
     }
 }
@@ -321,71 +327,63 @@ or use the managed event-loop/TUI lifecycle.
 below discovers dimensions only; the three capability flags remain host assertions.
 Terminal names and environment variables are not proof of support.
 
-Cell-pixel selection is a library capability shared by standalone renderers and
-TUI apps, not an example-only measurement step:
+**The renderer never discovers pixels or reads terminal input.** Eligible native
+raster rendering requires `RasterCapabilities.cell_pixels: Some(valid_pixels)`.
+Missing or invalid metrics mean text fallback for `Auto` or an error for
+`RequireSixel`, not a discovery request. Text-only and unused raster paths are
+unaffected by missing pixels.
 
-- `RasterCapabilities.cell_pixels: Some(pixels)` validates the explicit value and
-  skips **all OS metric lookup and terminal queries**. Invalid explicit dimensions
-  are errors in `RequireSixel`, not a request to try automatic detection.
-- `cell_pixels: None` (the default) first reads the OS window-size API/syscall and
-  divides text-area pixel width/height by columns/rows. Missing, zero, non-integral,
-  or backend-unsupported dimensions trigger the Unix query fallback rather than
-  guessing or rounding. The renderer resolves metrics on eligible native raster
-  frames without storing the result back into the configuration.
-- On Unix, including WSL, fallback sends `CSI 16 t` only when stdin and stdout are
-  TTYs attached to the controlling terminal. The absolute timeout is **500 ms**;
-  interleaved input does not extend it. The reply `CSI 6 ; height ; width t` gives
-  **pixels per cell directly**, in height/width order: do not divide by the grid.
-  Returned dimensions must satisfy the same backend limits as explicit values.
-- Query successes **and failures** are cached per terminal grid. A columns/rows
-  change refreshes the query result; a same-grid font change is not detected by
-  this cache. Use an explicit override or restart after such a change. OS metrics
-  are still checked first on eligible frames.
-- Native Windows has no terminal-query fallback; explicit cell dimensions are
-  still needed there. If neither OS metrics nor the query yields usable dimensions,
-  `RequireSixel` errors before frame output and `Auto` falls back to text.
-- `TextOnly`, unused raster paths, unsupported output modes, and unknown native
-  capabilities do not trigger automatic OS metric reads or cell-pixel queries.
-  In particular, default/unknown `Auto` does not query the terminal.
+`CellPixels::probe(timeout: std::time::Duration) -> std::io::Result<CellPixels>`
+is an explicit startup operation for both standalone hosts and TUI apps:
 
-`CellPixels::resolve(explicit: Option<CellPixels>) -> std::io::Result<CellPixels>`
-exposes the same selection and validation rule for startup preflight. For example:
+- Read OS `window_size` first, dividing text-area pixels by columns/rows. Missing,
+  zero, non-integral, or backend-unsupported dimensions trigger query fallback
+  rather than guessing or rounding.
+- On Unix/WSL, fallback sends `CSI 16 t` only when stdin/stdout are TTYs attached
+  to the controlling terminal. `CSI 6 ; height ; width t` reports **pixels per
+  cell directly**, not window pixels. Results must satisfy the backend limits.
+- The query returns immediately on a valid reply; the caller's timeout bounds
+  waiting and is not extended by unrelated input. It is not a guarantee of exact
+  wall-clock completion time. Native Windows has no query fallback. If no source
+  supplies usable dimensions, the probe returns an error.
+- `CellPixels::resolve(Some(pixels))` validates only, without OS reads or queries.
+  `resolve(None)` calls `probe(Duration::from_millis(500))` for compatibility.
+
+Probe **before starting any input reader**, and **store the result as `Some`**:
 
 ```rust
-use rsille::render::raster_output::CellPixels;
+use std::time::Duration;
+use rsille::render::raster_output::{CellPixels, RasterCapabilities, RasterOutput};
 
-// Explicit mode skips both OS metric lookup and terminal queries.
-let pixels = CellPixels::resolve(Some(CellPixels { width: 10, height: 20 }))?;
-// Preflight before starting any input reader: OS first, then Unix query fallback.
-// Returns an error if neither source supplies usable dimensions.
-let automatic = CellPixels::resolve(None);
+// Before managed input initialization or starting an external reader.
+let pixels = CellPixels::probe(Duration::from_millis(500))?;
+// Alternatively, validate measured dimensions without probing:
+// let pixels = CellPixels::resolve(Some(CellPixels { width: 10, height: 20 }))?;
+let output = RasterOutput {
+    capabilities: RasterCapabilities {
+        cell_pixels: Some(pixels),
+        ..Default::default() // No Sixel support asserted by this measurement.
+    },
+    ..Default::default()
+};
+// Pass output to the builder/app; assert native capabilities only after validation.
 # Ok::<(), std::io::Error>(())
 ```
 
-Keep `cell_pixels: None` in the configuration after automatic preflight; assigning
-`Some(measured)` would intentionally freeze that measurement as an override.
-`CellPixels::from_terminal()` remains available as a raw optional OS measurement
-without native resource-limit validation or query fallback. Metrics alone never
-establish graphics support; explicit overrides must be kept current after
-font/terminal changes.
+Stored pixels are a **startup snapshot**, not a live cache. Font, DPI, and resize
+changes do not update the configuration automatically. Supply updated dimensions
+explicitly or restart. `CellPixels::from_terminal()` remains an optional OS-only
+read callable at runtime, without backend-limit validation or query fallback;
+validate any result before storing it. It does not read terminal input.
 
-**Input ownership:** the managed event loop uses a unified input broker when
-automatic native metrics are enabled. A startup `CellPixels::resolve(None)` that
-enters query fallback also activates that broker. It parses query replies while
-preserving ordinary keyboard, mouse, paste, and other events; existing keyboard
-and cursor queries are routed through the same broker. Once fallback activates
-it, do not mix crossterm input readers or any other stdin reader with the broker.
-The broker's event stream is currently private to the managed loop. Standalone
-renderers or embedding hosts using external input readers must instead supply
-explicit measurements or use OS-only `CellPixels::from_terminal()` and update
-those values themselves. Running query preflight before an external reader is
-**not** sufficient: buffered input belongs to the broker, and later grid changes
-could trigger another query. Query-backed automatic discovery currently requires
-managed rsille input. Once a managed loop has used stock Crossterm input, later
-loops in the same process cannot take it over for querying; OS metrics still work,
-and otherwise `Auto` falls back or `RequireSixel` reports the ownership error.
-Calling `CellPixels::resolve(None)` explicitly requests discovery independently
-of renderer policy; `TextOnly`/unknown `Auto` avoid it only on automatic paths.
+**Input ownership:** probing is permanently rejected after managed input
+initialization, even after that loop exits. External reader state cannot be
+detected: standalone/embedded hosts may probe, but must do so before starting
+their own readers. The startup query may consume unrelated input, does not flush
+input, and can leave late replies arriving after timeout. Do not rely on event
+preservation. Native crossterm `EventStream` handles all managed runtime input;
+there is no runtime pixel-query reader. Calling the probe is independent of
+renderer policy and never establishes Sixel support.
 
 Graphics cleanup uses **ED 2 plus full redraw**, not assumptions that spaces or
 line erasure delete images. This path is permitted only after the explicit native

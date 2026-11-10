@@ -226,7 +226,6 @@ where
     ///
     /// May panic if polled outside a Tokio runtime or with its time driver disabled.
     pub async fn run_async_returning(mut self) -> Result<T, DrawErr> {
-        self.render.prepare_terminal_input(self.alt_screen);
         let guard = TerminalGuard::new(
             self.alt_screen,
             self.raw_mode,
@@ -284,7 +283,8 @@ where
             .map(|fps| Duration::from_secs_f64(1.0 / fps as f64));
         let mut pending_initial_frame = true;
         let mut next_frame_at = Instant::now();
-        let mut reader = TerminalInput::new()?;
+        super::terminal_probe::reserve_input()?;
+        let mut reader = EventStream::new();
         let wake = self.render.thing().wake_handle();
 
         loop {
@@ -498,48 +498,8 @@ where
     }
 }
 
-// The query broker, once activated, must remain the sole reader: Crossterm
-// cannot expose CSI 16 t replies and would silently consume them.
-enum TerminalInput {
-    Crossterm(EventStream),
-    #[cfg(unix)]
-    Queries(super::terminal_query::QueryEventStream),
-}
-
-impl TerminalInput {
-    fn new() -> std::io::Result<Self> {
-        #[cfg(unix)]
-        if super::terminal_query::is_active() {
-            return super::terminal_query::event_stream().map(Self::Queries);
-        }
-        #[cfg(unix)]
-        super::terminal_query::reserve_crossterm_input()?;
-        Ok(Self::Crossterm(EventStream::new()))
-    }
-}
-
-impl futures::Stream for TerminalInput {
-    type Item = std::io::Result<Event>;
-
-    fn poll_next(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Option<Self::Item>> {
-        match self.get_mut() {
-            Self::Crossterm(reader) => std::pin::Pin::new(reader).poll_next(cx),
-            #[cfg(unix)]
-            Self::Queries(reader) => std::pin::Pin::new(reader).poll_next(cx),
-        }
-    }
-}
-
 fn terminal_cursor_position() -> std::io::Result<(u16, u16)> {
-    #[cfg(unix)]
-    if super::terminal_query::is_active() {
-        return super::terminal_query::cursor_position();
-    }
-    #[cfg(unix)]
-    super::terminal_query::reserve_crossterm_input()?;
+    super::terminal_probe::reserve_input()?;
     position()
 }
 

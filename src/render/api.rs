@@ -6,8 +6,7 @@ mod raster_presenter;
 #[path = "render.rs"]
 mod renderer;
 mod terminal;
-#[cfg(unix)]
-mod terminal_query;
+mod terminal_probe;
 mod wake;
 
 pub mod area;

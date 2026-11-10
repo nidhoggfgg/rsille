@@ -114,12 +114,19 @@ fn frame(render: &mut Render<Vec<u8>, Scene>) -> Vec<u8> {
 
 #[test]
 fn unknown_auto_and_explicit_text_only_emit_fallback_without_dcs() {
-    for config in [RasterOutput::default(), verified(RasterPolicy::TextOnly)] {
+    let mut missing_pixels = verified(RasterPolicy::Auto);
+    missing_pixels.capabilities.cell_pixels = None;
+    for config in [
+        RasterOutput::default(),
+        verified(RasterPolicy::TextOnly),
+        missing_pixels,
+    ] {
         for inline in [false, true] {
             let mut render = renderer(config, Vec::new());
             render.inline_mode = inline;
             let output = frame(&mut render);
             assert!(!contains(&output, b"\x1bP"));
+            assert!(!contains(&output, b"\x1b[16t"));
             assert!(!contains(&output, b"\x1b[?2026"));
             assert!(contains(&output, "▀".as_bytes()));
             assert_eq!(render.raster_stats(), RasterStats::default());
@@ -135,7 +142,7 @@ fn strict_unsupported_frames_write_nothing_and_do_not_commit() {
         policy: RasterPolicy::RequireSixel,
         ..RasterOutput::default()
     }];
-    for missing in 0..5 {
+    for missing in 0..6 {
         let mut config = verified(RasterPolicy::RequireSixel);
         match missing {
             0 => config.capabilities.sixel = false,
@@ -147,12 +154,13 @@ fn strict_unsupported_frames_write_nothing_and_do_not_commit() {
                     height: 18,
                 })
             }
-            _ => {
+            4 => {
                 config.capabilities.cell_pixels = Some(CellPixels {
                     width: 8,
                     height: 1025,
                 })
             }
+            _ => config.capabilities.cell_pixels = None,
         }
         unsupported.push(config);
     }
