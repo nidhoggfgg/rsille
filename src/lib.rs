@@ -120,6 +120,12 @@
 #[path = "render/api.rs"]
 pub mod render;
 
+/// Independent opaque RGB drawing, shared with the renderer.
+///
+/// Unlike [`canvas`], raster coordinates are explicit pixels with y increasing
+/// downward. Native Sixel output is optional; character fallback is always available.
+pub use render::raster;
+
 /// Sample-based graphics with Braille, half-block, and quadrant terminal encoding.
 ///
 /// [`Canvas`](canvas::Canvas) stores colored samples and encodes them into cells

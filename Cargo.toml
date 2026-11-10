@@ -8,7 +8,7 @@ keywords = ["braille", "terminal", "tui", "cli", "animation"]
 readme = "README.md"
 license = "MIT"
 repository = "https://github.com/nidhoggfgg/rsille.git"
-include = ["src/**", "examples/basic_canvas.rs", "/README.md", "/README_cn.md", "LICENCE", "Cargo.toml"]
+include = ["src/**", "examples/basic_canvas.rs", "examples/sixel_windows.rs", "docs/raster.md", "docs/raster-design.md", "docs/raster-performance.md", "/README.md", "/README_cn.md", "LICENCE", "Cargo.toml"]
 
 [dependencies]
 crossterm = { workspace = true }
@@ -25,6 +25,7 @@ smallvec = "1.13"
 [features]
 default = []
 syntax-highlighting = ["dep:syntect"]
+sixel = []
 
 [workspace]
 members = ["packages/canvas", "packages/render", "packages/tui"]

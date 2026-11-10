@@ -15,13 +15,15 @@ cargo run --example basic_canvas
 cargo run --release --manifest-path examples/lumen/Cargo.toml
 ```
 
-`basic_canvas.rs` is a root-package example. Each subdirectory below is a standalone
-Cargo project with a path dependency on `rsille`; these projects are excluded from
-the root workspace. Run them with `--manifest-path`, using the directory name in the
-table. Prefer release builds for animations and 3D scenes.
+`basic_canvas.rs` and `sixel_windows.rs` are single-file root-package examples,
+run with `--example`, not standalone projects. Each subdirectory below is a
+standalone Cargo project with a path dependency on `rsille`; these projects are
+excluded from the root workspace. Run them with `--manifest-path`, using the
+directory name in the table. Prefer release builds for animations and 3D scenes.
 
-| Example | Directory | What it demonstrates |
+| Example | File / directory | What it demonstrates |
 | --- | --- | --- |
+| [Sixel vs Canvas windows](../docs/raster.md#run-the-showcase) | `sixel_windows.rs` (root example) | Two draggable, resizable windows showing the same static ringed planet as native RGB raster and Canvas character sampling. |
 | [TUI showcase](tui-showcase/README.md) | `tui-showcase` | Seven pages of controls, data, content, layout, motion and themes. |
 | [Lumen](lumen/README.md) | `lumen` | Interactive workspace with flows, a notebook and floating windows. |
 | [Orbit Files](orbit-files/README.md) | `orbit-files` | File manager with selection, drag and drop, previews and undo. |
@@ -38,6 +40,39 @@ Interactive demos need a TTY. Use a True Color terminal and a Unicode monospace 
 mouse support is needed for pointer interactions. See each guide for window sizes,
 keys, data persistence and export options. Orbit Files' complete filesystem operations
 require Linux; it starts in a disposable demo directory unless given `--path`.
+
+## Sixel vs Canvas windows
+
+```sh
+cargo run --release --features sixel --example sixel_windows -- --sixel
+cargo run --release --example sixel_windows -- --text-only
+cargo run --example sixel_windows -- --help
+```
+
+Two `floating_window` widgets in a `window_host` show the same procedural ringed
+planet, without live animation. Drag a title to move, drag a bottom grip to resize,
+and click to bring a window forward. `e` cycles Canvas Braille/HalfBlock/Quadrant;
+`r` restores the starting window rectangles; `q`/Esc quits. Ideally use 100×32 cells;
+smaller terminals and terminal resizing are supported.
+
+`--sixel` is your explicit assertion that the entire terminal/multiplexer path
+supports Sixel, graphics ED 2 erasure, no scrolling and stable palettes. It uses
+`RequireSixel`, with no silent fallback. Cell pixels are measured through the OS;
+optional `--cell-pixels 8x18` must match **actual font metrics**, not an arbitrary
+size. The feature and current backend limits (including height divisible by six)
+are checked before entering the terminal. No flags shows help, not a fallback demo;
+`--text-only` explicitly selects a character preview. See the
+[raster guide](../docs/raster.md) for the full safety contract.
+
+Finite, terminal-independent mouse-drag and occlusion checks and example tests:
+
+```sh
+cargo run --example sixel_windows -- --headless
+cargo test --example sixel_windows --features sixel
+cargo test --example sixel_windows --no-default-features
+```
+
+These do not certify real-terminal graphics behavior or measure performance.
 
 ## Validate without a terminal
 

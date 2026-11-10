@@ -48,6 +48,7 @@ pub struct Builder {
     pub(super) enable_mouse_capture: bool,
     pub(super) enable_hide_cursor: bool,
     pub(super) keyboard_mode: KeyboardMode,
+    pub(super) raster_output: crate::render::raster_output::RasterOutput,
     pub(super) focus_events: bool,
     pub(super) exit_code: Option<KeyEvent>,
     pub(super) frame_limit: Option<u16>,
@@ -78,6 +79,7 @@ impl Builder {
             enable_mouse_capture: false,
             enable_hide_cursor: false,
             keyboard_mode: KeyboardMode::Legacy,
+            raster_output: crate::render::raster_output::RasterOutput::default(),
             focus_events: false,
             exit_code: Some(KeyCode::Esc.into()),
             frame_limit: None,
@@ -104,6 +106,18 @@ impl Builder {
     /// Select keyboard negotiation. `Auto` requires raw mode and may fall back.
     pub fn keyboard_mode(&mut self, mode: KeyboardMode) -> &mut Self {
         self.keyboard_mode = mode;
+        self
+    }
+
+    /// Configures raster presentation. Unknown capabilities default to text.
+    ///
+    /// A standalone renderer does not enter an alternate screen: when enabling
+    /// native output, the caller must establish the configured terminal modes.
+    pub fn raster_output(
+        &mut self,
+        config: crate::render::raster_output::RasterOutput,
+    ) -> &mut Self {
+        self.raster_output = config;
         self
     }
 

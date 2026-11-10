@@ -66,6 +66,39 @@ rsille = { version = "3.0.4", features = ["syntax-highlighting"] }
 
 本地开发时，可改用 `rsille = { path = "../rsille" }`，将路径替换为本地仓库的位置。
 
+## 不透明栅格绘制
+
+`rsille::raster::RasterCanvas` 提供固定分辨率 RGB 像素、线段、矩形和圆，
+与现有采样式 `Canvas` 相互独立。通过 `raster_canvas(...)` 嵌入布局，或使用
+按内容版本缓存回调的 `RasterCanvasWidget::from_draw(...)`。布局、裁剪、滚动和
+不透明遮挡会保留栅格元数据；始终提供 HalfBlock（可选 Braille）降级及无终端帧。
+
+可选 `sixel` feature 启用原生编码。`Auto` 对未知终端默认字符降级，
+`TextOnly` 禁用原生输出，`RequireSixel` 在条件不足时返回错误。
+原生输出目前要求显式提供已验证的终端能力、备用屏幕模式及受支持的每格像素尺寸。
+**自动能力协商与真实终端认证尚未完成；仅启用 feature 不会启用原生输出。**
+不提供 alpha/透明度，也不增加 `Encoding::Sixel`。
+
+配置与限制见 [栅格指南](docs/raster.md)，设计及待验证项目见
+[实现与验证说明](docs/raster-design.md)。
+
+两个可拖动浮窗展示同一颗静态程序化带环行星，对比原生 RGB 栅格输出与现有 `Canvas`
+字符采样。[`sixel_windows`](examples/sixel_windows.rs) 是根包的单文件示例，不是独立项目：
+
+```sh
+cargo run --release --features sixel --example sixel_windows -- --sixel
+cargo run --release --example sixel_windows -- --text-only
+```
+
+`--sixel` 表示用户明确确认整个终端链路支持 Sixel、ED 2 图形擦除、无滚屏输出及稳定调色板；
+`RequireSixel` 不会静默降级。默认使用操作系统测得的每格像素尺寸；可选的
+`--cell-pixels 8x18` 必须匹配**实际字体度量**，不能任意填写。进入终端前会检查 feature
+及后端尺寸限制（包括每格高度须为六的倍数）。拖动标题移动窗口，拖动底部手柄调整大小，
+点击置前。`e` 循环切换 Canvas 的 Braille/HalfBlock/Quadrant，`r` 恢复初始窗口位置和大小，
+`q`/Esc 退出。建议使用 100×32 字符格，也支持更小尺寸及终端缩放；没有实时动画。
+不带参数或使用 `--help` 显示帮助，`--text-only` 显式选择字符预览，`--headless`
+执行有限的、无需终端的拖动与遮挡检查。验证命令见[演示指南](docs/raster.md#run-the-showcase)。
+
 ## 配合 AI 编程助手开发
 
 独立仓库提供 [rsille skill](https://github.com/nidhoggfgg/rsille.skills/blob/main/rsille/SKILL.md)，帮助编程助手使用 v3 API 开发终端应用，

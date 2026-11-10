@@ -30,6 +30,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use crate::render::raster_output::RasterOutput;
 use crate::render::InlineMouseMode;
 
 use crate::tui::animation::MotionPolicy;
@@ -109,6 +110,7 @@ pub struct App<State, M = ()> {
     pub(crate) global_key_handlers: HashMap<KeyCode, EventHandler<M>>,
     pub(crate) input_handler: Option<InputHandler<M>>,
     pub(crate) keyboard_mode: KeyboardMode,
+    pub(crate) raster_output: RasterOutput,
     pub(crate) focus_events: bool,
     pub(crate) hotkeys: HotkeyRegistry<M>,
     pub(crate) command_router: Option<CommandRouter<M>>,
@@ -149,6 +151,7 @@ impl<State, M> App<State, M> {
             global_key_handlers: HashMap::new(),
             input_handler: None,
             keyboard_mode: KeyboardMode::Legacy,
+            raster_output: RasterOutput::default(),
             focus_events: false,
             hotkeys: HotkeyRegistry::new(),
             command_router: None,
@@ -241,6 +244,17 @@ impl<State, M> App<State, M> {
     /// treating Press as a held key. Unsupported terminals retain legacy input.
     pub fn keyboard_mode(mut self, mode: KeyboardMode) -> Self {
         self.keyboard_mode = mode;
+        self
+    }
+
+    /// Configures terminal raster presentation policy and known capabilities.
+    ///
+    /// Defaults to automatic selection with unknown terminal capabilities. This
+    /// configuration is passed unchanged to the terminal renderer. Headless
+    /// [`Runtime::frame`] retains raster metadata regardless of terminal policy;
+    /// use [`Runtime::frame_text_only`] for an explicit character-only snapshot.
+    pub fn raster_output(mut self, config: RasterOutput) -> Self {
+        self.raster_output = config;
         self
     }
 

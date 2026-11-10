@@ -47,7 +47,7 @@ mod variant;
 
 pub use collections::{data_table, file_explorer, list, selection, tree};
 pub use controls::{button, calendar, checkbox, radio_group, select, switch, text_input, textarea};
-pub use display::{canvas, content, divider, label, progress, spacer};
+pub use display::{canvas, content, divider, label, progress, raster_canvas, spacer};
 pub use layout::{collapsible, dialog, panel};
 pub use motion::{animated, visual};
 pub use navigation::{command_palette, menu, tabs};
@@ -84,6 +84,7 @@ pub use progress::{
     loading_indicator, progress_bar, LoadingIndicator, ProgressBar, ProgressBarVariant,
 };
 pub use radio_group::{radio_group, RadioGroup, RadioGroupState, RadioOption};
+pub use raster_canvas::{raster_canvas, RasterCanvasContext, RasterCanvasWidget};
 pub use select::{select, Select, SelectOption, SelectSearchMode, SelectState};
 pub use selection::{SelectionMode, SelectionState};
 pub use spacer::{spacer, Spacer};

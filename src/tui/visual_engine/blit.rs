@@ -36,6 +36,7 @@ pub(crate) fn blit_with_effects(
         ctx.area.height() as usize,
     );
 
+    let backdrop_uses_raster = backdrop.is_some() && chunk.buffer().has_raster();
     let snapshot =
         backdrop.map(|backdrop| BackdropSnapshot::capture(chunk.buffer(), backdrop, ctx));
     let options = if backdrop.is_some() {
@@ -77,6 +78,11 @@ pub(crate) fn blit_with_effects(
             report.skipped_cells += 1;
         }
     });
+    // Backdrops sample stored fallbacks, including a halo outside this chunk.
+    // Conservatively reject native composition if any lower raster is present.
+    if blit_stats.unsupported_raster_composition || backdrop_uses_raster {
+        chunk.mark_unsupported_raster_composition();
+    }
     report.blank_cells_skipped = blit_stats.skipped_blank;
     report.clean_cells_skipped = blit_stats.skipped_clean;
     if let Some(started) = started {
@@ -123,6 +129,7 @@ pub(crate) fn blit_with_effect_groups(
         ctx.area.height() as usize,
     );
 
+    let backdrop_uses_raster = backdrop.is_some() && chunk.buffer().has_raster();
     let snapshot =
         backdrop.map(|backdrop| BackdropSnapshot::capture(chunk.buffer(), backdrop, ctx));
     let options = if backdrop.is_some() {
@@ -176,10 +183,125 @@ pub(crate) fn blit_with_effect_groups(
             report.skipped_cells += 1;
         }
     });
+    if blit_stats.unsupported_raster_composition || backdrop_uses_raster {
+        chunk.mark_unsupported_raster_composition();
+    }
     report.blank_cells_skipped = blit_stats.skipped_blank;
     report.clean_cells_skipped = blit_stats.skipped_clean;
     if let Some(started) = started {
         report.effect_apply_time = started.elapsed();
     }
     report
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::render::{area::Area, chunk::Chunk, raster::RasterCanvas, style::Stylized};
+    use crate::tui::{animation::MotionPolicy, style::Theme};
+
+    fn raster_source() -> Buffer {
+        let mut buffer = Buffer::new((2, 1).into());
+        let canvas = RasterCanvas::new(2, 2, Default::default()).unwrap();
+        Chunk::new(&mut buffer, Area::new((0, 0).into(), (2, 1).into()))
+            .unwrap()
+            .raster(&canvas, Default::default())
+            .unwrap();
+        buffer
+    }
+
+    fn apply(
+        grouped: bool,
+        source: &Buffer,
+        target: &mut Buffer,
+        progress: f64,
+        backdrop: Option<&Backdrop>,
+    ) -> BlitReport {
+        let theme = Theme::dark();
+        let area = Area::new((0, 0).into(), (2, 1).into());
+        let ctx = VisualCtx::new(
+            progress,
+            area,
+            Instant::now(),
+            0,
+            1.0,
+            MotionPolicy::default(),
+            &theme,
+            None,
+            0,
+        );
+        let mut chunk = Chunk::new(target, area).unwrap();
+        if grouped {
+            blit_with_effect_groups(
+                &mut chunk,
+                source,
+                &[ResolvedEffectGroup {
+                    progress,
+                    effects: vec![VisualEffect::fade_in()],
+                }],
+                backdrop,
+                &ctx,
+                false,
+            )
+        } else {
+            blit_with_effects(
+                &mut chunk,
+                source,
+                &[VisualEffect::fade_in()],
+                backdrop,
+                &ctx,
+                false,
+            )
+        }
+    }
+
+    #[test]
+    fn both_effect_paths_flatten_raster_and_propagate_unsupported_even_when_hidden() {
+        let source = raster_source();
+        for grouped in [false, true] {
+            for progress in [0.0, 1.0] {
+                let mut target = Buffer::new(source.size());
+                let report = apply(grouped, &source, &mut target, progress, None);
+                assert!(target.has_unsupported_raster_composition());
+                assert!(!target.has_raster());
+                if progress == 1.0 {
+                    assert_eq!(report.processed_cells, 2);
+                    assert_eq!(target.content(), source.content());
+                } else {
+                    assert_eq!(report.processed_cells, 0);
+                    assert_eq!(target.content(), Buffer::new(source.size()).content());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn both_effect_paths_propagate_nested_flattening_without_flagging_pure_text() {
+        let mut source = Buffer::new((2, 1).into());
+        source.set((0, 0).into(), Stylized::plain('x')).unwrap();
+        for flattened in [false, true] {
+            if flattened {
+                source.mark_unsupported_raster_composition();
+            }
+            for grouped in [false, true] {
+                let mut target = Buffer::new(source.size());
+                apply(grouped, &source, &mut target, 1.0, None);
+                assert_eq!(target.has_unsupported_raster_composition(), flattened);
+                assert_eq!(target.get((0, 0).into()).unwrap().as_char(), Some('x'));
+            }
+        }
+    }
+
+    #[test]
+    fn backdrop_sampling_lower_raster_is_not_silently_native() {
+        let source = Buffer::new((2, 1).into());
+        let backdrop = Backdrop::frosted();
+        for grouped in [false, true] {
+            let mut target = raster_source();
+            let report = apply(grouped, &source, &mut target, 1.0, Some(&backdrop));
+            assert_eq!(report.processed_cells, 2);
+            assert!(!target.has_raster());
+            assert!(target.has_unsupported_raster_composition());
+        }
+    }
 }

@@ -1,6 +1,12 @@
 //! Prelude — import everything you need with `use rsille::tui::prelude::*;`
 
 pub use crate::canvas::Encoding;
+pub use crate::render::raster::{
+    RasterAlign, RasterCanvas, RasterError, RasterFallback, RasterOptions, RasterScale, Rgb,
+};
+pub use crate::render::raster_output::{
+    CellPixels, RasterCapabilities, RasterOutput, RasterPolicy,
+};
 
 pub use crate::tui::animation::{
     AnimationSpec, AnimationTheme, AreaF, ClipMode, Direction as AnimationDirection, Easing,
@@ -61,6 +67,7 @@ pub use crate::tui::widgets::{
     VisualAnchor, VisualConfig, VisualCtx, VisualDegradation, VisualEffect, VisualEffectCost,
     VisualPerformanceConfig, VisualProfile, WaveAxis, WipeDirection, WipeMode,
 };
+pub use crate::tui::widgets::{raster_canvas, RasterCanvasContext, RasterCanvasWidget};
 pub use crate::tui::InlineMouseMode;
 
 pub use crate::tui::scope::Scope;

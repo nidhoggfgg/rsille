@@ -2,6 +2,7 @@ mod builder;
 mod draw_err;
 mod draw_update;
 mod input;
+mod raster_presenter;
 #[path = "render.rs"]
 mod renderer;
 mod terminal;
@@ -11,6 +12,10 @@ pub mod area;
 pub mod buffer;
 pub mod chunk;
 pub mod event_loop;
+pub mod raster;
+pub mod raster_output;
+#[cfg(feature = "sixel")]
+mod sixel;
 pub mod style;
 pub mod text;
 pub use builder::{Builder, InlineMouseMode};

@@ -73,6 +73,47 @@ Without that feature, code viewers still support plain text and navigation.
 For local development, replace the registry dependency with `rsille = { path = "../rsille" }`,
 adjusting the path to your checkout.
 
+## Opaque raster drawing
+
+`rsille::raster::RasterCanvas` provides fixed-resolution RGB pixels, lines,
+rectangles and circles, independently of the existing sample-based `Canvas`.
+Embed it with `raster_canvas(...)` or use revision-cached
+`RasterCanvasWidget::from_draw(...)`. Layout, clipping, scrolling and opaque
+coverage retain raster metadata; HalfBlock (or Braille) fallback is always
+available, including headless frames.
+
+The optional `sixel` feature enables native encoding. `Auto` defaults to text for
+unknown terminals; `TextOnly` disables native output, and `RequireSixel` returns
+an error when safety conditions are missing. Native output currently requires
+explicit verified capabilities, alternate-screen mode and supported cell-pixel
+metrics. **Automatic capability negotiation and real-terminal certification are
+not yet implemented; enabling the feature alone does not enable native output.**
+There is no alpha/transparency API or `Encoding::Sixel`.
+
+See the [raster guide](docs/raster.md) for configuration and limits, and the
+[design/validation notes](docs/raster-design.md) for remaining work.
+
+Compare the same static procedural ringed planet in two draggable windows: native
+RGB raster output versus existing `Canvas` character sampling. This is the root-package,
+single-file [`sixel_windows`](examples/sixel_windows.rs) demo, not a standalone project:
+
+```sh
+cargo run --release --features sixel --example sixel_windows -- --sixel
+cargo run --release --example sixel_windows -- --text-only
+```
+
+`--sixel` explicitly asserts that the whole terminal path supports Sixel, graphics
+ED 2 erasure, non-scrolling output and stable palettes; `RequireSixel` never silently
+falls back. It uses OS-measured cell pixels; an optional `--cell-pixels 8x18` must
+match **actual font metrics**, not arbitrary dimensions. Feature and backend metric
+checks (including cell height divisible by six) run before entering the terminal.
+Drag titles to move, drag bottom grips to resize, and click to bring a window forward.
+`e` cycles Canvas Braille/HalfBlock/Quadrant, `r` restores starting rectangles, and
+`q`/Esc quits. Prefer 100×32 cells; smaller sizes and terminal resizing are supported.
+There is no live animation. No flags or `--help` shows help; `--text-only` explicitly
+selects a preview, and `--headless` runs finite terminal-independent drag/occlusion
+checks. See the [showcase guide](docs/raster.md#run-the-showcase) for validation commands.
+
 ## Develop with an AI coding agent
 
 The [rsille skill](https://github.com/nidhoggfgg/rsille.skills/blob/main/rsille/SKILL.md) teaches coding agents the v3 API,

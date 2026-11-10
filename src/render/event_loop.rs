@@ -234,6 +234,7 @@ where
             self.keyboard_mode,
             self.focus_events,
         )?;
+        self.render.set_alternate_screen(self.alt_screen);
         self.render
             .thing_mut()
             .on_input_capabilities(guard.input_capabilities());
@@ -382,6 +383,11 @@ where
             if has_events || needs_render || self.render.has_pending_changes() || force_inline_frame
             {
                 if let Err(e) = self.render.render() {
+                    if e.kind() == std::io::ErrorKind::Unsupported {
+                        // Strict raster policy is an actionable configuration
+                        // error, not a transient frame failure to log forever.
+                        return Err(DrawErr::Io(e));
+                    }
                     error!("Error rendering: {}", e);
                 } else {
                     if force_inline_frame {

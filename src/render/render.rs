@@ -1,7 +1,7 @@
 //! Buffered terminal output with cell-level and line-level frame comparison.
 
 use crossterm::{
-    cursor::{MoveTo, MoveToNextLine, MoveToPreviousLine},
+    cursor::{MoveTo, MoveToNextLine, MoveToPreviousLine, RestorePosition, SavePosition},
     style::{Attribute, Attributes, Color, Colors, Print, ResetColor, SetAttributes, SetColors},
     terminal::{Clear, ClearType},
 };
@@ -87,6 +87,8 @@ pub struct Render<W, T> {
     inline_mode: bool,
     previous_inline_height: u16,
     used_height: u16, // Actual height to render (for inline mode, avoids buffer reallocation)
+    raster: super::raster_presenter::RasterPresenter,
+    automatic_cell_pixels: bool,
 }
 
 impl<W, T> Render<W, T>
@@ -108,6 +110,16 @@ where
     /// Returns drawing failures converted to [`std::io::Error`], or errors
     /// from writing or flushing output. A failed frame is not saved.
     pub fn render(&mut self) -> std::io::Result<()> {
+        let result = self.render_frame();
+        if result.is_err() {
+            // A failed draw is not a valid previous frame. Repaint from scratch
+            // on retry; the presenter separately remembers uncertain graphics.
+            self.buffer.clear_content();
+        }
+        result
+    }
+
+    fn render_frame(&mut self) -> std::io::Result<()> {
         #[cfg(debug_assertions)]
         let start = std::time::Instant::now();
 
@@ -133,19 +145,66 @@ where
         let chunk = Chunk::new(&mut self.buffer, render_size.into())?;
         self.thing.draw(chunk)?;
 
+        // OS metrics do not consume stdin. Query lazily only when native raster
+        // capability was explicitly supplied; TextOnly never queries anything.
+        if self.automatic_cell_pixels
+            && self.buffer.has_raster()
+            && self.raster.config.policy != super::raster_output::RasterPolicy::TextOnly
+            && self.raster.config.capabilities.sixel
+        {
+            self.raster.config.capabilities.cell_pixels =
+                super::raster_output::CellPixels::from_terminal();
+        }
+        // An appended LF can scroll even when Sixel itself cannot. Treat this
+        // contract like inline output rather than commit stale screen positions.
+        let raster_plan = self.raster.prepare(
+            &self.buffer,
+            self.pos,
+            self.inline_mode || self.append_newline,
+        )?;
+        if self.raster.needs_protocol_recovery() {
+            // A prior writer failure may have prevented even the best-effort
+            // terminator from reaching the terminal. Cancel an incomplete DCS
+            // before issuing SGR/ED commands on the recovered writer.
+            self.out.write_all(b"\x18\x1b\\")?;
+        }
+        self.raster.begin(&raster_plan);
+
         // Match the frame-local style cache to the real terminal before
         // drawing or erasing. Cursor movement and clearing do not reset SGR.
         crossterm::queue!(self.out, ResetColor)?;
 
-        if self.clear && self.buffer.previous().is_none() {
+        if raster_plan.clear || (self.clear && self.buffer.previous().is_none()) {
+            // Native output is enabled only for hosts that verified ED 2 erases
+            // graphics. Spaces/EL are not assumed to remove old Sixel pixels.
             crossterm::queue!(self.out, Clear(ClearType::All))?;
+        }
+        if raster_plan.clear {
+            self.buffer.reset_diff();
         }
 
         // Inline mode: use relative positioning with line-level differential rendering
         if self.inline_mode {
             self.render_inline()?;
+        } else if raster_plan.native {
+            self.render_raster_characters()?;
         } else {
             self.render_fullscreen()?;
+        }
+        if !raster_plan.encoded.is_empty() {
+            crossterm::queue!(self.out, SavePosition)?;
+            for (x, y, bytes) in &raster_plan.encoded {
+                crossterm::queue!(self.out, MoveTo(self.pos.x + x, self.pos.y + y))?;
+                if let Err(error) = self.out.write_all(bytes) {
+                    // Best effort DCS termination and cursor restoration on a
+                    // recoverable writer failure. The next frame fully clears.
+                    let _ = self.out.write_all(b"\x1b\\");
+                    let _ = crossterm::queue!(self.out, RestorePosition, ResetColor);
+                    let _ = self.out.flush();
+                    return Err(error);
+                }
+            }
+            crossterm::queue!(self.out, RestorePosition, ResetColor)?;
         }
 
         if self.append_newline {
@@ -154,6 +213,7 @@ where
 
         // ensure the output is flushed to terminal
         self.out.flush()?;
+        self.raster.commit(raster_plan);
 
         // Save current buffer for next frame's diff
         self.buffer.clear();
@@ -175,6 +235,44 @@ where
 
         crossterm::queue!(self.out, Print("\r\n"), MoveToPreviousLine(1))?;
         self.out.flush()
+    }
+
+    // Ownership was resolved during drawing/blitting, so these cells cannot
+    // overlap any native tile. This is not a fixed text-before-images z-order.
+    fn render_raster_characters(&mut self) -> std::io::Result<()> {
+        let mut style = TerminalStyleState::default();
+        if let Some(diff) = self.buffer.diff() {
+            for (x, y, cell) in diff {
+                if self.buffer.raster_at((x, y).into()).is_none() {
+                    crossterm::queue!(self.out, MoveTo(self.pos.x + x, self.pos.y + y))?;
+                    style.queue(&cell.content, &mut self.out)?;
+                }
+            }
+        } else {
+            for (x, y, cell) in self.buffer.all_cells() {
+                if self.buffer.raster_at((x, y).into()).is_none() {
+                    crossterm::queue!(self.out, MoveTo(self.pos.x + x, self.pos.y + y))?;
+                    style.queue(&cell.content, &mut self.out)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Changes presentation policy or explicit pixel metrics for subsequent frames.
+    /// Old graphics are cleared on the next successful frame before text fallback.
+    pub fn set_raster_output(&mut self, config: super::raster_output::RasterOutput) {
+        self.automatic_cell_pixels = config.capabilities.cell_pixels.is_none();
+        self.raster.config = config;
+    }
+
+    /// Returns Sixel work counters and bounded cache occupancy.
+    pub fn raster_stats(&self) -> super::raster_output::RasterStats {
+        self.raster.stats()
+    }
+
+    pub(crate) fn set_alternate_screen(&mut self, enabled: bool) {
+        self.raster.alternate_screen = enabled;
     }
 
     fn render_fullscreen(&mut self) -> std::io::Result<()> {
@@ -355,6 +453,11 @@ where
             inline_mode: builder.inline_mode,
             previous_inline_height: 0,
             used_height: builder.size.height, // Initialize to buffer capacity
+            raster: super::raster_presenter::RasterPresenter::new(
+                builder.raster_output,
+                builder.enable_alt_screen,
+            ),
+            automatic_cell_pixels: builder.raster_output.capabilities.cell_pixels.is_none(),
         }
     }
 }
@@ -437,6 +540,10 @@ where
 #[cfg(test)]
 #[path = "render_tests.rs"]
 mod style_tests;
+
+#[cfg(test)]
+#[path = "raster_render_tests.rs"]
+mod raster_tests;
 
 #[cfg(test)]
 mod tests {

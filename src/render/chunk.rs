@@ -9,6 +9,7 @@ use log::trace;
 use crate::render::{
     area::Area,
     buffer::Buffer,
+    raster::{RasterCanvas, RasterCell, RasterOptions},
     style::{Style, Stylized},
     DrawErr,
 };
@@ -39,10 +40,19 @@ impl<'a> Chunk<'a> {
     /// # Errors
     ///
     /// Returns [`DrawErr::InvalidArea`] if the area's exclusive end exceeds
-    /// the buffer dimensions. Origin plus size must fit in `u16`.
+    /// the buffer dimensions, including when origin plus size overflows `u16`.
     pub fn new(buffer: &'a mut Buffer, area: Area) -> Result<Self, DrawErr> {
-        if buffer.size().less_any(area.real_size()) {
-            return Err(DrawErr::invalid_area(area.real_size(), buffer.size()));
+        let right = area.x() as u32 + area.width() as u32;
+        let bottom = area.y() as u32 + area.height() as u32;
+        if right > buffer.size().width as u32 || bottom > buffer.size().height as u32 {
+            return Err(DrawErr::invalid_area(
+                (
+                    right.min(u16::MAX as u32) as u16,
+                    bottom.min(u16::MAX as u32) as u16,
+                )
+                    .into(),
+                buffer.size(),
+            ));
         }
 
         Ok(Self { buffer, area })
@@ -148,6 +158,66 @@ impl<'a> Chunk<'a> {
             );
             Err(DrawErr::out_of_bounds((x, y).into(), self.area.size()))
         }
+    }
+
+    /// Paints one opaque raster cell at local `(x, y)`.
+    ///
+    /// Preserves the cell's original target size and offsets, including when
+    /// copying a cropped image. Replaces any intersecting wide grapheme in full.
+    /// Returns [`DrawErr::OutOfBounds`] for an invalid local position or raster
+    /// offset, without modifying the buffer.
+    pub fn set_raster_cell(&mut self, x: u16, y: u16, cell: RasterCell) -> Result<(), DrawErr> {
+        let pos = self
+            .area
+            .to_absolute(x, y)
+            .ok_or_else(|| DrawErr::out_of_bounds((x, y).into(), self.area.size()))?;
+        self.buffer.set_raster(pos, cell)
+    }
+
+    /// Copies a raster owner with its already sampled fallback across render/TUI
+    /// package boundaries. Internal compositors use this to avoid resampling.
+    #[doc(hidden)]
+    pub fn set_raster_cell_with_fallback(
+        &mut self,
+        x: u16,
+        y: u16,
+        cell: RasterCell,
+        fallback: Stylized,
+    ) -> Result<(), DrawErr> {
+        let pos = self
+            .area
+            .to_absolute(x, y)
+            .ok_or_else(|| DrawErr::out_of_bounds((x, y).into(), self.area.size()))?;
+        self.buffer.set_raster_with_fallback(pos, cell, fallback)
+    }
+
+    /// Fills this chunk with an opaque raster and its character fallback.
+    ///
+    /// Each cell retains the full chunk size as its target and its original
+    /// local offsets. Empty chunks are a no-op. Canvas clones share pixel data.
+    pub fn raster(&mut self, canvas: &RasterCanvas, options: RasterOptions) -> Result<(), DrawErr> {
+        let target = self.area.size();
+        for y in 0..target.height {
+            for x in 0..target.width {
+                self.set_raster_cell(
+                    x,
+                    y,
+                    RasterCell {
+                        canvas: canvas.clone(),
+                        target,
+                        x,
+                        y,
+                        options,
+                    },
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Marks this frame as containing raster flattened by a visual effect.
+    pub fn mark_unsupported_raster_composition(&mut self) {
+        self.buffer.mark_unsupported_raster_composition();
     }
 
     /// Returns the text-width policy shared by the entire underlying buffer.
@@ -359,5 +429,74 @@ impl<'a> Chunk<'a> {
         let stylized = Stylized::new(ch, style);
         self.set_forced(x, y, stylized)?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod raster_tests {
+    use super::*;
+    use crate::render::text::{AmbiguousWidth, TextMetrics};
+
+    #[test]
+    fn raster_uses_local_offsets_and_chunk_target() {
+        let canvas = RasterCanvas::new(2, 2, Default::default()).unwrap();
+        let mut buffer = Buffer::new((6, 4).into());
+        let area = Area::new((2, 1).into(), (3, 2).into());
+        Chunk::new(&mut buffer, area)
+            .unwrap()
+            .raster(&canvas, RasterOptions::default())
+            .unwrap();
+        assert_eq!(buffer.raster_cells().count(), 6);
+        for (x, y, cell) in buffer.raster_cells() {
+            assert_eq!(cell.target, area.size());
+            assert_eq!((cell.x, cell.y), (x - 2, y - 1));
+            assert_eq!(cell.canvas, canvas);
+        }
+        assert!(buffer.raster_at((1, 1).into()).is_none());
+        assert!(buffer.raster_at((5, 1).into()).is_none());
+    }
+
+    #[test]
+    fn raster_nested_clip_and_invalid_local_positions() {
+        let canvas = RasterCanvas::new(1, 1, Default::default()).unwrap();
+        let mut buffer = Buffer::new((5, 3).into());
+        let mut chunk = Chunk::new(&mut buffer, Area::new((1, 1).into(), (3, 2).into())).unwrap();
+        chunk
+            .with_clip(Area::new((2, 0).into(), (3, 2).into()), |clipped| {
+                clipped.raster(&canvas, RasterOptions::default()).unwrap();
+                let cell = clipped.buffer().raster_at((2, 1).into()).unwrap().clone();
+                assert!(clipped.set_raster_cell(2, 0, cell.clone()).is_err());
+                assert!(clipped.set_raster_cell(0, 1, cell).is_err());
+            })
+            .unwrap();
+        assert_eq!(buffer.raster_cells().count(), 2);
+        let cell = buffer.raster_at((3, 1).into()).unwrap();
+        assert_eq!(cell.target, (2, 1).into());
+        assert_eq!((cell.x, cell.y), (1, 0));
+        assert!(Chunk::new(&mut buffer, Area::new((u16::MAX, 0).into(), (2, 1).into())).is_err());
+        Chunk::new(&mut buffer, Area::new((5, 3).into(), (0, 0).into()))
+            .unwrap()
+            .raster(&canvas, RasterOptions::default())
+            .unwrap();
+        assert_eq!(buffer.raster_cells().count(), 2);
+    }
+
+    #[test]
+    fn raster_fallback_stays_one_cell_under_cjk_metrics() {
+        let canvas = RasterCanvas::new(2, 2, Default::default()).unwrap();
+        let mut buffer = Buffer::new((2, 1).into());
+        buffer.set_text_metrics(TextMetrics {
+            ambiguous_width: AmbiguousWidth::Wide,
+            ..TextMetrics::default()
+        });
+        Chunk::new(&mut buffer, Area::new((0, 0).into(), (2, 1).into()))
+            .unwrap()
+            .raster(&canvas, RasterOptions::default())
+            .unwrap();
+        assert_eq!(buffer.raster_cells().count(), 2);
+        assert!(buffer
+            .content()
+            .iter()
+            .all(|cell| !cell.is_occupied && cell.width() == 1));
     }
 }

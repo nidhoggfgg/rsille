@@ -21,6 +21,10 @@ unicode-width = { workspace = true }
 unicode-segmentation = { workspace = true }
 log = { workspace = true }
 
+[features]
+default = []
+sixel = []
+
 [dev-dependencies]
 criterion = { version = "0.7", features = ["html_reports"] }
 

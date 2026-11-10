@@ -14,12 +14,14 @@ cargo run --example basic_canvas
 cargo run --release --manifest-path examples/lumen/Cargo.toml
 ```
 
-`basic_canvas.rs` 是根包的示例。下面每个子目录都是通过路径依赖引用 `rsille` 的独立
-Cargo 项目，不属于根 workspace。用表中的目录名配合 `--manifest-path` 运行；
+`basic_canvas.rs` 和 `sixel_windows.rs` 是根包的单文件示例，使用 `--example` 运行，
+不是独立项目。下面每个子目录都是通过路径依赖引用 `rsille` 的独立 Cargo 项目，
+不属于根 workspace。用表中的目录名配合 `--manifest-path` 运行；
 动画和三维场景建议使用 release 构建。
 
-| 示例 | 目录 | 展示内容 |
+| 示例 | 文件 / 目录 | 展示内容 |
 | --- | --- | --- |
+| [Sixel 与 Canvas 浮窗](../docs/raster.md#run-the-showcase) | `sixel_windows.rs`（根包示例） | 两个可拖动、调整大小的浮窗，以原生 RGB 栅格和 Canvas 字符采样展示同一颗静态带环行星。 |
 | [TUI showcase](tui-showcase/README_cn.md) | `tui-showcase` | 七页组件展厅：表单、数据、内容、布局、动画和主题。 |
 | [Lumen](lumen/README_cn.md) | `lumen` | 包含流程、笔记和浮动桌面的交互工作台。 |
 | [Orbit Files](orbit-files/README_cn.md) | `orbit-files` | 支持框选、拖放、预览和撤销的文件管理器。 |
@@ -35,6 +37,36 @@ Cargo 项目，不属于根 workspace。用表中的目录名配合 `--manifest-
 交互演示需要 TTY。建议使用支持 True Color 的终端和 Unicode 等宽字体；鼠标交互需要
 终端支持鼠标事件。窗口尺寸、按键、数据持久化和导出选项见各示例文档。
 Orbit Files 的完整文件操作需要 Linux；不传 `--path` 时使用一次性演示目录。
+
+## Sixel 与 Canvas 浮窗
+
+```sh
+cargo run --release --features sixel --example sixel_windows -- --sixel
+cargo run --release --example sixel_windows -- --text-only
+cargo run --example sixel_windows -- --help
+```
+
+在同一个 `window_host` 中用两个 `floating_window` 展示同一颗程序化带环行星，
+没有实时动画。拖动标题移动窗口，拖动底部手柄调整大小，点击置前。
+`e` 循环切换 Canvas 的 Braille/HalfBlock/Quadrant；`r` 恢复初始窗口位置和大小；
+`q`/Esc 退出。建议使用 100×32 字符格，也支持更小终端及终端缩放。
+
+`--sixel` 表示用户明确确认整个终端/复用器链路支持 Sixel、ED 2 图形擦除、
+无滚屏及稳定调色板。示例使用 `RequireSixel`，不会静默降级。默认通过操作系统
+测量每格像素尺寸；可选的 `--cell-pixels 8x18` 必须匹配**实际字体度量**，不能任意填写。
+进入终端前会检查 feature 和当前后端限制（包括高度须为六的倍数）。
+不带参数显示帮助，而不是默认字符降级演示；`--text-only` 显式选择字符预览。
+完整安全约定见[栅格指南](../docs/raster.md)。
+
+有限的、无需终端的鼠标拖动与遮挡检查，以及示例测试：
+
+```sh
+cargo run --example sixel_windows -- --headless
+cargo test --example sixel_windows --features sixel
+cargo test --example sixel_windows --no-default-features
+```
+
+这些检查不能认证真实终端的图形行为，也不是性能测量。
 
 ## 无终端验证
 

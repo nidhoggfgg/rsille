@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 
 use crate::render::area::Size;
 use crate::render::chunk::Chunk;
+use crate::render::raster_output::RasterOutput;
 use crate::render::{Draw, DrawErr, InlineMouseMode, InputCapabilities, KeyboardMode, Update};
 use crossterm::event::Event;
 
@@ -275,8 +276,29 @@ impl<State, M: Send + 'static> Runtime<State, M> {
     /// Borrows the in-memory frame without triggering a draw.
     ///
     /// The buffer is blank before the first step and immediately after resizing.
+    /// Raster metadata and its character fallback are both retained, regardless
+    /// of the terminal raster policy. Use [`Self::frame_text_only`] to explicitly
+    /// obtain a character-only snapshot for an embedding host.
     pub fn frame(&self) -> &crate::render::buffer::Buffer {
         &self.buffer
+    }
+
+    /// Copies the current frame into a character-only buffer without raster metadata.
+    ///
+    /// Uses the already rendered character fallbacks, preserving colors, text
+    /// metrics and wide graphemes. This allocates and copies the frame; it does
+    /// not trigger a redraw or change the retained frame or terminal policy.
+    pub fn frame_text_only(&self) -> crate::render::buffer::Buffer {
+        let mut text = crate::render::buffer::Buffer::new(self.buffer.size());
+        text.set_text_metrics(self.buffer.text_metrics());
+        let width = self.buffer.size().width as usize;
+        for (index, cell) in self.buffer.content().iter().enumerate() {
+            if !cell.is_occupied {
+                let position = ((index % width) as u16, (index / width) as u16).into();
+                let _ = text.overwrite(position, cell.content.clone());
+            }
+        }
+        text
     }
 
     /// Returns the keyboard-focused widget's path, or `None` if none is focused.
@@ -561,6 +583,7 @@ pub(crate) struct AppRuntime<State, U, V, M> {
     global_key_handlers: HashMap<KeyCode, Box<dyn Fn() -> M>>,
     input_handler: Option<InputHandler<M>>,
     keyboard_mode: KeyboardMode,
+    raster_output: RasterOutput,
     focus_events: bool,
     hotkeys: HotkeyRegistry<M>,
     command_router: Option<CommandRouter<M>>,
@@ -806,6 +829,7 @@ impl<State, U, V, M: Send + 'static> AppRuntime<State, U, V, M> {
             global_key_handlers,
             input_handler,
             keyboard_mode,
+            raster_output,
             focus_events,
             hotkeys,
             command_router,
@@ -853,6 +877,7 @@ impl<State, U, V, M: Send + 'static> AppRuntime<State, U, V, M> {
             global_key_handlers,
             input_handler,
             keyboard_mode,
+            raster_output,
             focus_events,
             hotkeys,
             command_router,
@@ -2354,6 +2379,7 @@ where
         builder
             .enable_raw_mode()
             .keyboard_mode(self.keyboard_mode)
+            .raster_output(self.raster_output)
             .focus_events(self.focus_events)
             .clear(false)
             .append_newline(false)
@@ -2934,6 +2960,85 @@ where
 mod tests {
     use super::*;
     use crate::tui::animation::{AnimationSpec, Easing, Transition};
+
+    #[test]
+    fn raster_output_defaults_and_explicit_config_reach_the_runtime() {
+        use crate::tui::prelude::{CellPixels, RasterCapabilities, RasterOutput, RasterPolicy};
+        use crate::tui::widgets::label;
+
+        let default = App::<(), ()>::new(());
+        assert!(matches!(default.raster_output.policy, RasterPolicy::Auto));
+        assert!(!default.raster_output.capabilities.sixel);
+        let pixels = CellPixels {
+            width: 8,
+            height: 16,
+        };
+
+        for policy in [
+            RasterPolicy::Auto,
+            RasterPolicy::TextOnly,
+            RasterPolicy::RequireSixel,
+        ] {
+            let config = RasterOutput {
+                policy,
+                capabilities: RasterCapabilities {
+                    sixel: true,
+                    reliable_erase: true,
+                    no_scroll: true,
+                    cell_pixels: Some(pixels),
+                },
+            };
+            let app = App::new(())
+                .raster_output(config)
+                .build(|_, ()| {}, |_| label("ready"));
+            assert_eq!(app.core.raster_output, config);
+        }
+    }
+
+    #[test]
+    fn raster_output_headless_frames_preserve_metadata_and_offer_text_only_snapshots() {
+        use crate::render::raster::{RasterCanvas, RasterFallback, Rgb};
+        use crate::tui::layout::col;
+        use crate::tui::prelude::RasterPolicy;
+        use crate::tui::widgets::{label, raster_canvas};
+
+        for policy in [
+            RasterPolicy::Auto,
+            RasterPolicy::TextOnly,
+            RasterPolicy::RequireSixel,
+        ] {
+            for fallback in [RasterFallback::HalfBlock, RasterFallback::Braille] {
+                let image = Arc::new(RasterCanvas::new(4, 4, Rgb(20, 40, 80)).unwrap());
+                let mut app = App::new(())
+                    .raster_output(RasterOutput {
+                        policy,
+                        ..RasterOutput::default()
+                    })
+                    .build(
+                        |_, ()| {},
+                        move |_| {
+                            col()
+                                .child(label("中e\u{301}"))
+                                .child(raster_canvas(image.clone()).fallback(fallback).height(1))
+                        },
+                    )
+                    .size(6, 3);
+                assert!(!app.frame_text_only().has_raster());
+                app.step(&[]).unwrap();
+                assert!(app.frame().has_raster());
+                let raster_count = app.frame().raster_cells().count();
+                let text = app.frame_text_only();
+                assert!(!text.has_raster());
+                assert_eq!(text.size(), app.frame().size());
+                assert_eq!(text.text_metrics(), app.frame().text_metrics());
+                assert_eq!(text.content(), app.frame().content());
+                assert_eq!(app.frame().raster_cells().count(), raster_count);
+                assert!(text.content().iter().any(|cell| cell.is_occupied));
+                app.resize((0, 0).into());
+                assert!(app.frame_text_only().content().is_empty());
+            }
+        }
+    }
 
     #[test]
     fn exit_collapse_reduces_height_without_moving_origin() {

@@ -4,7 +4,9 @@
 //! viewers for code, logs, diffs, and Markdown. [`progress`] displays progress
 //! fractions or application-driven spinner frames. [`canvas::CanvasWidget`]
 //! renders sample graphics, with [`world_canvas`] providing clipped drawing in
-//! world coordinates. [`divider`] and [`spacer`] separate content visually.
+//! world coordinates. [`raster_canvas::RasterCanvasWidget`] displays opaque RGB
+//! sources with revision-cached drawing. [`divider`] and [`spacer`] separate
+//! content visually.
 //!
 //! # Examples
 //!
@@ -24,6 +26,7 @@ pub mod content;
 pub mod divider;
 pub mod label;
 pub mod progress;
+pub mod raster_canvas;
 pub mod spacer;
 
 pub mod world_canvas;
