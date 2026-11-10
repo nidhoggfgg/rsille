@@ -2,7 +2,8 @@
 
 Each source is a 4x6 grid of 256px cells. Sample 96x48 and 128x64 Quadrant
 frames directly from the cleaned source for real horizontal detail, with an
-explicit material palette and binary alpha. Legacy square assets are untouched.
+explicit material palette and binary alpha. Raster frames upscale the same native
+cells to 320x320 (not new detail), stored only as PNG atlases.
 Idle/wave share stationary pixels; only authored eyes/arm/expression move.
 No per-frame crop or recentering: authored walking/jumping offsets survive.
 ChatGPT uses the separately tuned pack_actions.py pipeline.
@@ -91,7 +92,7 @@ def pack(name):
         colors = PALETTES[name]
         palette = Image.new("P", (1, 1))
         palette.putpalette([v for rgb in colors + [colors[0]] * (256 - len(colors)) for v in rgb])
-        for size in ((96, 48), (128, 64)):
+        for size in ((96, 48), (128, 64), (320, 320)):
             width, height = size
             frames = []
             for row in range(ROWS):
@@ -139,10 +140,11 @@ def pack(name):
                 atlas.paste(frame, (index % COLUMNS * width, index // COLUMNS * height))
             stem = ASSETS / f"{name}-actions-{width}x{height}"
             atlas.save(stem.with_suffix(".png"))
-            data = b"".join(frame.tobytes() for frame in frames)
-            stem.with_suffix(".rgba").write_bytes(data)
+            if size != (320, 320):
+                data = b"".join(frame.tobytes() for frame in frames)
+                stem.with_suffix(".rgba").write_bytes(data)
             print(f"Packed {name}: 24 frames at {width}x{height}px, {len(colors)} colors, "
-                  f"{len(data):,} bytes; motion/bounds checks passed")
+                  f"{stem.with_suffix('.png').stat().st_size:,} PNG bytes; motion/bounds checks passed")
 
 
 if __name__ == "__main__":

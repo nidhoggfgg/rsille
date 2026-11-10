@@ -3,7 +3,8 @@
 Use one explicit palette, no dithering, binary coverage, and fixed source-space
 motion masks. The idle/wave body is shared; runtime still only plays full frames.
 Quadrant frames are sampled directly at 96x48 and 128x64 from the 256px
-source cells, preserving real horizontal detail. Legacy square assets are untouched.
+source cells, preserving real horizontal detail. Raster frames upscale those same
+native cells to 320x320 (not new detail), stored only as a PNG atlas.
 """
 from collections import Counter
 from pathlib import Path
@@ -11,7 +12,7 @@ from PIL import Image, ImageDraw
 
 ASSETS = Path(__file__).resolve().parent.parent / "assets"
 COLUMNS, ROWS = 4, 6
-SIZES = ((96, 48), (128, 64))
+SIZES = ((96, 48), (128, 64), (320, 320))
 # Reserve iris, skin and gold colors, which an automatic frequency-based palette
 # otherwise sacrifices in favor of dozens of almost identical lavender shades.
 COLORS = [
@@ -176,9 +177,11 @@ def main():
             atlas.paste(frame, ((i % COLUMNS) * width, (i // COLUMNS) * height))
         stem = ASSETS / f"chatgpt-actions-v2-{width}x{height}"
         atlas.save(stem.with_suffix(".png"))
-        data = b"".join(frame.tobytes() for frame in frames)
-        stem.with_suffix(".rgba").write_bytes(data)
-        print(f"Packed {len(frames)} frames at {width}x{height}px: {len(data):,} bytes; palette/motion/bounds checks passed")
+        if size != (320, 320):
+            data = b"".join(frame.tobytes() for frame in frames)
+            stem.with_suffix(".rgba").write_bytes(data)
+        print(f"Packed {len(frames)} frames at {width}x{height}px: "
+              f"{stem.with_suffix('.png').stat().st_size:,} PNG bytes; palette/motion/bounds checks passed")
 
 
 if __name__ == "__main__":

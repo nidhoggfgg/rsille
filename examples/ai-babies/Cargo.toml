@@ -6,6 +6,11 @@ publish = false
 
 [workspace]
 
+[features]
+default = []
+sixel = ["rsille/sixel"]
+
 [dependencies]
 rsille = { path = "../.." }
 crossterm = "0.28.1"
+png = "0.18"

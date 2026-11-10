@@ -1,12 +1,16 @@
 //! Three selectable raster pets, playing embedded, pre-drawn animation clips.
 mod export;
+mod options;
+mod raster;
 mod scene;
 mod static_image;
 
 use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
+use options::{animation_args, Options, Output};
 use rsille::{
     canvas::{Canvas, Encoding},
-    render::{area::Size, chunk::Chunk, Builder, Draw, DrawErr, Update},
+    raster::RasterOptions,
+    render::{area::Size, chunk::Chunk, raster_output::CellPixels, Builder, Draw, DrawErr, Update},
 };
 use std::{error::Error, time::Instant};
 
@@ -21,6 +25,8 @@ struct Nursery {
     action: Option<scene::Action>,
     character: scene::Character,
     canvas: Canvas,
+    raster: Option<[raster::Frames; 3]>,
+    options: Options,
 }
 
 impl Default for Nursery {
@@ -33,7 +39,30 @@ impl Default for Nursery {
             action: None,
             character: scene::Character::default(),
             canvas: Canvas::with_encoding(Encoding::Quadrant),
+            raster: None,
+            options: Options::default(),
         }
+    }
+}
+
+impl Nursery {
+    fn new(options: Options) -> Result<Self, Box<dyn Error>> {
+        let raster = if options.output == Output::Quadrant {
+            None
+        } else {
+            // Decode before entering terminal modes; switching pets only selects cached frames.
+            Some([
+                raster::Frames::new(scene::Character::ChatGpt, options.background)?,
+                raster::Frames::new(scene::Character::DeepSeek, options.background)?,
+                raster::Frames::new(scene::Character::Claude, options.background)?,
+            ])
+        };
+        Ok(Self {
+            character: options.character,
+            raster,
+            options,
+            ..Self::default()
+        })
     }
 }
 
@@ -96,9 +125,42 @@ impl Update for Nursery {
 }
 
 impl Draw for Nursery {
-    fn draw(&mut self, chunk: Chunk) -> Result<Size, DrawErr> {
+    fn draw(&mut self, mut chunk: Chunk) -> Result<Size, DrawErr> {
         let size = chunk.area().size();
         if size.width == 0 || size.height == 0 {
+            return Ok(size);
+        }
+        if let Some(frames) = &self.raster {
+            let index = scene::current_frame(self.time, self.action);
+            let character = match self.character {
+                scene::Character::ChatGpt => 0,
+                scene::Character::DeepSeek => 1,
+                scene::Character::Claude => 2,
+            };
+            // Bound native output to roughly 320 physical pixels per axis; Fit
+            // preserves square proportions when the viewport is smaller.
+            let pixels = self.options.pixels.unwrap_or(CellPixels {
+                width: 1,
+                height: 2,
+            });
+            let width = size
+                .width
+                .min(raster::SIDE.div_ceil(u32::from(pixels.width)) as u16);
+            let height = size
+                .height
+                .min(self.options.height)
+                .min(raster::SIDE.div_ceil(u32::from(pixels.height)) as u16);
+            let dx = size.width - width;
+            let dy = size.height - height;
+            chunk
+                .shrink(dy / 2, dy - dy / 2, dx / 2, dx - dx / 2)?
+                .raster(
+                    frames[character].frame(index),
+                    RasterOptions {
+                        background: self.options.background,
+                        ..RasterOptions::default()
+                    },
+                )?;
             return Ok(size);
         }
         let w = size.width as usize * 2;
@@ -121,60 +183,45 @@ impl Draw for Nursery {
     }
 }
 
-fn animation_args(
-    mut args: &[String],
-) -> Result<(scene::Character, u16, &[String]), Box<dyn Error>> {
-    let mut character = scene::Character::default();
-    let mut height = INLINE_HEIGHT;
-    while let Some(arg) = args.first() {
-        match arg.as_str() {
-            "--character" => {
-                let name = args
-                    .get(1)
-                    .ok_or("--character requires chatgpt/deepseek/claude")?;
-                character = scene::Character::parse(name)?;
-            }
-            "--height" => {
-                height = args
-                    .get(1)
-                    .ok_or("--height requires ROWS (24 or 32)")?
-                    .parse()?;
-                if ![24, 32].contains(&height) {
-                    return Err("--height must be 24 or 32 rows".into());
-                }
-            }
-            _ => break,
-        }
-        args = &args[2..];
-    }
-    Ok((character, height, args))
-}
-
 fn main() -> Result<(), Box<dyn Error>> {
     let args: Vec<_> = std::env::args().skip(1).collect();
     if args.first().is_some_and(|arg| arg == "--static") {
         return static_image::command(&args[1..]);
     }
-    let (character, requested_height, args) = animation_args(&args)?;
+    let (mut options, args) = animation_args(&args)?;
     if !args.is_empty() {
-        return export::command(args, character, requested_height);
+        return export::command(args, options);
+    }
+    if options.output == Output::Sixel && !cfg!(feature = "sixel") {
+        return Err(
+            "--sixel requires cargo --features sixel; use --raster for a character preview".into(),
+        );
     }
     let (width, height) = crossterm::terminal::size()?;
-    Builder::new()
-        .size((width, height.min(requested_height)))
-        .inline_mode(true)
-        .inline_max_height(requested_height)
+    // Resolve metrics before any input reader starts, and retain this snapshot.
+    let output = options.native_config((width, height))?;
+    options.pixels = output.capabilities.cell_pixels;
+    let nursery = Nursery::new(options)?;
+    let mut builder = Builder::new();
+    builder
+        .raster_output(output)
         .enable_raw_mode()
         .enable_hide_cursor()
-        .frame_limit(24)
-        .build_event_loop(Nursery {
-            character,
-            ..Nursery::default()
-        })
-        .run()?;
+        .frame_limit(24);
+    if options.output == Output::Sixel {
+        builder.size((width, height)).enable_alt_screen();
+    } else {
+        builder
+            .size((width, height.min(options.height)))
+            .inline_mode(true)
+            .inline_max_height(options.height);
+    }
+    builder.build_event_loop(nursery).run()?;
     println!();
     Ok(())
 }
 
+#[cfg(test)]
+mod raster_tests;
 #[cfg(test)]
 mod tests;

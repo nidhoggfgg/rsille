@@ -1,10 +1,13 @@
-//! Export actual Quadrant terminal cells at the same scale as static previews.
+//! Export character fallbacks (Quadrant or raster HalfBlock), not native Sixel pixels.
 use std::{error::Error, fs, time::Instant};
 
 use crossterm::style::Color;
 use rsille::render::{area::Size, buffer::Buffer, chunk::Chunk, Draw};
 
-use crate::{Nursery, PREVIEW_WIDTH};
+use crate::{
+    options::{Options, Output},
+    Nursery, PREVIEW_WIDTH,
+};
 
 pub fn frame(nursery: &mut Nursery, size: Size) -> Result<Buffer, Box<dyn Error>> {
     let mut buffer = Buffer::new(size);
@@ -24,7 +27,7 @@ pub fn rgba(buffer: &Buffer) -> Vec<[u8; 4]> {
             let mask = " ▖▗▄▘▌▚▙▝▞▐▟▀▛▜█"
                 .chars()
                 .position(|symbol| Some(symbol) == cell.as_char())
-                .expect("Quadrant canvas symbol");
+                .expect("Quadrant or HalfBlock canvas symbol");
             let bit = (1 - (y / 2) % 2) * 2 + x % 2;
             let foreground = mask & (1 << bit) != 0;
             let color = cell.style.colors.and_then(|colors| {
@@ -67,19 +70,22 @@ fn save(path: impl AsRef<std::path::Path>, buffer: &Buffer) -> Result<(), Box<dy
     Ok(())
 }
 
-pub fn command(
-    args: &[String],
-    character: crate::scene::Character,
-    height: u16,
-) -> Result<(), Box<dyn Error>> {
+pub fn command(args: &[String], options: Options) -> Result<(), Box<dyn Error>> {
+    if options.output == Output::Sixel
+        && !matches!(args[0].as_str(), "--headless" | "--help" | "-h")
+    {
+        return Err("Sixel exports are not supported; use --raster for character-fallback exports or --sixel --headless to check drawing".into());
+    }
+    let height = options.height;
     match args[0].as_str() {
         "--snapshot" if [2, 3, 5].contains(&args.len()) => {
             let time: f64 = args.get(2).map_or(Ok(0.0), |s| s.parse())?;
             if !time.is_finite() || !(0.0..=86400.0).contains(&time) {
                 return Err("SECONDS must be finite and between 0 and 86400".into());
             }
-            let mut nursery = Nursery { time, character, ..Nursery::default() };
-            let size = if args.len() == 5 {
+            let mut nursery = Nursery::new(options)?;
+            nursery.time = time;
+            let size: Size = if args.len() == 5 {
                 let width: u16 = args[3].parse()?;
                 let height: u16 = args[4].parse()?;
                 if width == 0 || height == 0 || width > 512 || height > 128 {
@@ -87,12 +93,13 @@ pub fn command(
                 }
                 (width, height).into()
             } else { (PREVIEW_WIDTH, height).into() };
+            nursery.options.height = size.height;
             save(&args[1], &frame(&mut nursery, size)?)?;
             println!("Saved terminal frame to {} at {time}s", args[1]);
         }
         "--frames" if args.len() == 2 => {
             fs::create_dir_all(&args[1])?;
-            let mut nursery = Nursery { character, ..Nursery::default() };
+            let mut nursery = Nursery::new(options)?;
             for index in 0..(crate::scene::PERIOD * 24.0).ceil() as usize {
                 nursery.time = index as f64 / 24.0;
                 let path = std::path::Path::new(&args[1]).join(format!("{index:04}.ppm"));
@@ -104,7 +111,8 @@ pub fn command(
             let action = crate::scene::Action::ALL.into_iter()
                 .find(|action| action.name() == args[1]).ok_or("Unknown action; use idle/wave/walk/hop/think/sleep")?;
             fs::create_dir_all(&args[2])?;
-            let mut nursery = Nursery { action: Some(action), character, ..Nursery::default() };
+            let mut nursery = Nursery::new(options)?;
+            nursery.action = Some(action);
             for index in 0..(action.duration() * 24.0).ceil() as usize {
                 nursery.time = index as f64 / 24.0;
                 let path = std::path::Path::new(&args[2]).join(format!("{index:04}.ppm"));
@@ -113,17 +121,18 @@ pub fn command(
             println!("Saved {} clip to {}", action.name(), args[2]);
         }
         "--headless" if args.len() == 1 => {
-            let mut nursery = Nursery { character, ..Nursery::default() };
+            let mut nursery = Nursery::new(options)?;
             let start = Instant::now();
             for index in 0..90 {
                 nursery.time = index as f64 * 0.75;
                 let buffer = frame(&mut nursery, (PREVIEW_WIDTH, height).into())?;
                 assert!(buffer.content().iter().all(|cell| !cell.content.is_empty()));
+                assert_eq!(buffer.has_raster(), options.output != Output::Quadrant);
             }
             println!("90 frames passed at {PREVIEW_WIDTH}x{height}; mean {:.2} ms/frame (drawing + encoding; no terminal I/O)", start.elapsed().as_secs_f64() * 1000.0 / 90.0);
         }
         "--help" | "-h" if args.len() == 1 => println!(
-            "AI BABIES / ChatGPT, DeepSeek and Claude pets\n\nRun without arguments for automatic inline playback (up to 24 rows). Use --height ROWS to set the height (24 or 32, limited by the terminal during playback).\nTab: next character; g: ChatGPT; d: DeepSeek; c: Claude; q / Esc / Ctrl+C: exit; Space: pause; 1: idle; 2: wave; 3: walk; 4: hop; 5: think; 6: sleep; 0: automatic\n\n--static [--height ROWS] [--snapshot FILE.ppm]  (default: 144 columns × 24 rows; height: 1..40)\n[--character chatgpt|deepseek|claude] [--height ROWS] [EXPORT OPTION]  (either order, before export options; defaults: chatgpt, 24 rows)\n--headless\n--snapshot FILE.ppm [SECONDS [COLUMNS ROWS]]  (explicit dimensions override --height)\n--frames DIRECTORY  (one complete action playlist at 24 FPS)\n--action idle|wave|walk|hop|think|sleep DIRECTORY"
+            "AI BABIES / ChatGPT, DeepSeek and Claude pets\n\nRun without arguments for automatic inline playback (up to 24 rows). Use --height ROWS to set the height (24 or 32, limited by the terminal during playback).\nTab: next character; g: ChatGPT; d: DeepSeek; c: Claude; q / Esc / Ctrl+C: exit; Space: pause; 1: idle; 2: wave; 3: walk; 4: hop; 5: think; 6: sleep; 0: automatic\n\n--static [--height ROWS] [--snapshot FILE.ppm]  (default: 144 columns × 24 rows; height: 1..40)\n[--character chatgpt|deepseek|claude] [--height ROWS] [EXPORT OPTION]  (either order, before export options; defaults: chatgpt, 24 rows)\n--raster  (opaque 320x320 source, inline HalfBlock preview; supports fallback exports)\n--sixel   (requires --features sixel, alternate screen; no silent fallback)\n--background RRGGBB  (raster/sixel only; default black)\n--cell-pixels WxH    (sixel only: measured physical pixels per character cell, NOT terminal columns x rows; omit for startup discovery)\n--force-cell-pixels  (confirm a measured override matching the terminal grid)\nSixel asserts terminal/multiplexer support for Sixel, ED 2 graphics erasure, stable palettes and non-scrolling positioned output including partial bands. Metrics do not detect Sixel support; restart after font/DPI changes. Native output is limited to roughly 320x320 physical pixels and scales down to fit. See README for compatibility details.\nAll playback options precede export options. Sixel permits --headless only, not image exports. Headless checks drawing, not terminal compatibility.\n--headless\n--snapshot FILE.ppm [SECONDS [COLUMNS ROWS]]  (explicit dimensions override --height)\n--frames DIRECTORY  (one complete action playlist at 24 FPS)\n--action idle|wave|walk|hop|think|sleep DIRECTORY"
         ),
         _ => return Err("Unknown or incomplete arguments; use --help".into()),
     }

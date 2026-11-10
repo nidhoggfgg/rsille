@@ -270,7 +270,7 @@ fn character_cli_selection_applies_to_playback_and_exports() {
     let empty: Vec<String> = vec![];
     assert_eq!(
         animation_args(&empty).unwrap(),
-        (Character::ChatGpt, INLINE_HEIGHT, empty.as_slice())
+        (Options::default(), empty.as_slice())
     );
     for character in Character::ALL {
         for tail in [
@@ -282,9 +282,9 @@ fn character_cli_selection_applies_to_playback_and_exports() {
         ] {
             let mut args = vec!["--character".to_string(), character.name().to_string()];
             args.extend(tail.iter().map(|s| s.to_string()));
-            let (selected, height, remaining) = animation_args(&args).unwrap();
-            assert_eq!(height, INLINE_HEIGHT);
-            assert_eq!(selected, character);
+            let (options, remaining) = animation_args(&args).unwrap();
+            assert_eq!(options.height, INLINE_HEIGHT);
+            assert_eq!(options.character, character);
             assert_eq!(remaining, &args[2..]);
         }
     }
@@ -294,15 +294,15 @@ fn character_cli_selection_applies_to_playback_and_exports() {
 
 #[test]
 fn animation_height_accepts_either_option_order_and_rejects_invalid_rows() {
-    assert_eq!(animation_args(&[]).unwrap().1, 24);
+    assert_eq!(animation_args(&[]).unwrap().0.height, 24);
     for args in [
         vec!["--height", "24", "--character", "claude", "--frames", "out"],
         vec!["--character", "claude", "--height", "24", "--frames", "out"],
     ] {
         let args: Vec<String> = args.into_iter().map(String::from).collect();
-        let (character, height, remaining) = animation_args(&args).unwrap();
-        assert_eq!(character, Character::Claude);
-        assert_eq!(height, 24);
+        let (options, remaining) = animation_args(&args).unwrap();
+        assert_eq!(options.character, Character::Claude);
+        assert_eq!(options.height, 24);
         assert_eq!(remaining, &["--frames", "out"]);
     }
     for value in [
@@ -315,7 +315,8 @@ fn animation_height_accepts_either_option_order_and_rejects_invalid_rows() {
         assert_eq!(
             animation_args(&["--height".into(), height.to_string()])
                 .unwrap()
-                .1,
+                .0
+                .height,
             height
         );
     }

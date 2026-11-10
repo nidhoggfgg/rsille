@@ -22,15 +22,47 @@ cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --character
 cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --character claude --height 24
 ```
 
-动画使用 inline 模式、True Color 和 2 × 2 Quadrant 编码。默认高度上限为 24 行，
+默认动画使用 inline 模式、True Color 和 2 × 2 Quadrant 编码。默认高度上限为 24 行，
 `--height ROWS` 仅接受 24 或 32，播放时受实际终端高度限制。
 推荐 80 × 26 的终端，为 shell 提示符留出空间；透明像素沿用终端默认背景。
 
 24 行使用 96 × 48 帧，32 行使用 128 × 64 帧，均从原图直接采样。
 横向采样翻倍，实际显示比例不变；小窗口会缩小显示，更高的区域只增加留白，
 角色不会超过 128 × 64 个采样。每格归并为终端支持的两种颜色；部分透明的格子
-使用一种前景色并保留终端背景。像素数据内嵌在二进制中，
-播放无需网络、Python 或图片解码器。
+使用一种前景色并保留终端背景。旧路径内嵌原始像素数据，无需图片解码器。
+所有播放模式在运行时均无需 Python 或网络。上方 GIF 是现有的旧版 Quadrant 预览，
+不是新的 raster/Sixel 输出。
+
+## Raster 与 Sixel
+
+以下可选动画模式不改变默认的透明 Quadrant 播放、静态模式及现有导出行为：
+
+```bash
+cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --raster --background 181820
+cargo run --release --features sixel --manifest-path examples/ai-babies/Cargo.toml -- --sixel --character claude
+cargo run --release --features sixel --manifest-path examples/ai-babies/Cargo.toml -- --sixel --cell-pixels 8x16
+```
+
+- `--raster` 选择 `RasterCanvas`，使用不透明 HalfBlock inline 预览。
+- `--sixel` 需要 `--features sixel`，使用备用屏幕，不会静默回退。渲染模式择一使用。
+- `--background RRGGBB` 可用于任一模式，默认黑色；允许前导 `#`（在 shell 命令中需加引号）。
+  RGBA 会合成到此不透明背景上，两种模式均不保留终端透明背景。
+- `--cell-pixels WxH` 仅用于 Sixel，指定**实际物理字符格的像素尺寸**，不是终端的列数和行数。
+  省略时通过 `CellPixels::resolve` 在启动时探测。探测先于输入处理，尺寸解析失败会报错。
+  `--force-cell-pixels` 只能与 `--sixel --cell-pixels` 同用，允许使用与终端网格一致的实测尺寸覆盖。
+  字体或 DPI 改变后需重启。
+
+选择 `--sixel` 表示你确认**整个终端/复用器链路**支持 Sixel、稳定调色板、ED2 清除图形，
+以及包含局部条带的非滚屏定位输出。不自动检测这些能力；它们是兼容性要求，
+无终端检查也不能验证这些能力。当前 sixel 编码器使用固定 RGB332 256 色调色板，
+因此原生输出提升的是空间分辨率，并非无损 24 位真彩色。
+
+两种模式均使用三个角色的内嵌 PNG 图集，每帧 320 × 320。现有打包脚本直接从原始
+256 × 256 源图单元生成：这是放大采样，并非新增原生 320 像素细节，也不是放大旧的
+128 × 64 帧。新增的 `png` 0.18 解码器在启动时一次性解码并缓存帧。
+`--height` 仍仅接受 24/32 并限制渲染高度。Sixel 将原生区域居中，最多约占
+320 × 320 个物理像素；较小的终端会缩小以适应空间。HalfBlock 是基于字符格的预览，
+不是原生 Sixel 分辨率。
 
 ## 操作
 
@@ -49,13 +81,17 @@ cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --character
 
 ```bash
 cargo test --manifest-path examples/ai-babies/Cargo.toml
+cargo test --features sixel --manifest-path examples/ai-babies/Cargo.toml
 cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --headless
 cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --snapshot /tmp/ai-babies.ppm 0
 cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --character deepseek --height 24 --frames /tmp/deepseek-frames
 cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --character claude --action wave /tmp/claude-wave
+cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --raster --background 181820 --snapshot /tmp/ai-babies-raster.ppm 0
+cargo run --release --features sixel --manifest-path examples/ai-babies/Cargo.toml -- --sixel --headless
 ```
 
-`--character` 和 `--height` 必须放在导出选项之前，两者顺序不限。导出选项择一使用：
+`--character`、`--height` 及新的渲染参数必须放在导出选项之前，彼此顺序不限。
+导出选项择一使用：
 
 | 选项 | 输出 |
 | --- | --- |
@@ -65,8 +101,16 @@ cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --character
 | `--action idle\|wave\|walk\|hop\|think\|sleep DIRECTORY` | 按 24 FPS 导出单个动作循环 |
 
 快照时间范围为 0–86400 秒，显式尺寸范围为 1–512 列、1–128 行。
-每张 PPM 配套同名 `.pgm` 透明度掩码。单独打开 PPM 时透明区域显示为黑色，该黑色不会用于终端绘制。
-请使用新的输出目录，避免混入旧帧。安装 Pillow 后，可从两种文件制作透明预览：
+每张 PPM 配套同名 `.pgm` 透明度掩码。默认旧模式下，单独打开 PPM 时透明区域显示为黑色，
+该黑色不会用于终端绘制。
+
+`--raster` 允许所有现有导出选项，包括 `--snapshot`、`--frames` 和 `--action`。
+其 PPM/PGM 输出还原 HalfBlock 回退画面，得到不透明的栅格矩形，而非原生 Sixel 像素。
+`--sixel` 仅允许 `--headless`，拒绝其他导出选项以免产生误导性输出。
+无终端模式测试绘制，但**不能**证明终端/复用器兼容。
+
+请使用新的输出目录，避免混入旧帧。安装 Pillow 后，可从两种文件制作预览
+（仅旧路径保留透明度）：
 
 ```bash
 python3 examples/ai-babies/tools/preview_actions.py /tmp/deepseek-frames --name deepseek
@@ -92,6 +136,7 @@ cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --static --
 ## 素材与源码
 
 [scene.rs](src/scene.rs) 选择动作并采样内嵌 RGBA 帧，[main.rs](src/main.rs) 管理播放与输入，
+[raster.rs](src/raster.rs) 解码并缓存高分辨率画布，[options.rs](src/options.rs) 校验渲染选项。
 [export.rs](src/export.rs) 还原编码后的终端字符格，[static_image.rs](src/static_image.rs)
 实现静态模式。预览通过字符块还原，接缝和比例可能与实际终端字体不同。
 
@@ -100,7 +145,8 @@ cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --static --
 | [chibi-trio-source.png](assets/chibi-trio-source.png) | 三角色原始参考图 |
 | [chatgpt-actions-source.png](assets/chatgpt-actions-source.png) | ChatGPT 动作源图 |
 | `assets/{deepseek,claude}-actions-clean-source.png` | 另外两个角色的动作源图 |
-| `assets/*-actions-*.png` 和 `.rgba`（96x48/128x64） | 当前预览图集与内嵌动画像素 |
+| `assets/*-actions-*.png` 和 `.rgba`（96x48/128x64） | 旧版预览图集与内嵌动画像素 |
+| `assets/*-actions*-320x320.png` | raster/Sixel 内嵌高分辨率 PNG 图集，无 320x320 `.rgba` 文件 |
 | `assets/chibi-trio-240x80.png` 和 `.rgb` | 静态源图与内嵌像素 |
 | `assets/*-prompt.txt` | 生成与清理提示词 |
 

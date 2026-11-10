@@ -23,7 +23,7 @@ cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --character
 cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --character claude --height 24
 ```
 
-Animated playback uses inline mode, True Color and 2 × 2 Quadrant encoding. The default
+Default animated playback uses inline mode, True Color and 2 × 2 Quadrant encoding. The default
 height cap is 24 terminal rows; `--height ROWS` accepts only 24 or 32 and is limited by
 the actual terminal during playback. An 80 × 26 terminal is recommended, allowing room for the
 shell prompt. Transparent pixels use the terminal's default background.
@@ -33,7 +33,47 @@ original art. Horizontal sampling is doubled while the displayed proportions sta
 unchanged. Smaller windows scale down; more height adds space without enlarging the
 character beyond 128 × 64 samples. Each cell fits its samples to two terminal colors;
 partially transparent cells use one foreground color and the terminal background.
-The binary embeds the pixel data, so playback needs no network, Python or image decoder.
+The legacy path embeds raw pixel data and needs no image decoder. No playback mode
+needs Python or network access at runtime. The GIFs above show the existing legacy
+Quadrant previews, not the new raster/Sixel output.
+
+## Raster and Sixel
+
+These opt-in animation modes leave default transparent Quadrant playback, static mode
+and existing exports unchanged:
+
+```bash
+cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --raster --background 181820
+cargo run --release --features sixel --manifest-path examples/ai-babies/Cargo.toml -- --sixel --character claude
+cargo run --release --features sixel --manifest-path examples/ai-babies/Cargo.toml -- --sixel --cell-pixels 8x16
+```
+
+- `--raster` selects `RasterCanvas` with an opaque HalfBlock inline preview.
+- `--sixel` requires `--features sixel` and uses the alternate screen, with no silent
+  fallback. Choose one rendering mode.
+- `--background RRGGBB` (optional leading `#`, quoted in shell commands) applies to
+  either mode and defaults to black. RGBA is composited onto this opaque background;
+  neither mode preserves terminal transparency.
+- `--cell-pixels WxH` is Sixel-only: supply the **actual physical character-cell size
+  in pixels**, not the terminal's column/row grid. Omit it to use `CellPixels::resolve`
+  startup discovery. Probing happens before input handling; metric resolution failures
+  are errors. `--force-cell-pixels` is allowed only with `--sixel --cell-pixels` for a
+  measured override consistent with the terminal grid. Restart after font or DPI changes.
+
+`--sixel` is your assertion that the **whole terminal/multiplexer path** supports Sixel,
+stable palettes, ED2 graphics clearing, and non-scrolling positioned output including
+partial bands. There is no capability auto-detection; these are compatibility
+requirements that headless checks cannot verify. The current Sixel encoder uses a
+fixed RGB332 256-color palette: native output improves spatial resolution, but is
+not lossless 24-bit color.
+
+Both modes use embedded PNG atlases with 320 × 320 frames for all three characters.
+The existing packers generate them directly from the original 256 × 256 source cells:
+this is upscaling, not new native 320-pixel detail or enlargement of the old 128 × 64
+frames. The added `png` 0.18 decoder decodes and caches frames once at startup.
+`--height` still accepts 24/32 and caps rendering. Sixel centers a native area up to
+approximately 320 × 320 physical pixels; smaller terminals scale it to fit. HalfBlock
+is a cell-based preview, not native Sixel resolution.
 
 ## Controls
 
@@ -52,14 +92,17 @@ restarts its first frame. Both operations preserve the paused state.
 
 ```bash
 cargo test --manifest-path examples/ai-babies/Cargo.toml
+cargo test --features sixel --manifest-path examples/ai-babies/Cargo.toml
 cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --headless
 cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --snapshot /tmp/ai-babies.ppm 0
 cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --character deepseek --height 24 --frames /tmp/deepseek-frames
 cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --character claude --action wave /tmp/claude-wave
+cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --raster --background 181820 --snapshot /tmp/ai-babies-raster.ppm 0
+cargo run --release --features sixel --manifest-path examples/ai-babies/Cargo.toml -- --sixel --headless
 ```
 
-Place `--character` and `--height` before an export option; they may appear in either
-order. Export options are alternatives:
+Place `--character`, `--height` and any new rendering arguments before the export
+option, in any order. Export options are alternatives:
 
 | Option | Output |
 | --- | --- |
@@ -69,9 +112,17 @@ order. Export options are alternatives:
 | `--action idle\|wave\|walk\|hop\|think\|sleep DIRECTORY` | One action cycle at 24 FPS |
 
 Snapshots accept 0–86400 seconds and explicit sizes of 1–512 columns by 1–128 rows.
-Each PPM has a matching `.pgm` alpha mask. PPM alone shows transparent areas as black;
-this black is not painted in the terminal. Use fresh output directories to avoid mixing
-old and new frames. With Pillow installed, create transparent previews from both files:
+Each PPM has a matching `.pgm` alpha mask. In the default legacy mode, PPM alone shows
+transparent areas as black; this black is not painted in the terminal.
+
+`--raster` permits all existing export options, including `--snapshot`, `--frames` and
+`--action`. Its PPM/PGM output reconstructs the HalfBlock fallback as an opaque raster
+rectangle, not native Sixel pixels. `--sixel` permits only `--headless`; other export
+flags are rejected to avoid misleading output. Headless mode tests drawing without a
+terminal and does **not** certify terminal/multiplexer compatibility.
+
+Use fresh output directories to avoid mixing old and new frames. With Pillow installed,
+create previews from both files (transparent only for the legacy path):
 
 ```bash
 python3 examples/ai-babies/tools/preview_actions.py /tmp/deepseek-frames --name deepseek
@@ -100,7 +151,9 @@ and the reference image's white background. The default is 144 columns × 24 row
 ## Assets and source
 
 [scene.rs](src/scene.rs) selects clips and samples embedded RGBA frames;
-[main.rs](src/main.rs) handles playback and input; [export.rs](src/export.rs) reconstructs
+[main.rs](src/main.rs) handles playback and input; [raster.rs](src/raster.rs) decodes
+and caches high-resolution canvases; [options.rs](src/options.rs) validates rendering
+options; [export.rs](src/export.rs) reconstructs
 encoded terminal cells; [static_image.rs](src/static_image.rs) implements static mode.
 Previews reconstruct block cells and may differ from a terminal font's seams or proportions.
 
@@ -109,7 +162,8 @@ Previews reconstruct block cells and may differ from a terminal font's seams or 
 | [chibi-trio-source.png](assets/chibi-trio-source.png) | Original three-character reference |
 | [chatgpt-actions-source.png](assets/chatgpt-actions-source.png) | ChatGPT action source |
 | `assets/{deepseek,claude}-actions-clean-source.png` | Companion action sources |
-| `assets/*-actions-*.png` and `.rgba` (96x48/128x64) | Current preview atlases and embedded animation pixels |
+| `assets/*-actions-*.png` and `.rgba` (96x48/128x64) | Legacy preview atlases and embedded animation pixels |
+| `assets/*-actions*-320x320.png` | Embedded high-resolution PNG atlases for raster/Sixel; no 320x320 `.rgba` files |
 | `assets/chibi-trio-240x80.png` and `.rgb` | Static source and embedded pixels |
 | `assets/*-prompt.txt` | Generation and cleanup prompts |
 
