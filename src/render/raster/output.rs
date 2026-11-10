@@ -89,9 +89,9 @@ impl CellPixels {
     /// # Ok::<(), std::io::Error>(())
     /// ```
     pub fn probe(timeout: Duration) -> io::Result<Self> {
-        super::terminal_probe::before_input(|| {
+        crate::render::terminal_probe::before_input(|| {
             Self::detect_with(Self::read_terminal, || {
-                let (width, height) = super::terminal_probe::cell_pixels(timeout)?;
+                let (width, height) = crate::render::terminal_probe::cell_pixels(timeout)?;
                 Ok(Self { width, height })
             })
         })

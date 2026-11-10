@@ -14,15 +14,23 @@ for configuration and controls.
 The published crate and internal workspace packages use shared source; there is
 not a second raster implementation for the internal crates.
 
+The raster subsystem lives in `src/render/raster/`, with `mod.rs` exposing the
+canvas API and public `output` configuration while keeping presentation state and
+Sixel encoding private. `rsille::raster` remains the public shortcut, and
+`rsille::render::raster_output` re-exports `raster::output` for compatibility.
+Renderer integration tests live in `raster/render_tests.rs` but are compiled as a
+child of the renderer so they can exercise its private state. TUI widgets and
+shared terminal probing remain in their respective layers.
+
 | Source | Responsibility / principal API |
 | --- | --- |
-| `src/render/raster.rs` | `Rgb`, opaque `RasterCanvas`, identity/revision COW snapshots, clipped integer primitives, `RasterOptions`, full-target `RasterCell::sample`, explicit-color `fallback` |
+| `src/render/raster/canvas.rs` | `Rgb`, opaque `RasterCanvas`, identity/revision COW snapshots, clipped integer primitives, `RasterOptions`, full-target `RasterCell::sample`, explicit-color `fallback` |
 | `src/tui/widgets/display/raster_canvas.rs` | `RasterCanvasWidget`, `raster_canvas`, fixed-resolution `from_draw`, persistent revision-keyed callback state |
 | `src/render/buffer.rs`, `chunk.rs` | Cell ownership, stored fallback, current/previous raster metadata, `Chunk::raster`, `Buffer::raster_at` / `raster_cells` |
 | `src/tui/offscreen.rs` | Copy original raster metadata with cell blits; flatten to stored text for character effects and propagate the unsupported-composition marker |
-| `src/render/raster_output.rs` | `RasterOutput`, `RasterPolicy`, host-supplied `RasterCapabilities`, `CellPixels`, `RasterStats`; conservative policy resolution |
-| `src/render/raster_presenter.rs` | Per-renderer terminal-visible state, resource preflight, invalidation/erase plan, commit after successful flush |
-| `src/render/sixel.rs` | Private, optional dependency-free RGB332 encoder and bounded encoded-tile LRU |
+| `src/render/raster/output.rs` | `RasterOutput`, `RasterPolicy`, host-supplied `RasterCapabilities`, `CellPixels`, `RasterStats`; conservative policy resolution |
+| `src/render/raster/presenter.rs` | Per-renderer terminal-visible state, resource preflight, invalidation/erase plan, commit after successful flush |
+| `src/render/raster/sixel.rs` | Private, optional dependency-free RGB332 encoder and bounded encoded-tile LRU |
 | `src/render/render.rs` | Character diff, ED 2/full-redraw cleanup, cursor positioning and Sixel writes; `set_raster_output`, `raster_stats` |
 | `src/tui/runtime/core.rs` | `frame()` retains graphics and text; `frame_text_only()` makes an explicit character-only copy |
 

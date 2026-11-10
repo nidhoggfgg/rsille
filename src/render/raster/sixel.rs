@@ -11,7 +11,7 @@ use std::collections::VecDeque;
 use std::io::{self, Write};
 use std::sync::Arc;
 
-use super::raster::{RasterCell, RasterOptions, Rgb};
+use super::{RasterCell, RasterOptions, Rgb};
 
 const MAX_CELL_DIMENSION: u16 = 1024;
 const MAX_TILE_PIXELS: usize = 64 * 1024;

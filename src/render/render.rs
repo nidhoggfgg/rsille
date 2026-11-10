@@ -87,7 +87,7 @@ pub struct Render<W, T> {
     inline_mode: bool,
     previous_inline_height: u16,
     used_height: u16, // Actual height to render (for inline mode, avoids buffer reallocation)
-    raster: super::raster_presenter::RasterPresenter,
+    raster: super::raster::RasterPresenter,
 }
 
 impl<W, T> Render<W, T>
@@ -460,7 +460,7 @@ where
             inline_mode: builder.inline_mode,
             previous_inline_height: 0,
             used_height: builder.size.height, // Initialize to buffer capacity
-            raster: super::raster_presenter::RasterPresenter::new(
+            raster: super::raster::RasterPresenter::new(
                 builder.raster_output,
                 builder.enable_alt_screen,
             ),
@@ -548,7 +548,7 @@ where
 mod style_tests;
 
 #[cfg(test)]
-#[path = "raster_render_tests.rs"]
+#[path = "raster/render_tests.rs"]
 mod raster_tests;
 
 #[cfg(test)]

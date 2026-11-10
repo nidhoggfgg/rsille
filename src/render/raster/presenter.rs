@@ -2,10 +2,11 @@
 
 use std::io;
 
-use super::area::{Position, Size};
-use super::buffer::Buffer;
-use super::raster::RasterCell;
-use super::raster_output::{CellPixels, RasterOutput, RasterPolicy, RasterStats};
+use crate::render::area::{Position, Size};
+use crate::render::buffer::Buffer;
+
+use super::output::{CellPixels, RasterOutput, RasterPolicy, RasterStats};
+use super::RasterCell;
 
 // Bound a single native frame as well as each encoded tile/cache. Oversized
 // layouts remain usable through character output rather than unbounded staging.
@@ -18,7 +19,7 @@ type VisibleCell = (u16, u16, RasterCell);
 type EncodedCell = (u16, u16, std::sync::Arc<[u8]>);
 
 #[derive(Debug, Clone, Default)]
-pub(super) struct RasterPresenter {
+pub(in crate::render) struct RasterPresenter {
     pub config: RasterOutput,
     pub alternate_screen: bool,
     visible: Vec<VisibleCell>,
@@ -34,7 +35,7 @@ pub(super) struct RasterPresenter {
     bytes_sent: u64,
 }
 
-pub(super) struct RasterPlan {
+pub(in crate::render) struct RasterPlan {
     pub native: bool,
     pub clear: bool,
     pub encoded: Vec<EncodedCell>,
@@ -197,8 +198,8 @@ impl RasterPresenter {
 #[cfg(all(test, feature = "sixel"))]
 mod tests {
     use super::*;
+    use crate::render::raster::output::RasterCapabilities;
     use crate::render::raster::{RasterCanvas, RasterOptions, Rgb};
-    use crate::render::raster_output::RasterCapabilities;
 
     fn frame(width: u16) -> Buffer {
         let mut buffer = Buffer::new((width, 1).into());
