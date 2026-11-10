@@ -120,6 +120,7 @@ fn unknown_auto_and_explicit_text_only_emit_fallback_without_dcs() {
             render.inline_mode = inline;
             let output = frame(&mut render);
             assert!(!contains(&output, b"\x1bP"));
+            assert!(!contains(&output, b"\x1b[?2026"));
             assert!(contains(&output, "▀".as_bytes()));
             assert_eq!(render.raster_stats(), RasterStats::default());
             assert!(render.buffer.previous().is_some());
@@ -149,7 +150,7 @@ fn strict_unsupported_frames_write_nothing_and_do_not_commit() {
             _ => {
                 config.capabilities.cell_pixels = Some(CellPixels {
                     width: 8,
-                    height: 17,
+                    height: 1025,
                 })
             }
         }
@@ -329,6 +330,11 @@ mod native {
                         index += 1;
                     }
                     let command = bytes[index];
+                    if matches!(command, b'h' | b'l') {
+                        assert_eq!(&bytes[parameters..index], b"?2026");
+                        index += 1;
+                        continue;
+                    }
                     let values: Vec<u16> = std::str::from_utf8(&bytes[parameters..index])
                         .unwrap()
                         .split(';')
@@ -432,6 +438,53 @@ mod native {
                 [Event::Print((0, 0).into(), '.'), Event::Clear]
             );
         }
+    }
+
+    fn assert_synchronized(bytes: &[u8]) {
+        let begin = b"\x1b[?2026h";
+        let end = b"\x1b[?2026l";
+        assert!(
+            bytes.starts_with(begin),
+            "synchronize before any clear or paint"
+        );
+        assert!(
+            bytes.ends_with(end),
+            "release only after text, tiles and cursor restoration"
+        );
+        assert_eq!(
+            bytes.windows(begin.len()).filter(|s| *s == begin).count(),
+            1
+        );
+        assert_eq!(bytes.windows(end.len()).filter(|s| *s == end).count(), 1);
+    }
+
+    #[test]
+    fn native_frames_and_cleanup_are_one_synchronized_update() {
+        let mut render = renderer(verified(RasterPolicy::RequireSixel), Vec::new());
+        assert_synchronized(&frame(&mut render));
+        for origin in [(1, 0), (1, 1), (0, 1), (0, 0)] {
+            render.thing.origin = origin.into();
+            let moved = frame(&mut render);
+            assert_synchronized(&moved);
+            let trace = events(&moved);
+            assert_clear_before_paint(&trace);
+            assert_eq!(tiles(&trace).len(), 2);
+        }
+        // The cleanup frame must be synchronized even without new native tiles.
+        render.thing.visible = false;
+        let hidden = frame(&mut render);
+        assert_synchronized(&hidden);
+        assert_clear_before_paint(&events(&hidden));
+        assert!(!contains(&frame(&mut render), b"\x1b[?2026"));
+
+        render.thing.visible = true;
+        assert_synchronized(&frame(&mut render));
+        render.set_raster_output(RasterOutput::text_only());
+        let fallback = frame(&mut render);
+        assert_synchronized(&fallback);
+        assert_clear_before_paint(&events(&fallback));
+        assert!(contains(&fallback, "▀".as_bytes()));
+        assert!(!contains(&frame(&mut render), b"\x1b[?2026"));
     }
 
     #[test]
@@ -717,20 +770,20 @@ mod native {
     }
 
     #[test]
-    fn physical_metric_changes_reencode_and_invalid_bands_fall_back() {
+    fn physical_metric_changes_reencode_and_invalid_dimensions_fall_back() {
         let mut render = renderer(verified(RasterPolicy::Auto), Vec::new());
         frame(&mut render);
         let mut config = verified(RasterPolicy::Auto);
         config.capabilities.cell_pixels = Some(CellPixels {
             width: 10,
-            height: 24,
+            height: 20,
         });
         render.set_raster_output(config);
         let resized = events(&frame(&mut render));
         assert_clear_before_paint(&resized);
         assert_eq!(tiles(&resized).len(), 2);
         for (_, bytes) in tiles(&resized) {
-            assert!(bytes.starts_with(b"\x1bP0;1;0q\"1;1;10;24"));
+            assert_bounded_tile(bytes, 10, 20);
         }
         assert_eq!(render.raster_stats().encodes, 4);
         let before = render.raster_stats();
@@ -739,7 +792,7 @@ mod native {
 
         config.capabilities.cell_pixels = Some(CellPixels {
             width: 10,
-            height: 23,
+            height: 0,
         });
         render.set_raster_output(config);
         let fallback = events(&frame(&mut render));
@@ -859,46 +912,105 @@ mod native {
 
     #[test]
     fn bottom_row_tiles_are_cell_bounded_and_restore_the_saved_cursor() {
-        let mut render = renderer(verified(RasterPolicy::RequireSixel), Vec::new());
-        render.pos = (4, 3).into();
-        render.thing.origin = (2, 1).into();
-        render.thing.target = (2, 1).into();
-        let output = frame(&mut render);
-        assert!(!output.contains(&b'\n'));
-        let trace = events(&output);
-        let encoded = tiles(&trace);
-        assert_eq!(
-            encoded
+        for height in 1..=25 {
+            let mut config = verified(RasterPolicy::RequireSixel);
+            config.capabilities.cell_pixels = Some(CellPixels { width: 10, height });
+            let mut render = renderer(config, Vec::new());
+            render.pos = (4, 3).into();
+            render.thing.origin = (2, 1).into();
+            render.thing.target = (2, 1).into();
+            let output = frame(&mut render);
+            assert!(!output.contains(&b'\n'));
+            let trace = events(&output);
+            let encoded = tiles(&trace);
+            assert_eq!(
+                encoded
+                    .iter()
+                    .map(|(position, _)| *position)
+                    .collect::<Vec<_>>(),
+                [(6, 4).into(), (7, 4).into()]
+            );
+            for (_, bytes) in encoded {
+                assert_bounded_tile(bytes, 10, usize::from(height));
+            }
+            let saved = trace
                 .iter()
-                .map(|(position, _)| *position)
-                .collect::<Vec<_>>(),
-            [(6, 4).into(), (7, 4).into()]
-        );
-        for (_, bytes) in encoded {
-            assert_bounded_tile(bytes, 8, 18);
+                .find_map(|event| match event {
+                    Event::Save(position) => Some(*position),
+                    _ => None,
+                })
+                .unwrap();
+            assert_eq!(trace.last(), Some(&Event::Restore(saved)));
+            assert_eq!(
+                trace
+                    .iter()
+                    .filter(|event| matches!(event, Event::Save(_)))
+                    .count(),
+                1
+            );
+            assert_eq!(
+                trace
+                    .iter()
+                    .filter(|event| matches!(event, Event::Restore(_)))
+                    .count(),
+                1
+            );
         }
-        let saved = trace
-            .iter()
-            .find_map(|event| match event {
-                Event::Save(position) => Some(*position),
-                _ => None,
-            })
-            .unwrap();
-        assert_eq!(trace.last(), Some(&Event::Restore(saved)));
-        assert_eq!(
-            trace
-                .iter()
-                .filter(|event| matches!(event, Event::Save(_)))
-                .count(),
-            1
-        );
-        assert_eq!(
-            trace
-                .iter()
-                .filter(|event| matches!(event, Event::Restore(_)))
-                .count(),
-            1
-        );
+    }
+
+    #[test]
+    fn ten_by_twenty_cells_remain_bounded_when_moving_and_occluding() {
+        let mut config = verified(RasterPolicy::RequireSixel);
+        config.capabilities.cell_pixels = Some(CellPixels {
+            width: 10,
+            height: 20,
+        });
+        let mut render = renderer(config, Vec::new());
+        render.thing.target = (2, 2).into();
+        let initial = events(&frame(&mut render));
+        let initial_tiles = tiles(&initial);
+        assert_eq!(initial_tiles.len(), 4);
+        for (index, (position, bytes)) in initial_tiles.iter().enumerate() {
+            assert_eq!(
+                *position,
+                Position::from(((index % 2) as u16, (index / 2) as u16))
+            );
+            assert_bounded_tile(bytes, 10, 20);
+        }
+        render.thing.origin = (1, 0).into();
+        let moved = frame(&mut render);
+        assert_synchronized(&moved);
+        let trace = events(&moved);
+        assert_clear_before_paint(&trace);
+        for ((position, bytes), (old_position, old_bytes)) in
+            tiles(&trace).iter().zip(&initial_tiles)
+        {
+            assert_eq!(
+                *position,
+                Position::from((old_position.x + 1, old_position.y))
+            );
+            assert_eq!(bytes, old_bytes);
+        }
+        assert_eq!(tiles(&trace).len(), 4);
+        assert_eq!(render.raster_stats().encodes, 4);
+        assert_eq!(render.raster_stats().cache_hits, 4);
+
+        // A lower-row text cell must not be painted by the upper tile's padding.
+        render.thing.text.push(((1, 1).into(), '!'));
+        let covered = events(&frame(&mut render));
+        assert_clear_before_paint(&covered);
+        assert_print(&covered, (1, 1), '!');
+        assert_eq!(tiles(&covered).len(), 3);
+        for (position, bytes) in tiles(&covered) {
+            assert_ne!(position, Position::from((1, 1)));
+            assert_bounded_tile(bytes, 10, 20);
+        }
+        render.thing.visible = false;
+        let hidden = events(&frame(&mut render));
+        assert_clear_before_paint(&hidden);
+        assert!(tiles(&hidden).is_empty());
+        assert_print(&hidden, (1, 0), '.');
+        assert_print(&hidden, (1, 1), '!');
     }
 
     #[derive(Clone, Default)]
@@ -942,6 +1054,32 @@ mod native {
     }
 
     #[test]
+    fn every_partial_native_write_releases_sync_and_retry_repaints() {
+        let mut probe = renderer(verified(RasterPolicy::Auto), FaultWriter::default());
+        probe.render().unwrap();
+        for offset in 0..probe.out.bytes.len() {
+            let mut render = renderer(verified(RasterPolicy::Auto), FaultWriter::default());
+            render.out.remaining = Some(offset);
+            assert_eq!(
+                render.render().unwrap_err().kind(),
+                io::ErrorKind::BrokenPipe
+            );
+            assert_no_raster_commit(&render, RasterStats::default());
+            assert!(
+                contains(&render.out.bytes, b"\x18\x1b\\\x1b[?2026l"),
+                "release sync after any recoverable write failure, offset {offset}"
+            );
+            render.out.bytes.clear();
+            render.render().unwrap();
+            assert!(render.out.bytes.starts_with(b"\x18\x1b\\\x1b[?2026l"));
+            assert!(render.out.bytes.ends_with(b"\x1b[?2026l"));
+            let trace = events(&render.out.bytes);
+            assert_clear_before_paint(&trace);
+            assert_eq!(tiles(&trace).len(), 2);
+        }
+    }
+
+    #[test]
     fn write_and_flush_failures_do_not_commit_and_retry_clears_and_reuses_cache() {
         for previous_frame in [false, true] {
             for failure in 0..3 {
@@ -970,6 +1108,7 @@ mod native {
                     io::ErrorKind::BrokenPipe
                 );
                 assert_no_raster_commit(&render, before);
+                assert!(contains(&render.out.bytes, b"\x18\x1b\\\x1b[?2026l"));
                 let failed_stats = render.raster_stats();
                 assert_eq!(
                     failed_stats.encodes,
@@ -1019,6 +1158,8 @@ mod native {
         render.out.remaining = None;
         render.render().unwrap();
         let retry = &render.out.bytes[retry_start..];
+        assert!(retry.starts_with(b"\x18\x1b\\\x1b[?2026l\x1b[?2026h"));
+        assert!(retry.ends_with(b"\x1b[?2026l"));
         let clear = retry
             .windows(4)
             .position(|bytes| bytes == b"\x1b[2J")

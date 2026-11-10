@@ -28,8 +28,9 @@ not a second raster implementation for the internal crates.
 
 The core model, widget, and text fallback do not require the `sixel` feature.
 `--features sixel` enables the private native encoder without adding an external
-encoding dependency. It does not assert that the active terminal is supported.
-Existing `Canvas` and `Encoding` semantics remain separate.
+encoding dependency; Unix terminal input/query handling uses `libc`. The feature
+does not assert that the active terminal is supported. Existing `Canvas` and
+`Encoding` semantics remain separate.
 
 ## Buffer ownership and order
 
@@ -91,20 +92,46 @@ Sixel image-delete protocol.
 
 ## Input and metric discovery
 
-There is **no active DA/CSI raster capability probe** in this release. Crossterm
-does not route the required replies into this layer, and an independent stdin
-reader would race the application event stream. No competing reader is started.
-Terminal names/environment heuristics are not accepted as positive capability
-evidence. Automatic negotiation needs a future coordinated input-parser design,
-bounded timeouts, and tests for interleaved ordinary input before it can ship.
+There is **no DA or Sixel capability negotiation** in this release. The `sixel`,
+`reliable_erase`, and `no_scroll` flags remain host assertions, not detection results.
+Terminal names/environment heuristics and measured cell dimensions are not
+positive evidence of Sixel support.
 
-Physical cell metrics can come from an explicit `CellPixels` override or the OS
-window-size API (`CellPixels::from_terminal`). The latter is a lazy syscall/API
-lookup, not terminal escape-sequence negotiation. Automatic lookup is restricted
-to raster frames with explicit Sixel capability and a non-TextOnly policy when no
-metric override was supplied. It can refresh on later frames after resize.
-Unavailable, zero, or non-integral metrics remain unknown and trigger fallback or
-a strict error. Knowing pixel size does not establish Sixel support.
+`CellPixels::resolve` is shared by startup preflight and eligible native frames:
+
+1. An explicit `CellPixels` override is validated without any OS metric lookup or
+   terminal query. Invalid overrides do not request automatic discovery.
+2. Without an override, read OS window metrics first and divide text-area pixels
+   by columns/rows. `CellPixels::from_terminal` remains the raw optional OS-only
+   helper, without backend-limit validation or query fallback.
+3. If OS dimensions are unavailable, zero, non-integral, or unsupported by the
+   backend, Unix (including WSL) falls back to `CSI 16 t`. Stdin and stdout must
+   be TTYs attached to the controlling terminal. The absolute timeout is 500 ms,
+   not extended by interleaved input. `CSI 6 ; height ; width t` reports pixels
+   **per cell directly**; do not divide this reply by columns/rows. Apply the same
+   backend dimension limits to query results.
+4. Cache query success and failure per terminal grid, refreshing when columns/rows
+   change. This discovery cache is separate from the rendering caches above.
+   OS metrics are still checked first on eligible frames. A same-grid font change
+   is not detected by the query cache: use an explicit override or restart.
+5. Native Windows has no query fallback; explicit dimensions are still needed
+   there. If both automatic sources fail, `RequireSixel` errors before frame output
+   and `Auto` uses character fallback.
+
+Automatic discovery is gated to eligible native raster frames without an override.
+`TextOnly`, default/unknown `Auto`, unused raster paths, and unsupported output modes
+perform no automatic cell-metric discovery. Explicitly calling
+`CellPixels::resolve(None)` requests discovery independently of renderer policy.
+Keep `cell_pixels: None` after automatic preflight rather than freezing the result
+into an override.
+
+The managed event loop uses a unified input broker when automatic native metrics
+are enabled. Startup `CellPixels::resolve(None)` also activates it when entering
+query fallback. Query replies are parsed while ordinary keyboard, mouse, paste,
+and other events are preserved; existing keyboard/cursor queries use the same
+broker. **Do not mix crossterm input readers or any other stdin reader with the
+broker after fallback activation.** Standalone/embedded hosts must preflight before
+starting any input reader and coordinate subsequent input through the broker.
 
 ## Encoder and budgets
 
@@ -112,12 +139,20 @@ The encoder creates one independently positioned DCS tile per surviving raster
 cell. Nearest-neighbor sampling uses full-target physical dimensions. Quantization
 uses RGB332 (256 fixed colors); used palette definitions are emitted per tile,
 with six-row bands and run-length compression. Black and letterbox pixels are
-explicitly painted. Transparent *unset band bits* are an encoding detail, not
-alpha in the content model. There is no final band advance past the tile.
+explicitly painted. Sixel `P2=1` leaves unset pixels transparent, raster attributes
+declare the exact tile height, and there is no extra final band advance past the
+tile. Transparent *unset band bits* are an encoding detail, not alpha in the
+content model.
 
-The presenter nevertheless requires `cell_height % 6 == 0`: partial-band allocation
-and bottom-edge behavior have not been validated on real terminals. Setting host
-capabilities does not bypass this restriction or the other resource limits.
+The presenter and example accept cell heights not divisible by six, within the
+unchanged limits of 1..=1024 per dimension and at most 65,536 pixels. Actual 10×20
+cells are supported without rounding to 18 or 24: the final band contains two
+pixel rows and four unset padding rows. The terminal/multiplexer path must honor
+that transparent padding without painting beyond the tile or scrolling at the
+bottom edge, and must still satisfy `no_scroll` and `reliable_erase` assertions.
+Partial-band allocation and bottom-edge behavior remain unverified on real
+terminals; accepting these metrics is not terminal certification. Setting host
+capabilities does not bypass resource limits.
 
 - Source: at most 16,777,216 pixels, about 48 MiB RGB per distinct source buffer.
 - Tile: nonzero dimensions at most 1024, at most 65,536 pixels, at most 1 MiB
@@ -150,7 +185,7 @@ scroll behavior. No real-terminal configuration is currently certified.
 | TUI composition | Callback cache/invalidation, resize, borders/padding, scroll blits, opaque coverage, text snapshots, effect flattening | Interactive checks with representative layouts |
 | Policy / renderer | Unknown Auto fallback, TextOnly, strict rejection, feature/mode/metric gates, injected-writer bytes and invalidation | Actual terminal behavior, interrupted output, recovery |
 | Encoder / cache | RGB332 tile bytes, bounds, deterministic output, cache keys/eviction | Terminal decoding and palette interaction |
-| Negotiation | No competing stdin reader and no active graphics queries by design | Coordinated response routing and timed negotiation |
+| Metric discovery / input | OS-first lookup, bounded Unix cell-pixel query, grid-keyed success/failure cache, unified reply/event routing | Real-terminal input interleaving and resize/font-change checks; DA/Sixel capability negotiation remains unimplemented |
 
 ### Terminal candidates — all UNVERIFIED
 
@@ -174,8 +209,13 @@ reject an unsupported configuration.
 
 - [ ] Establish the exact environment and alternate-screen lifecycle; verify
       Sixel DCS/RGB palettes reach the terminal through every intermediary.
-- [ ] Measure cell pixels, verify integral nonzero dimensions and the six-row
-      height restriction; repeat after resize and font changes.
+- [ ] Measure actual cell pixels, verify integral dimensions in 1..=1024 and a
+      product at most 65,536; repeat after resize and font changes. Do not round
+      measured heights to complete six-row bands. If using query fallback, a
+      same-grid font change requires an explicit override or restart.
+- [ ] With actual partial-band metrics such as 10×20, verify exact raster height
+      and transparent unset padding, especially at cell boundaries and the last
+      row; confirm no extra painting or scrolling.
 - [ ] Compare Fit/Stretch, all alignments, letterboxing, and corner pixels with
       the source; check black pixels are opaque and no background bleeds through.
 - [ ] Exercise nested clipping, both scroll axes, screen edges, and the last row;
@@ -193,8 +233,11 @@ reject an unsupported configuration.
       content or retain unsupported native ownership under a character effect.
 - [ ] Exit normally, interrupt execution, and inject recoverable writer failures;
       check cursor/style/modes, alternate-screen restoration, and graphics residue.
-- [ ] Confirm ordinary keyboard/paste/mouse input is not consumed by discovery.
-      Automatic graphics-response negotiation itself remains unimplemented.
+- [ ] Confirm ordinary keyboard/paste/mouse input is preserved during cell-pixel,
+      keyboard, and cursor queries through the unified broker; do not mix input
+      readers. Exercise the 500 ms absolute deadline and cached failures, then
+      change the terminal grid to refresh discovery. DA/Sixel capability
+      negotiation remains unimplemented.
 
 ### Repeatable automated commands
 
@@ -231,9 +274,13 @@ is no live animation. No flags shows help; `--text-only` is an explicit preview.
 `--sixel` asserts that the entire terminal path supports graphics, ED 2 graphics
 erasure, non-scrolling positioned output and stable palettes. It selects
 `RequireSixel`, never silent fallback. Startup checks the feature and current
-backend cell-metric limits, including height divisible by six, before entering
-terminal mode. The default uses OS-measured cell pixels. Optional
-`--cell-pixels 8x18` must describe **actual font metrics**, not arbitrary dimensions;
+backend cell-metric limits (1..=1024 per dimension, at most 65,536 pixels) before
+entering the managed terminal session. The default tries OS metrics, then the
+bounded Unix cell-pixel query (including WSL); native Windows still needs explicit
+dimensions. Optional `--cell-pixels 10x20` bypasses both sources and must describe
+**actual font metrics**, not arbitrary dimensions;
+there is no need to round the height to 18 or 24. Transparent partial-band padding
+must be honored along with the erase/no-scroll assertions above;
 see the [startup and safety contract](raster.md#run-the-showcase). These assertions
 are user responsibility, not automatic negotiation or terminal certification.
 

@@ -21,21 +21,47 @@ Run from the repository root:
   cargo run --example sixel_windows -- --headless
 
 Options:
-  --sixel              Require actual Sixel; never silently fall back
-  --cell-pixels WxH    Override OS metrics with your ACTUAL font cell size
-  --text-only          Explicit HalfBlock preview in the RGB window
-  --headless           Check dragging, resizing, stacking and restoration in memory
-  --help               Show this guide
+  --sixel               Require actual Sixel; never silently fall back
+  --cell-pixels WxH     Skip OS/query discovery: physical pixels per character cell
+  --force-cell-pixels   Confirm an override equal to the terminal columns x rows
+  --text-only           Explicit HalfBlock preview in the RGB window
+  --headless            Check dragging, resizing, stacking and restoration in memory
+  --help                Show this guide
 
 Drag a title to move; drag the bottom grip to resize; click to bring forward.
 Tab focuses a title; arrows move it; Shift+arrows resize it.
 e cycles Canvas HalfBlock/Braille/Quadrant; r resets windows; q / Esc quits.
-Suggested terminal size: 100 columns by 32 rows.
+Suggested terminal size: 100 columns by 32 rows (NOT --cell-pixels 100x32).
+
+Cell pixels are the width x height of ONE character cell, not the terminal grid,
+window pixels, font point size, or Canvas samples. For example, a 960x648-pixel
+text area with 120 columns and 36 rows has 8x18-pixel cells, NOT 120x36.
+Omit --cell-pixels to try OS window metrics first. Unavailable, zero, non-integral,
+or unsupported OS dimensions trigger CSI 16 t on Unix (including WSL), with a
+500 ms absolute timeout. Stdin/stdout must be TTYs on the controlling terminal.
+The CSI 6 ; height ; width t reply is pixels per cell directly, not window pixels;
+do not divide it by columns/rows. Query successes/failures are cached per terminal
+grid and refreshed when columns/rows change. OS metrics remain live, but the query
+cache cannot detect same-grid font changes: supply an override or restart.
+Native Windows has no query fallback; explicit dimensions are still needed there.
+If both automatic sources fail, --sixel startup fails: measure text-area pixels /
+columns and rows; do not guess 8x18. Explicit overrides skip all OS metric lookup
+and terminal queries, and stay fixed after font changes. An override matching the
+grid requires --force-cell-pixels; use it only for a verified unusual cell size.
+Dimensions must be 1..=1024 with area <=65536 pixels per character cell.
+--text-only does not query cell pixels. Metric queries do not detect Sixel support.
+The managed event loop uses a unified input broker for automatic native metrics;
+startup query fallback activates it too. Normal events are preserved while replies
+are parsed, including existing keyboard/cursor queries. Do not mix crossterm or
+other stdin readers after fallback. Standalone/embedded hosts should preflight
+CellPixels::resolve(None) before starting any input reader.
+Incorrect metrics can distort images and misalign graphics while dragging.
 
 --sixel is your explicit assertion that the terminal AND any multiplexer support
 Sixel, ED 2 graphics erasure, stable palettes, and non-scrolling positioned output.
-No automatic capability detection is performed. The current backend requires a
-cell height divisible by six. Do not invent metrics just to pass this check.
+Partial final six-pixel bands must preserve transparent padding without scrolling.
+Actual cell sizes such as 10x20 are supported; do not round the height to 18 or 24.
+No automatic capability detection is performed.
 The --headless checks do not certify terminal compatibility.";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -48,6 +74,7 @@ enum Output {
 struct Options {
     output: Option<Output>,
     pixels: Option<CellPixels>,
+    force_cell_pixels: bool,
     headless: bool,
     help: bool,
 }
@@ -70,12 +97,17 @@ impl Options {
                     options.output = Some(output);
                 }
                 "--cell-pixels" => {
-                    let value = args.next().ok_or("--cell-pixels needs WxH, e.g. 8x18")?;
-                    let (width, height) = value.split_once('x').ok_or("cell pixels must be WxH")?;
+                    let value = args.next().ok_or(
+                        "--cell-pixels needs WxH: physical pixels per character cell, not terminal columns x rows; use --help",
+                    )?;
+                    let (width, height) = value.split_once('x').ok_or(
+                        "cell pixels must be WxH: physical pixels per character cell; use --help",
+                    )?;
                     let width = width.parse().map_err(|_| "invalid cell pixel width")?;
                     let height = height.parse().map_err(|_| "invalid cell pixel height")?;
                     options.pixels = Some(CellPixels { width, height });
                 }
+                "--force-cell-pixels" => options.force_cell_pixels = true,
                 "--headless" => options.headless = true,
                 "--help" | "-h" => options.help = true,
                 _ => return Err(format!("unknown argument: {argument}; use --help")),
@@ -84,27 +116,36 @@ impl Options {
         if options.pixels.is_some() && options.output != Some(Output::Sixel) {
             return Err("--cell-pixels requires --sixel".into());
         }
+        if options.force_cell_pixels && options.pixels.is_none() {
+            return Err("--force-cell-pixels requires --sixel --cell-pixels WxH".into());
+        }
         Ok(options)
     }
 
-    fn native_config(&self, measured: Option<CellPixels>) -> Result<RasterOutput, String> {
+    fn native_config(&self, grid: (u16, u16)) -> Result<RasterOutput, String> {
+        self.native_config_with_resolver(grid, CellPixels::resolve)
+    }
+
+    fn native_config_with_resolver(
+        &self,
+        grid: (u16, u16),
+        resolve: impl FnOnce(Option<CellPixels>) -> std::io::Result<CellPixels>,
+    ) -> Result<RasterOutput, String> {
         if !cfg!(feature = "sixel") {
             return Err(
                 "native output needs --features sixel; alternatively use --text-only".into(),
             );
         }
-        let pixels = self.pixels.or(measured).ok_or(
-            "OS cell pixels are unavailable; pass --cell-pixels WxH with your actual font metrics, or use --text-only",
-        )?;
-        if pixels.width == 0
-            || pixels.height == 0
-            || pixels.width > 1024
-            || pixels.height > 1024
-            || !pixels.height.is_multiple_of(6)
-            || u32::from(pixels.width) * u32::from(pixels.height) > 65_536
+        // Preflight only: the renderer resolves automatic metrics for each frame.
+        let pixels = resolve(self.pixels).map_err(|error| error.to_string())?;
+        if self.pixels.is_some() && (pixels.width, pixels.height) == grid && !self.force_cell_pixels
         {
-            return Err("unsupported cell pixels: dimensions must be 1..=1024, area <=65536, height divisible by 6; use --text-only or a supported actual font size".into());
+            return Err(format!(
+                "--cell-pixels {}x{} matches the terminal grid ({} columns x {} rows); this looks like columns x rows rather than physical pixels per character cell. Omit --cell-pixels to use automatic detection, or supply measured physical pixels per character cell (text-area pixels / columns and rows). If this unusual cell size is intentional, confirm it with --force-cell-pixels; otherwise use --text-only",
+                pixels.width, pixels.height, grid.0, grid.1,
+            ));
         }
+
         Ok(RasterOutput {
             policy: RasterPolicy::RequireSixel,
             capabilities: RasterCapabilities {
@@ -112,7 +153,7 @@ impl Options {
                 sixel: true,
                 reliable_erase: true,
                 no_scroll: true,
-                // Keep automatic OS metrics live after resize; explicit overrides
+                // Keep automatic metrics live after resize; explicit overrides
                 // remain authoritative and must be kept accurate by the user.
                 cell_pixels: self.pixels,
             },
@@ -497,15 +538,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         return headless();
     }
     let output = options.output.expect("explicit mode");
+    let (width, height) = crossterm::terminal::size()?;
     let config = match output {
-        Output::Sixel => options.native_config(if options.pixels.is_none() {
-            CellPixels::from_terminal()
-        } else {
-            None
-        })?,
+        Output::Sixel => options.native_config((width, height))?,
         Output::Text => RasterOutput::text_only(),
     };
-    let (width, height) = crossterm::terminal::size()?;
     application(width, height, output, config)?.run()?;
     Ok(())
 }
@@ -533,29 +570,195 @@ mod tests {
 
     #[test]
     fn native_mode_never_silently_falls_back() {
-        let valid = options(&["--sixel", "--cell-pixels", "8x18"])
+        let valid = options(&["--sixel", "--cell-pixels", "10x20"])
             .unwrap()
-            .native_config(None);
+            .native_config((110, 36));
         if cfg!(feature = "sixel") {
             let config = valid.unwrap();
             assert_eq!(config.policy, RasterPolicy::RequireSixel);
             assert_eq!(
                 config.capabilities.cell_pixels,
                 Some(CellPixels {
-                    width: 8,
-                    height: 18
+                    width: 10,
+                    height: 20
                 })
             );
         } else {
             assert!(valid.is_err());
         }
-        for value in ["0x18", "8x16", "1025x18", "1024x1020"] {
+        for value in ["0x18", "8x0", "1025x18", "8x1025", "257x256", "1024x1020"] {
             assert!(options(&["--sixel", "--cell-pixels", value])
                 .unwrap()
-                .native_config(None)
+                .native_config((110, 36))
                 .is_err());
         }
-        assert!(options(&["--sixel"]).unwrap().native_config(None).is_err());
+        assert!(options(&["--sixel"])
+            .unwrap()
+            .native_config_with_resolver((110, 36), |explicit| {
+                assert_eq!(explicit, None);
+                Err(std::io::Error::other("OS cell pixels unavailable (test)"))
+            })
+            .is_err());
+    }
+
+    #[test]
+    fn forcing_grid_sized_cells_requires_an_explicit_override() {
+        for args in [
+            vec!["--force-cell-pixels"],
+            vec!["--sixel", "--force-cell-pixels"],
+            vec![
+                "--text-only",
+                "--cell-pixels",
+                "120x36",
+                "--force-cell-pixels",
+            ],
+        ] {
+            assert!(options(&args).is_err());
+        }
+        assert!(
+            options(&["--force-cell-pixels", "--cell-pixels", "120x36", "--sixel",])
+                .unwrap()
+                .force_cell_pixels
+        );
+    }
+
+    #[cfg(feature = "sixel")]
+    #[test]
+    fn terminal_grid_is_not_a_cell_pixel_measurement() {
+        let opts = options(&["--sixel", "--cell-pixels", "120x36"]).unwrap();
+        let error = opts.native_config((120, 36)).unwrap_err();
+        assert!(error.contains("120 columns x 36 rows"));
+        assert!(error.contains("physical pixels per character cell"));
+        assert!(error.contains("Omit --cell-pixels"));
+        assert!(error.contains("--force-cell-pixels"));
+        // Detection is based on the current grid, not a hardcoded 120x36 ban.
+        let error = options(&["--sixel", "--cell-pixels", "80x24"])
+            .unwrap()
+            .native_config((80, 24))
+            .unwrap_err();
+        assert!(error.contains("80 columns x 24 rows"));
+        assert!(opts.native_config((100, 32)).is_ok());
+    }
+
+    #[cfg(feature = "sixel")]
+    #[test]
+    fn unusual_grid_sized_cells_can_be_confirmed() {
+        let pixels = CellPixels {
+            width: 120,
+            height: 36,
+        };
+        let forced =
+            options(&["--sixel", "--cell-pixels", "120x36", "--force-cell-pixels"]).unwrap();
+        assert_eq!(
+            forced
+                .native_config((120, 36))
+                .unwrap()
+                .capabilities
+                .cell_pixels,
+            Some(pixels),
+        );
+        // Confirmation bypasses only the grid ambiguity, never backend limits.
+        for (value, grid) in [
+            ("0x18", (0, 18)),
+            ("8x0", (8, 0)),
+            ("1025x18", (1025, 18)),
+            ("8x1025", (8, 1025)),
+            ("257x256", (257, 256)),
+            ("1024x1020", (1024, 1020)),
+        ] {
+            assert!(
+                options(&["--sixel", "--cell-pixels", value, "--force-cell-pixels"])
+                    .unwrap()
+                    .native_config(grid)
+                    .is_err()
+            );
+        }
+    }
+
+    #[cfg(feature = "sixel")]
+    #[test]
+    fn explicit_metrics_stay_authoritative_without_aspect_ratio_rules() {
+        for value in [
+            "8x16", "8x18", "9x18", "10x20", "18x18", "36x6", "120x36", "1x1024", "1024x1",
+            "256x256", "1024x64",
+        ] {
+            let opts = options(&["--sixel", "--cell-pixels", value]).unwrap();
+            assert_eq!(
+                opts.native_config((110, 36))
+                    .unwrap()
+                    .capabilities
+                    .cell_pixels,
+                opts.pixels,
+            );
+        }
+    }
+
+    #[cfg(feature = "sixel")]
+    #[test]
+    fn automatic_metrics_are_validated_but_remain_live() {
+        let opts = options(&["--sixel"]).unwrap();
+        for pixels in [
+            CellPixels {
+                width: 10,
+                height: 20,
+            },
+            CellPixels {
+                width: 8,
+                height: 18,
+            },
+            CellPixels {
+                width: 120,
+                height: 36,
+            },
+        ] {
+            let config = opts
+                .native_config_with_resolver((120, 36), |explicit| {
+                    assert_eq!(explicit, None);
+                    CellPixels::resolve(Some(pixels))
+                })
+                .unwrap();
+            assert_eq!(config.policy, RasterPolicy::RequireSixel);
+            assert_eq!(config.capabilities.cell_pixels, None);
+        }
+        let error = opts
+            .native_config_with_resolver((120, 36), |explicit| {
+                assert_eq!(explicit, None);
+                Err(std::io::Error::other("OS cell pixels unavailable (test)"))
+            })
+            .unwrap_err();
+        assert_eq!(error, "OS cell pixels unavailable (test)");
+        for pixels in [
+            CellPixels {
+                width: 0,
+                height: 20,
+            },
+            CellPixels {
+                width: 10,
+                height: 0,
+            },
+            CellPixels {
+                width: 1025,
+                height: 20,
+            },
+            CellPixels {
+                width: 10,
+                height: 1025,
+            },
+            CellPixels {
+                width: 257,
+                height: 256,
+            },
+        ] {
+            let expected = CellPixels::resolve(Some(pixels)).unwrap_err().to_string();
+            let error = opts
+                .native_config_with_resolver((120, 36), |explicit| {
+                    assert_eq!(explicit, None);
+                    CellPixels::resolve(Some(pixels))
+                })
+                .unwrap_err();
+            assert_eq!(error, expected);
+        }
+        assert_eq!(opts.pixels, None);
     }
 
     #[test]
@@ -612,9 +815,9 @@ mod tests {
             }
         }
         // Synthetic verified capabilities apply ONLY to this memory writer.
-        let config = options(&["--sixel", "--cell-pixels", "8x18"])
+        let config = options(&["--sixel", "--cell-pixels", "10x20"])
             .unwrap()
-            .native_config(None)
+            .native_config((110, 36))
             .unwrap();
         let mut runtime = application(110, 36, Output::Sixel, config).unwrap();
         runtime.step(&[]).unwrap();
@@ -634,7 +837,14 @@ mod tests {
             renderer.render().unwrap();
             assert_eq!(renderer.raster_stats(), stats);
         }
-        assert!(output.windows(2).any(|bytes| bytes == b"\x1bP"));
+        let header = b"\x1bP0;1;0q\"1;1;10;20";
+        assert_eq!(
+            output
+                .windows(header.len())
+                .filter(|bytes| *bytes == header)
+                .count(),
+            native_cells
+        );
         assert!(String::from_utf8(output).unwrap().contains('▀'));
     }
 }

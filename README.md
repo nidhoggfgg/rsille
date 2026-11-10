@@ -83,8 +83,9 @@ coverage retain raster metadata; HalfBlock (or Braille) fallback is always
 available, including headless frames.
 
 The optional `sixel` feature enables native encoding. `Auto` defaults to text for
-unknown terminals; `TextOnly` disables native output, and `RequireSixel` returns
-an error when safety conditions are missing. Native output currently requires
+unknown terminals; neither unknown `Auto` nor `TextOnly` sends cell-pixel queries.
+`TextOnly` disables native output, and `RequireSixel` returns an error when safety
+conditions are missing. Native output currently requires
 explicit verified capabilities, alternate-screen mode and supported cell-pixel
 metrics. **Automatic capability negotiation and real-terminal certification are
 not yet implemented; enabling the feature alone does not enable native output.**
@@ -104,9 +105,19 @@ cargo run --release --example sixel_windows -- --text-only
 
 `--sixel` explicitly asserts that the whole terminal path supports Sixel, graphics
 ED 2 erasure, non-scrolling output and stable palettes; `RequireSixel` never silently
-falls back. It uses OS-measured cell pixels; an optional `--cell-pixels 8x18` must
-match **actual font metrics**, not arbitrary dimensions. Feature and backend metric
-checks (including cell height divisible by six) run before entering the terminal.
+falls back. Automatic cell pixels use OS window metrics first, then a `CSI 16 t`
+query on Unix (including WSL) if OS dimensions are unusable. The query requires
+stdin/stdout TTYs attached to the controlling terminal and has a 500 ms absolute
+timeout. Native Windows has no query fallback and still needs explicit dimensions.
+An optional `--cell-pixels 8x18` skips both sources and must match **actual font
+metrics**, not arbitrary dimensions. Query successes/failures are cached per
+terminal grid and refreshed on grid changes; after a same-grid font change, use
+an explicit override or restart. Feature and backend metric checks (1..=1024 per
+dimension, at most 65,536 pixels) run before entering the managed terminal session.
+The query measures cells, not Sixel support; capability flags remain host assertions.
+Actual 10×20 cells are supported with `--cell-pixels 10x20`, without rounding the
+height to 18 or 24. The terminal must honor transparent partial-band padding as
+well as the erase/no-scroll assertions; this is not real-terminal certification.
 Drag titles to move, drag bottom grips to resize, and click to bring a window forward.
 `e` cycles Canvas Braille/HalfBlock/Quadrant, `r` restores starting rectangles, and
 `q`/Esc quits. Prefer 100×32 cells; smaller sizes and terminal resizing are supported.

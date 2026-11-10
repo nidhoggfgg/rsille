@@ -83,6 +83,12 @@ impl TerminalBackend for SystemTerminal {
         }
     }
     fn keyboard_supported(&mut self) -> io::Result<bool> {
+        #[cfg(unix)]
+        if super::terminal_query::is_active() {
+            return super::terminal_query::keyboard_supported();
+        }
+        #[cfg(unix)]
+        super::terminal_query::reserve_crossterm_input()?;
         crossterm::terminal::supports_keyboard_enhancement()
     }
     fn native_key_releases(&self) -> bool {

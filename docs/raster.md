@@ -32,20 +32,49 @@ terminal/multiplexer path must support Sixel, ED 2 erasure of graphics,
 non-scrolling positioned output (including the last row), and stable colors when
 later tile palettes are sent. The demo uses `RequireSixel`, so failure is an error,
 not a silent character fallback. The feature and current backend cell-metric
-requirements are checked **before entering terminal mode**: each dimension must
-be 1..=1024, the product at most 65,536, and cell height a multiple of six.
+requirements are checked **before entering the managed terminal session**: each dimension must
+be 1..=1024 and the product at most 65,536. Cell height need not be divisible by six.
 
-By default, cell pixels come from the OS window-size API. If those measurements
-are unavailable, an explicit override is possible:
+By default, cell pixels come first from the OS window-size API, then from a
+bounded `CSI 16 t` query on Unix (including WSL) if OS measurements are unusable.
+The query requires stdin and stdout to be TTYs attached to the controlling terminal
+and has a 500 ms absolute timeout. Native Windows has no query fallback; explicit
+cell dimensions are still needed there. If automatic discovery fails, supply a
+measured override:
 
 ```sh
 cargo run --release --features sixel --example sixel_windows -- --sixel --cell-pixels 8x18
 ```
 
 **Use `8x18` only if it matches your actual terminal font/cell metrics.** It is not
-an arbitrary rendering resolution or a way to bypass the height restriction.
+an arbitrary rendering resolution or a way to bypass resource limits.
 Measure the real cell size and keep overrides current after font/terminal changes.
 Neither measured pixels nor the feature flag proves graphics support.
+
+`--cell-pixels` is **not terminal columns × rows**. For example, a 960×648-pixel
+text area containing 120 columns and 36 rows has 8×18-pixel cells, not 120×36.
+Using 120×36 for that terminal makes each tile too wide and tall; adjacent tiles
+then overlap, compressing the visible image and spilling beyond window borders.
+Prefer omitting the override when automatic discovery supplies correct metrics.
+OS metrics are refreshed on eligible frames; query successes and failures are
+cached per terminal grid and refreshed when columns/rows change. A font change
+without a grid change is not detected by that query cache: use an explicit override
+or restart. The example rejects an override equal to the terminal grid unless
+`--force-cell-pixels` explicitly confirms an unusual, measured cell size. Explicit
+overrides skip both OS metric lookup and terminal queries, so they are not compared
+against automatic measurements.
+Actual **10×20-pixel cells are supported**: use the measured metrics or
+`--cell-pixels 10x20`, without rounding the height to 18 or 24. Rounding would
+misalign tiles with the real cell grid.
+
+The encoder handles partial six-row bands: Sixel `P2=1` leaves unset pixels
+transparent, raster attributes declare the exact height, and there is no extra
+final band advance. For a 20-pixel tile, only two rows of the final band contain
+pixels; its four padding rows remain unset. The real terminal/multiplexer path
+must honor this transparent padding without painting outside the tile, including
+at the bottom edge, and still satisfy the `no_scroll` and `reliable_erase`
+assertions. Accepting these metrics is **not real-terminal certification**;
+use `--text-only` if the terminal cannot satisfy that contract.
 
 Prefer a 100×32-cell terminal with mouse reporting; smaller sizes and terminal
 resizing are supported. Controls:
@@ -73,8 +102,12 @@ cargo test --example sixel_windows --features sixel
 cargo test --example sixel_windows --no-default-features
 ```
 
-Headless checks and unit tests do **not** validate real-terminal graphics,
-erasure, palette behavior, scrolling safety, or negotiation. The showcase replaces
+On Unix, `python3 scripts/check-sixel-query.py` runs a bounded PTY transport check
+for explicit/OS/query selection, fragmented replies, interleaved input, caching,
+resize, timeout, invalid replies, terminal identity and raw-mode restoration.
+
+Headless checks, unit tests and PTY transport checks do **not** validate real-terminal
+graphics, erasure, palette behavior, scrolling safety, or negotiation. The showcase replaces
 the earlier separate raster demos and benchmark harness; it is not a benchmark.
 
 ## Source coordinates and opacity
@@ -235,13 +268,14 @@ or change a renderer with `Render::set_raster_output(config)`:
 
 | Policy | Behavior |
 | --- | --- |
-| `RasterPolicy::Auto` (default) | Native only when all safety conditions are known; otherwise character fallback. |
-| `RasterPolicy::TextOnly` | No raster capability queries or Sixel output. Use `RasterOutput::text_only()`. |
+| `RasterPolicy::Auto` (default) | Native only when all safety conditions are known; otherwise character fallback. Unknown capabilities do not trigger cell-pixel queries. |
+| `RasterPolicy::TextOnly` | No cell-pixel queries or Sixel output. Use `RasterOutput::text_only()`. |
 | `RasterPolicy::RequireSixel` | Reject unsupported raster frames before frame output, rather than silently falling back. Text-only frames need not satisfy native conditions. |
 
-Build with `--features sixel` to include the native encoder. The feature adds no
-new dependencies; it uses a fixed 256-color **RGB332** palette (3 red, 3 green,
-2 blue bits), not lossless 24-bit output or adaptive image quantization.
+Build with `--features sixel` to include the native encoder. The encoder uses no
+external encoding library; Unix terminal input/query handling uses `libc`.
+It uses a fixed 256-color **RGB332** palette (3 red, 3 green, 2 blue bits), not
+lossless 24-bit output or adaptive image quantization.
 
 Native output additionally requires all of the following:
 
@@ -249,9 +283,9 @@ Native output additionally requires all of the following:
    are unsupported (an ordinary linefeed can scroll even when Sixel does not).
 2. Explicit `RasterCapabilities.sixel`, `.reliable_erase`, and `.no_scroll`
    assertions for the **whole terminal/multiplexer path**.
-3. Valid `cell_pixels`: dimensions 1..=1024, product at most 65,536, and
-   **`height % 6 == 0`**. The height restriction prevents unverified six-row band
-   allocation from leaking beyond cell clipping or the bottom edge.
+3. Valid actual `cell_pixels`: dimensions 1..=1024 and product at most 65,536.
+   Heights not divisible by six, including 10×20 cells, are supported without
+   rounding; the terminal must honor transparent padding in partial bands.
 4. Supported composition and the resource budgets below.
 
 There is **no certified preset** to copy. For a host that has independently
@@ -262,14 +296,15 @@ use rsille::tui::prelude::*;
 
 // Call only AFTER validating the active terminal, font, modes, and multiplexer.
 // These true values are host assertions, NOT detection results or mode setters.
-fn output_after_host_validation(measured: CellPixels) -> RasterOutput {
+fn output_after_host_validation(explicit: Option<CellPixels>) -> RasterOutput {
     RasterOutput {
         policy: RasterPolicy::RequireSixel,
         capabilities: RasterCapabilities {
             sixel: true,
             reliable_erase: true,
             no_scroll: true,
-            cell_pixels: Some(measured),
+            // None: OS metrics, then Unix query. Some(pixels): skip both.
+            cell_pixels: explicit,
         },
     }
 }
@@ -282,18 +317,75 @@ These flags do not enable terminal modes. A standalone `Render` does not establi
 terminal modes itself; the caller must establish the configured alternate screen,
 or use the managed event-loop/TUI lifecycle.
 
-**No active DA/CSI graphics capability probe is implemented.** Crossterm's input
-stream does not route those replies to this layer. Starting a competing stdin
-reader would steal application input, so the implementation deliberately does
-not do that. Terminal names and environment variables are not proof of support.
+**No DA or Sixel capability negotiation is implemented.** The cell-pixel query
+below discovers dimensions only; the three capability flags remain host assertions.
+Terminal names and environment variables are not proof of support.
 
-`CellPixels::from_terminal()` uses the OS window-size API/syscall, not terminal
-query escapes or an input reader. Missing, zero, or non-integral metrics yield
-`None`. With explicit Sixel support and no metric override, the renderer looks up
-OS metrics lazily on raster frames, allowing resize updates. TextOnly, unused
-raster paths, and default unknown-capability Auto do not trigger this lookup.
-Metrics alone never establish graphics support; explicit overrides must be kept
-current after font/terminal changes.
+Cell-pixel selection is a library capability shared by standalone renderers and
+TUI apps, not an example-only measurement step:
+
+- `RasterCapabilities.cell_pixels: Some(pixels)` validates the explicit value and
+  skips **all OS metric lookup and terminal queries**. Invalid explicit dimensions
+  are errors in `RequireSixel`, not a request to try automatic detection.
+- `cell_pixels: None` (the default) first reads the OS window-size API/syscall and
+  divides text-area pixel width/height by columns/rows. Missing, zero, non-integral,
+  or backend-unsupported dimensions trigger the Unix query fallback rather than
+  guessing or rounding. The renderer resolves metrics on eligible native raster
+  frames without storing the result back into the configuration.
+- On Unix, including WSL, fallback sends `CSI 16 t` only when stdin and stdout are
+  TTYs attached to the controlling terminal. The absolute timeout is **500 ms**;
+  interleaved input does not extend it. The reply `CSI 6 ; height ; width t` gives
+  **pixels per cell directly**, in height/width order: do not divide by the grid.
+  Returned dimensions must satisfy the same backend limits as explicit values.
+- Query successes **and failures** are cached per terminal grid. A columns/rows
+  change refreshes the query result; a same-grid font change is not detected by
+  this cache. Use an explicit override or restart after such a change. OS metrics
+  are still checked first on eligible frames.
+- Native Windows has no terminal-query fallback; explicit cell dimensions are
+  still needed there. If neither OS metrics nor the query yields usable dimensions,
+  `RequireSixel` errors before frame output and `Auto` falls back to text.
+- `TextOnly`, unused raster paths, unsupported output modes, and unknown native
+  capabilities do not trigger automatic OS metric reads or cell-pixel queries.
+  In particular, default/unknown `Auto` does not query the terminal.
+
+`CellPixels::resolve(explicit: Option<CellPixels>) -> std::io::Result<CellPixels>`
+exposes the same selection and validation rule for startup preflight. For example:
+
+```rust
+use rsille::render::raster_output::CellPixels;
+
+// Explicit mode skips both OS metric lookup and terminal queries.
+let pixels = CellPixels::resolve(Some(CellPixels { width: 10, height: 20 }))?;
+// Preflight before starting any input reader: OS first, then Unix query fallback.
+// Returns an error if neither source supplies usable dimensions.
+let automatic = CellPixels::resolve(None);
+# Ok::<(), std::io::Error>(())
+```
+
+Keep `cell_pixels: None` in the configuration after automatic preflight; assigning
+`Some(measured)` would intentionally freeze that measurement as an override.
+`CellPixels::from_terminal()` remains available as a raw optional OS measurement
+without native resource-limit validation or query fallback. Metrics alone never
+establish graphics support; explicit overrides must be kept current after
+font/terminal changes.
+
+**Input ownership:** the managed event loop uses a unified input broker when
+automatic native metrics are enabled. A startup `CellPixels::resolve(None)` that
+enters query fallback also activates that broker. It parses query replies while
+preserving ordinary keyboard, mouse, paste, and other events; existing keyboard
+and cursor queries are routed through the same broker. Once fallback activates
+it, do not mix crossterm input readers or any other stdin reader with the broker.
+The broker's event stream is currently private to the managed loop. Standalone
+renderers or embedding hosts using external input readers must instead supply
+explicit measurements or use OS-only `CellPixels::from_terminal()` and update
+those values themselves. Running query preflight before an external reader is
+**not** sufficient: buffered input belongs to the broker, and later grid changes
+could trigger another query. Query-backed automatic discovery currently requires
+managed rsille input. Once a managed loop has used stock Crossterm input, later
+loops in the same process cannot take it over for querying; OS metrics still work,
+and otherwise `Auto` falls back or `RequireSixel` reports the ownership error.
+Calling `CellPixels::resolve(None)` explicitly requests discovery independently
+of renderer policy; `TextOnly`/unknown `Auto` avoid it only on automatic paths.
 
 Graphics cleanup uses **ED 2 plus full redraw**, not assumptions that spaces or
 line erasure delete images. This path is permitted only after the explicit native
@@ -302,6 +394,16 @@ resize, or switching to text may require a full screen clear and repaint. The
 normal terminal guard restores modes and leaves the alternate screen on exit;
 actual graphics persistence on exit/errors still requires real-terminal testing.
 There is no portable Sixel resource-delete command or retained image layer here.
+
+Native frames and graphics-cleanup frames wrap the entire clear/text/tile repaint
+in synchronized output (DEC mode 2026), ending before the final flush. Supporting
+terminals can present a completed frame instead of exposing blank screens or
+partially redrawn rows during dragging. Writer errors trigger best-effort protocol
+cancellation and synchronization release; retries repeat recovery and fully repaint.
+This is not capability negotiation: terminals or multiplexers without synchronized
+output support may still show progressive repainting. A final `flush()` alone does
+not make a terminal update atomic, and synchronization does not reduce tile count
+or guarantee a particular frame rate.
 
 ## Budgets and performance limits
 

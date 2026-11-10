@@ -1,10 +1,11 @@
 //! Position-independent Sixel tiles for already-visible raster cells.
 //!
 //! The parent gates this module with `cfg(feature = "sixel")` and owns cursor
-//! placement, clipping, terminal capabilities, and graphics cleanup. P2=1 and
-//! exact raster attributes prevent painting unused band bits, but some terminals
-//! still allocate six-row bands. Unless that behavior has been validated, the
-//! parent must require a physical cell height divisible by six.
+//! placement, clipping, terminal capabilities, and graphics cleanup. Arbitrary
+//! cell heights use a partial final band: P2=1 leaves unset padding transparent,
+//! raster attributes keep the actual dimensions, and no trailing band advance
+//! is emitted. The host must support transparent padding and non-scrolling
+//! positioned graphics, including at the bottom edge.
 
 use std::collections::VecDeque;
 use std::io::{self, Write};
@@ -445,7 +446,7 @@ mod tests {
 
     #[test]
     fn round_trips_all_colors_and_every_partial_band_height() {
-        for height in 1..=19 {
+        for height in 1..=25 {
             let mut cell = cell(256, height);
             for y in 0..height {
                 for x in 0..256 {
@@ -468,6 +469,43 @@ mod tests {
                 .encode(&cell, 256, height as u16)
                 .unwrap();
             assert_eq!(encoded, again);
+        }
+    }
+
+    #[test]
+    fn ten_by_twenty_tiles_preserve_exact_sampling_and_transparent_padding() {
+        let mut cell = cell(20, 40);
+        for y in 0..40 {
+            for x in 0..20 {
+                cell.canvas
+                    .set_pixel(x, y, Rgb((x * 13) as u8, (y * 6) as u8, 145));
+            }
+        }
+        cell.target = (2, 2).into();
+        let mut cache = SixelCache::default();
+        for y in 0..2 {
+            for x in 0..2 {
+                cell.x = x;
+                cell.y = y;
+                let bytes = cache.encode(&cell, 10, 20).unwrap();
+                // The decoder rejects painted padding rather than clipping it.
+                let decoded = assert_pixels(&cell, 10, 20, &bytes);
+                assert_eq!(decoded.bands, 4);
+                for py in 0..20 {
+                    for px in 0..10 {
+                        let source_x = usize::from(x) * 10 + px;
+                        let source_y = usize::from(y) * 20 + py;
+                        assert_eq!(
+                            decoded.pixels[py * 10 + px],
+                            Some(expected(Rgb(
+                                (source_x * 13) as u8,
+                                (source_y * 6) as u8,
+                                145
+                            )))
+                        );
+                    }
+                }
+            }
         }
     }
 

@@ -250,8 +250,12 @@ impl<State, M> App<State, M> {
     /// Configures terminal raster presentation policy and known capabilities.
     ///
     /// Defaults to automatic selection with unknown terminal capabilities. This
-    /// configuration is passed unchanged to the terminal renderer. Headless
-    /// [`Runtime::frame`] retains raster metadata regardless of terminal policy;
+    /// configuration is passed unchanged to the terminal renderer. Cell pixels
+    /// default to OS measurement followed by a bounded Unix/WSL terminal query
+    /// (`None`); an explicit `Some` bypasses both. Managed terminal input routes
+    /// query replies without discarding normal events. Unavailable metrics fail
+    /// `RequireSixel`; `Auto` falls back to text. Headless [`Runtime::frame`]
+    /// retains raster metadata regardless of terminal policy;
     /// use [`Runtime::frame_text_only`] for an explicit character-only snapshot.
     pub fn raster_output(mut self, config: RasterOutput) -> Self {
         self.raster_output = config;

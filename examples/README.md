@@ -57,10 +57,20 @@ smaller terminals and terminal resizing are supported.
 
 `--sixel` is your explicit assertion that the entire terminal/multiplexer path
 supports Sixel, graphics ED 2 erasure, no scrolling and stable palettes. It uses
-`RequireSixel`, with no silent fallback. Cell pixels are measured through the OS;
-optional `--cell-pixels 8x18` must match **actual font metrics**, not an arbitrary
-size. The feature and current backend limits (including height divisible by six)
-are checked before entering the terminal. No flags shows help, not a fallback demo;
+`RequireSixel`, with no silent fallback. Cell pixels use OS window metrics first;
+unusable OS dimensions trigger a `CSI 16 t` query on Unix (including WSL), requiring
+stdin/stdout TTYs attached to the controlling terminal and a 500 ms absolute timeout.
+Native Windows has no query fallback and still needs explicit dimensions. Optional
+`--cell-pixels 8x18` skips both sources and must match **actual font metrics**, not
+an arbitrary size. Query success/failure is cached per terminal grid and refreshed
+on grid changes; use an explicit override or restart after a same-grid font change.
+This query does not negotiate Sixel support. `--text-only` sends no cell-pixel query.
+The feature and backend limits (1..=1024 per dimension, at most 65,536 pixels)
+are checked before entering the managed terminal session. Actual 10×20 cells are supported with
+`--cell-pixels 10x20`; do not round the height to 18 or 24. The terminal must honor
+transparent partial-band padding and the erase/no-scroll assertions; accepting
+these metrics does not certify real-terminal behavior.
+No flags shows help, not a fallback demo;
 `--text-only` explicitly selects a character preview. See the
 [raster guide](../docs/raster.md) for the full safety contract.
 

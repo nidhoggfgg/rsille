@@ -3,7 +3,7 @@
 use crossterm::{
     cursor::{MoveTo, MoveToNextLine, MoveToPreviousLine, RestorePosition, SavePosition},
     style::{Attribute, Attributes, Color, Colors, Print, ResetColor, SetAttributes, SetColors},
-    terminal::{Clear, ClearType},
+    terminal::{BeginSynchronizedUpdate, Clear, ClearType, EndSynchronizedUpdate},
 };
 use log::debug;
 
@@ -88,7 +88,6 @@ pub struct Render<W, T> {
     previous_inline_height: u16,
     used_height: u16, // Actual height to render (for inline mode, avoids buffer reallocation)
     raster: super::raster_presenter::RasterPresenter,
-    automatic_cell_pixels: bool,
 }
 
 impl<W, T> Render<W, T>
@@ -115,6 +114,14 @@ where
             // A failed draw is not a valid previous frame. Repaint from scratch
             // on retry; the presenter separately remembers uncertain graphics.
             self.buffer.clear_content();
+            if self.raster.needs_protocol_recovery() {
+                // Cancel partial DCS/CSI before releasing a synchronized frame.
+                // Keep the presenter uncertain: a failed writer may reject this
+                // cleanup too, so the next frame must repeat it and fully repaint.
+                let _ = self.out.write_all(b"\x18\x1b\\");
+                let _ = crossterm::queue!(self.out, EndSynchronizedUpdate, ResetColor);
+                let _ = self.out.flush();
+            }
         }
         result
     }
@@ -145,16 +152,6 @@ where
         let chunk = Chunk::new(&mut self.buffer, render_size.into())?;
         self.thing.draw(chunk)?;
 
-        // OS metrics do not consume stdin. Query lazily only when native raster
-        // capability was explicitly supplied; TextOnly never queries anything.
-        if self.automatic_cell_pixels
-            && self.buffer.has_raster()
-            && self.raster.config.policy != super::raster_output::RasterPolicy::TextOnly
-            && self.raster.config.capabilities.sixel
-        {
-            self.raster.config.capabilities.cell_pixels =
-                super::raster_output::CellPixels::from_terminal();
-        }
         // An appended LF can scroll even when Sixel itself cannot. Treat this
         // contract like inline output rather than commit stale screen positions.
         let raster_plan = self.raster.prepare(
@@ -167,8 +164,16 @@ where
             // terminator from reaching the terminal. Cancel an incomplete DCS
             // before issuing SGR/ED commands on the recovered writer.
             self.out.write_all(b"\x18\x1b\\")?;
+            crossterm::queue!(self.out, EndSynchronizedUpdate)?;
         }
         self.raster.begin(&raster_plan);
+        // A flush is not an atomic terminal repaint. Hide the intermediate
+        // clear/text/tile passes on terminals supporting DEC mode 2026, including
+        // the last native frame's cleanup when switching to character output.
+        let synchronized = raster_plan.native || raster_plan.clear;
+        if synchronized {
+            crossterm::queue!(self.out, BeginSynchronizedUpdate)?;
+        }
 
         // Match the frame-local style cache to the real terminal before
         // drawing or erasing. Cursor movement and clearing do not reset SGR.
@@ -211,7 +216,10 @@ where
             crossterm::queue!(self.out, Print("\n"))?;
         }
 
-        // ensure the output is flushed to terminal
+        if synchronized {
+            crossterm::queue!(self.out, EndSynchronizedUpdate)?;
+        }
+        // Commit display history only after the entire synchronized frame flushes.
         self.out.flush()?;
         self.raster.commit(raster_plan);
 
@@ -262,13 +270,40 @@ where
     /// Changes presentation policy or explicit pixel metrics for subsequent frames.
     /// Old graphics are cleared on the next successful frame before text fallback.
     pub fn set_raster_output(&mut self, config: super::raster_output::RasterOutput) {
-        self.automatic_cell_pixels = config.capabilities.cell_pixels.is_none();
         self.raster.config = config;
     }
 
     /// Returns Sixel work counters and bounded cache occupancy.
     pub fn raster_stats(&self) -> super::raster_output::RasterStats {
         self.raster.stats()
+    }
+
+    /// Reserve the managed input owner before terminal negotiation or any
+    /// EventStream is created. Automatic native output can then query safely
+    /// even if OS metrics become unavailable later in the session.
+    pub(crate) fn prepare_terminal_input(&self, alternate_screen: bool) {
+        #[cfg(all(unix, feature = "sixel"))]
+        {
+            use super::raster_output::RasterPolicy;
+            let config = self.raster.config;
+            let capabilities = config.capabilities;
+            if alternate_screen
+                && !self.inline_mode
+                && !self.append_newline
+                && config.policy != RasterPolicy::TextOnly
+                && capabilities.sixel
+                && capabilities.reliable_erase
+                && capabilities.no_scroll
+                && capabilities.cell_pixels.is_none()
+            {
+                // Failure only disables the query fallback. OS metrics may
+                // still work, and Auto must remain free to use character output.
+                if let Err(error) = super::terminal_query::prepare_input() {
+                    debug!("Terminal metric query unavailable: {error}");
+                }
+            }
+        }
+        let _ = alternate_screen;
     }
 
     pub(crate) fn set_alternate_screen(&mut self, enabled: bool) {
@@ -457,7 +492,6 @@ where
                 builder.raster_output,
                 builder.enable_alt_screen,
             ),
-            automatic_cell_pixels: builder.raster_output.capabilities.cell_pixels.is_none(),
         }
     }
 }

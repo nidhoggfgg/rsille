@@ -111,6 +111,12 @@ impl Builder {
 
     /// Configures raster presentation. Unknown capabilities default to text.
     ///
+    /// `config.capabilities.cell_pixels` defaults to `None`: OS metrics first,
+    /// then a bounded terminal query on Unix/WSL. `Some` bypasses both. Managed
+    /// loops coordinate query replies with input. Standalone hosts using external
+    /// input readers must supply explicit or OS-only metrics; they cannot share
+    /// the managed query broker with Crossterm or another stdin reader.
+    /// Missing metrics fail `RequireSixel`; `Auto` uses character fallback.
     /// A standalone renderer does not enter an alternate screen: when enabling
     /// native output, the caller must establish the configured terminal modes.
     pub fn raster_output(
