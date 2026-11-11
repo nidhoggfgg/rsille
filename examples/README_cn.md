@@ -22,6 +22,7 @@ cargo run --release --manifest-path examples/lumen/Cargo.toml
 | 示例 | 文件 / 目录 | 展示内容 |
 | --- | --- | --- |
 | [Sixel 与 Canvas 浮窗](../docs/raster.md#run-the-showcase) | `sixel_windows.rs`（根包示例） | 两个可拖动、调整大小的浮窗，以原生 RGB 栅格和 Canvas 字符采样展示同一颗静态带环行星。 |
+| [函数绘图](function-plotter/README_cn.md) | `function-plotter` | Mathematica 风格输入/输出单元、紧凑 Sixel 函数图像、重新执行与滚动历史。 |
 | [TUI showcase](tui-showcase/README_cn.md) | `tui-showcase` | 七页组件展厅：表单、数据、内容、布局、动画和主题。 |
 | [Lumen](lumen/README_cn.md) | `lumen` | 包含流程、笔记和浮动桌面的交互工作台。 |
 | [Orbit Files](orbit-files/README_cn.md) | `orbit-files` | 支持框选、拖放、预览和撤销的文件管理器。 |

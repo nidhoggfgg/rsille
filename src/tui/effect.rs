@@ -297,6 +297,8 @@ pub enum Effect<M> {
     Exit,
     /// Queues an application message.
     Message(M),
+    /// Presents and commits the current inline frame before delivering this message.
+    CommitFrame(M),
     /// Applies effects in declaration order without awaiting their completion.
     Batch(Vec<Effect<M>>),
     /// Submits a task to the configured executor.
@@ -336,6 +338,11 @@ impl<M> Effect<M> {
     /// Queues a message for a subsequent application update.
     pub fn message(message: M) -> Self {
         Self::Message(message)
+    }
+
+    /// Creates a hard presentation boundary. See [`UpdateCtx::commit_frame`].
+    pub fn commit_frame(after_message: M) -> Self {
+        Self::CommitFrame(after_message)
     }
 
     /// Collects effects in declaration order; spawned tasks are not awaited.
@@ -405,6 +412,7 @@ impl<M> Effect<M> {
             Self::None => Effect::None,
             Self::Exit => Effect::Exit,
             Self::Message(m) => Effect::Message(map(m)),
+            Self::CommitFrame(m) => Effect::CommitFrame(map(m)),
             Self::Batch(effects) => Effect::Batch(
                 effects
                     .into_iter()
@@ -1259,6 +1267,45 @@ impl<'a, M> UpdateCtx<'a, M> {
     /// Queues a message for a subsequent application update.
     pub fn emit(&mut self, message: M) {
         self.effects.push(Effect::message(message));
+    }
+
+    /// Renders this update's final view and leaves it above the next inline frame.
+    ///
+    /// Message processing and later effects pause until presentation and cursor
+    /// advancement succeed. `after_message` runs before other queued messages;
+    /// use it to reset the result state to the next prompt. This does not snapshot
+    /// state at the call site: the entire current update finishes first.
+    ///
+    /// Terminal execution requires inline mode (fullscreen returns an error).
+    /// The cursor advances with real newlines, including native raster padding.
+    /// Sixel retention while scrolling depends on the terminal; this API does not
+    /// guarantee graphics in scrollback. Headless execution reports a committed
+    /// frame through [`crate::tui::runtime::StepResult::committed`], retaining it
+    /// in `Runtime::frame()` until the next step. No terminal I/O occurs there.
+    ///
+    /// ```
+    /// use rsille::tui::{app::App, widgets::label};
+    ///
+    /// let mut app = App::new("prompt>".to_owned()).build_with_effects(
+    ///     |state, submit: bool, ctx| {
+    ///         if submit {
+    ///             *state = "result: 42".into();
+    ///             ctx.commit_frame(false);
+    ///         } else {
+    ///             *state = "prompt>".into();
+    ///         }
+    ///     },
+    ///     |state| label(state.clone()),
+    /// ).size(20, 1);
+    /// app.handle().send(true).unwrap();
+    /// assert!(app.step(&[]).unwrap().committed);
+    /// assert_eq!(app.state(), "result: 42"); // frame() contains the result
+    /// assert!(!app.step(&[]).unwrap().committed);
+    /// assert_eq!(app.state(), "prompt>");
+    /// // For terminal execution, use app.run_inline() instead of stepping.
+    /// ```
+    pub fn commit_frame(&mut self, after_message: M) {
+        self.effects.push(Effect::commit_frame(after_message));
     }
 
     /// Appends an effect to the update's effect queue.

@@ -280,8 +280,13 @@ impl<M: 'static> Widget<M> for TextArea<M> {
         let cursor_position = floor_boundary(&self.value, state.cursor_position);
         let metrics = theme.text_metrics;
         let (cursor_line, cursor_col) = metrics.byte_to_line_column(&self.value, cursor_position);
-        let horizontal_offset =
-            cursor_scroll(cursor_col, state.horizontal_offset, content_width as usize);
+        let horizontal_offset = horizontal_scroll(
+            &self.value,
+            metrics,
+            cursor_col,
+            state.horizontal_offset,
+            content_width as usize,
+        );
         let visible_rows = content_height as usize;
         let scroll_offset = if state.viewport_scrolled {
             state
@@ -444,7 +449,13 @@ impl<M: 'static> Widget<M> for TextArea<M> {
             } else {
                 ensure_item_visible(state.scroll_offset, line, rows)
             };
-            let mut horizontal = cursor_scroll(col, state.horizontal_offset, columns);
+            let mut horizontal = horizontal_scroll(
+                &editor.value,
+                metrics,
+                col,
+                state.horizontal_offset,
+                columns,
+            );
             if dragging {
                 if y < inset {
                     scroll = scroll.saturating_sub(1);
@@ -503,7 +514,13 @@ impl<M: 'static> Widget<M> for TextArea<M> {
         state.selection_anchor = editor.anchor;
         let (line, col) = metrics.byte_to_line_column(&editor.value, editor.cursor);
         state.scroll_offset = ensure_item_visible(state.scroll_offset, line, rows);
-        state.horizontal_offset = cursor_scroll(col, state.horizontal_offset, columns);
+        state.horizontal_offset = horizontal_scroll(
+            &editor.value,
+            metrics,
+            col,
+            state.horizontal_offset,
+            columns,
+        );
         state.value = Some(editor.value);
         state.dragging = pointer.anchor.is_some();
         state.viewport_scrolled = pointer.scrolled;
@@ -548,6 +565,25 @@ impl<M: 'static> Widget<M> for TextArea<M> {
     fn key(&self) -> Option<&str> {
         self.widget_key.as_deref()
     }
+}
+
+// Shrinking text or widening the viewport must reveal text hidden by an old
+// offset. Reserve one column for the end caret, and retain the longest line's
+// extent so multiline editors keep a shared horizontal viewport.
+fn horizontal_scroll(
+    value: &str,
+    metrics: TextMetrics,
+    column: usize,
+    offset: usize,
+    width: usize,
+) -> usize {
+    let extent = value
+        .split('\n')
+        .map(|line| metrics.width(line))
+        .max()
+        .unwrap_or(0);
+    let max_offset = extent.saturating_add(1).saturating_sub(width.max(1));
+    cursor_scroll(column, offset.min(max_offset), width)
 }
 
 /// Creates an empty [`TextArea`] with its default configuration.

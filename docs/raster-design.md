@@ -198,7 +198,7 @@ does not bypass resource limits.
   encoded payload. Dimension products/allocation sizes are checked.
 - LRU: at most 1,024 entries, approximately 4 MiB including an overhead reserve.
   Reported `cache_bytes` counts payload only; returned Arcs may outlive eviction.
-- Native frame: at most 4,096 visible raster cells and 16,777,216 physical pixels;
+- Native frame: at most 32,768 visible raster cells and 16,777,216 physical pixels;
   staged encoded payload at most 32 MiB. Coordinate addition is checked too.
 
 Auto chooses text when policy/preflight frame limits fail; RequireSixel reports

@@ -121,6 +121,23 @@ pub trait Update {
     /// Return `true` when the new state should be rendered, `false` when no redraw is needed.
     fn update(&mut self) -> Result<bool, DrawErr>;
 
+    /// Opt into update checkpoints between input events, allowing an event to
+    /// request a commit before the rest of the batch is dispatched. Ordinary
+    /// draws are still coalesced. The default preserves batched event delivery.
+    fn event_frame_boundaries(&self) -> bool {
+        false
+    }
+
+    /// Whether updates are paused for a hard inline presentation boundary.
+    /// The event loop renders and commits before acknowledging this request.
+    fn frame_commit_pending(&self) -> bool {
+        false
+    }
+
+    /// Acknowledges successful presentation and cursor advancement. Never called
+    /// on a failed render or commit; implementations may now queue a continuation.
+    fn frame_committed(&mut self) {}
+
     /// Check if the application should quit
     ///
     /// This allows the application to signal a clean shutdown without

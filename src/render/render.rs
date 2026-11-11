@@ -273,6 +273,46 @@ where
         Ok(())
     }
 
+    /// Leaves the successfully rendered inline region in terminal history and
+    /// starts a fresh region below it. Native graphics history is terminal-dependent.
+    ///
+    /// Does not draw. Call after a successful `render`; failures propagate without
+    /// forgetting display history. A partially written newline is not retry-safe.
+    pub(crate) fn commit_frame(&mut self) -> std::io::Result<()> {
+        if !self.inline_mode || self.append_newline {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "frame commits require inline mode without appended newlines",
+            ));
+        }
+        if self.raster.needs_protocol_recovery() {
+            return Err(std::io::Error::other(
+                "cannot commit an uncertain raster frame",
+            ));
+        }
+        // The cursor is on the last content row, not the last padding row.
+        // Real LF (rather than CNL) scrolls correctly at the viewport bottom.
+        for _ in 0..=self.inline_raster_padding {
+            crossterm::queue!(self.out, Print("\r\n"))?;
+        }
+        self.out.flush()?;
+        let extent = self
+            .previous_inline_height
+            .max(1)
+            .saturating_add(self.inline_raster_padding);
+        self.pos.x = 0;
+        self.pos.y = self.pos.y.saturating_add(extent);
+        if let Some(height) = self.inline_viewport_height {
+            self.pos.y = self.pos.y.min(height.saturating_sub(1));
+        }
+        self.previous_inline_height = 0;
+        self.inline_raster_padding = 0;
+        self.inline_raster_checkpoint = None;
+        self.buffer.reset_diff();
+        self.raster.forget_region();
+        Ok(())
+    }
+
     pub(crate) fn force_inline_viewport_follow(&mut self) -> std::io::Result<()> {
         if !self.inline_mode || self.used_height == 0 {
             return Ok(());
@@ -772,6 +812,44 @@ mod tests {
             }
             Ok((width as u16, height as u16).into())
         }
+    }
+
+    #[test]
+    fn commit_frame_advances_without_erasing_and_starts_fresh_diff() {
+        let mut render = Builder::new()
+            .inline_mode(true)
+            .size((8, 2))
+            .build_render(Text::new("result\nvalue"), Vec::new());
+        render.set_inline_viewport_height(4);
+        render.pos.y = 2;
+        render.render().unwrap();
+        render.out.clear();
+        render.commit_frame().unwrap();
+        assert_eq!(render.out, b"\r\n");
+        assert_eq!(render.pos, (0, 3).into());
+        assert!(render.buffer.previous().is_none());
+        assert_eq!(render.previous_inline_height, 0);
+        render.out.clear();
+        render.thing = Text::new("next");
+        render.used_height = 1;
+        render.render().unwrap();
+        let bytes = String::from_utf8(render.out).unwrap();
+        assert!(bytes.contains("next"));
+        assert!(!bytes.contains("\x1b[1F"));
+        assert!(!bytes.contains("\x1b[2K"));
+        assert!(!bytes.contains("\x1b[2J"));
+    }
+
+    #[test]
+    fn commit_frame_rejects_fullscreen_without_writing() {
+        let mut render = Builder::new()
+            .size((8, 1))
+            .build_render(Text::new("result"), Vec::new());
+        assert_eq!(
+            render.commit_frame().unwrap_err().kind(),
+            std::io::ErrorKind::Unsupported
+        );
+        assert!(render.out.is_empty());
     }
 
     #[test]

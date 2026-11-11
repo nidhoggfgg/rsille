@@ -152,6 +152,58 @@ fn same_key_changes_component_type_and_new_key_starts_fresh_state() {
 }
 
 #[test]
+fn textarea_horizontal_viewport_recovers_after_resize_and_external_replacement() {
+    let mut app = App::new(String::new())
+        .with_motion_policy(MotionPolicy::disabled())
+        .build(
+            |state, value| *state = value,
+            |value| textarea().value(value).height(4).on_change(|value| value),
+        )
+        .size(20, 4);
+    let value = "0123456789界e\u{301}abcdefghij";
+    app.step(&[Event::Paste(value.into())]).unwrap();
+    assert_eq!(app.state(), value);
+    assert!(
+        app.widget_state::<TextAreaState>(&WidgetId::root())
+            .unwrap()
+            .horizontal_offset
+            > 0
+    );
+    app.step(&[Event::Resize(60, 4)]).unwrap();
+    let row: String = app.frame().content()[60..120]
+        .iter()
+        .map(|c| c.content.symbol())
+        .collect();
+    assert!(row.contains("0123456789"), "{row:?}");
+    // Pointer hit-testing must use the same repaired viewport as painting.
+    app.step(&[
+        Event::Mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 2,
+            row: 1,
+            modifiers: KeyModifiers::NONE,
+        }),
+        key(KeyCode::Char('X')),
+    ])
+    .unwrap();
+    assert_eq!(app.state(), "0X123456789界e\u{301}abcdefghij");
+    app.step(&[Event::Resize(20, 4), key(KeyCode::End)])
+        .unwrap();
+    app.handle().send("界e\u{301}".into()).unwrap();
+    app.step(&[]).unwrap();
+    let row: String = app.frame().content()[20..40]
+        .iter()
+        .map(|c| c.content.symbol())
+        .collect();
+    assert!(row.contains('界') && row.contains("e\u{301}"), "{row:?}");
+    app.step(&[key(KeyCode::Backspace)]).unwrap();
+    assert_eq!(app.state(), "界");
+    app.step(&[key(KeyCode::Backspace), Event::Paste(value.into())])
+        .unwrap();
+    assert_eq!(app.state(), value);
+}
+
+#[test]
 fn textarea_external_reset_repairs_cursor_and_scroll_without_keyboard_input() {
     let mut app = App::new(String::new())
         .build(

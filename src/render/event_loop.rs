@@ -7,7 +7,7 @@
 #[cfg(test)]
 use crossterm::event::MouseEvent;
 use std::{
-    io::{stdout, Stdout},
+    io::stdout,
     time::{Duration, Instant},
 };
 
@@ -26,14 +26,22 @@ use crate::render::{
     KeyboardMode, Render, WakeHandle,
 };
 
+#[cfg(not(test))]
+type LoopOutput = std::io::Stdout;
+// Exercise the real loop and renderer without writing control sequences to the
+// test runner's terminal. Terminal setup is bypassed by run_loop_with_stream.
+#[cfg(test)]
+type LoopOutput = Vec<u8>;
+
 /// Owns an application, its standard-output renderer, and terminal settings.
 ///
 /// Each iteration dispatches input and updates the application before deciding
 /// whether to draw. Input, update, and drawing failures during iterations are
-/// logged and the loop continues. Setup failures are returned to the caller.
+/// logged and the loop continues. Setup and commit-frame presentation failures
+/// are returned to the caller.
 /// Cleanup is best-effort, including when a running future is dropped.
 pub struct EventLoop<T> {
-    render: Render<Stdout, T>,
+    render: Render<LoopOutput, T>,
     raw_mode: bool,
     exit_code: Option<KeyEvent>,
     max_event_per_frame: usize,
@@ -57,8 +65,12 @@ where
     where
         T: DrawUpdate,
     {
+        #[cfg(not(test))]
+        let output = stdout();
+        #[cfg(test)]
+        let output = Vec::new();
         Self {
-            render: Render::from_builder(builder, thing, stdout()),
+            render: Render::from_builder(builder, thing, output),
             raw_mode: builder.enable_raw_mode,
             exit_code: builder.exit_code,
             max_event_per_frame: builder.max_event_per_frame,
@@ -278,22 +290,32 @@ where
     }
 
     async fn run_loop(&mut self) -> Result<(), DrawErr> {
+        super::terminal_probe::reserve_input()?;
+        self.run_loop_with_stream(&mut EventStream::new()).await
+    }
+
+    async fn run_loop_with_stream<S>(&mut self, reader: &mut S) -> Result<(), DrawErr>
+    where
+        S: futures::Stream<Item = std::io::Result<Event>> + Unpin,
+    {
         let frame_interval = self
             .frame_limit
             .filter(|fps| *fps > 0)
             .map(|fps| Duration::from_secs_f64(1.0 / fps as f64));
         let mut pending_initial_frame = true;
         let mut next_frame_at = Instant::now();
-        super::terminal_probe::reserve_input()?;
-        let mut reader = EventStream::new();
         let wake = self.render.thing().wake_handle();
+        let mut pending_events = std::collections::VecDeque::new();
+        let mut resume_after_commit = false;
+        let mut input_closed = false;
+        let mut pending_render = false;
 
         loop {
             let mut stop_after_iteration = false;
             let mut events = Vec::new();
 
             match wait_for_frame_or_event(
-                &mut reader,
+                reader,
                 self.exit_code,
                 if wake.is_some() {
                     self.render.thing().next_update_at()
@@ -301,7 +323,11 @@ where
                     frame_interval.map(|_| next_frame_at)
                 },
                 wake.as_ref(),
-                pending_initial_frame,
+                pending_initial_frame
+                    || resume_after_commit
+                    || !pending_events.is_empty()
+                    || input_closed
+                    || self.render.thing().frame_commit_pending(),
             )
             .await
             {
@@ -317,14 +343,22 @@ where
                 WaitOutcome::Disconnected => break,
             }
 
-            match drain_pending_events(
-                &mut reader,
-                self.exit_code,
-                &mut events,
-                self.max_event_per_frame,
-            )
-            .await
+            let drained = if pending_events.is_empty()
+                && !resume_after_commit
+                && !input_closed
+                && !self.render.thing().frame_commit_pending()
             {
+                drain_pending_events(
+                    reader,
+                    self.exit_code,
+                    &mut events,
+                    self.max_event_per_frame,
+                )
+                .await
+            } else {
+                DrainOutcome::Continue
+            };
+            match drained {
                 DrainOutcome::Continue => {}
                 DrainOutcome::ExitRequested => {
                     info!(
@@ -341,6 +375,16 @@ where
             pending_initial_frame = false;
             let frame_started_at = Instant::now();
 
+            input_closed |= stop_after_iteration;
+            pending_events.extend(events);
+            let resuming = std::mem::take(&mut resume_after_commit);
+            let events: Vec<_> = if resuming || self.render.thing().frame_commit_pending() {
+                Vec::new()
+            } else if self.render.thing().event_frame_boundaries() {
+                pending_events.pop_front().into_iter().collect()
+            } else {
+                pending_events.drain(..).collect()
+            };
             for event in &events {
                 if let Event::Resize(width, height) = event {
                     self.terminal_size = (*width, *height).into();
@@ -354,7 +398,11 @@ where
                 }
             }
 
-            let has_events = self.dispatch_events(events);
+            let has_events = if self.render.thing().frame_commit_pending() {
+                false
+            } else {
+                self.dispatch_events(events)
+            };
             let needs_render = match self.render.update() {
                 Ok(needs_render) => needs_render,
                 Err(e) => {
@@ -371,6 +419,13 @@ where
                 break;
             }
 
+            let committing = self.render.thing().frame_commit_pending();
+            if committing && !self.inline_mode {
+                return Err(DrawErr::Io(std::io::Error::new(
+                    std::io::ErrorKind::Unsupported,
+                    "frame commits require inline terminal mode",
+                )));
+            }
             let current_size = self.render.size();
             if let Some(new_size) = self.render.thing().required_size(current_size) {
                 if self.inline_mode {
@@ -383,26 +438,36 @@ where
             let force_inline_frame =
                 self.inline_mode && self.inline_mouse_mode.force_follows_viewport();
 
-            if has_events || needs_render || self.render.has_pending_changes() || force_inline_frame
-            {
+            pending_render |= has_events
+                || needs_render
+                || self.render.has_pending_changes()
+                || force_inline_frame;
+            if committing || (pending_render && (resuming || pending_events.is_empty())) {
                 if let Err(e) = self.render.render() {
-                    if e.kind() == std::io::ErrorKind::Unsupported {
+                    if committing || e.kind() == std::io::ErrorKind::Unsupported {
                         // Strict raster policy is an actionable configuration
                         // error, not a transient frame failure to log forever.
                         return Err(DrawErr::Io(e));
                     }
                     error!("Error rendering: {}", e);
                 } else {
-                    if force_inline_frame {
+                    pending_render = false;
+                    if force_inline_frame && !committing {
                         if let Err(e) = self.render.force_inline_viewport_follow() {
                             error!("Error following inline viewport: {}", e);
                         }
                     }
                     self.align_inline_origin_after_render();
+                    if committing {
+                        // Never acknowledge a partial write or flush failure.
+                        self.render.commit_frame()?;
+                        self.render.thing_mut().frame_committed();
+                        resume_after_commit = true;
+                    }
                 }
             }
 
-            if stop_after_iteration {
+            if input_closed && pending_events.is_empty() && !resume_after_commit {
                 break;
             }
 
@@ -735,6 +800,154 @@ mod tests {
             .await
             .unwrap()
             .unwrap());
+    }
+
+    #[derive(Default)]
+    struct BoundaryProbe {
+        checkpoints: bool,
+        pending: bool,
+        resume: bool,
+        commits: usize,
+        fail_draw: bool,
+        received: String,
+        state: String,
+        batches: Vec<usize>,
+        draws: Vec<String>,
+    }
+
+    impl Draw for BoundaryProbe {
+        fn draw(&mut self, _: Chunk) -> Result<Size, DrawErr> {
+            if self.fail_draw {
+                return Err(DrawErr::Io(std::io::Error::other("injected draw failure")));
+            }
+            self.draws.push(self.state.clone());
+            Ok((0, 0).into())
+        }
+    }
+
+    impl Update for BoundaryProbe {
+        fn on_events(&mut self, events: &[Event]) -> Result<(), DrawErr> {
+            if !events.is_empty() {
+                self.batches.push(events.len());
+            }
+            for event in events {
+                if let Event::Key(KeyEvent {
+                    code: crossterm::event::KeyCode::Char(c),
+                    ..
+                }) = event
+                {
+                    assert!(!self.pending && !self.resume, "input crossed a boundary");
+                    self.received.push(*c);
+                    self.state = c.to_string();
+                    if *c == 'c' {
+                        self.pending = true;
+                    }
+                }
+            }
+            Ok(())
+        }
+        fn update(&mut self) -> Result<bool, DrawErr> {
+            if std::mem::take(&mut self.resume) {
+                self.state = "prompt".into();
+            }
+            Ok(true)
+        }
+        fn event_frame_boundaries(&self) -> bool {
+            self.checkpoints
+        }
+        fn frame_commit_pending(&self) -> bool {
+            self.pending
+        }
+        fn frame_committed(&mut self) {
+            assert!(self.pending);
+            assert_eq!(self.draws.last(), Some(&self.state));
+            self.pending = false;
+            self.resume = true;
+            self.commits += 1;
+        }
+    }
+
+    fn boundary_loop(checkpoints: bool) -> EventLoop<BoundaryProbe> {
+        Builder::new()
+            .inline_mode(true)
+            .size((0, 0))
+            .clear(false)
+            .build_event_loop(BoundaryProbe {
+                checkpoints,
+                ..Default::default()
+            })
+    }
+
+    fn key_event(c: char) -> Event {
+        Event::Key(KeyEvent::new(
+            crossterm::event::KeyCode::Char(c),
+            KeyModifiers::NONE,
+        ))
+    }
+
+    #[tokio::test]
+    async fn ordinary_events_keep_batch_delivery_and_coalesce_checkpoint_draws() {
+        for checkpoints in [false, true] {
+            let mut event_loop = boundary_loop(checkpoints);
+            let mut reader = futures::stream::iter(['a', 'b', 'd'].map(|c| Ok(key_event(c))));
+            event_loop.run_loop_with_stream(&mut reader).await.unwrap();
+            let app = event_loop.render.thing();
+            assert_eq!(app.received, "abd");
+            assert_eq!(app.draws, ["d"]);
+            assert_eq!(
+                app.batches,
+                if checkpoints { vec![1, 1, 1] } else { vec![3] }
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn drained_exit_or_eof_preserves_all_prior_commits_and_continuations() {
+        for exit_key in [false, true] {
+            let mut event_loop = boundary_loop(true);
+            let exit = KeyEvent::new(crossterm::event::KeyCode::Esc, KeyModifiers::NONE);
+            event_loop.exit_code = Some(exit);
+            let mut events = vec![Ok(key_event('c')), Ok(key_event('c')), Ok(key_event('a'))];
+            if exit_key {
+                events.extend([Ok(Event::Key(exit)), Ok(key_event('z'))]);
+            }
+            let mut reader = futures::stream::iter(events);
+            event_loop.run_loop_with_stream(&mut reader).await.unwrap();
+            let app = event_loop.render.thing();
+            assert_eq!(app.received, "cca");
+            assert_eq!(app.commits, 2);
+            assert_eq!(app.draws, ["c", "prompt", "c", "prompt", "a"]);
+        }
+    }
+
+    #[tokio::test]
+    async fn drained_exit_does_not_hide_commit_failure_or_run_continuation() {
+        let mut event_loop = boundary_loop(true);
+        event_loop.render.thing_mut().fail_draw = true;
+        let exit = KeyEvent::new(crossterm::event::KeyCode::Esc, KeyModifiers::NONE);
+        event_loop.exit_code = Some(exit);
+        let mut reader = futures::stream::iter([Ok(key_event('c')), Ok(Event::Key(exit))]);
+        assert!(event_loop.run_loop_with_stream(&mut reader).await.is_err());
+        let app = event_loop.render.thing();
+        assert_eq!(app.commits, 0);
+        assert!(app.pending);
+        assert!(!app.resume);
+        assert_eq!(app.state, "c");
+    }
+
+    #[tokio::test]
+    async fn already_pending_commit_is_presented_before_reading_exit() {
+        let mut event_loop = boundary_loop(true);
+        event_loop.render.thing_mut().pending = true;
+        event_loop.render.thing_mut().state = "result".into();
+        let exit = KeyEvent::new(crossterm::event::KeyCode::Esc, KeyModifiers::NONE);
+        event_loop.exit_code = Some(exit);
+        let mut reader = futures::stream::iter([Ok(Event::Key(exit))]);
+        event_loop.run_loop_with_stream(&mut reader).await.unwrap();
+        let app = event_loop.render.thing();
+        assert_eq!(app.commits, 1);
+        assert_eq!(app.draws, ["result", "prompt"]);
+        assert!(app.received.is_empty());
     }
 
     struct Noop;

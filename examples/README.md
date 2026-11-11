@@ -24,6 +24,7 @@ directory name in the table. Prefer release builds for animations and 3D scenes.
 | Example | File / directory | What it demonstrates |
 | --- | --- | --- |
 | [Sixel vs Canvas windows](../docs/raster.md#run-the-showcase) | `sixel_windows.rs` (root example) | Two draggable, resizable windows showing the same static ringed planet as native RGB raster and Canvas character sampling. |
+| [Function Plotter](function-plotter/README.md) | `function-plotter` | Mathematica-style input/output cells, compact Sixel function graphs, reevaluation and scrollable history. |
 | [TUI showcase](tui-showcase/README.md) | `tui-showcase` | Seven pages of controls, data, content, layout, motion and themes. |
 | [Lumen](lumen/README.md) | `lumen` | Interactive workspace with flows, a notebook and floating windows. |
 | [Orbit Files](orbit-files/README.md) | `orbit-files` | File manager with selection, drag and drop, previews and undo. |

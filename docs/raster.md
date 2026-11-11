@@ -485,7 +485,7 @@ or guarantee a particular frame rate.
 | Source canvas | 16,777,216 pixels (`MAX_RASTER_PIXELS`), about 48 MiB RGB per distinct buffer |
 | Native cell tile | 1..=1024 pixels per dimension; at most 65,536 pixels and 1 MiB encoded payload |
 | Encoded tile LRU | At most 1,024 entries; approximately 4 MiB including reserved entry overhead |
-| Native frame | At most 4,096 visible raster cells and 16,777,216 sampled physical pixels |
+| Native frame | At most 32,768 visible raster cells and 16,777,216 sampled physical pixels |
 | Staged native frame payload | At most 32 MiB of encoded Sixel payload |
 | Reusable offscreen pool | At most 8 buffers and 8 MiB of cell-storage capacity per thread; source snapshots released after reading |
 
@@ -497,6 +497,11 @@ are not counted as cache occupancy. Offscreen buffers also allocate character
 cells and, when used, a dense raster-ownership table. The raster widget itself
 submits only visible cells, even for a huge clipped target; other containers may
 still allocate full-content offscreens, so large scroll content is not free.
+
+With 10×20-pixel character cells, the cell-count budget allows up to 6,553,600
+sampled physical pixels per frame. These are safety budgets, not throughput
+or terminal frame-rate guarantees; the pixel and encoded-payload limits still
+apply independently.
 
 Auto falls back to text for native frame budget/coordinate-limit violations;
 RequireSixel returns an error. Encoder allocation/encoding and writer failures

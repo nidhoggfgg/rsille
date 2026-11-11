@@ -10,7 +10,7 @@ use super::RasterCell;
 
 // Bound a single native frame as well as each encoded tile/cache. Oversized
 // layouts remain usable through character output rather than unbounded staging.
-const MAX_NATIVE_CELLS: usize = 4096;
+const MAX_NATIVE_CELLS: usize = 32 * 1024;
 const MAX_NATIVE_PIXELS: u64 = 16 * 1024 * 1024;
 #[cfg(feature = "sixel")]
 const MAX_FRAME_BYTES: usize = 32 * 1024 * 1024;
@@ -88,16 +88,22 @@ impl RasterPresenter {
         }
         if let Some(pixels) = metrics {
             let count = buffer.raster_cells().count();
-            let valid = count <= MAX_NATIVE_CELLS
-                && count as u64 * u64::from(pixels.width) * u64::from(pixels.height)
-                    <= MAX_NATIVE_PIXELS
-                && origin.x.checked_add(buffer.size().width).is_some()
+            let pixel_count = count as u64 * u64::from(pixels.width) * u64::from(pixels.height);
+            let coordinates_valid = origin.x.checked_add(buffer.size().width).is_some()
                 && origin.y.checked_add(buffer.size().height).is_some();
+            let valid =
+                count <= MAX_NATIVE_CELLS && pixel_count <= MAX_NATIVE_PIXELS && coordinates_valid;
             if !valid {
                 if self.config.policy == RasterPolicy::RequireSixel {
                     return Err(io::Error::new(
                         io::ErrorKind::Unsupported,
-                        "native raster frame exceeds resource or coordinate limits",
+                        format!(
+                            "native raster frame exceeds resource or coordinate limits: \
+                             {count} cells (limit {MAX_NATIVE_CELLS}), \
+                             {pixel_count} physical pixels (limit {MAX_NATIVE_PIXELS}), \
+                             cell pixels {}x{}, coordinates valid: {coordinates_valid}",
+                            pixels.width, pixels.height,
+                        ),
                     ));
                 }
                 metrics = None;
@@ -202,6 +208,16 @@ impl RasterPresenter {
         self.uncertain = false;
     }
 
+    // Transfer ownership of a successfully displayed region to terminal history.
+    // Keep the bounded encoding cache and counters, but never erase old coverage.
+    pub fn forget_region(&mut self) {
+        self.visible.clear();
+        self.metrics = None;
+        self.origin = Position::default();
+        self.size = Size::default();
+        self.uncertain = false;
+    }
+
     pub fn stats(&self) -> RasterStats {
         let stats = RasterStats {
             tiles_sent: self.tiles_sent,
@@ -268,7 +284,9 @@ mod tests {
 
     #[test]
     fn native_frame_limits_are_checked_before_any_encoding() {
-        for (cells, pixel_width, pixel_height) in [(4097, 1, 6), (300, 1000, 60)] {
+        for (cells, pixel_width, pixel_height) in
+            [((MAX_NATIVE_CELLS + 1) as u16, 1, 6), (300, 1000, 60)]
+        {
             let buffer = frame(cells);
             for policy in [RasterPolicy::Auto, RasterPolicy::RequireSixel] {
                 let mut presenter = presenter(policy, pixel_width, pixel_height);
@@ -283,6 +301,40 @@ mod tests {
                 assert_eq!(presenter.stats(), RasterStats::default());
             }
         }
+    }
+
+    #[test]
+    fn million_pixel_frame_and_cell_budget_boundary_use_native_output() {
+        for cells in [5000, MAX_NATIVE_CELLS as u16] {
+            for policy in [RasterPolicy::Auto, RasterPolicy::RequireSixel] {
+                let mut presenter = presenter(policy, 10, 20);
+                let plan = presenter
+                    .prepare(&frame(cells), Position::default(), false, false, false)
+                    .unwrap();
+                assert!(plan.native);
+                assert_eq!(plan.encoded.len(), usize::from(cells));
+                assert_eq!(plan.visible.len(), usize::from(cells));
+            }
+        }
+    }
+
+    #[test]
+    fn strict_limit_error_reports_usage_and_limits() {
+        let mut presenter = presenter(RasterPolicy::RequireSixel, 10, 20);
+        let error = presenter
+            .prepare(
+                &frame((MAX_NATIVE_CELLS + 1) as u16),
+                Position::default(),
+                false,
+                false,
+                false,
+            )
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(error.contains("32769 cells (limit 32768)"));
+        assert!(error.contains("6553800 physical pixels (limit 16777216)"));
+        assert!(error.contains("cell pixels 10x20, coordinates valid: true"));
     }
 
     #[test]
@@ -305,7 +357,13 @@ mod tests {
         presenter.begin(&first);
         presenter.commit(first);
         let plan = presenter
-            .prepare(&frame(4097), Position::default(), false, false, false)
+            .prepare(
+                &frame((MAX_NATIVE_CELLS + 1) as u16),
+                Position::default(),
+                false,
+                false,
+                false,
+            )
             .unwrap();
         assert!(!plan.native);
         assert!(plan.clear);

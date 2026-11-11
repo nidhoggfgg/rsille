@@ -173,6 +173,10 @@ pub struct Runtime<State, M> {
     core: AppRuntime<State, RuntimeUpdate<State, M>, RuntimeView<State, M>, M>,
     buffer: crate::render::buffer::Buffer,
     needs_draw: bool,
+    #[cfg(test)]
+    fail_next_draw: bool,
+    pending_events: VecDeque<Event>,
+    resume_after_commit: bool,
     mouse_capture: bool,
     inline_mouse_mode: InlineMouseMode,
 }
@@ -184,6 +188,9 @@ pub struct StepResult {
     ///
     /// This does not indicate whether the rendered cells changed.
     pub rendered: bool,
+    /// A hard frame boundary was reached. `Runtime::frame()` is the committed
+    /// snapshot (including raster metadata); the continuation runs next step.
+    pub committed: bool,
     /// Whether the application has requested exit and should no longer be stepped.
     pub should_quit: bool,
     /// Earliest scheduled update in the injected clock's time domain.
@@ -209,6 +216,10 @@ impl<State, M: Send + 'static> Runtime<State, M> {
             core: AppRuntime::new(app, update, view, inline, 50),
             buffer: crate::render::buffer::Buffer::new((80, 24).into()),
             needs_draw: true,
+            #[cfg(test)]
+            fail_next_draw: false,
+            pending_events: VecDeque::new(),
+            resume_after_commit: false,
         }
     }
 
@@ -372,11 +383,17 @@ impl<State, M: Send + 'static> Runtime<State, M> {
     /// Returns the earliest scheduled update in the injected clock's time domain.
     ///
     /// Includes timers, task deadlines and retries, ticks, frames and animations.
-    /// Already queued internal messages request an immediate update. `None`
+    /// Queued messages/input and pending or failed draws request an immediate update. `None`
     /// means no deadline is scheduled or the runtime has stopped; external
     /// messages notify [`wake_handle`](Self::wake_handle) separately.
     pub fn next_update_at(&self) -> Option<Instant> {
-        self.core.next_update_at()
+        if !self.core.should_quit
+            && (self.needs_draw || self.resume_after_commit || !self.pending_events.is_empty())
+        {
+            Some(self.core.clock.now())
+        } else {
+            self.core.next_update_at()
+        }
     }
 
     /// Returns a shared notification handle for work arriving between steps.
@@ -439,7 +456,10 @@ impl<State, M: Send + 'static> Runtime<State, M> {
     /// [`ManualClock`](super::ManualClock). This method does not wait for input,
     /// sleep until deadlines or run jobs queued in a
     /// [`ManualExecutor`](super::ManualExecutor). Message processing is bounded
-    /// per step, so a backlog can require multiple calls.
+    /// per update, so a backlog can require multiple calls. Events are dispatched
+    /// individually, with update checkpoints but coalesced drawing. A frame commit ends
+    /// the step immediately; remaining input is retained in order for later steps,
+    /// after the commit's continuation. Clone `frame()` to retain a snapshot.
     ///
     /// Once stopped, returns `should_quit: true` without drawing or processing
     /// input. Use [`into_exit`](Self::into_exit) to recover the final state.
@@ -447,40 +467,89 @@ impl<State, M: Send + 'static> Runtime<State, M> {
     /// # Errors
     ///
     /// Returns a [`DrawErr`] if input handling, updating or drawing fails.
+    /// Input is retained across drawing failures; retry with an empty slice
+    /// rather than resubmitting it. Failed frames are retried before queued input
+    /// or a pending commit's continuation is processed.
     pub fn step(&mut self, events: &[Event]) -> Result<StepResult, DrawErr> {
         if self.core.should_quit {
             return Ok(StepResult {
                 rendered: false,
+                committed: false,
                 should_quit: true,
                 next_update_at: None,
             });
         }
-        // Establish initial focus and hit geometry before dispatching input.
+        // Own input before any fallible drawing, including initial/retry frames.
+        self.pending_events.extend(events.iter().cloned());
         let mut rendered = false;
-        if self.needs_draw {
+        if self.needs_draw || self.core.frame_commit_pending() {
             self.draw_frame()?;
             rendered = true;
-        }
-        for event in events {
-            if let Event::Resize(width, height) = event {
-                self.resize((*width, *height).into());
+            if self.core.frame_commit_pending() {
+                self.core.frame_committed();
+                self.buffer.reset_diff();
+                self.resume_after_commit = true;
+                return Ok(StepResult {
+                    rendered,
+                    committed: true,
+                    should_quit: self.core.should_quit,
+                    next_update_at: self.next_update_at(),
+                });
             }
         }
-        self.core.on_events(events)?;
-        let changed = self.core.update()?;
-        if !self.core.should_quit && (changed || !events.is_empty() || self.needs_draw) {
-            self.draw_frame()?;
-            rendered = true;
+        let mut committed = false;
+        loop {
+            // A continuation must establish the next prompt before more input.
+            let resuming = self.resume_after_commit;
+            let event = if resuming || self.core.frame_commit_pending() {
+                None
+            } else {
+                self.pending_events.pop_front()
+            };
+            self.resume_after_commit = false;
+            if let Some(Event::Resize(width, height)) = event.as_ref() {
+                self.resize((*width, *height).into());
+            }
+            if !self.core.frame_commit_pending() {
+                self.core.on_events(event.as_slice())?;
+            }
+            let changed = self.core.update()?;
+            self.needs_draw |= changed || event.is_some() || self.core.frame_commit_pending();
+            if !self.core.should_quit
+                && self.needs_draw
+                && (self.core.frame_commit_pending() || resuming || self.pending_events.is_empty())
+            {
+                self.draw_frame()?;
+                rendered = true;
+            }
+            if self.core.frame_commit_pending() {
+                self.core.frame_committed();
+                self.buffer.reset_diff();
+                self.resume_after_commit = true;
+                committed = true;
+                break;
+            }
+            if self.core.should_quit || self.pending_events.is_empty() {
+                break;
+            }
         }
         Ok(StepResult {
             rendered,
+            committed,
             should_quit: self.core.should_quit,
-            next_update_at: self.core.next_update_at(),
+            next_update_at: self.next_update_at(),
         })
     }
 
     fn draw_frame(&mut self) -> Result<(), DrawErr> {
+        // Keep the frame pending until the entire draw succeeds. A retry must
+        // precede new input, especially for the post-commit prompt.
+        self.needs_draw = true;
         self.buffer.clear();
+        #[cfg(test)]
+        if std::mem::take(&mut self.fail_next_draw) {
+            return Err(DrawErr::Io(std::io::Error::other("injected draw failure")));
+        }
         let area = crate::render::area::Area::new((0, 0).into(), self.buffer.size());
         let chunk = Chunk::new(&mut self.buffer, area)?;
         self.core.draw(chunk)?;
@@ -511,6 +580,7 @@ struct MountedScope {
 }
 
 enum QueuedMessage<M> {
+    Effect(Effect<M>, ScopeLease),
     Plain(M),
     Scoped {
         lease: ScopeLease,
@@ -577,6 +647,8 @@ pub(crate) struct AppRuntime<State, U, V, M> {
     previous_geometry: HashMap<WidgetPath, crate::render::area::Area>,
     exiting_visuals: Vec<ExitingVisual<M>>,
     messages: MessageQueue<M>,
+    pending_commit: Option<(ScopeLease, M)>,
+    deferred_effects: Vec<(Effect<M>, ScopeLease)>,
     should_quit: bool,
     exit_reason: Option<ExitReason>,
     quit_behavior: QuitBehavior,
@@ -871,6 +943,8 @@ impl<State, U, V, M: Send + 'static> AppRuntime<State, U, V, M> {
             previous_geometry: HashMap::new(),
             exiting_visuals: Vec::new(),
             messages: MessageQueue::new(),
+            pending_commit: None,
+            deferred_effects: Vec::new(),
             should_quit: false,
             exit_reason: None,
             quit_behavior,
@@ -2199,6 +2273,10 @@ impl<State, U, V, M: Send + 'static> AppRuntime<State, U, V, M> {
         let Some(lease) = self.lease(&scope) else {
             return;
         };
+        if self.pending_commit.is_some() {
+            self.deferred_effects.push((effect, lease));
+            return;
+        }
         match effect {
             Effect::None => {}
             Effect::Exit => {
@@ -2206,6 +2284,7 @@ impl<State, U, V, M: Send + 'static> AppRuntime<State, U, V, M> {
                 self.shutdown();
             }
             Effect::Message(message) => self.messages.push_scoped(lease, message),
+            Effect::CommitFrame(message) => self.pending_commit = Some((lease, message)),
             Effect::Batch(effects) => {
                 for effect in effects {
                     self.apply_scoped_effect(effect, scope.clone());
@@ -2470,7 +2549,7 @@ where
             return None;
         }
         let now = self.clock.now();
-        if !self.messages.is_empty() {
+        if !self.messages.is_empty() || self.pending_commit.is_some() {
             return Some(now);
         }
         let animation = self.next_animation_at.or_else(|| {
@@ -2833,7 +2912,32 @@ where
         Ok(())
     }
 
+    fn event_frame_boundaries(&self) -> bool {
+        true
+    }
+
+    fn frame_commit_pending(&self) -> bool {
+        self.pending_commit.is_some()
+    }
+
+    fn frame_committed(&mut self) {
+        if let Some((lease, message)) = self.pending_commit.take() {
+            for (effect, scope) in self.deferred_effects.drain(..).rev() {
+                self.messages
+                    .0
+                    .push_front(QueuedMessage::Effect(effect, scope));
+            }
+            self.messages
+                .0
+                .push_front(QueuedMessage::Scoped { lease, message });
+            self.wake.wake();
+        }
+    }
+
     fn update(&mut self) -> Result<bool, DrawErr> {
+        if self.pending_commit.is_some() {
+            return Ok(true);
+        }
         if self.should_quit {
             self.shutdown();
             return Ok(false);
@@ -2850,6 +2954,19 @@ where
                 break;
             };
             let message = match message {
+                QueuedMessage::Effect(effect, lease) => {
+                    if !self.lease_is_live(&lease) {
+                        continue;
+                    }
+                    self.apply_scoped_effect(effect, lease.scope);
+                    if self.should_quit {
+                        return Ok(false);
+                    }
+                    if self.pending_commit.is_some() {
+                        break;
+                    }
+                    continue;
+                }
                 QueuedMessage::Plain(message) => message,
                 QueuedMessage::Scoped { lease, message } => {
                     if !self.lease_is_live(&lease) {
@@ -2895,6 +3012,9 @@ where
                 if self.should_quit {
                     return Ok(false);
                 }
+            }
+            if self.pending_commit.is_some() {
+                break;
             }
         }
         self.prune_finished_tasks();
@@ -2960,6 +3080,177 @@ where
 mod tests {
     use super::*;
     use crate::tui::animation::{AnimationSpec, Easing, Transition};
+
+    #[test]
+    fn ordinary_input_coalesces_headless_draws() {
+        use crate::tui::widgets::label;
+        let mut app = App::new(0)
+            .on_key(KeyCode::Enter, || ())
+            .build(|state, ()| *state += 1, |state| label(state.to_string()));
+        app.step(&[]).unwrap();
+        let before = app.core.render_frame;
+        let enter = Event::Key(crossterm::event::KeyEvent::new(
+            KeyCode::Enter,
+            KeyModifiers::NONE,
+        ));
+        app.step(&[enter.clone(), enter.clone(), enter]).unwrap();
+        assert_eq!(*app.state(), 3);
+        assert_eq!(app.core.render_frame, before + 1);
+    }
+
+    #[test]
+    fn headless_initial_draw_failure_retains_input_across_retries() {
+        use crate::tui::widgets::label;
+        let mut app = App::new(0)
+            .on_key(KeyCode::Enter, || ())
+            .build(|state, ()| *state += 1, |state| label(state.to_string()));
+        let enter = Event::Key(crossterm::event::KeyEvent::new(
+            KeyCode::Enter,
+            KeyModifiers::NONE,
+        ));
+        for _ in 0..2 {
+            app.fail_next_draw = true;
+            assert!(app.step(std::slice::from_ref(&enter)).is_err());
+            assert_eq!(*app.state(), 0);
+            assert!(app.needs_draw);
+            assert!(app.next_update_at().is_some());
+        }
+        app.step(&[]).unwrap();
+        assert_eq!(*app.state(), 2);
+        assert!(app.pending_events.is_empty());
+    }
+
+    #[test]
+    fn headless_commit_and_prompt_retries_precede_retained_input() {
+        use crate::tui::widgets::label;
+        let mut app = App::new(String::new())
+            .on_key(KeyCode::Enter, || 0_u8)
+            .on_key(KeyCode::Char('x'), || 2_u8)
+            .build_with_effects(
+                |state, message, ctx| match message {
+                    0 => {
+                        *state = "result".into();
+                        ctx.commit_frame(1);
+                    }
+                    1 => *state = "prompt".into(),
+                    2 => state.push('x'),
+                    _ => unreachable!(),
+                },
+                |state| label(state.clone()),
+            );
+        app.step(&[]).unwrap();
+        let key = |code| Event::Key(crossterm::event::KeyEvent::new(code, KeyModifiers::NONE));
+        app.fail_next_draw = true;
+        assert!(app
+            .step(&[key(KeyCode::Enter), key(KeyCode::Char('x'))])
+            .is_err());
+        assert!(app.core.frame_commit_pending());
+        assert_eq!(app.state(), "result");
+        app.fail_next_draw = true;
+        assert!(app.step(&[key(KeyCode::Char('x'))]).is_err());
+        assert_eq!(app.pending_events.len(), 2);
+        assert!(app.step(&[]).unwrap().committed);
+        assert_eq!(app.state(), "result");
+        assert!(!app.core.frame_commit_pending());
+        app.fail_next_draw = true;
+        assert!(app.step(&[]).is_err());
+        assert_eq!(app.state(), "prompt");
+        assert_eq!(app.pending_events.len(), 2);
+        assert!(app.needs_draw);
+        assert!(!app.step(&[]).unwrap().committed);
+        assert_eq!(app.state(), "promptxx");
+        assert!(app.pending_events.is_empty());
+    }
+
+    #[test]
+    fn commit_frame_stops_message_batches_and_delivers_continuation_first() {
+        use crate::tui::widgets::label;
+        let mut app = App::new(String::new())
+            .build_with_effects(
+                |state, message: u8, ctx| match message {
+                    0 => {
+                        *state = "result".into();
+                        ctx.dispatch(Effect::batch([
+                            Effect::commit_frame(1).map(|m| m),
+                            Effect::message(2),
+                        ]));
+                    }
+                    1 => *state = "prompt".into(),
+                    2 => state.push('!'),
+                    3 => {
+                        assert_eq!(state, "prompt");
+                        state.push('?');
+                    }
+                    _ => unreachable!(),
+                },
+                |state| label(state.clone()),
+            )
+            .size(12, 2);
+        app.handle().send(0).unwrap();
+        app.handle().send(3).unwrap();
+        let step = app.step(&[]).unwrap();
+        assert!(step.committed && step.rendered);
+        assert_eq!(app.state(), "result");
+        assert_eq!(app.frame().get((0, 0).into()).unwrap().symbol(), "r");
+        assert!(step.next_update_at.is_some());
+        assert!(!app.step(&[]).unwrap().committed);
+        assert_eq!(app.state(), "prompt?!");
+    }
+
+    #[test]
+    fn commit_frame_preserves_remaining_input_and_repeated_boundaries() {
+        use crate::tui::widgets::label;
+        let mut app = App::new(0_u8)
+            .on_key(KeyCode::Enter, || true)
+            .build_with_effects(
+                |state, submit, ctx| {
+                    if submit {
+                        *state += 1;
+                        ctx.commit_frame(false);
+                    } else {
+                        *state += 10;
+                    }
+                },
+                |state| label(state.to_string()),
+            )
+            .size(8, 1);
+        let enter = Event::Key(crossterm::event::KeyEvent::new(
+            KeyCode::Enter,
+            KeyModifiers::NONE,
+        ));
+        assert!(app.step(&[enter.clone(), enter]).unwrap().committed);
+        assert_eq!(*app.state(), 1);
+        assert!(app.step(&[]).unwrap().committed);
+        assert_eq!(*app.state(), 12);
+        assert!(!app.step(&[]).unwrap().committed);
+        assert_eq!(*app.state(), 22);
+    }
+
+    #[test]
+    fn commit_frame_precedes_deferred_exit_and_preserves_raster_snapshot() {
+        use crate::render::raster::{RasterCanvas, Rgb};
+        use crate::tui::widgets::raster_canvas;
+        let image = Arc::new(RasterCanvas::new(2, 2, Rgb(1, 2, 3)).unwrap());
+        let mut app = App::new(false)
+            .build_with_effects(
+                |state, message, ctx| {
+                    if message {
+                        ctx.dispatch(Effect::batch([Effect::commit_frame(false), Effect::exit()]));
+                    } else {
+                        *state = true;
+                    }
+                },
+                move |_| raster_canvas(image.clone()).height(1),
+            )
+            .size(4, 2);
+        app.handle().send(true).unwrap();
+        let result = app.step(&[]).unwrap();
+        assert!(result.committed && !result.should_quit);
+        assert!(app.frame().has_raster());
+        assert!(!*app.state());
+        assert!(app.step(&[]).unwrap().should_quit);
+        assert!(*app.state());
+    }
 
     #[test]
     fn raster_output_defaults_and_explicit_config_reach_the_runtime() {

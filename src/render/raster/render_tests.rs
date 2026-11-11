@@ -2335,6 +2335,98 @@ mod native {
         }
     }
 
+    #[test]
+    fn commit_frame_accounts_for_bands_and_forgets_only_visible_raster() {
+        for (height, padding) in [(18, 0), (20, 1), (1, 5), (2, 2)] {
+            let mut render = inline_renderer(band_config(8, height), Vec::new());
+            render.set_inline_viewport_height(12);
+            render.render().unwrap();
+            let stats = render.raster_stats();
+            assert_eq!(render.inline_raster_padding, padding);
+            render.out.clear();
+            render.commit_frame().unwrap();
+            assert_eq!(render.out, b"\r\n".repeat(usize::from(padding) + 1));
+            assert_eq!(render.raster_stats(), stats);
+            assert!(render.buffer.previous().is_none());
+            render.out.clear();
+            // Identical source in the new region must be sent again, without
+            // erasing coverage belonging to the committed region.
+            render.render().unwrap();
+            assert!(render.raster_stats().tiles_sent > stats.tiles_sent);
+            assert_eq!(render.raster_stats().encodes, stats.encodes);
+            assert!(!contains(&render.out, b"\x1b[2J"));
+            render.out.clear();
+            render.commit_frame().unwrap();
+            render.thing.visible = false;
+            render.out.clear();
+            render.render().unwrap();
+            assert!(!contains(&render.out, b"\x1b[2K"));
+            assert!(!contains(&render.out, b"\x1b[2J"));
+        }
+    }
+
+    #[test]
+    fn commit_frame_scrolls_past_band_padding_at_viewport_bottom() {
+        for (height, padding) in [(18, 0), (20, 1), (1, 5), (2, 2)] {
+            let config = band_config(8, height);
+            let mut terminal = BandTerminal::new(12, 4, config.capabilities.cell_pixels.unwrap());
+            let mut render = inline_renderer(config, Vec::new());
+            render.set_inline_viewport_height(12);
+            render.pos.y = 11;
+            render.render().unwrap();
+            terminal.read(&std::mem::take(&mut render.out));
+            let before = terminal.lf_scrolls;
+            render.commit_frame().unwrap();
+            let trace = terminal.read(&std::mem::take(&mut render.out));
+            assert_eq!(terminal.lf_scrolls, before + 1);
+            assert_eq!(terminal.cursor, (0, 11).into());
+            assert_eq!(render.pos, terminal.cursor);
+            assert_eq!(terminal.sixel_scrolls, 0);
+            assert_eq!(
+                trace
+                    .iter()
+                    .filter(|event| matches!(event, Event::Newline(_)))
+                    .count(),
+                padding + 1
+            );
+            // No claim about real terminal scrollback: this model only verifies
+            // cursor reservation and absence of erasure in the emitted protocol.
+            assert!(!trace.iter().any(|event| matches!(event, Event::Clear)));
+        }
+    }
+
+    #[test]
+    fn commit_frame_write_and_flush_errors_keep_display_history() {
+        for flush in [false, true] {
+            let mut render = inline_renderer(band_config(8, 20), FaultWriter::default());
+            render.render().unwrap();
+            let stats = render.raster_stats();
+            let height = render.previous_inline_height;
+            render.out.bytes.clear();
+            render.out.fail_flush = flush;
+            render.out.remaining = (!flush).then_some(1);
+            assert_eq!(
+                render.commit_frame().unwrap_err().kind(),
+                io::ErrorKind::BrokenPipe
+            );
+            assert!(render.buffer.previous().is_some());
+            assert_eq!(render.previous_inline_height, height);
+            assert_eq!(render.inline_raster_padding, 1);
+            assert_eq!(render.raster_stats(), stats);
+        }
+    }
+
+    #[test]
+    fn commit_frame_refuses_uncertain_native_output() {
+        let mut render = inline_renderer(band_config(8, 20), FaultWriter::default());
+        render.out.fail_flush = true;
+        assert!(render.render().is_err());
+        render.out.bytes.clear();
+        assert!(render.commit_frame().is_err());
+        assert!(render.out.bytes.is_empty());
+        assert!(render.raster.needs_protocol_recovery());
+    }
+
     #[derive(Clone, Default)]
     struct FaultWriter {
         bytes: Vec<u8>,
