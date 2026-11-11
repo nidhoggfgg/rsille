@@ -1,4 +1,5 @@
 mod formula;
+mod grid;
 mod notebook;
 mod plot;
 
@@ -11,11 +12,16 @@ use std::error::Error;
 const X_RANGE: [f64; 2] = [-10.0, 10.0];
 #[cfg(test)]
 const BOUNDS: [f64; 4] = [-10.0, 10.0, -3.0, 3.0];
-const HELP: &str = "Function plotter — Cartesian, polar and parametric curves
+const HELP: &str = "Function plotter — 2D curves and shaded 3D surfaces
 
   --sixel                 Require native Sixel (build with --features sixel)
   --text-only             Character preview, no terminal pixel queries
   --expr 'sin(x); x^2/8'   Initial functions (up to six)
+  --grid                  Independent demo panels; no expr: four presets
+                          Repeat --expr for 1–6 panels (4096 bytes each).
+                          Semicolons still overlay within one panel.
+                          Live preview; Enter/F5 freezes, commits and exits.
+                          Responsive 1–2 columns; no grid editor or history.
   --x-range MIN MAX      Finite increasing x domain (default -10 10)
   --cell-pixels WxH       Actual pixels per character cell, NOT terminal size
   --headless              Exercise inline REPL commits without a terminal
@@ -23,13 +29,24 @@ const HELP: &str = "Function plotter — Cartesian, polar and parametric curves
 
 Live preview below input after 500ms idle (also on history recall); no submission.
 Edits clear old previews; empty input clears preview. Preview errors do not block Enter.
-Inline REPL: Enter / F5 immediately evaluates In[n]:= and commits Out[n]= or an error.
+Single-plot REPL: Enter / F5 evaluates In[n]:= and commits Out[n]= or an error.
 A new blank prompt follows; old output stays in terminal history, not editable cells.
 Up/Down recalls the newest 24 inputs and restores your draft. Esc: quit.
-Inputs are capped at 4096 bytes. No session is saved; graphs are not retained in memory.
+REPL commands (type then Enter; no math syntax changes):
+  :grid     Enter empty grid composition (up to six independent panels)
+  :plot     Discard the grid and return to single plots
+In grid: Enter adds the expression as a panel; F5 adds any nonempty draft then
+freezes and commits the whole grid. :submit commits already-added panels.
+:undo removes the last panel; :clear removes all. Invalid/full-grid drafts stay
+editable and block submission. A commit opens another empty grid, not an exit.
+Drafts preview after 500ms; added 3D panels keep rotating until commit.
+Commands are not expression history; added expressions are. :grid in grid is a no-op.
+Inputs are capped at 4096 bytes. No session is saved; committed graphs are released.
 Mouse capture is disabled: use your terminal's normal scrollback controls.
-Native graphs match formula content width; text graphs cap at 70 columns.
-Graphs stay 14 rows high; bounds auto-scale from finite samples.
+Single plots: formulas and graphs share max(70 columns, native formula width),
+capped by available terminal width. Text-only plots retain their 70-column cap.
+Single graphs stay 14 rows high; grids request 30 rows with responsive 1–2 columns.
+Bounds auto-scale independently from finite samples.
 Polar/parametric plots use equal pixel-unit axes; Cartesian-only plots fill the frame.
 Pole outliers may be clipped; sampled bounds do not guarantee global extrema.
 Start blank at In[1]; only explicit --expr evaluates and commits at startup.
@@ -40,6 +57,12 @@ Mix up to six curves with semicolons. Curve syntax:
   polar(1+cos(theta), 0, 2*pi)          Polar radius; angle theta in radians
   param(sin(3*t), sin(2*t), 0, 2*pi)   Parametric x(t), y(t)
 Polar/parametric ranges are required, finite and increasing; endpoints may use pi/e.
+3D syntax (up to six surfaces/curves; cannot mix with 2D):
+  surface(sin(x)*cos(y), -pi, pi, -pi, pi)  Height field z(x,y)
+  param3(cos(t), sin(t), t/4, 0, 6*pi)      Space curve x(t), y(t), z(t)
+3D uses orthographic projection, equal world units and depth-tested shading.
+Live 3D previews rotate around vertical z; submission freezes the displayed angle.
+Explicit ranges override --x-range. Fixed sampling can miss narrow features/poles.
 
 --sixel asserts that your terminal/multiplexer supports Sixel, ED 2 and EL2
  graphics erase, graphics following text scroll, stable palettes and non-scrolling
@@ -53,6 +76,8 @@ struct Options {
     sixel: Option<bool>,
     pixels: Option<CellPixels>,
     expr: Option<String>,
+    panels: Vec<String>,
+    grid: bool,
     x_range: Option<[f64; 2]>,
     headless: bool,
     help: bool,
@@ -87,7 +112,15 @@ impl Options {
                     }
                     result.x_range = Some(range);
                 }
-                "--expr" => result.expr = Some(args.next().ok_or("--expr needs an expression")?),
+                "--grid" => result.grid = true,
+                "--expr" => {
+                    let source = args.next().ok_or("--expr needs an expression")?;
+                    if source.len() > 4096 {
+                        return Err("Expression exceeds 4096 bytes".into());
+                    }
+                    result.expr = Some(source.clone());
+                    result.panels.push(source);
+                }
                 "--cell-pixels" => {
                     let value = args.next().ok_or("--cell-pixels needs WxH")?;
                     let (w, h) = value.split_once('x').ok_or("expected WxH")?;
@@ -104,6 +137,9 @@ impl Options {
         if result.pixels.is_some() && result.sixel != Some(true) {
             return Err("--cell-pixels requires --sixel".into());
         }
+        if result.grid && result.panels.len() > grid::MAX_PANELS {
+            return Err("--grid accepts at most six --expr panels".into());
+        }
         Ok(result)
     }
 }
@@ -114,9 +150,13 @@ fn main() -> Result<(), Box<dyn Error>> {
         println!("{HELP}");
         return Ok(());
     }
-    let state = State::new(options.expr, options.x_range.unwrap_or(X_RANGE))?;
+    let x_range = options.x_range.unwrap_or(X_RANGE);
     if options.headless {
-        return notebook::smoke_test(state);
+        return if options.grid {
+            grid::smoke_test(grid::State::new(options.panels, x_range)?)
+        } else {
+            notebook::smoke_test(State::new(options.expr, x_range)?)
+        };
     }
     let output = if options.sixel == Some(true) {
         if !cfg!(feature = "sixel") {
@@ -135,13 +175,32 @@ fn main() -> Result<(), Box<dyn Error>> {
     } else {
         RasterOutput::text_only()
     };
-    application(state, output).run()?;
+    if options.grid {
+        grid::application(grid::State::new(options.panels, x_range)?, output).run()?;
+    } else {
+        application(State::new(options.expr, x_range)?, output).run()?;
+    }
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn grid_cli_keeps_panels_separate_and_preserves_legacy_last_expr() {
+        let args = ["--expr", "x; x^2", "--expr", "polar(1,0,pi)"];
+        let legacy = Options::parse(args.map(str::to_owned)).unwrap();
+        assert_eq!(legacy.expr.as_deref(), Some("polar(1,0,pi)"));
+        let grid = Options::parse(args.into_iter().chain(["--grid"]).map(str::to_owned)).unwrap();
+        assert!(grid.grid);
+        assert_eq!(grid.panels, ["x; x^2", "polar(1,0,pi)"]);
+        assert!(Options::parse(
+            std::iter::once("--grid".to_owned())
+                .chain((0..7).flat_map(|_| ["--expr".to_owned(), "x".to_owned()]))
+        )
+        .is_err());
+    }
+
     #[test]
     fn x_range_accepts_negatives_and_rejects_invalid_domains() {
         let options = Options::parse(["--x-range", "-2.5", "0.1"].map(str::to_owned)).unwrap();

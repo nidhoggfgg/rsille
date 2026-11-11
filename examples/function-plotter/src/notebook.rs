@@ -1,22 +1,37 @@
-use crate::Plot;
+use crate::{
+    grid::{self, Panel},
+    Plot,
+};
 use rsille::render::{area::Area, chunk::Chunk};
 use rsille::tui::prelude::*;
-use std::{rc::Rc, time::Duration};
+use std::{
+    rc::Rc,
+    time::{Duration, Instant},
+};
 
 const PREVIEW_DELAY: Duration = Duration::from_millis(500);
 const PREVIEW_TIMER: &str = "preview";
+const ROTATION_TIMER: &str = "preview-rotation";
+const ROTATION_INTERVAL: Duration = Duration::from_millis(50);
+const ROTATION_SPEED: f64 = 0.6; // Radians per second around world z.
 
 const MAX_HISTORY: usize = 24;
 const MAX_INPUT: usize = 4096;
 const GRAPH_ROWS: u16 = 14;
+const GRAPH_COLUMNS: u16 = 70;
 
 pub(crate) struct State {
+    grid_mode: bool,
+    panels: Vec<Panel>,
+    rotation_base: f64,
     number: u64,
     initial_expression: bool,
     x_range: [f64; 2],
     bounds: [f64; 4],
     draft: String,
     output: Option<Rc<Plot>>,
+    angle: f64,
+    rotation_started: Option<Instant>,
     cell_pixels: (u16, u16),
     error: Option<String>,
     validation_error: Option<String>,
@@ -36,12 +51,17 @@ impl State {
             return Err(format!("Expression exceeds {MAX_INPUT} bytes"));
         }
         Ok(Self {
+            grid_mode: false,
+            panels: Vec::new(),
+            rotation_base: 0.0,
             number: 1,
             initial_expression,
             x_range,
             bounds: [x_range[0], x_range[1], -1.0, 1.0],
             draft: source,
             output: None,
+            angle: 0.0,
+            rotation_started: None,
             cell_pixels: (1, 2),
             error: None,
             validation_error: None,
@@ -57,16 +77,105 @@ impl State {
     fn cancel_preview(&mut self, ctx: &mut UpdateCtx<Msg>) {
         self.revision += 1;
         ctx.cancel_debounce(PREVIEW_TIMER);
+        ctx.cancel_debounce(ROTATION_TIMER);
+        self.rotation_started = None;
     }
 
     fn schedule_preview(&mut self, ctx: &mut UpdateCtx<Msg>) {
         self.cancel_preview(ctx);
         // Clear both together so an old graph never gets the new draft's legend.
         self.output = None;
+        if !self.grid_mode {
+            self.angle = 0.0;
+        }
         self.error = None;
-        if !self.draft.trim().is_empty() && self.validation_error.is_none() {
+        self.start_rotation(ctx);
+        if !self.draft.trim().is_empty()
+            && !self.draft.trim().starts_with(':')
+            && self.validation_error.is_none()
+        {
             ctx.debounce(PREVIEW_TIMER, PREVIEW_DELAY, Msg::Preview(self.revision));
         }
+    }
+
+    fn start_rotation(&mut self, ctx: &mut UpdateCtx<Msg>) {
+        if self.rotation_started.is_none()
+            && (self.output.as_ref().is_some_and(|p| p.is_spatial())
+                || self.panels.iter().any(|p| p.plot.is_spatial()))
+        {
+            self.rotation_base = self.angle;
+            self.rotation_started = Some(ctx.now());
+            ctx.debounce(
+                ROTATION_TIMER,
+                ROTATION_INTERVAL,
+                Msg::Rotate(self.revision),
+            );
+        }
+    }
+
+    fn remember_draft(&mut self) {
+        if self.history.len() == MAX_HISTORY {
+            self.history.remove(0);
+        }
+        self.history.push(self.draft.clone());
+    }
+
+    fn clear_draft(&mut self, ctx: &mut UpdateCtx<Msg>) {
+        self.draft.clear();
+        self.validation_error = None;
+        self.history_index = None;
+        self.saved_draft.clear();
+        self.saved_validation = None;
+        self.schedule_preview(ctx);
+    }
+
+    fn command(&mut self, ctx: &mut UpdateCtx<Msg>) {
+        match self.draft.trim() {
+            ":grid" | ":plot" => {
+                let grid_mode = self.draft.trim() == ":grid";
+                // Re-entering the current mode is harmless; leaving discards its composition.
+                if grid_mode != self.grid_mode {
+                    self.panels.clear();
+                    self.angle = 0.0;
+                }
+                self.grid_mode = grid_mode;
+                self.clear_draft(ctx);
+            }
+            ":undo" if self.grid_mode => {
+                self.panels.pop();
+                self.clear_draft(ctx);
+            }
+            ":clear" if self.grid_mode => {
+                self.panels.clear();
+                self.angle = 0.0;
+                self.clear_draft(ctx);
+            }
+            ":submit" if self.grid_mode => {
+                self.clear_draft(ctx);
+                self.update(Msg::Submit, ctx);
+            }
+            _ => {
+                self.error = Some("Commands: :grid, :plot; in grid: :undo, :clear, :submit".into())
+            }
+        }
+    }
+
+    fn add_panel(&mut self, ctx: &mut UpdateCtx<Msg>) -> bool {
+        if self.panels.len() == grid::MAX_PANELS {
+            self.error = Some("Grid is full (six panels); :undo or :clear before adding".into());
+            return false;
+        }
+        self.render_draft();
+        let Some(plot) = self.output.clone() else {
+            return false;
+        };
+        self.panels.push(Panel {
+            plot,
+            bounds: self.bounds,
+        });
+        self.remember_draft();
+        self.clear_draft(ctx);
+        true
     }
 
     fn render_draft(&mut self) {
@@ -88,29 +197,66 @@ impl State {
     }
 
     fn update(&mut self, msg: Msg, ctx: &mut UpdateCtx<Msg>) {
+        if self.finished && !matches!(msg, Msg::NextPrompt) {
+            return;
+        }
         match msg {
-            Msg::Evaluate => {
+            Msg::Evaluate | Msg::Submit if self.draft.trim().starts_with(':') => {
+                self.command(ctx);
+            }
+            Msg::Evaluate if self.grid_mode => {
+                self.add_panel(ctx);
+            }
+            Msg::Submit if self.grid_mode => {
+                if !self.draft.trim().is_empty() && !self.add_panel(ctx) {
+                    return;
+                }
+                if self.panels.is_empty() {
+                    self.error =
+                        Some("Add an expression with Enter before submitting a grid".into());
+                    return;
+                }
+                self.cancel_preview(ctx);
+                self.error = None;
+                self.finished = true;
+                ctx.commit_frame(Msg::NextPrompt);
+            }
+            Msg::Evaluate | Msg::Submit => {
                 self.cancel_preview(ctx);
                 // Preview errors never block immediate evaluation of the current source.
                 self.render_draft();
-                if self.history.len() == MAX_HISTORY {
-                    self.history.remove(0);
-                }
-                self.history.push(self.draft.clone());
+                self.remember_draft();
                 self.finished = true;
                 ctx.commit_frame(Msg::NextPrompt);
             }
             Msg::Preview(revision) => {
-                if revision == self.revision && !self.finished {
+                if revision == self.revision
+                    && !self.draft.trim().is_empty()
+                    && !self.draft.trim().starts_with(':')
+                {
                     self.render_draft();
+                    self.start_rotation(ctx);
+                }
+            }
+            Msg::Rotate(revision) => {
+                if revision == self.revision && !self.finished {
+                    if let Some(started) = self.rotation_started {
+                        self.angle = (self.rotation_base
+                            + ctx.now().saturating_duration_since(started).as_secs_f64()
+                                * ROTATION_SPEED)
+                            .rem_euclid(std::f64::consts::TAU);
+                        ctx.debounce(ROTATION_TIMER, ROTATION_INTERVAL, Msg::Rotate(revision));
+                    }
                 }
             }
             Msg::NextPrompt => {
                 self.cancel_preview(ctx);
                 self.validation_error = None;
                 self.number += 1;
+                self.panels.clear();
                 self.draft.clear();
                 self.output = None;
+                self.angle = 0.0;
                 self.error = None;
                 self.finished = false;
                 self.history_index = None;
@@ -169,7 +315,9 @@ impl State {
 pub(crate) enum Msg {
     Edit(String),
     Evaluate,
+    Submit,
     Preview(u64),
+    Rotate(u64),
     NextPrompt,
     Previous,
     Next,
@@ -206,7 +354,40 @@ pub(crate) fn view(state: &State) -> impl Widget<Msg> {
             .style(Style::default().fg(Color::Rgb(255, 179, 92))),
         );
     }
-    if let Some(image) = &state.output {
+    if state.grid_mode {
+        let mut panels = state.panels.clone();
+        if panels.len() < grid::MAX_PANELS {
+            if let Some(plot) = &state.output {
+                panels.push(Panel {
+                    plot: plot.clone(),
+                    bounds: state.bounds,
+                });
+            }
+        }
+        body =
+            body.child(label(format!("Grid · {} / 6 panels added", state.panels.len())).height(1));
+        if state.finished {
+            // Keep preview geometry on commit, including in short viewports.
+            body = body
+                .child(label(format!("Out[{}]=", state.number)).height(1))
+                .child(label("Submitted grid (static)").height(1));
+        } else {
+            body = body
+                .child(
+                    label("Enter: add · F5/:submit: commit · :undo: remove last · :clear: reset")
+                        .height(1),
+                )
+                .child(label(":plot: discard & leave · Up/Down: history · Esc: quit").height(1));
+        }
+        if !panels.is_empty() {
+            body = body.child(grid::panels_view(
+                &panels,
+                state.cell_pixels,
+                state.angle,
+                state.finished,
+            ));
+        }
+    } else if let Some(image) = &state.output {
         body = body.child(
             label(if state.finished {
                 format!("Out[{}]=", state.number)
@@ -222,12 +403,13 @@ pub(crate) fn view(state: &State) -> impl Widget<Msg> {
         body = body.child(Graph {
             source: Rc::clone(image),
             bounds: state.bounds,
+            angle: state.angle,
             cell_pixels: state.cell_pixels,
         });
     }
-    if !state.finished {
+    if !state.finished && !state.grid_mode {
         body = body.child(
-            label("Preview: 500ms idle · Enter/F5: submit now · Up/Down: history · Esc: quit")
+            label("Enter/F5: submit · :grid: compose grid · Up/Down: history · Esc: quit")
                 .height(1),
         );
     }
@@ -308,7 +490,8 @@ impl Widget<Msg> for Prompt {
                 return;
             }
             let message = match key.code {
-                KeyCode::Enter | KeyCode::F(5) => Msg::Evaluate,
+                KeyCode::Enter => Msg::Evaluate,
+                KeyCode::F(5) => Msg::Submit,
                 KeyCode::Up => Msg::Previous,
                 KeyCode::Down => Msg::Next,
                 _ => return,
@@ -323,11 +506,11 @@ impl Widget<Msg> for Prompt {
 
 // Layout selects the final pixel grid before adaptive curve sampling.
 // The separate bounds survey runs once when the source is parsed.
-struct FormulaOutput {
-    source: Rc<Plot>,
-    cell_pixels: (u16, u16),
+pub(crate) struct FormulaOutput {
+    pub(crate) source: Rc<Plot>,
+    pub(crate) cell_pixels: (u16, u16),
 }
-impl Widget<Msg> for FormulaOutput {
+impl<M> Widget<M> for FormulaOutput {
     fn key(&self) -> Option<&str> {
         Some("formula")
     }
@@ -339,7 +522,12 @@ impl Widget<Msg> for FormulaOutput {
         };
         Constraints {
             min_width: 1,
-            max_width: Some(self.source.formula.width(self.cell_pixels)),
+            max_width: Some(
+                self.source
+                    .formula
+                    .width(self.cell_pixels)
+                    .max(GRAPH_COLUMNS),
+            ),
             min_height: height,
             max_height: Some(height),
             flex: None,
@@ -356,11 +544,18 @@ impl Widget<Msg> for FormulaOutput {
                 u32::from(area.height()) * u32::from(self.cell_pixels.1),
             );
             if let Some(image) = self.source.formula.image(size, self.cell_pixels.1) {
-                raster_canvas::<Msg>(image)
+                raster_canvas::<M>(image)
                     .align_x(RasterAlign::Start)
                     .render(chunk, ctx);
-                return;
+            } else {
+                let _ = chunk.set_string(
+                    0,
+                    0,
+                    "[Formula rendering unavailable]",
+                    Style::default().to_render_style(),
+                );
             }
+            return;
         }
         for (y, (text, index)) in self.source.formula.text_rows().enumerate() {
             let rsille::raster::Rgb(r, g, b) = crate::plot::COLORS[index];
@@ -377,6 +572,7 @@ impl Widget<Msg> for FormulaOutput {
 struct Graph {
     source: Rc<Plot>,
     bounds: [f64; 4],
+    angle: f64,
     cell_pixels: (u16, u16),
 }
 
@@ -390,12 +586,13 @@ impl Widget<Msg> for Graph {
         if area.width() == 0 || area.height() == 0 {
             return;
         }
-        let image = self.source.image(
+        let image = self.source.image_at(
             self.bounds,
             (
                 u32::from(area.width()) * u32::from(self.cell_pixels.0),
                 u32::from(area.height()) * u32::from(self.cell_pixels.1),
             ),
+            self.angle,
         );
         raster_canvas::<Msg>(image)
             .align_x(RasterAlign::Start)
@@ -405,7 +602,12 @@ impl Widget<Msg> for Graph {
     fn constraints(&self) -> Constraints {
         Constraints {
             min_width: 1,
-            max_width: Some(self.source.formula.width(self.cell_pixels)),
+            max_width: Some(
+                self.source
+                    .formula
+                    .width(self.cell_pixels)
+                    .max(GRAPH_COLUMNS),
+            ),
             min_height: GRAPH_ROWS,
             max_height: Some(GRAPH_ROWS),
             flex: None,
@@ -487,7 +689,33 @@ pub(crate) fn smoke_test(state: State) -> Result<(), Box<dyn std::error::Error>>
         assert!(!runtime.frame().has_raster());
         assert_eq!(runtime.focused_key(), Some("editor"));
     }
-    println!("Inline REPL passed: repeated commits, error, next prompt, typing, focus and raster snapshots");
+    for source in [":grid", "sin(x); cos(x)", "surface(x*y,-2,2,-2,2)"] {
+        assert!(
+            !runtime
+                .step(&[
+                    Event::Paste(source.into()),
+                    Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+                ])?
+                .committed
+        );
+    }
+    assert_eq!(runtime.state().panels.len(), 2);
+    assert!(
+        runtime
+            .step(&[Event::Key(KeyEvent::new(KeyCode::F(5), KeyModifiers::NONE))])?
+            .committed
+    );
+    assert!(runtime.frame().has_raster());
+    runtime.step(&[])?;
+    assert!(runtime.state().grid_mode);
+    assert!(runtime.state().panels.is_empty());
+    runtime.step(&[
+        Event::Paste(":plot".into()),
+        Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+    ])?;
+    assert!(!runtime.state().grid_mode);
+    assert_eq!(runtime.focused_key(), Some("editor"));
+    println!("Inline REPL passed: repeated commits, errors, focus, grid composition, frozen commit and mode switching");
     Ok(())
 }
 
@@ -532,6 +760,338 @@ mod tests {
     fn send(rt: &mut Runtime<State, Msg>, msg: Msg) {
         rt.handle().send(msg).unwrap();
         assert!(!rt.step(&[]).unwrap().committed);
+    }
+
+    const SPATIAL: &str = "param3(3*cos(t),sin(t),t,0,4)";
+
+    fn enter(rt: &mut Runtime<State, Msg>, source: &str) {
+        send(rt, Msg::Edit(source.into()));
+        assert!(!rt.step(&[key(KeyCode::Enter)]).unwrap().committed);
+    }
+
+    #[test]
+    fn grid_composition_rotates_and_commits_frozen_independent_panels() {
+        let (mut rt, clock) = timed();
+        enter(&mut rt, ":grid");
+        assert!(rt.state().grid_mode);
+        assert!(rt.state().panels.is_empty());
+        assert_eq!(rt.focused_key(), Some("editor"));
+        enter(&mut rt, "0.01*sin(x); 0.02*cos(x)");
+        send(&mut rt, Msg::Edit(SPATIAL.into()));
+        clock.advance(PREVIEW_DELAY);
+        rt.step(&[]).unwrap();
+        let draft = rt.state().output.clone().unwrap();
+        clock.advance(Duration::from_secs(1));
+        rt.step(&[]).unwrap();
+        let angle = rt.state().angle;
+        assert!(angle > 0.0);
+        assert!(!rt.step(&[key(KeyCode::Enter)]).unwrap().committed);
+        assert!(Rc::ptr_eq(&draft, &rt.state().panels[1].plot));
+        assert_eq!(rt.state().angle, angle);
+        assert!(rt.state().draft.is_empty());
+        assert_eq!(rt.state().panels.len(), 2);
+        assert!(!Rc::ptr_eq(&rt.state().panels[0].plot, &draft));
+        assert_ne!(rt.state().panels[0].bounds, rt.state().panels[1].bounds);
+        clock.advance(ROTATION_INTERVAL);
+        rt.step(&[]).unwrap();
+        assert!(rt.state().angle > angle);
+        let angle = rt.state().angle;
+        let preview = rt.frame().clone();
+        let revision = rt.state().revision;
+        assert!(rt.step(&[key(KeyCode::F(5))]).unwrap().committed);
+        assert_eq!(rt.state().angle, angle);
+        assert!(rt.state().rotation_started.is_none());
+        let committed = rt.frame().clone();
+        let before: Vec<_> = preview
+            .raster_cells()
+            .filter(|(_, _, r)| r.x == 0 && r.y == 0)
+            .map(|(_, _, r)| r.canvas.clone())
+            .collect();
+        let after: Vec<_> = committed
+            .raster_cells()
+            .filter(|(_, _, r)| r.x == 0 && r.y == 0)
+            .map(|(_, _, r)| r.canvas.clone())
+            .collect();
+        assert_eq!(before.len(), 2);
+        for (a, b) in before.iter().zip(&after) {
+            assert_eq!(a.pixels(), b.pixels());
+            assert_eq!((a.width(), a.height()), (b.width(), b.height()));
+        }
+        rt.handle().send(Msg::Rotate(revision)).unwrap();
+        rt.handle().send(Msg::Preview(revision)).unwrap();
+        rt.step(&[]).unwrap();
+        clock.advance(Duration::from_secs(5));
+        rt.step(&[]).unwrap();
+        assert!(rt.state().grid_mode);
+        assert!(rt.state().panels.is_empty());
+        assert!(!rt.frame().has_raster());
+        assert_eq!(rt.next_update_at(), None);
+        enter(&mut rt, SPATIAL);
+        clock.advance(Duration::from_secs(2));
+        rt.step(&[]).unwrap();
+        for (a, b) in before.iter().zip(&after) {
+            assert_eq!(a.pixels(), b.pixels());
+        }
+    }
+
+    #[test]
+    fn grid_commands_limits_history_and_stale_timers() {
+        let (mut rt, clock) = timed();
+        send(&mut rt, Msg::Edit(SPATIAL.into()));
+        let pending = rt.state().revision;
+        enter(&mut rt, ":grid");
+        send(&mut rt, Msg::Preview(pending));
+        assert!(rt.state().output.is_none());
+        assert_eq!(rt.next_update_at(), None);
+        send(&mut rt, Msg::Submit);
+        assert!(rt.state().error.is_some());
+        enter(&mut rt, "unknown(x)");
+        assert!(rt.state().panels.is_empty());
+        assert_eq!(rt.state().draft, "unknown(x)");
+        enter(&mut rt, &"x".repeat(MAX_INPUT + 1));
+        assert!(rt.state().validation_error.is_some());
+        assert!(rt.state().panels.is_empty());
+        for i in 0..grid::MAX_PANELS {
+            enter(&mut rt, &format!("{i}*x"));
+        }
+        enter(&mut rt, "x^2");
+        assert_eq!(rt.state().panels.len(), grid::MAX_PANELS);
+        assert_eq!(rt.state().draft, "x^2");
+        assert!(rt.state().error.as_ref().unwrap().contains("full"));
+        enter(&mut rt, ":grid");
+        assert_eq!(rt.state().panels.len(), grid::MAX_PANELS);
+        enter(&mut rt, ":undo");
+        assert_eq!(rt.state().panels.len(), grid::MAX_PANELS - 1);
+        send(&mut rt, Msg::Previous);
+        assert_eq!(rt.state().draft, "5*x");
+        enter(&mut rt, ":clear");
+        enter(&mut rt, SPATIAL);
+        clock.advance(ROTATION_INTERVAL);
+        rt.step(&[]).unwrap();
+        let stale = rt.state().revision;
+        enter(&mut rt, ":plot");
+        assert!(!rt.state().grid_mode);
+        assert!(rt.state().panels.is_empty());
+        send(&mut rt, Msg::Rotate(stale));
+        send(&mut rt, Msg::Preview(stale));
+        clock.advance(Duration::from_secs(5));
+        rt.step(&[]).unwrap();
+        assert_eq!(rt.next_update_at(), None);
+        assert_eq!(rt.state().angle, 0.0);
+        assert!(!rt.frame().has_raster());
+        enter(&mut rt, ":bogus");
+        assert!(rt.state().error.as_ref().unwrap().contains("Commands"));
+        assert!(!rt.state().history.iter().any(|s| s.starts_with(':')));
+        send(&mut rt, Msg::Edit("cos(x)".into()));
+        assert!(rt.step(&[key(KeyCode::Enter)]).unwrap().committed);
+    }
+
+    #[test]
+    fn grid_undo_clear_and_quit_cancel_rotation() {
+        let (mut rt, clock) = timed();
+        enter(&mut rt, ":grid");
+        for command in [":undo", ":clear"] {
+            enter(&mut rt, SPATIAL);
+            clock.advance(ROTATION_INTERVAL);
+            rt.step(&[]).unwrap();
+            let revision = rt.state().revision;
+            enter(&mut rt, command);
+            assert!(rt.state().panels.is_empty());
+            send(&mut rt, Msg::Rotate(revision));
+            clock.advance(Duration::from_secs(1));
+            rt.step(&[]).unwrap();
+            assert_eq!(rt.next_update_at(), None);
+            assert!(!rt.frame().has_raster());
+        }
+        enter(&mut rt, SPATIAL);
+        clock.advance(ROTATION_INTERVAL);
+        rt.step(&[]).unwrap();
+        let angle = rt.state().angle;
+        let revision = rt.state().revision;
+        let result = rt.step(&[key(KeyCode::Esc)]).unwrap();
+        assert!(result.should_quit);
+        assert!(!result.committed);
+        assert_eq!(rt.next_update_at(), None);
+        let _ = rt.handle().send(Msg::Rotate(revision));
+        clock.advance(Duration::from_secs(10));
+        assert!(rt.step(&[]).unwrap().should_quit);
+        assert_eq!(rt.state().angle, angle);
+    }
+
+    #[test]
+    fn grid_submit_includes_draft_and_invalid_draft_blocks_commit() {
+        let (mut rt, _) = timed();
+        enter(&mut rt, ":grid");
+        enter(&mut rt, "x");
+        send(&mut rt, Msg::Edit("unknown(x)".into()));
+        send(&mut rt, Msg::Submit);
+        assert_eq!(rt.state().panels.len(), 1);
+        assert!(rt.state().error.is_some());
+        send(&mut rt, Msg::Edit(SPATIAL.into()));
+        assert!(rt.step(&[key(KeyCode::F(5))]).unwrap().committed);
+        assert_eq!(rt.state().panels.len(), 2);
+        assert_eq!(rt.state().angle, 0.0);
+        rt.step(&[]).unwrap();
+        enter(&mut rt, "x^2");
+        send(&mut rt, Msg::Edit(":submit".into()));
+        assert!(rt.step(&[key(KeyCode::Enter)]).unwrap().committed);
+        rt.step(&[]).unwrap();
+        assert_eq!(rt.next_update_at(), None);
+    }
+
+    #[test]
+    fn spatial_preview_rotates_with_elapsed_time_and_freezes_cached_angle() {
+        let (mut rt, clock) = timed();
+        send(&mut rt, Msg::Edit(SPATIAL.into()));
+        clock.advance(PREVIEW_DELAY);
+        rt.step(&[]).unwrap();
+        let source = Rc::clone(rt.state().output.as_ref().unwrap());
+        let bounds = rt.state().bounds;
+        let initial = rt.frame().clone();
+        assert_eq!(rt.state().angle, 0.0);
+        assert!(rt.state().rotation_started.is_some());
+        clock.advance(ROTATION_INTERVAL - Duration::from_millis(1));
+        rt.step(&[]).unwrap();
+        assert_eq!(rt.state().angle, 0.0);
+        clock.advance(Duration::from_millis(1));
+        rt.step(&[]).unwrap();
+        assert!((rt.state().angle - 0.03).abs() < 1e-12);
+        // A delayed tick uses elapsed time, without replaying missed frames.
+        clock.advance(Duration::from_millis(950));
+        rt.step(&[]).unwrap();
+        let angle = rt.state().angle;
+        assert!((angle - ROTATION_SPEED).abs() < 1e-12);
+        let preview = rt.frame().clone();
+        let graph = preview
+            .raster_cells()
+            .find(|(_, _, r)| r.target.height == GRAPH_ROWS)
+            .unwrap()
+            .2;
+        let size = (graph.canvas.width(), graph.canvas.height());
+        let cached = source.image_at(bounds, size, angle);
+        assert_eq!(cached.pixels(), graph.canvas.pixels());
+        let original = initial
+            .raster_cells()
+            .find(|(_, _, r)| r.target.height == GRAPH_ROWS)
+            .unwrap()
+            .2;
+        assert_ne!(original.canvas.pixels(), cached.pixels());
+        let revision = rt.state().revision;
+        clock.advance(Duration::from_millis(25));
+        assert!(rt.step(&[key(KeyCode::Enter)]).unwrap().committed);
+        assert_eq!(rt.state().angle, angle);
+        assert!(rt.state().rotation_started.is_none());
+        assert!(Rc::ptr_eq(&source, rt.state().output.as_ref().unwrap()));
+        let committed = rt.frame().clone();
+        let frozen = committed
+            .raster_cells()
+            .find(|(_, _, r)| r.target.height == GRAPH_ROWS)
+            .unwrap()
+            .2;
+        assert_eq!(cached.pixels(), frozen.canvas.pixels());
+        assert!(std::sync::Arc::ptr_eq(
+            &cached,
+            &source.image_at(bounds, size, angle)
+        ));
+        rt.handle().send(Msg::Rotate(revision)).unwrap();
+        rt.handle().send(Msg::Preview(revision)).unwrap();
+        rt.step(&[]).unwrap();
+        clock.advance(Duration::from_secs(10));
+        rt.step(&[]).unwrap();
+        assert!(rt.state().output.is_none());
+        assert_eq!(rt.state().angle, 0.0);
+        assert_eq!(rt.next_update_at(), None);
+        // A new animated prompt cannot change a retained committed snapshot.
+        send(&mut rt, Msg::Edit(SPATIAL.into()));
+        clock.advance(PREVIEW_DELAY);
+        rt.step(&[]).unwrap();
+        clock.advance(Duration::from_secs(2));
+        rt.step(&[]).unwrap();
+        assert_eq!(frozen.canvas.pixels(), cached.pixels());
+        assert!(std::sync::Arc::ptr_eq(
+            &cached,
+            &source.image_at(bounds, size, angle)
+        ));
+    }
+
+    #[test]
+    fn spatial_edits_invalid_empty_and_next_prompt_cancel_rotation() {
+        let (mut rt, clock) = timed();
+        for replacement in [
+            "unknown(x)".to_owned(),
+            String::new(),
+            "x".repeat(MAX_INPUT + 1),
+        ] {
+            send(&mut rt, Msg::Edit(SPATIAL.into()));
+            clock.advance(PREVIEW_DELAY);
+            rt.step(&[]).unwrap();
+            let revision = rt.state().revision;
+            send(&mut rt, Msg::Edit(replacement));
+            assert!(rt.state().rotation_started.is_none());
+            send(&mut rt, Msg::Rotate(revision));
+            send(&mut rt, Msg::Preview(revision));
+            clock.advance(PREVIEW_DELAY);
+            rt.step(&[]).unwrap();
+            assert!(rt.state().output.is_none());
+            assert_eq!(rt.state().angle, 0.0);
+            assert_eq!(rt.next_update_at(), None);
+        }
+        send(&mut rt, Msg::Edit(SPATIAL.into()));
+        clock.advance(PREVIEW_DELAY);
+        rt.step(&[]).unwrap();
+        let revision = rt.state().revision;
+        send(&mut rt, Msg::NextPrompt);
+        send(&mut rt, Msg::Rotate(revision));
+        assert!(rt.state().rotation_started.is_none());
+        assert_eq!(rt.next_update_at(), None);
+        send(&mut rt, Msg::Edit(SPATIAL.into()));
+        clock.advance(PREVIEW_DELAY);
+        rt.step(&[]).unwrap();
+        // Old messages must also be harmless while a newer animation is active.
+        send(&mut rt, Msg::Rotate(revision));
+        assert_eq!(rt.state().angle, 0.0);
+        clock.advance(ROTATION_INTERVAL);
+        rt.step(&[]).unwrap();
+        assert!(rt.state().angle > 0.0);
+    }
+
+    #[test]
+    fn flat_previews_and_immediate_spatial_submissions_do_not_animate() {
+        let (mut rt, clock) = timed();
+        send(&mut rt, Msg::Edit("sin(x)".into()));
+        clock.advance(PREVIEW_DELAY);
+        rt.step(&[]).unwrap();
+        let revision = rt.state().revision;
+        send(&mut rt, Msg::Rotate(revision));
+        clock.advance(Duration::from_secs(10));
+        rt.step(&[]).unwrap();
+        assert_eq!(rt.state().angle, 0.0);
+        assert!(rt.state().rotation_started.is_none());
+        assert_eq!(rt.next_update_at(), None);
+        send(&mut rt, Msg::Edit(SPATIAL.into()));
+        assert!(rt.step(&[key(KeyCode::Enter)]).unwrap().committed);
+        assert_eq!(rt.state().angle, 0.0);
+        assert!(rt.state().rotation_started.is_none());
+        rt.step(&[]).unwrap();
+        assert_eq!(rt.next_update_at(), None);
+    }
+
+    #[test]
+    fn quit_cancels_spatial_timer_and_ignores_queued_messages() {
+        let (mut rt, clock) = timed();
+        send(&mut rt, Msg::Edit(SPATIAL.into()));
+        clock.advance(PREVIEW_DELAY);
+        rt.step(&[]).unwrap();
+        clock.advance(ROTATION_INTERVAL);
+        rt.step(&[]).unwrap();
+        let angle = rt.state().angle;
+        let revision = rt.state().revision;
+        assert!(rt.step(&[key(KeyCode::Esc)]).unwrap().should_quit);
+        assert_eq!(rt.next_update_at(), None);
+        let _ = rt.handle().send(Msg::Rotate(revision));
+        clock.advance(Duration::from_secs(10));
+        assert!(rt.step(&[]).unwrap().should_quit);
+        assert_eq!(rt.state().angle, angle);
     }
 
     #[test]
@@ -994,7 +1554,7 @@ mod tests {
             rt.step(&[]).unwrap();
             let source = Rc::clone(rt.state().output.as_ref().unwrap());
             let bounds = rt.state().bounds;
-            let columns = source.formula.width(cell);
+            let columns = source.formula.width(cell).max(GRAPH_COLUMNS);
             let image = source.image(
                 bounds,
                 (
@@ -1043,7 +1603,7 @@ mod tests {
     }
 
     #[test]
-    fn formula_preview_commit_cache_and_text_fallback() {
+    fn formula_preview_commit_cache_and_explicit_text_mode() {
         let (mut rt, clock) = timed_with_pixels((8, 16));
         send(&mut rt, Msg::Edit("sqrt(1/(1+x^2))".into()));
         clock.advance(PREVIEW_DELAY);
@@ -1072,35 +1632,56 @@ mod tests {
             send(&mut rt, Msg::Edit("param(cos(t),sin(t),0,2*pi)".into()));
             clock.advance(PREVIEW_DELAY);
             rt.step(&[]).unwrap();
-            assert_eq!(frame_row(&rt, 2).trim(), "⎰ x(t) = cos(t)  t in [0, 2*pi]");
-            assert_eq!(frame_row(&rt, 3).trim(), "⎱ y(t) = sin(t)");
             let path = WidgetPath::root().child(WidgetKey::Named("formula".into()));
             if pixels == (1, 2) {
+                assert_eq!(frame_row(&rt, 2).trim(), "⎰ x(t) = cos(t)  t in [0, 2*pi]");
+                assert_eq!(frame_row(&rt, 3).trim(), "⎱ y(t) = sin(t)");
                 assert_eq!(rt.layout_geometry(&path).unwrap().target.height(), 2);
+                assert!(rt
+                    .frame()
+                    .raster_cells()
+                    .all(|(_, _, r)| r.target.height == GRAPH_ROWS));
+            } else {
+                assert!(rt
+                    .frame()
+                    .raster_cells()
+                    .any(|(_, _, r)| r.target.height != GRAPH_ROWS));
+                assert!(!frame_row(&rt, 2).contains("x(t)"));
             }
-            assert!(rt
-                .frame()
-                .raster_cells()
-                .all(|(_, _, r)| r.target.height == GRAPH_ROWS));
         }
     }
 
     #[test]
-    fn formulas_use_terminal_width_instead_of_graph_width() {
+    fn failed_native_formula_shows_placeholder_not_source_text() {
+        let (mut rt, clock) = timed_with_pixels((8, 16));
+        send(&mut rt, Msg::Edit(vec!["x"; 150].join("+")));
+        clock.advance(PREVIEW_DELAY);
+        rt.step(&[]).unwrap();
+        assert_eq!(frame_row(&rt, 2).trim(), "[Formula rendering unavailable]");
+        assert!(rt.frame().has_raster());
+        assert!(!frame_row(&rt, 2).contains("x+x"));
+    }
+
+    #[test]
+    fn long_formulas_expand_single_plot_width_beyond_preferred_minimum() {
         let (rt, clock) = timed_with_pixels((8, 16));
         let mut rt = rt.size(160, 32);
-        send(
-            &mut rt,
-            Msg::Edit("param(16*sin(t)^3,13*cos(t)-5*cos(2*t)-2*cos(3*t)-cos(4*t),0,2*pi)".into()),
-        );
+        send(&mut rt, Msg::Edit(vec!["x"; 25].join("+")));
         clock.advance(PREVIEW_DELAY);
         rt.step(&[]).unwrap();
         let path = WidgetPath::root().child(WidgetKey::Named("formula".into()));
         let area = rt.layout_geometry(&path).unwrap().target;
         assert_eq!(
             area.width(),
-            rt.state().output.as_ref().unwrap().formula.width((8, 16))
+            rt.state()
+                .output
+                .as_ref()
+                .unwrap()
+                .formula
+                .width((8, 16))
+                .max(GRAPH_COLUMNS)
         );
+        assert!(area.width() > GRAPH_COLUMNS);
         assert!(area.width() < 158);
         let image = rt
             .state()
@@ -1112,7 +1693,7 @@ mod tests {
                 (u32::from(area.width()) * 8, u32::from(area.height()) * 16),
                 16,
             )
-            .expect("the heart equations should fit a wide terminal");
+            .expect("the long formula should fit a wide terminal");
         assert!(rt
             .frame()
             .raster_cells()
@@ -1125,27 +1706,49 @@ mod tests {
     }
 
     #[test]
-    fn native_formula_and_graph_share_content_width_and_leave_blank_space() {
-        for source in ["sin(x)", "param(cos(t),sin(t),0,2*pi)"] {
+    fn native_single_plot_preferred_width_survives_grid_resize_and_commit() {
+        for source in ["sin(x); cos(x)", "param(cos(t),sin(t),0,2*pi)"] {
             let (rt, clock) = timed_with_pixels((8, 16));
             let mut rt = rt.size(160, 32);
+            enter(&mut rt, ":grid");
+            enter(&mut rt, "cos(x)");
+            enter(&mut rt, ":plot");
+            assert!(!rt.state().grid_mode);
+            assert!(rt.state().panels.is_empty());
             send(&mut rt, Msg::Edit(source.into()));
             clock.advance(PREVIEW_DELAY);
             rt.step(&[]).unwrap();
             let columns = rt.state().output.as_ref().unwrap().formula.width((8, 16));
-            assert!(columns < 158);
+            assert!(columns < GRAPH_COLUMNS);
+            let source = Rc::clone(rt.state().output.as_ref().unwrap());
             for terminal_width in [160, 200, 12, 160] {
                 rt.step(&[Event::Resize(terminal_width, 32)]).unwrap();
                 let formula = WidgetPath::root().child(WidgetKey::Named("formula".into()));
                 let graph = WidgetPath::root().child(WidgetKey::Named("output".into()));
                 let f = rt.layout_geometry(&formula).unwrap().target;
                 let g = rt.layout_geometry(&graph).unwrap().target;
-                assert_eq!(f.width(), columns.min(terminal_width - 2));
+                assert_eq!(f.width(), GRAPH_COLUMNS.min(terminal_width - 2));
+                assert_eq!(g.height(), GRAPH_ROWS);
                 assert_eq!((f.x(), f.width()), (g.x(), g.width()));
                 for (x, _, raster) in rt.frame().raster_cells() {
                     assert!(x < f.x() + f.width());
                     assert_eq!(raster.canvas.width(), u32::from(f.width()) * 8);
+                    assert_eq!(raster.canvas.height(), u32::from(raster.target.height) * 16);
                 }
+            }
+            let preview: Vec<_> = rt
+                .frame()
+                .raster_cells()
+                .map(|(_, _, r)| (r.target, r.canvas.clone()))
+                .collect();
+            assert!(!preview.is_empty());
+            assert!(rt.step(&[key(KeyCode::Enter)]).unwrap().committed);
+            assert!(Rc::ptr_eq(&source, rt.state().output.as_ref().unwrap()));
+            let committed: Vec<_> = rt.frame().raster_cells().collect();
+            assert_eq!(committed.len(), preview.len());
+            for ((target, canvas), (_, _, raster)) in preview.iter().zip(committed) {
+                assert_eq!(*target, raster.target);
+                assert_eq!(canvas.pixels(), raster.canvas.pixels());
             }
         }
     }

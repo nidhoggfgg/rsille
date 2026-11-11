@@ -1,3 +1,5 @@
+mod spatial;
+
 use rsille::raster::{RasterCanvas, Rgb};
 use std::{cell::RefCell, sync::Arc};
 
@@ -19,6 +21,7 @@ pub struct Plot {
     functions: Vec<Box<dyn Fn(f64) -> f64>>,
     cache: RefCell<Option<Rendered>>,
     curves: Vec<Curve>,
+    spatial: Option<spatial::Scene>,
     survey: RefCell<Option<([f64; 4], [f64; 2])>>,
 }
 
@@ -34,11 +37,12 @@ struct Rendered {
     bounds: [f64; 4],
     size: (u32, u32),
     domain: [f64; 2],
+    angle: f64,
     canvas: Arc<RasterCanvas>,
 }
 
 impl Plot {
-    /// Parses up to six Cartesian, polar or parametric curves.
+    /// Parses up to six 2D curves or up to six 3D surfaces/curves.
     pub fn parse(source: &str) -> Result<Self, String> {
         let parts: Vec<_> = source.split(';').collect();
         if parts.len() > COLORS.len() {
@@ -46,8 +50,15 @@ impl Plot {
         }
         let mut functions: Vec<Box<dyn Fn(f64) -> f64>> = Vec::new();
         let mut curves = Vec::new();
+        let mut objects = Vec::new();
         for (index, source) in parts.iter().enumerate() {
             let source = source.trim();
+            if let Some(object) =
+                spatial::parse(source).map_err(|error| format!("Object {}: {error}", index + 1))?
+            {
+                objects.push(object);
+                continue;
+            }
             let geometric =
                 parse_geometric(source).map_err(|error| format!("Curve {}: {error}", index + 1))?;
             if let Some(curve) = geometric {
@@ -66,7 +77,11 @@ impl Plot {
             curves.push(Curve::Cartesian(functions.len()));
             functions.push(Box::new(function));
         }
+        if !objects.is_empty() && !curves.is_empty() {
+            return Err("Cannot mix 2D curves and 3D objects in one plot".into());
+        }
         Ok(Self {
+            spatial: (!objects.is_empty()).then(|| spatial::Scene::new(objects)),
             formula: crate::formula::Formula::new(source),
             functions,
             curves,
@@ -77,6 +92,9 @@ impl Plot {
 
     /// Resolution-independent survey; not a proof of extrema or continuity.
     pub fn auto_bounds(&self, x: [f64; 2]) -> [f64; 4] {
+        if let Some(scene) = &self.spatial {
+            return scene.bounds();
+        }
         if self.has_geometry() {
             return self.geometric_bounds(x);
         }
@@ -185,19 +203,43 @@ impl Plot {
 
     /// The immutable source owns one cached size/bounds pair. Redraws only clone
     /// the shared canvas; resizing replaces it without reparsing expressions.
+    #[cfg(test)]
     pub fn image(&self, bounds: [f64; 4], size: (u32, u32)) -> Arc<RasterCanvas> {
+        self.image_at(bounds, size, 0.0)
+    }
+
+    pub fn is_spatial(&self) -> bool {
+        self.spatial.is_some()
+    }
+
+    /// Renders a fixed angle in radians around world z; never advances time.
+    /// Nonfinite angles and angles on 2D plots are treated as zero.
+    pub fn image_at(&self, bounds: [f64; 4], size: (u32, u32), angle: f64) -> Arc<RasterCanvas> {
+        let angle = if self.is_spatial() && angle.is_finite() {
+            angle
+        } else {
+            0.0
+        };
         let domain = self.domain(bounds);
         let mut cache = self.cache.borrow_mut();
         if let Some(old) = cache.as_ref() {
-            if old.bounds == bounds && old.size == size && old.domain == domain {
+            if old.bounds == bounds
+                && old.size == size
+                && old.domain == domain
+                && old.angle == angle
+            {
                 return Arc::clone(&old.canvas);
             }
         }
-        let canvas = Arc::new(self.render(bounds, size));
+        let canvas = Arc::new(match &self.spatial {
+            Some(scene) => scene.render_at(bounds, size, angle),
+            None => self.render(bounds, size),
+        });
         *cache = Some(Rendered {
             bounds,
             size,
             domain,
+            angle,
             canvas: Arc::clone(&canvas),
         });
         canvas
@@ -205,6 +247,9 @@ impl Plot {
 
     /// Draw directly on the final pixel grid, with finite, ordered bounds.
     fn render(&self, bounds: [f64; 4], size: (u32, u32)) -> RasterCanvas {
+        if let Some(scene) = &self.spatial {
+            return scene.render(bounds, size);
+        }
         let domain = self.domain(bounds);
         let bounds = if self.has_geometry() {
             equal_bounds(bounds, size)
@@ -994,6 +1039,7 @@ mod tests {
                     curves: (0..self.functions.len()).map(Curve::Cartesian).collect(),
                     functions: self.functions,
                     cache: self.cache,
+                    spatial: None,
                     survey: RefCell::new(None),
                 }
                 .render(bounds, size)
@@ -1015,6 +1061,7 @@ mod tests {
             })],
             cache: RefCell::new(None),
             curves: vec![Curve::Cartesian(0)],
+            spatial: None,
             survey: RefCell::new(None),
         };
         let first = plot.image(crate::BOUNDS, (70, 28));

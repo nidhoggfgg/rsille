@@ -118,37 +118,68 @@ impl Formula {
         let mut math_rows = Vec::new();
         for (color, source) in source.split(';').enumerate() {
             let source = source.trim();
-            let geometric = ["polar", "param"].iter().find_map(|name| {
-                let body = source
-                    .strip_prefix(name)?
-                    .trim()
-                    .strip_prefix('(')?
-                    .strip_suffix(')')?;
-                let mut depth = 0i32;
-                let args: Vec<_> = body
-                    .split(|c| {
-                        match c {
-                            '(' => depth += 1,
-                            ')' => depth -= 1,
-                            _ => {}
-                        };
-                        c == ',' && depth == 0
-                    })
-                    .map(str::trim)
-                    .collect();
-                Some((*name, args))
-            });
+            let geometric = ["polar", "param", "surface", "param3"]
+                .iter()
+                .find_map(|name| {
+                    let body = source
+                        .strip_prefix(name)?
+                        .trim()
+                        .strip_prefix('(')?
+                        .strip_suffix(')')?;
+                    let mut depth = 0i32;
+                    let args: Vec<_> = body
+                        .split(|c| {
+                            match c {
+                                '(' => depth += 1,
+                                ')' => depth -= 1,
+                                _ => {}
+                            };
+                            c == ',' && depth == 0
+                        })
+                        .map(str::trim)
+                        .collect();
+                    Some((*name, args))
+                });
             if let Some((name, args)) = geometric {
-                let count = if name == "param" { 2 } else { 1 };
-                if args.len() == count + 2 {
+                if name == "surface" && args.len() == 5 {
+                    rows.push((
+                        format!(
+                            "z(x,y) = {},  x in [{}, {}],  y in [{}, {}]",
+                            args[0], args[1], args[2], args[3], args[4]
+                        ),
+                        color,
+                    ));
+                    let parsed = args
+                        .iter()
+                        .map(|arg| parse(arg))
+                        .collect::<Option<Vec<_>>>();
+                    math_rows.push((
+                        parsed.map(|a| {
+                            format!(
+                                "z(x,y) = {}, quad x in [{}, {}], quad y in [{}, {}]",
+                                a[0], a[1], a[2], a[3], a[4]
+                            )
+                        }),
+                        color,
+                    ));
+                    continue;
+                }
+                let count = match name {
+                    "param" => 2,
+                    "param3" => 3,
+                    _ => 1,
+                };
+                if name != "surface" && args.len() == count + 2 {
                     let mut equations = Vec::new();
                     for i in 0..count {
                         let prefix = if name == "polar" {
                             "r(θ)"
                         } else if i == 0 {
                             "x(t)"
-                        } else {
+                        } else if i == 1 {
                             "y(t)"
+                        } else {
+                            "z(t)"
                         };
                         let math_prefix = if name == "polar" { "r(theta)" } else { prefix };
                         rows.push((format!("{prefix} = {}", args[i]), color));
@@ -156,7 +187,7 @@ impl Formula {
                     }
                     let equations = equations.into_iter().collect::<Option<Vec<_>>>();
                     let math = equations.map(|equations| {
-                        if name == "param" {
+                        if count > 1 {
                             format!("cases({})", equations.join(", "))
                         } else {
                             equations.join(", ")
@@ -167,7 +198,26 @@ impl Formula {
                     let domain_math = parse(args[count])
                         .zip(parse(args[count + 1]))
                         .map(|(a, b)| format!("{variable} in [{a}, {b}]"));
-                    if name == "param" {
+                    if name == "param3" {
+                        let equations = rows.split_off(rows.len() - count);
+                        let width = equations
+                            .iter()
+                            .map(|(s, _)| s.chars().count())
+                            .max()
+                            .unwrap();
+                        for (i, (equation, color)) in equations.into_iter().enumerate() {
+                            let brace = ["⎧", "⎨", "⎩"][i];
+                            let text = if i == 1 {
+                                format!(
+                                    "{brace} {equation}{}  {domain}",
+                                    " ".repeat(width - equation.chars().count())
+                                )
+                            } else {
+                                format!("{brace} {equation}")
+                            };
+                            rows.push((text, color));
+                        }
+                    } else if name == "param" {
                         let (y, _) = rows.pop().unwrap();
                         let (x, _) = rows.pop().unwrap();
                         let width = x.chars().count().max(y.chars().count());
@@ -282,20 +332,16 @@ impl Formula {
         self.prepare(cell_height);
         let rendered = self.rendered.borrow();
         let rows = rendered.as_ref()?.1.as_ref()?;
-        if rows.iter().any(|(l, _)| l.width() + 8 > size.0)
-            || rows.iter().map(|(l, _)| l.height() + 4).sum::<u32>() + 4 > size.1
-        {
-            return None;
-        }
+
         let mut canvas = RasterCanvas::new(size.0, size.1, BG).ok()?;
         let mut y = 4;
         for (image, _) in rows {
-            for (i, color) in image.pixels().iter().enumerate() {
-                canvas.set_pixel(
-                    (i as u32 % image.width() + 4) as i32,
-                    (y + i as u32 / image.width()) as i32,
-                    *color,
-                );
+            // Copy only visible pixels, preserving native scale even in tiny viewports.
+            for row in 0..image.height().min(size.1.saturating_sub(y)) {
+                for column in 0..image.width().min(size.0.saturating_sub(4)) {
+                    let color = image.pixels()[(row * image.width() + column) as usize];
+                    canvas.set_pixel((column + 4) as i32, (y + row) as i32, color);
+                }
             }
             y += image.height() + 4;
         }
@@ -361,7 +407,7 @@ mod tests {
         assert_eq!(f.math_rows[0].1, 0);
         assert_eq!(f.math_rows[1].1, 1);
         assert!(f.image((1000, 500), 16).is_some());
-        assert!(f.image((10, 10), 16).is_none());
+        assert!(f.image((10, 10), 16).is_some());
         let rendered = f.rendered.borrow();
         let rows = rendered.as_ref().unwrap().1.as_ref().unwrap();
         assert_eq!(rows.len(), 2);
@@ -390,6 +436,105 @@ mod tests {
     }
 
     #[test]
+    fn spatial_text_math_and_native_colors() {
+        let f = Formula::new("surface(max(x,y),-pi,pi,-2,2);param3(cos(t),sin(t),t/4,0,2*pi)");
+        assert_eq!(
+            f.text_rows().collect::<Vec<_>>(),
+            vec![
+                ("z(x,y) = max(x,y),  x in [-pi, pi],  y in [-2, 2]", 0),
+                ("⎧ x(t) = cos(t)", 1),
+                ("⎨ y(t) = sin(t)  t in [0, 2*pi]", 1),
+                ("⎩ z(t) = t/4", 1),
+            ]
+        );
+        assert_eq!(
+            f.math_rows,
+            vec![
+                (Some("z(x,y) = op(\"max\")(x, y), quad x in [-pi, pi], quad y in [-2, 2]".into()), 0),
+                (Some("cases(x(t) = op(\"cos\")(t), y(t) = op(\"sin\")(t), z(t) = frac(t, 4)), quad t in [0, 2 dot pi]".into()), 1),
+            ]
+        );
+        assert!(f.image((1600, 500), 16).is_some());
+        let rendered = f.rendered.borrow();
+        let rows = rendered.as_ref().unwrap().1.as_ref().unwrap();
+        assert_eq!(rows.len(), 2);
+        for (index, (image, color)) in rows.iter().enumerate() {
+            assert_eq!(*color, index);
+            assert!(image.pixels().iter().any(|pixel| *pixel != BG));
+            RENDERER.with(|renderer| {
+                let expected = renderer
+                    .as_ref()
+                    .unwrap()
+                    .render(
+                        f.math_rows[index].0.as_ref().unwrap(),
+                        &RenderOptions {
+                            font_size: 16.0,
+                            pixels_per_point: 1.0,
+                            foreground: crate::plot::COLORS[index],
+                            background: BG,
+                            max_pixels: 500_000,
+                        },
+                    )
+                    .unwrap();
+                assert_eq!(image.pixels(), expected.pixels());
+            });
+        }
+    }
+
+    #[test]
+    fn spatial_inputs_are_translated_not_raw_typst() {
+        for source in [
+            "surface(#panic(1),0,1,0,1)",
+            "surface(x,0,1,0,#panic(1))",
+            "param3(t,t,#panic(1),0,1)",
+            "param3(t,t,t,0,#panic(1))",
+        ] {
+            assert!(
+                Formula::new(source).image((1600, 500), 16).is_none(),
+                "{source}"
+            );
+        }
+        for source in ["surface(x,0,1,0)", "param3(t,t,0,1)"] {
+            let f = Formula::new(source);
+            assert_eq!(f.text_rows().collect::<Vec<_>>(), vec![(source, 0)]);
+            assert_eq!(f.math_rows[0].0, parse(source));
+        }
+        let f = Formula::new("param3(t,t,unsupported_name,0,1)");
+        assert!(f.math_rows[0]
+            .0
+            .as_ref()
+            .unwrap()
+            .contains("z(t) = \"unsupported_name\""));
+        assert!(f.image((1600, 500), 16).is_some());
+    }
+
+    #[test]
+    fn param3_native_clips_to_three_rows_and_narrow_width_without_rescaling() {
+        for source in [
+            "param3(cos(t),sin(t),t/4,0,6*pi)",
+            "param3((2+cos(3*t))*cos(2*t),(2+cos(3*t))*sin(2*t),sin(3*t),0,2*pi)",
+        ] {
+            let formula = Formula::new(source);
+            assert!(formula.height(16) > 3);
+            let full = formula.image((1000, 500), 16).unwrap();
+            for width in [1000, 80, 10] {
+                let clipped = formula.image((width, 48), 16).unwrap();
+                assert_eq!((clipped.width(), clipped.height()), (width, 48));
+                for y in 0..48usize {
+                    assert_eq!(
+                        &clipped.pixels()[y * width as usize..(y + 1) * width as usize],
+                        &full.pixels()[y * 1000..y * 1000 + width as usize],
+                    );
+                }
+                assert!(Arc::ptr_eq(
+                    &clipped,
+                    &formula.image((width, 48), 16).unwrap()
+                ));
+            }
+        }
+    }
+
+    #[test]
     fn geometry_colors_cache_and_resize() {
         let f = Formula::new("x^2; polar(1+cos(theta),0,2*pi); param(cos(t),sin(t),0,2*pi)");
         let rows: Vec<_> = f.text_rows().collect();
@@ -408,7 +553,7 @@ mod tests {
             .pixels()
             .as_ptr();
         drop(rendered);
-        assert!(f.image((10, 10), 16).is_none());
+        assert!(f.image((10, 10), 16).is_some());
         assert!(f.image((900, 500), 16).is_some());
         assert_eq!(
             row_pixels,
