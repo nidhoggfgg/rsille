@@ -152,7 +152,7 @@ impl<M, F> RasterCanvasWidget<M, F> {
         self
     }
 
-    /// Selects aspect-preserving fit or stretch presentation.
+    /// Selects fit, stretch, or aligned/cropped original-pixel presentation.
     pub fn scale(mut self, scale: RasterScale) -> Self {
         self.options.scale = scale;
         self
@@ -260,6 +260,7 @@ impl<M, F> RasterCanvasWidget<M, F> {
             RasterError::EmptyDimensions => "Raster error: empty dimensions",
             RasterError::TooManyPixels => "Raster error: dimensions too large",
             RasterError::AllocationFailed => "Raster error: allocation failed",
+            RasterError::InvalidPixelLength => "Raster error: invalid pixel length",
         };
         // Keep the diagnostic visible even when the source's top-left is clipped.
         let _ = chunk.with_clip(allocation, |visible| {
@@ -779,7 +780,11 @@ mod tests {
         let source = Arc::new(RasterCanvas::new(2, 2, RED).unwrap());
         let allocation = area(0, 0, u16::MAX, u16::MAX);
         let clip = area(3, 2, 2, 2);
-        for scale in [RasterScale::Fit, RasterScale::Stretch] {
+        for scale in [
+            RasterScale::Fit,
+            RasterScale::Stretch,
+            RasterScale::Original,
+        ] {
             for fallback in [RasterFallback::HalfBlock, RasterFallback::Braille] {
                 let widget = raster_canvas::<()>(source.clone())
                     .scale(scale)
@@ -844,7 +849,11 @@ mod tests {
         source.fill_rect(0, 0, 3, 4, RED);
         let source = Arc::new(source);
         let allocation = area(1, 1, 6, 4);
-        for scale in [RasterScale::Fit, RasterScale::Stretch] {
+        for scale in [
+            RasterScale::Fit,
+            RasterScale::Stretch,
+            RasterScale::Original,
+        ] {
             for fallback in [RasterFallback::HalfBlock, RasterFallback::Braille] {
                 let widget = raster_canvas::<()>(source.clone())
                     .scale(scale)

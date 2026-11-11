@@ -536,7 +536,11 @@ mod tests {
         }
         cell.target = Size::from((3, 2));
         cell.options.background = Rgb(255, 0, 255);
-        for scale in [RasterScale::Fit, RasterScale::Stretch] {
+        for scale in [
+            RasterScale::Fit,
+            RasterScale::Stretch,
+            RasterScale::Original,
+        ] {
             for align in [RasterAlign::Start, RasterAlign::Center, RasterAlign::End] {
                 cell.options.scale = scale;
                 cell.options.align_x = align;
@@ -545,8 +549,10 @@ mod tests {
                     for x in 0..3 {
                         cell.x = x;
                         cell.y = y;
-                        let bytes = SixelCache::default().encode(&cell, 7, 13).unwrap();
-                        assert_pixels(&cell, 7, 13, &bytes);
+                        for (width, height) in [(7, 13), (1, 1)] {
+                            let bytes = SixelCache::default().encode(&cell, width, height).unwrap();
+                            assert_pixels(&cell, width, height, &bytes);
+                        }
                     }
                 }
             }

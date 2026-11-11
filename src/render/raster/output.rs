@@ -27,6 +27,28 @@ pub struct CellPixels {
 }
 
 impl CellPixels {
+    /// Converts image pixels to the smallest enclosing terminal-cell size.
+    ///
+    /// Each axis is rounded up independently. Returns `None` for zero cell
+    /// metrics or a result exceeding `u16::MAX` on either axis. Zero image axes
+    /// produce zero cell axes. This pure calculation neither probes the terminal
+    /// nor enforces Sixel backend limits; metrics are supplied by the caller.
+    ///
+    /// ```
+    /// use rsille::render::raster_output::CellPixels;
+    /// let size = CellPixels { width: 8, height: 16 }.size_for_pixels(17, 33).unwrap();
+    /// assert_eq!((size.width, size.height), (3, 3));
+    /// ```
+    pub fn size_for_pixels(self, width: u32, height: u32) -> Option<crate::render::area::Size> {
+        if self.width == 0 || self.height == 0 {
+            return None;
+        }
+        Some(crate::render::area::Size {
+            width: u16::try_from(width.div_ceil(u32::from(self.width))).ok()?,
+            height: u16::try_from(height.div_ceil(u32::from(self.height))).ok()?,
+        })
+    }
+
     /// Reads OS-reported window pixels without querying or reading terminal input.
     ///
     /// Returns `None` for unavailable, zero, or non-integral cell metrics. This

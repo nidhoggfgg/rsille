@@ -12,6 +12,58 @@ performance acceptance are **pending**. Historical memory-writer measurements ar
 retained in [the performance notes](raster-performance.md); their harness has been
 removed. See [the design and validation plan](raster-design.md).
 
+## External pixel producers
+
+No image or document-rendering dependency is required. Import opaque row-major
+pixels with `RasterCanvas::from_pixels(width, height, background, Vec<Rgb>)`
+(ownership transfer, no pixel copy), or
+`RasterCanvas::from_rgb8(width, height, background, &[u8])` (one RGB conversion
+allocation). Both validate nonzero dimensions, the existing 16,777,216-pixel
+limit, and exact input length. RGB8 is tightly packed R/G/B without stride or
+alpha; callers must remove padding and composite alpha themselves. Invalid
+lengths return `RasterError::InvalidPixelLength`. The background argument is
+canvas metadata, not a transformation of imported pixels. Fresh resources start
+with a new identity and version zero, and retain normal COW snapshot semantics.
+
+```rust
+use rsille::render::raster_output::CellPixels;
+use rsille::tui::prelude::*;
+
+// A simulated external renderer's tightly packed RGB8 result.
+let bytes = vec![128; 17 * 33 * 3];
+let image = RasterCanvas::from_rgb8(17, 33, Rgb(0, 0, 0), &bytes).unwrap();
+// Explicit host-provided physical metrics, not terminal discovery.
+let size = CellPixels { width: 8, height: 16 }
+    .size_for_pixels(image.width(), image.height()).unwrap();
+let view = raster_canvas::<()>(image)
+    .scale(RasterScale::Original)
+    .align_x(RasterAlign::Start)
+    .align_y(RasterAlign::Start)
+    .fixed(size.width, size.height);
+```
+
+`CellPixels::size_for_pixels` rounds up independently on each axis and returns
+`None` for zero cell metrics or a cell count exceeding `u16::MAX`. Zero image
+axes yield zero cell axes. It is a pure checked conversion, not a Sixel capability
+check or a layout policy; the application chooses constraints and when to update
+explicit metrics.
+
+`RasterScale::Original` does not rescale: one source pixel maps to one destination
+sample. Smaller images are padded with `RasterOptions::background`; larger ones
+are cropped. Start/Center/End alignment applies on each axis to both padding and
+cropping. With Center, an odd extra padded or cropped pixel is at bottom/right.
+Clipping, tiling and occlusion preserve the original full target and offsets;
+visible fragments are never refitted. Native Sixel uses physical cell pixels
+(and still quantizes colors to RGB332). Character fallback uses its existing
+1×2 HalfBlock or 2×4 Braille grid, **not physical metrics**, so Original can crop
+more source pixels in text mode. Use Fit for an overview in either backend.
+The default remains centered Fit; Stretch is unchanged.
+
+The public `Chunk::raster` API accepts the same resource and options for custom
+drawing. `tests/raster_external.rs` exercises both public widget and chunk paths
+without a terminal or an external rendering library. Adding enum variants means
+external exhaustive matches on `RasterScale` / `RasterError` need updating.
+
 ## Run the showcase
 
 [`examples/sixel_windows.rs`](../examples/sixel_windows.rs) is a single-file

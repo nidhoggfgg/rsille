@@ -32,6 +32,8 @@ pub enum RasterError {
     TooManyPixels,
     /// The allocator could not reserve the requested pixel storage.
     AllocationFailed,
+    /// The input length does not exactly match the dimensions and pixel format.
+    InvalidPixelLength,
 }
 
 impl fmt::Display for RasterError {
@@ -40,6 +42,7 @@ impl fmt::Display for RasterError {
             Self::EmptyDimensions => "raster dimensions must be nonzero",
             Self::TooManyPixels => "raster dimensions exceed the pixel resource limit",
             Self::AllocationFailed => "could not allocate raster pixels",
+            Self::InvalidPixelLength => "raster pixel length does not match dimensions",
         })
     }
 }
@@ -93,6 +96,16 @@ impl RasterCanvas {
     /// Dimensions are checked before allocation; at most [`MAX_RASTER_PIXELS`]
     /// pixels are accepted. Dimensions never change after construction.
     pub fn new(width: u32, height: u32, background: Rgb) -> Result<Self, RasterError> {
+        let len = Self::checked_len(width, height)?;
+        let mut pixels = Vec::new();
+        pixels
+            .try_reserve_exact(len)
+            .map_err(|_| RasterError::AllocationFailed)?;
+        pixels.resize(len, background);
+        Self::from_pixels(width, height, background, pixels)
+    }
+
+    fn checked_len(width: u32, height: u32) -> Result<usize, RasterError> {
         if width == 0 || height == 0 {
             return Err(RasterError::EmptyDimensions);
         }
@@ -105,11 +118,23 @@ impl RasterCanvas {
             })
             .filter(|&len| len <= MAX_RASTER_PIXELS)
             .ok_or(RasterError::TooManyPixels)?;
-        let mut pixels = Vec::new();
-        pixels
-            .try_reserve_exact(len)
-            .map_err(|_| RasterError::AllocationFailed)?;
-        pixels.resize(len, background);
+        Ok(len)
+    }
+
+    /// Takes ownership of tightly packed, row-major RGB pixels without copying.
+    ///
+    /// Dimensions must be nonzero, within [`MAX_RASTER_PIXELS`], and match the
+    /// exact input length. `background` is metadata, not a fill or alpha color.
+    /// The canvas has a fresh identity and version zero; clones use normal COW.
+    pub fn from_pixels(
+        width: u32,
+        height: u32,
+        background: Rgb,
+        pixels: Vec<Rgb>,
+    ) -> Result<Self, RasterError> {
+        if pixels.len() != Self::checked_len(width, height)? {
+            return Err(RasterError::InvalidPixelLength);
+        }
         Ok(Self {
             width,
             height,
@@ -118,6 +143,30 @@ impl RasterCanvas {
             id: next_token(),
             version: 0,
         })
+    }
+
+    /// Copies tightly packed row-major RGB8 bytes (`R, G, B`, no alpha/padding).
+    ///
+    /// Checks dimensions, resource limits, and exact byte length before reserving
+    /// storage. Allocation failure returns [`RasterError::AllocationFailed`].
+    /// Alpha compositing and stride removal are the caller's responsibility.
+    /// Identity, background metadata and COW semantics match [`Self::from_pixels`].
+    pub fn from_rgb8(
+        width: u32,
+        height: u32,
+        background: Rgb,
+        bytes: &[u8],
+    ) -> Result<Self, RasterError> {
+        let len = Self::checked_len(width, height)?;
+        if len.checked_mul(3) != Some(bytes.len()) {
+            return Err(RasterError::InvalidPixelLength);
+        }
+        let mut pixels = Vec::new();
+        pixels
+            .try_reserve_exact(len)
+            .map_err(|_| RasterError::AllocationFailed)?;
+        pixels.extend(bytes.chunks_exact(3).map(|rgb| Rgb(rgb[0], rgb[1], rgb[2])));
+        Self::from_pixels(width, height, background, pixels)
     }
 
     /// Source width in pixels.
@@ -366,9 +415,16 @@ pub enum RasterScale {
     Fit,
     /// Scale each axis independently to fill the target.
     Stretch,
+    /// One source pixel per destination sample, without scaling.
+    ///
+    /// Alignment places smaller images over the presentation background and
+    /// selects the crop of larger images. Center leaves an odd extra padding or
+    /// cropped pixel at the bottom/right. Native output uses physical pixels;
+    /// character fallback uses its 1×2 or 2×4 sample grid, not physical metrics.
+    Original,
 }
 
-/// Placement of any unused space along an axis.
+/// Placement of an image along an axis, including cropping in original mode.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum RasterAlign {
     /// Place the image against the top or left edge.
@@ -462,6 +518,7 @@ impl RasterCell {
         let source_height = u64::from(self.canvas.height);
         let (width, height) = match self.options.scale {
             RasterScale::Stretch => (target_width, target_height),
+            RasterScale::Original => (source_width, source_height),
             RasterScale::Fit => {
                 if target_width * source_height <= target_height * source_width {
                     (
@@ -476,10 +533,26 @@ impl RasterCell {
                 }
             }
         };
-        let left = self.options.align_x.offset(target_width - width);
-        let top = self.options.align_y.offset(target_height - height);
-        let x = u64::from(self.x) * u64::from(cell_width) + u64::from(pixel_x);
-        let y = u64::from(self.y) * u64::from(cell_height) + u64::from(pixel_y);
+        let left = self
+            .options
+            .align_x
+            .offset(target_width.saturating_sub(width));
+        let top = self
+            .options
+            .align_y
+            .offset(target_height.saturating_sub(height));
+        let x = u64::from(self.x) * u64::from(cell_width)
+            + u64::from(pixel_x)
+            + self
+                .options
+                .align_x
+                .offset(width.saturating_sub(target_width));
+        let y = u64::from(self.y) * u64::from(cell_height)
+            + u64::from(pixel_y)
+            + self
+                .options
+                .align_y
+                .offset(height.saturating_sub(target_height));
         if x < left || y < top || x >= left + width || y >= top + height {
             return background;
         }
@@ -1090,7 +1163,11 @@ mod tests {
         }
         let pointer = source.pixels().as_ptr();
         let version = source.version();
-        for scale in [RasterScale::Fit, RasterScale::Stretch] {
+        for scale in [
+            RasterScale::Fit,
+            RasterScale::Stretch,
+            RasterScale::Original,
+        ] {
             for align_x in [RasterAlign::Start, RasterAlign::Center, RasterAlign::End] {
                 for align_y in [RasterAlign::Start, RasterAlign::Center, RasterAlign::End] {
                     let mut whole = cell(source.clone(), 1, 1);
