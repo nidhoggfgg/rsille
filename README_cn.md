@@ -55,6 +55,20 @@ rsille = "3.0.4"
 对外的包名是 `rsille`。仓库中的 `tui`、`render`、`canvas` 都是内部开发用 crate，
 均设置了 `publish = false`。
 
+Typst 数学公式 → RGB 像素画布由独立扩展
+[`rsille-typst`](packages/rsille-typst/README.md) 提供，直接使用 Typst 数学语法，
+不向核心 crate 添加 Typst 依赖。在兼容终端的普通屏幕 inline 展示块级公式，
+不进入备用屏幕、不捕获鼠标（`q` / `Esc` 退出）。保留原始像素尺寸，窄/矮窗口
+选择裁剪而非放大或重排：
+
+```sh
+cargo run -p rsille-typst --features sixel --example formula -- --sixel 'sqrt(x)'
+cargo run -p rsille-typst --example formula -- --help
+```
+
+`--sixel` 显式断言终端/复用器能力，不会静默降级。单格物理像素手动 override、
+`--text-only` 预览（不保证可读性）和无 TTY 的 `--headless` 自检详见扩展 README。
+
 默认没有启用任何 feature。代码查看器需要 Syntect 语法高亮时，启用 `syntax-highlighting`：
 
 ```toml

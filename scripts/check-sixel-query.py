@@ -23,10 +23,10 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 QUERY = b"\x1b[16t"
 FRAME_END = b"\x1b[?2026l"
-TILE = b'\x1bP0;1;0q"1;1;10;20'
+TILE = b'\x1bP7;1;0q"1;1;10;20'
 
 
-def check(binary, mode):
+def check(binary, mode, formula=None):
     master, slave = pty.openpty()
     os.set_blocking(master, False)
     pixels = (1100, 720) if mode == "os" else (0, 0)
@@ -50,6 +50,8 @@ sys.exit(child.returncode if restored else 1)
     args = [str(binary), "--sixel"]
     if mode == "explicit":
         args += ["--cell-pixels", "10x20"]
+    if formula:
+        args += ["--", formula]
     process = subprocess.Popen(
         [sys.executable, "-c", wrapper, *args],
         stdin=slave, stdout=output_slave, stderr=output_slave,
@@ -61,6 +63,11 @@ sys.exit(child.returncode if restored else 1)
             try:
                 data = os.read(output_master, 65536)
                 screen.extend(data)
+                # Inline startup asks for the cursor origin. Start at the bottom
+                # to exercise reservation/scrolling before painting graphics.
+                if b"\x1b[6n" in screen and not getattr(pump, "replied", False):
+                    os.write(master, b"\x1b[36;1R")
+                    pump.replied = True
                 assert len(screen) < 8 * 1024 * 1024, "unbounded output"
                 return bool(data)
             except OSError as error:
@@ -99,6 +106,7 @@ sys.exit(child.returncode if restored else 1)
 
     def plain_text(start=0):
         data = re.sub(rb"\x1bP.*?\x1b\\", b"", bytes(screen[start:]), flags=re.S)
+        data = re.sub(rb"\x1b[78]", b"", data)
         return re.sub(rb"\x1b\[[0-?]*[ -/]*[@-~]", b"", data)
 
     try:
@@ -143,17 +151,21 @@ sys.exit(child.returncode if restored else 1)
         # the state change as well as a frame, so an unrelated redraw cannot pass.
         # HalfBlock -> Braille changes the first four letters; differential
         # output may omit an unchanged 'l', so do not require the entire word.
-        start = len(screen)
-        send_input(b"e")
-        wait_until(
-            lambda: FRAME_END in screen[start:] and b"Brai" in plain_text(start),
-            "native key event after the initial frame",
-        )
-        assert screen.count(QUERY) == expected_queries
+        if formula is None:
+            start = len(screen)
+            send_input(b"e")
+            wait_until(
+                lambda: FRAME_END in screen[start:] and b"Brai" in plain_text(start),
+                "native key event after the initial frame",
+            )
+            assert screen.count(QUERY) == expected_queries
+        else:
+            assert b"Typst / Sixel" in plain_text()
+            check_formula_frame(bytes(screen), 36, 110)
 
         if mode == "resize":
             start = len(screen)
-            fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 32, 100, 0, 0))
+            fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 6 if formula is not None else 32, 12 if formula is not None else 100, 0, 0))
             # No OS pixels and no second reply: the renderer must retain the
             # explicit 10x20 snapshot returned by startup preflight.
             wait_until(
@@ -161,15 +173,22 @@ sys.exit(child.returncode if restored else 1)
                 "resize redraw with the original 10x20 pixel snapshot",
             )
             assert screen.count(QUERY) == expected_queries, "resize must not query cell pixels"
+            if formula is not None:
+                check_formula_frame(bytes(screen[start:]), 6, 12)
 
-        send_input(b"q")
+        send_input(b"\x1b" if formula is not None and mode == "explicit" else b"q")
         wait_until(lambda: process.poll() is not None, "clean keyboard exit")
         while pump():
             pass
         assert process.returncode == 0, bytes(screen[-1200:])
         assert screen.count(QUERY) == expected_queries
         assert b"RSILLE_TTY_RESTORED=True" in screen
-        assert b"\x1b[?1049l" in screen, "alternate screen was not restored"
+        if formula is None:
+            assert b"\x1b[?1049l" in screen, "alternate screen was not restored"
+        else:
+            for forbidden in (b"\x1b[?1049h", b"\x1b[?1049l", b"\x1b[?1000h", b"\x1b[?1002h", b"\x1b[?1003h", b"\x1b[2J"):
+                assert forbidden not in screen, ("not normal-screen keyboard-only output", forbidden)
+            assert b"\x1b[?25h" in screen, "cursor was not restored"
         print(f"PASS {mode}: startup snapshot, native input and terminal restoration")
     finally:
         if process.poll() is None:
@@ -185,19 +204,50 @@ sys.exit(child.returncode if restored else 1)
             os.close(output_slave)
 
 
+def check_formula_frame(data, rows, columns):
+    # Inline tiles are positioned relative to the saved bottom guard anchor.
+    # At 10x20 every tile needs 24 physical scanlines, so at least one row
+    # below every tile is required; no fullscreen bottom-prefix workaround.
+    data = data.split(FRAME_END, 1)[0]
+    tiles = re.findall(
+        rb'\x1b8\x1b\[(\d+)F\x1b\[(\d+)G\x1bP7;1;0q"1;1;10;(\d+).*?\x1b\\',
+        data, flags=re.S,
+    )
+    assert len(tiles) == data.count(b"\x1bP"), "unpositioned or malformed DCS"
+    assert tiles, "formula did not reach terminal encoder"
+    for above_guard, column, height in tiles:
+        above_guard, column, height = int(above_guard), int(column), int(height)
+        assert 1 <= above_guard < rows and 1 <= column <= columns
+        assert height == 20, "inline must retain original cell metrics"
+        assert ((height + 5) // 6) * 6 <= (above_guard + 1) * 20
+    content_rows = max(int(up) for up, _, _ in tiles) + 1  # includes title
+    assert content_rows + 1 <= rows, "missing safe bottom guard"
+    if rows == 36:
+        assert content_rows < 35, "formula expanded to the whole viewport"
+        assert data.count(b"\n") <= content_rows + 1, "excessive row reservation"
+    assert b"\x1b[2K" in data, "missing local graphics erasure"
+    print(f"PASS formula bytes: {len(tiles)} relative DCS, {content_rows} content rows + guard, viewport {columns}x{rows}")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--binary", type=Path, help="Use an already built sixel_windows example")
+    parser.add_argument("--binary", type=Path, help="Use an already built example (sixel_windows, or formula with --formula)")
+    parser.add_argument(
+        "--formula", nargs="?", const="",
+        help="Check formula example instead (optional quoted Typst source; default formula if omitted)",
+    )
     args = parser.parse_args()
     binary = args.binary
     if binary is None:
+        example = "sixel_windows" if args.formula is None else "formula"
+        package = [] if args.formula is None else ["-p", "rsille-typst"]
         subprocess.run(
-            ["cargo", "build", "--features", "sixel", "--example", "sixel_windows"],
+            ["cargo", "build", *package, "--features", "sixel", "--example", example],
             cwd=ROOT, check=True, timeout=120,
         )
-        binary = ROOT / "target/debug/examples/sixel_windows"
+        binary = ROOT / "target/debug/examples" / example
     for mode in ("explicit", "os", "query", "resize", "timeout", "noise", "invalid", "mismatched-tty"):
-        check(binary.resolve(), mode)
+        check(binary.resolve(), mode, args.formula)
 
 
 if __name__ == "__main__":

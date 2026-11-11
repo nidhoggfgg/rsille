@@ -8,7 +8,8 @@
 //! such as Windows Terminal may check the full band's height. Inline reserves
 //! ceil(((6 - cell_height % 6) % 6) / cell_height) guard rows in the parent.
 //! The host must support safe positioned graphics and padding that does not
-//! erase adjacent cells; fullscreen still requires safe output at the last row.
+//! erase adjacent cells. Fullscreen can prepend transparent rows and anchor a
+//! bottom-edge tile higher so its final six-pixel band fits the viewport.
 
 use std::collections::VecDeque;
 use std::io::{self, Write};
@@ -36,6 +37,7 @@ struct Key {
     options: RasterOptions,
     cell_width: u16,
     cell_height: u16,
+    top_padding: u16,
 }
 
 impl Key {
@@ -50,6 +52,7 @@ impl Key {
             options: cell.options,
             cell_width,
             cell_height,
+            top_padding: 0,
         }
     }
 }
@@ -81,14 +84,29 @@ impl SixelCache {
     /// and letterboxing. Dimensions must be 1..=1024, their product at most
     /// 65,536, and encoded output at most 1 MiB. Limit violations return
     /// `InvalidInput`, without changing cache entries or counters.
+    #[cfg(test)]
     pub(super) fn encode(
         &mut self,
         cell: &RasterCell,
         cell_width: u16,
         cell_height: u16,
     ) -> io::Result<Arc<[u8]>> {
+        self.encode_padded(cell, cell_width, cell_height, 0)
+    }
+
+    pub(super) fn encode_padded(
+        &mut self,
+        cell: &RasterCell,
+        cell_width: u16,
+        cell_height: u16,
+        top_padding: u16,
+    ) -> io::Result<Arc<[u8]>> {
         validate_dimensions(cell_width, cell_height)?;
-        let key = Key::new(cell, cell_width, cell_height);
+        if u32::from(top_padding) > 5 * u32::from(cell_height) {
+            return Err(invalid_input("Sixel top padding exceeds five cell rows"));
+        }
+        let mut key = Key::new(cell, cell_width, cell_height);
+        key.top_padding = top_padding;
         if let Some(index) = self.entries.iter().position(|entry| entry.key == key) {
             let entry = self.entries.remove(index).expect("existing cache entry");
             let encoded = Arc::clone(&entry.encoded);
@@ -97,7 +115,8 @@ impl SixelCache {
             return Ok(encoded);
         }
 
-        let encoded: Arc<[u8]> = encode_tile(cell, cell_width, cell_height)?.into();
+        let encoded: Arc<[u8]> =
+            encode_tile_padded(cell, cell_width, cell_height, top_padding)?.into();
         self.insert(key, Arc::clone(&encoded))?;
         self.encodes = self.encodes.saturating_add(1);
         Ok(encoded)
@@ -212,7 +231,12 @@ impl Write for TileBytes {
     }
 }
 
-fn encode_tile(cell: &RasterCell, cell_width: u16, cell_height: u16) -> io::Result<Vec<u8>> {
+fn encode_tile_padded(
+    cell: &RasterCell,
+    cell_width: u16,
+    cell_height: u16,
+    top_padding: u16,
+) -> io::Result<Vec<u8>> {
     let width = usize::from(cell_width);
     let height = usize::from(cell_height);
     let mut pixels = zeroed(width * height)?;
@@ -231,7 +255,11 @@ fn encode_tile(cell: &RasterCell, cell_width: u16, cell_height: u16) -> io::Resu
     // Transparent *unset bits* avoid filling the final band's padding. All real
     // pixels, including the presentation background, are explicitly set below.
     // This does not prevent full-band scroll checks; inline needs a bottom margin.
-    write!(output, "\x1bP0;1;0q\"1;1;{width};{height}")?;
+    let padding = usize::from(top_padding);
+    let encoded_height = padding + height;
+    // P1=7 starts at 1:1, unlike P1=0's initial 2:1. Windows Terminal retains
+    // that initial 12-pixel segment for its first scroll check even after DECGRA.
+    write!(output, "\x1bP7;1;0q\"1;1;{width};{encoded_height}")?;
     for (index, &present) in used.iter().enumerate() {
         if present {
             let [red, green, blue] = palette_color(index as u8);
@@ -241,11 +269,11 @@ fn encode_tile(cell: &RasterCell, cell_width: u16, cell_height: u16) -> io::Resu
 
     // Only one band's color planes are held at a time (at most 256 KiB).
     let mut planes = zeroed(256 * width)?;
-    for top in (0..height).step_by(6) {
+    for top in (0..encoded_height).step_by(6) {
         planes.fill(0);
-        for y in top..(top + 6).min(height) {
+        for y in top.max(padding)..(top + 6).min(encoded_height) {
             for x in 0..width {
-                let index = usize::from(pixels[y * width + x]);
+                let index = usize::from(pixels[(y - padding) * width + x]);
                 planes[index * width + x] |= 1 << (y - top);
             }
         }
@@ -263,7 +291,7 @@ fn encode_tile(cell: &RasterCell, cell_width: u16, cell_height: u16) -> io::Resu
         }
         // Avoid an extra advance past the final band. The band itself may still
         // trigger bottom scrolling without the parent's inline guard rows.
-        if top + 6 < height {
+        if top + 6 < encoded_height {
             output.write_all(b"-")?;
         }
     }
@@ -339,7 +367,7 @@ mod tests {
     // Independent protocol parser: unset pixels stay None, so transparent holes,
     // repeated writes, and any painted padding are errors, not hidden by black.
     fn decode(input: &[u8]) -> Decoded {
-        let prefix = b"\x1bP0;1;0q\"";
+        let prefix = b"\x1bP7;1;0q\"";
         assert!(input.starts_with(prefix));
         assert!(input.ends_with(b"\x1b\\"));
         assert!(!input.ends_with(b"-\x1b\\"));
@@ -410,10 +438,6 @@ mod tests {
                 _ => panic!("unexpected Sixel command {command}"),
             }
         }
-        assert!(
-            result.pixels.iter().all(Option::is_some),
-            "transparent holes"
-        );
         result
     }
 
@@ -428,6 +452,10 @@ mod tests {
 
     fn assert_pixels(cell: &RasterCell, width: u16, height: u16, bytes: &[u8]) -> Decoded {
         let decoded = decode(bytes);
+        assert!(
+            decoded.pixels.iter().all(Option::is_some),
+            "transparent holes"
+        );
         assert_eq!(
             (decoded.width, decoded.height),
             (width as usize, height as usize)
@@ -512,6 +540,35 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn transparent_prefix_preserves_sampling_and_is_part_of_cache_key() {
+        let mut cell = cell(10, 20);
+        for y in 0..20 {
+            for x in 0..10 {
+                cell.canvas
+                    .set_pixel(x, y, Rgb((x * 25) as u8, (y * 12) as u8, 200));
+            }
+        }
+        let mut cache = SixelCache::default();
+        let plain = cache.encode(&cell, 10, 20).unwrap();
+        let reference = decode(&plain);
+        for padding in [20, 40, 100] {
+            let bytes = cache.encode_padded(&cell, 10, 20, padding).unwrap();
+            let decoded = decode(&bytes);
+            let prefix = usize::from(padding) * 10;
+            assert!(decoded.pixels[..prefix].iter().all(Option::is_none));
+            assert_eq!(&decoded.pixels[prefix..], &reference.pixels);
+            assert!(Arc::ptr_eq(
+                &bytes,
+                &cache.encode_padded(&cell, 10, 20, padding).unwrap()
+            ));
+        }
+        assert!(Arc::ptr_eq(&plain, &cache.encode(&cell, 10, 20).unwrap()));
+        assert_eq!(cache.encodes(), 4);
+        assert!(cache.encode_padded(&cell, 10, 20, 101).is_err());
+        assert_eq!(cache.encodes(), 4);
     }
 
     #[test]

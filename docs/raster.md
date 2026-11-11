@@ -132,8 +132,14 @@ final band advance. For a 20-pixel tile, only two rows of the final band contain
 pixels; its four padding rows remain unset. Transparent padding prevents painting
 adjacent cells on conforming terminals, but does not by itself prevent bottom-edge
 scrolling: Windows Terminal can check the full band height. Inline reserves a
-bottom margin for this padding; fullscreen still requires safe positioned output
-at the last row, as well as `reliable_erase`. Accepting these metrics is
+bottom margin for this padding. Fullscreen instead anchors bottom-edge tiles
+higher with transparent prefix pixels, without moving or cropping their visible
+pixels. For 20-pixel cells, the last-row DCS starts two rows earlier with 40
+transparent pixels followed by the original 20 pixels: all ten bands fit exactly.
+The encoder starts at 1:1 (`P1=7`), avoiding an initial 12-pixel segment on Windows
+Terminal. A viewport too short for any safe anchor fails before output under
+`RequireSixel` (or uses character fallback under `Auto`). Transparent prefixes,
+positioned output and `reliable_erase` still require host support. Accepting these metrics is
 **not real-terminal certification**;
 use `--text-only` if the terminal cannot satisfy that contract.
 

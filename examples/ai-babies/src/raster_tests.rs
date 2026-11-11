@@ -230,7 +230,7 @@ fn native_inline_playback_is_compact_and_reuses_unchanged_frames() {
         renderer.render().unwrap();
         assert!(renderer.raster_stats().tiles_sent > stats.tiles_sent);
     }
-    let header = b"\x1bP0;1;0q\"1;1;10;20";
+    let header = b"\x1bP7;1;0q\"1;1;10;20";
     assert!(bytes.windows(header.len()).any(|part| part == header));
     assert!(bytes.windows(4).any(|part| part == b"\x1b[2K"));
     assert!(!bytes.windows(4).any(|part| part == b"\x1b[2J"));

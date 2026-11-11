@@ -222,8 +222,9 @@ pub struct RasterCapabilities {
     /// Cell-positioned graphics do not scroll or move their origin, and retain
     /// their colors when subsequent palettes are sent. Unset bits in a partial
     /// final six-pixel band must not erase adjacent cells.
-    /// Inline output reserves trailing rows for that band's padding; fullscreen
-    /// output still requires safe positioned graphics at the screen's last row.
+    /// Inline reserves trailing rows for band padding. Fullscreen moves bottom
+    /// tile anchors upward with transparent prefixes so complete bands fit.
+    /// Transparent prefix pixels must preserve existing text and graphics.
     pub no_scroll: bool,
     /// Physical pixels per character cell, required for native Sixel output.
     /// Set `Some(pixels)` explicitly or store the result of [`CellPixels::probe`]

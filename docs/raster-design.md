@@ -187,11 +187,32 @@ Inline therefore reserves `ceil(padding / h)` blank guard rows for cell height
 320-pixel AI Babies image uses **16 content rows + 1 blank guard row** when space
 permits. At 8×18 no guard row is needed; at tiny `h = 1`, five are needed.
 A known viewport height is reduced by the guard rows before limiting content
-height. This inline margin does not fix fullscreen bottom-edge behavior:
-fullscreen still requires safe positioned output at the last row and
-`reliable_erase`; inline requires `reliable_inline_erase`. Both retain the shared
-`no_scroll` contract and need real-terminal validation. Setting host capabilities
-does not bypass resource limits.
+height. Fullscreen uses a different strategy: for a tile at row `y`, choose the
+smallest upward shift `s` (0..=min(y, 5)) such that
+`ceil((s + 1) * h / 6) * 6 <= (viewport_rows - y + s) * h`.
+Encode `s * h` transparent prefix pixels, then the unchanged cell crop, and emit
+CUP at `y - s`. At 10×20 the last row shifts two rows up: 40 transparent pixels
+plus 20 opaque pixels end exactly at the bottom. Prefix length is in the cache
+key; absolute position is not. No additional sampled-pixel allocation is needed.
+If no anchor fits, RequireSixel fails before any bytes and Auto uses fallback.
+This preserves layout, title, sampling and all bottom-row pixels instead of
+reserving a blank fullscreen row or rounding physical metrics.
+
+The DCS starts with `P1=7` (1:1), not `P1=0` (initially 2:1). Windows Terminal's
+`_updateRasterAttributes` retains the maximum initial segment height for the
+first flush, so changing to 1:1 in DECGRA alone leaves a 12-pixel scroll check.
+Enabling DEC mode 80 is not a substitute: `_initTextBufferBoundaries` then uses
+the page top-left rather than CUP as the image origin. The library does not
+change this terminal mode; hosts must allow cursor-positioned Sixel output.
+
+Full output-stream tests interpret CUP, saved/restored cursor, DCS payloads,
+full-band scrolling and text retention, including a legacy negative control
+that scrolls 32 times and leaves a staircase. They cover cell heights 1..=25,
+resize, unchanged frames, transparent prefixes and exact pixel sampling.
+This is a source-based model, not real Windows Terminal validation. Fullscreen
+still requires `reliable_erase`; inline requires `reliable_inline_erase`. Both
+retain the shared `no_scroll` contract. Setting host capabilities does not
+bypass resource limits.
 
 - Source: at most 16,777,216 pixels, about 48 MiB RGB per distinct source buffer.
 - Tile: nonzero dimensions at most 1024, at most 65,536 pixels, at most 1 MiB
@@ -255,7 +276,8 @@ reject an unsupported configuration.
 - [ ] With actual partial-band metrics such as 10×20, verify exact raster height
       and transparent padding without adjacent-cell erasure. Check inline's blank
       guard rows (one at 10×20, none at 8×18, five at `h = 1`) prevent bottom
-      scrolling; separately validate fullscreen's unchanged last-row requirement.
+      scrolling; separately validate fullscreen's upward anchors and transparent
+      prefixes preserve text/graphics above the tile and all last-row pixels.
 - [ ] Compare Fit/Stretch, all alignments, letterboxing, and corner pixels with
       the source; check black pixels are opaque and no background bleeds through.
 - [ ] Exercise nested clipping, both scroll axes, screen edges, and the last row;

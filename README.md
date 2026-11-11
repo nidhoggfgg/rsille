@@ -60,6 +60,22 @@ rsille = "3.0.4"
 The public package is `rsille`. The repository's `tui`, `render` and `canvas` crates
 are private development targets, all with `publish = false`.
 
+For Typst math → RGB raster rendering, see the independent
+[`rsille-typst` extension](packages/rsille-typst/README.md). It uses Typst math
+syntax directly and does not add Typst dependencies to the core crate. Display a
+block formula inline on the normal screen, without mouse capture, in a compatible
+terminal (`q` / `Esc` to quit). Original pixel size is preserved; narrow/short
+viewports clip rather than enlarge or reflow the formula:
+
+```sh
+cargo run -p rsille-typst --features sixel --example formula -- --sixel 'sqrt(x)'
+cargo run -p rsille-typst --example formula -- --help
+```
+
+`--sixel` explicitly asserts terminal/multiplexer capabilities and never silently
+falls back. See the extension README for measured cell-pixel overrides,
+`--text-only` previews (readability not guaranteed), and no-TTY `--headless` checks.
+
 Default features are empty. Enable `syntax-highlighting` for Syntect highlighting in
 code viewers:
 

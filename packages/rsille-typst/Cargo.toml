@@ -1,0 +1,21 @@
+[package]
+name = "rsille-typst"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Render Typst math into rsille raster canvases"
+repository = "https://github.com/nidhoggfgg/rsille.git"
+readme = "README.md"
+
+[features]
+default = []
+sixel = ["rsille/sixel"]
+
+[dependencies]
+rsille = { version = "3.0.4", path = "../.." }
+typst = "=0.13.1"
+typst-render = "=0.13.1"
+
+[dev-dependencies]
+crossterm = { workspace = true }
+typst-assets = { version = "=0.13.1", features = ["fonts"] }

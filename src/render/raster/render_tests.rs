@@ -411,6 +411,11 @@ mod native {
                     "unexpected control character {character:?}"
                 );
                 events.push(Event::Print(cursor, character));
+                if let Some(terminal) = terminal.as_deref_mut() {
+                    terminal.text
+                        [usize::from(cursor.y) * terminal.columns + usize::from(cursor.x)] =
+                        character;
+                }
                 cursor.x += 1;
                 index += character.len_utf8();
                 continue;
@@ -483,6 +488,10 @@ mod native {
                         b'J' => {
                             assert!(!inline, "inline output must not erase the screen");
                             assert_eq!(values, [2], "only verified ED 2 erases graphics");
+                            if let Some(terminal) = terminal.as_deref_mut() {
+                                terminal.pixels.fill(false);
+                                terminal.text.fill(' ');
+                            }
                             events.push(Event::Clear);
                         }
                         b'E' | b'F' => {
@@ -1006,7 +1015,12 @@ mod native {
     }
 
     fn assert_bounded_tile(bytes: &[u8], width: usize, height: usize) {
-        let header = format!("\x1bP0;1;0q\"1;1;{width};{height}");
+        assert_padded_tile(bytes, width, height, 0);
+    }
+
+    fn assert_padded_tile(bytes: &[u8], width: usize, height: usize, padding: usize) {
+        let height = height + padding;
+        let header = format!("\x1bP7;1;0q\"1;1;{width};{height}");
         assert!(bytes.starts_with(header.as_bytes()));
         assert!(bytes.ends_with(b"\x1b\\"));
         assert!(!bytes.ends_with(b"-\x1b\\"));
@@ -1062,7 +1076,13 @@ mod native {
                 _ => panic!("unexpected tile command {command}"),
             }
         }
-        assert!(painted.into_iter().all(|pixel| pixel));
+        for (index, pixel) in painted.into_iter().enumerate() {
+            assert_eq!(
+                pixel,
+                index / width >= padding,
+                "transparent prefix or missing ink"
+            );
+        }
         assert_eq!(y, (height - 1) / 6 * 6);
     }
 
@@ -1072,22 +1092,24 @@ mod native {
             let mut config = verified(RasterPolicy::RequireSixel);
             config.capabilities.cell_pixels = Some(CellPixels { width: 10, height });
             let mut render = renderer(config, Vec::new());
+            render.resize((4, 6).into());
             render.pos = (4, 3).into();
-            render.thing.origin = (2, 1).into();
+            render.thing.origin = (2, 5).into();
             render.thing.target = (2, 1).into();
             let output = frame(&mut render);
             assert!(!output.contains(&b'\n'));
             let trace = events(&output);
             let encoded = tiles(&trace);
+            let shift = (0..6).find(|s| ((s + 1) * height) % 6 == 0).unwrap();
             assert_eq!(
                 encoded
                     .iter()
                     .map(|(position, _)| *position)
                     .collect::<Vec<_>>(),
-                [(6, 4).into(), (7, 4).into()]
+                [(6, 8 - shift).into(), (7, 8 - shift).into()]
             );
             for (_, bytes) in encoded {
-                assert_bounded_tile(bytes, 10, usize::from(height));
+                assert_padded_tile(bytes, 10, usize::from(height), usize::from(shift * height));
             }
             let saved = trace
                 .iter()
@@ -1122,6 +1144,7 @@ mod native {
             height: 20,
         });
         let mut render = renderer(config, Vec::new());
+        render.resize((4, 3).into());
         render.thing.target = (2, 2).into();
         let initial = events(&frame(&mut render));
         let initial_tiles = tiles(&initial);
@@ -1181,6 +1204,7 @@ mod native {
         columns: usize,
         cell: CellPixels,
         pixels: Vec<bool>,
+        text: Vec<char>,
         lf_scrolls: usize,
         sixel_scrolls: usize,
     }
@@ -1194,14 +1218,19 @@ mod native {
                 columns,
                 cell,
                 pixels: vec![false; usize::from(rows) * usize::from(cell.height) * columns],
+                text: vec![' '; usize::from(rows) * columns],
                 lf_scrolls: 0,
                 sixel_scrolls: 0,
             }
         }
 
         fn read(&mut self, bytes: &[u8]) -> Vec<Event> {
+            self.read_mode(bytes, true)
+        }
+
+        fn read_mode(&mut self, bytes: &[u8], inline: bool) -> Vec<Event> {
             let (mut cursor, mut saved) = (self.cursor, self.saved);
-            let trace = events_in(bytes, &mut cursor, &mut saved, true, Some(self));
+            let trace = events_in(bytes, &mut cursor, &mut saved, inline, Some(self));
             self.cursor = cursor;
             self.saved = saved;
             assert!(cursor.y < self.rows);
@@ -1209,6 +1238,10 @@ mod native {
         }
 
         fn scroll(&mut self, rows: usize) {
+            let count = (rows * self.columns).min(self.text.len());
+            self.text.rotate_left(count);
+            let start = self.text.len() - count;
+            self.text[start..].fill(' ');
             let count =
                 (rows * usize::from(self.cell.height) * self.columns).min(self.pixels.len());
             self.pixels.rotate_left(count);
@@ -1223,6 +1256,7 @@ mod native {
             self.saved = self.saved.map(|p| (p.x, p.y.min(rows - 1)).into());
             // Resizing invalidates physical pixels; the next frame must repaint.
             self.pixels = vec![false; usize::from(rows) * usize::from(cell.height) * self.columns];
+            self.text = vec![' '; usize::from(rows) * self.columns];
         }
 
         fn sixel(&mut self, data: &[u8], cursor: &mut Position) {
@@ -1232,6 +1266,7 @@ mod native {
             let mut index = q + 1;
             let (mut x, mut band) = (0usize, 0i32);
             let mut origin = i32::from(cursor.y) * i32::from(self.cell.height);
+            let mut segment = if data.starts_with(b"0;") { 12 } else { 6 };
             while index < data.len() {
                 let command = data[index];
                 index += 1;
@@ -1245,6 +1280,8 @@ mod native {
                     }
                     b'$' => x = 0,
                     b'-' => {
+                        self.reserve_band(&mut origin, band, segment);
+                        segment = 6;
                         x = 0;
                         band += 6;
                     }
@@ -1269,15 +1306,7 @@ mod native {
                         };
                         assert!((b'?'..=b'~').contains(&character));
                         assert!(count > 0 && x + count <= usize::from(self.cell.width));
-                        let overflow =
-                            origin + band + 6 - i32::from(self.rows) * i32::from(self.cell.height);
-                        if overflow > 0 {
-                            let rows = (overflow as usize).div_ceil(usize::from(self.cell.height));
-                            self.scroll(rows);
-                            self.sixel_scrolls += rows;
-                            origin -= rows as i32 * i32::from(self.cell.height);
-                            cursor.y = cursor.y.saturating_sub(rows as u16);
-                        }
+                        self.reserve_band(&mut origin, band, segment);
                         for bit in 0..6 {
                             let y = origin + band + bit;
                             if (character - b'?') & (1 << bit) != 0 && y >= 0 {
@@ -1289,6 +1318,24 @@ mod native {
                         x += count;
                     }
                     _ => panic!("unexpected Sixel command {command}"),
+                }
+            }
+            self.reserve_band(&mut origin, band, segment);
+            cursor.y = ((origin + band).max(0) / i32::from(self.cell.height)) as u16;
+        }
+
+        // Mirrors WT's _maybeFlushImageBuffer full-segment scroll test, not
+        // raster attributes or the last set bit. P1=0 starts with 12px even
+        // when DECGRA subsequently requests 1:1. This is a model, not WT itself.
+        fn reserve_band(&mut self, origin: &mut i32, band: i32, segment: i32) {
+            let page = i32::from(self.rows) * i32::from(self.cell.height);
+            let mut available = page - *origin - band;
+            if segment > available {
+                while available < page && segment >= available {
+                    self.scroll(1);
+                    self.sixel_scrolls += 1;
+                    available += i32::from(self.cell.height);
+                    *origin -= i32::from(self.cell.height);
                 }
             }
         }
@@ -1326,8 +1373,108 @@ mod native {
     }
 
     #[test]
+    fn fullscreen_complete_stream_preserves_title_and_bottom_pixels() {
+        for height in 1..=25 {
+            let cell = CellPixels { width: 10, height };
+            let mut config = verified(RasterPolicy::RequireSixel);
+            config.capabilities.cell_pixels = Some(cell);
+            let mut render = renderer(config, Vec::new());
+            render.thing.origin = (0, 1).into();
+            render.thing.text = vec![((0, 0).into(), 'T')];
+            let mut terminal = BandTerminal::new(10, 32, cell);
+            for rows in [10, 7] {
+                render.resize((32, rows).into());
+                render.thing.target = (32, rows - 1).into();
+                terminal.resize(rows, cell);
+                for repaint in [false, true] {
+                    if repaint {
+                        render.thing.canvas.set_pixel(0, 0, Rgb(rows as u8, 0, 255));
+                    }
+                    let output = frame(&mut render);
+                    let trace = terminal.read_mode(&output, false);
+                    assert_eq!(tiles(&trace).len(), 32 * usize::from(rows - 1));
+                    assert_eq!(terminal.sixel_scrolls, 0, "cell height {height}");
+                    assert_eq!(terminal.lf_scrolls, 0);
+                    assert_eq!(terminal.text[0], 'T');
+                    terminal.assert_image(1, 32, rows - 1);
+                    let saved = trace
+                        .iter()
+                        .find_map(|e| match e {
+                            Event::Save(p) => Some(*p),
+                            _ => None,
+                        })
+                        .unwrap();
+                    assert_eq!(
+                        terminal.cursor, saved,
+                        "DCS cursor advance must be restored"
+                    );
+                    let warm = terminal.read_mode(&frame(&mut render), false);
+                    assert!(tiles(&warm).is_empty());
+                    terminal.assert_image(1, 32, rows - 1);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn fullscreen_legacy_complete_stream_scrolls_title_into_a_staircase() {
+        let cell = CellPixels {
+            width: 10,
+            height: 20,
+        };
+        let mut config = verified(RasterPolicy::RequireSixel);
+        config.capabilities.cell_pixels = Some(cell);
+        let mut render = renderer(config, Vec::new());
+        render.resize((32, 11).into());
+        render.thing.origin = (0, 1).into();
+        render.thing.target = (32, 9).into();
+        let trace = events(&frame(&mut render));
+        // Recreate the former fullscreen loop with genuine, complete encoder
+        // payloads. Absolute CUP and save/restore cannot undo Sixel scrolling.
+        let mut legacy = b"\x1b[2J\x1b[1;1HT\x1b7".to_vec();
+        for (position, tile) in tiles(&trace) {
+            legacy.extend_from_slice(
+                format!("\x1b[{};{}H", position.y + 1, position.x + 1).as_bytes(),
+            );
+            legacy.extend_from_slice(tile);
+        }
+        legacy.extend_from_slice(b"\x1b8");
+        let mut terminal = BandTerminal::new(10, 32, cell);
+        terminal.read_mode(&legacy, false);
+        assert_eq!(terminal.sixel_scrolls, 32);
+        assert!(!terminal.text.contains(&'T'));
+        for x in 23..32 {
+            let bottom = (0..200).rfind(|y| terminal.pixels[y * 32 + x]);
+            assert_eq!(bottom, Some((x - 22) * 20 - 1));
+        }
+    }
+
+    #[test]
+    fn fullscreen_too_short_for_a_band_rejects_before_output_or_falls_back() {
+        for policy in [RasterPolicy::Auto, RasterPolicy::RequireSixel] {
+            let mut config = verified(policy);
+            config.capabilities.cell_pixels = Some(CellPixels {
+                width: 10,
+                height: 20,
+            });
+            let mut render = renderer(config, Vec::new());
+            render.resize((4, 1).into());
+            if policy == RasterPolicy::RequireSixel {
+                assert_eq!(
+                    render.render().unwrap_err().kind(),
+                    io::ErrorKind::Unsupported
+                );
+                assert!(render.out.is_empty());
+            } else {
+                assert!(!contains(&frame(&mut render), b"\x1bP"));
+            }
+            assert_eq!(render.raster_stats().encodes, 0);
+        }
+    }
+
+    #[test]
     fn band_bottom_legacy_sequence_reproduces_32_column_staircase() {
-        for (width, height, padding) in [(10, 20, 1), (8, 18, 0), (10, 1, 5), (10, 2, 2)] {
+        for (width, height, padding) in [(10, 20, 1), (8, 18, 0), (10, 1, 6), (10, 2, 3)] {
             let config = band_config(width, height);
             let cell = config.capabilities.cell_pixels.unwrap();
             let mut render = inline_renderer(config, Vec::new());

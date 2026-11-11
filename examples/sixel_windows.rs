@@ -849,7 +849,7 @@ mod tests {
             renderer.render().unwrap();
             assert_eq!(renderer.raster_stats(), stats);
         }
-        let header = b"\x1bP0;1;0q\"1;1;10;20";
+        let header = b"\x1bP7;1;0q\"1;1;10;20";
         assert_eq!(
             output
                 .windows(header.len())

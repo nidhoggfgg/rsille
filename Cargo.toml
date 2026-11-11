@@ -31,7 +31,7 @@ syntax-highlighting = ["dep:syntect"]
 sixel = []
 
 [workspace]
-members = ["packages/canvas", "packages/render", "packages/tui"]
+members = ["packages/canvas", "packages/render", "packages/tui", "packages/rsille-typst"]
 resolver = "3"
 exclude = ["examples"]
 

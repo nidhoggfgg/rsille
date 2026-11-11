@@ -18,6 +18,17 @@ const MAX_FRAME_BYTES: usize = 32 * 1024 * 1024;
 type VisibleCell = (u16, u16, RasterCell);
 type EncodedCell = (u16, u16, std::sync::Arc<[u8]>);
 
+// Move only the DCS anchor, not the cell's source crop. Leading unset bits
+// preserve text/graphics above it. Within six cell rows a band boundary aligns
+// for every integral cell height; very short viewports may have no safe anchor.
+fn anchor_shift(y: u16, rows: u16, cell_height: u16) -> Option<u16> {
+    (0..=y.min(5)).find(|&shift| {
+        let image_height = u32::from(shift + 1) * u32::from(cell_height);
+        let available = u32::from(rows - y + shift) * u32::from(cell_height);
+        image_height.div_ceil(6) * 6 <= available
+    })
+}
+
 #[derive(Debug, Clone, Default)]
 pub(in crate::render) struct RasterPresenter {
     pub config: RasterOutput,
@@ -109,6 +120,21 @@ impl RasterPresenter {
                 metrics = None;
             }
         }
+        if let Some(pixels) = metrics {
+            if !inline
+                && buffer
+                    .raster_cells()
+                    .any(|(_, y, _)| anchor_shift(y, buffer.size().height, pixels.height).is_none())
+            {
+                if self.config.policy == RasterPolicy::RequireSixel {
+                    return Err(io::Error::new(
+                        io::ErrorKind::Unsupported,
+                        "fullscreen viewport is too short to position a complete Sixel band without scrolling",
+                    ));
+                }
+                metrics = None;
+            }
+        }
         let visible: Vec<_> = if metrics.is_some() {
             buffer
                 .raster_cells()
@@ -163,7 +189,18 @@ impl RasterPresenter {
                 {
                     continue;
                 }
-                let data = self.cache.encode(cell, pixels.width, pixels.height)?;
+                let shift = if inline {
+                    0 // Inline already reserves trailing guard rows.
+                } else {
+                    anchor_shift(*y, buffer.size().height, pixels.height)
+                        .expect("anchors validated before encoding")
+                };
+                let data = self.cache.encode_padded(
+                    cell,
+                    pixels.width,
+                    pixels.height,
+                    shift * pixels.height,
+                )?;
                 bytes = bytes.saturating_add(data.len());
                 if bytes > MAX_FRAME_BYTES {
                     if self.config.policy == RasterPolicy::RequireSixel {
@@ -180,7 +217,7 @@ impl RasterPresenter {
                     plan.clear |= !self.visible.is_empty();
                     break;
                 }
-                plan.encoded.push((*x, *y, data));
+                plan.encoded.push((*x, *y - shift, data));
             }
         }
         // No source/cached encoded allocation is performed on the text-only path.
@@ -247,7 +284,7 @@ mod tests {
     use crate::render::raster::{RasterCanvas, RasterOptions, Rgb};
 
     fn frame(width: u16) -> Buffer {
-        let mut buffer = Buffer::new((width, 1).into());
+        let mut buffer = Buffer::new((width, 3).into());
         let canvas = RasterCanvas::new(1, 1, Rgb(0, 0, 0)).unwrap();
         for x in 0..width {
             buffer
