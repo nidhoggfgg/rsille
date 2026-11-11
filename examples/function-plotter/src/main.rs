@@ -28,7 +28,8 @@ A new blank prompt follows; old output stays in terminal history, not editable c
 Up/Down recalls the newest 24 inputs and restores your draft. Esc: quit.
 Inputs are capped at 4096 bytes. No session is saved; graphs are not retained in memory.
 Mouse capture is disabled: use your terminal's normal scrollback controls.
-Graphs fit within 70 columns by 14 rows; bounds auto-scale from finite samples.
+Native graphs match formula content width; text graphs cap at 70 columns.
+Graphs stay 14 rows high; bounds auto-scale from finite samples.
 Polar/parametric plots use equal pixel-unit axes; Cartesian-only plots fill the frame.
 Pole outliers may be clipped; sampled bounds do not guarantee global extrema.
 Start blank at In[1]; only explicit --expr evaluates and commits at startup.

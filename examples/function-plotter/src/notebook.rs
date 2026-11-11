@@ -339,7 +339,7 @@ impl Widget<Msg> for FormulaOutput {
         };
         Constraints {
             min_width: 1,
-            max_width: Some(70),
+            max_width: Some(self.source.formula.width(self.cell_pixels)),
             min_height: height,
             max_height: Some(height),
             flex: None,
@@ -405,7 +405,7 @@ impl Widget<Msg> for Graph {
     fn constraints(&self) -> Constraints {
         Constraints {
             min_width: 1,
-            max_width: Some(70),
+            max_width: Some(self.source.formula.width(self.cell_pixels)),
             min_height: GRAPH_ROWS,
             max_height: Some(GRAPH_ROWS),
             flex: None,
@@ -994,7 +994,14 @@ mod tests {
             rt.step(&[]).unwrap();
             let source = Rc::clone(rt.state().output.as_ref().unwrap());
             let bounds = rt.state().bounds;
-            let image = source.image(bounds, (70 * u32::from(cell.0), 14 * u32::from(cell.1)));
+            let columns = source.formula.width(cell);
+            let image = source.image(
+                bounds,
+                (
+                    u32::from(columns) * u32::from(cell.0),
+                    14 * u32::from(cell.1),
+                ),
+            );
             for (_, _, raster) in rt.frame().raster_cells() {
                 assert_eq!(
                     raster.canvas.width(),
@@ -1010,7 +1017,13 @@ mod tests {
             }
             rt.step(&[Event::Resize(32, 32)]).unwrap();
             assert!(Rc::ptr_eq(&source, rt.state().output.as_ref().unwrap()));
-            let resized = source.image(bounds, (30 * u32::from(cell.0), 14 * u32::from(cell.1)));
+            let resized = source.image(
+                bounds,
+                (
+                    u32::from(columns.min(30)) * u32::from(cell.0),
+                    14 * u32::from(cell.1),
+                ),
+            );
             for (_, _, raster) in rt.frame().raster_cells() {
                 if raster.target.height != GRAPH_ROWS {
                     continue;
@@ -1054,17 +1067,87 @@ mod tests {
         assert!(!rt.frame().has_raster());
         assert!(rt.state().output.is_none());
 
-        let (mut rt, clock) = timed();
-        send(&mut rt, Msg::Edit("param(cos(t),sin(t),0,2*pi)".into()));
+        for pixels in [(1, 2), (1, 16)] {
+            let (mut rt, clock) = timed_with_pixels(pixels);
+            send(&mut rt, Msg::Edit("param(cos(t),sin(t),0,2*pi)".into()));
+            clock.advance(PREVIEW_DELAY);
+            rt.step(&[]).unwrap();
+            assert_eq!(frame_row(&rt, 2).trim(), "⎰ x(t) = cos(t)  t in [0, 2*pi]");
+            assert_eq!(frame_row(&rt, 3).trim(), "⎱ y(t) = sin(t)");
+            let path = WidgetPath::root().child(WidgetKey::Named("formula".into()));
+            if pixels == (1, 2) {
+                assert_eq!(rt.layout_geometry(&path).unwrap().target.height(), 2);
+            }
+            assert!(rt
+                .frame()
+                .raster_cells()
+                .all(|(_, _, r)| r.target.height == GRAPH_ROWS));
+        }
+    }
+
+    #[test]
+    fn formulas_use_terminal_width_instead_of_graph_width() {
+        let (rt, clock) = timed_with_pixels((8, 16));
+        let mut rt = rt.size(160, 32);
+        send(
+            &mut rt,
+            Msg::Edit("param(16*sin(t)^3,13*cos(t)-5*cos(2*t)-2*cos(3*t)-cos(4*t),0,2*pi)".into()),
+        );
         clock.advance(PREVIEW_DELAY);
         rt.step(&[]).unwrap();
-        assert_eq!(frame_row(&rt, 2).trim(), "x(t) = cos(t)");
-        assert_eq!(frame_row(&rt, 3).trim(), "y(t) = sin(t)");
-        assert_eq!(frame_row(&rt, 4).trim(), "t in [0, 2*pi]");
+        let path = WidgetPath::root().child(WidgetKey::Named("formula".into()));
+        let area = rt.layout_geometry(&path).unwrap().target;
+        assert_eq!(
+            area.width(),
+            rt.state().output.as_ref().unwrap().formula.width((8, 16))
+        );
+        assert!(area.width() < 158);
+        let image = rt
+            .state()
+            .output
+            .as_ref()
+            .unwrap()
+            .formula
+            .image(
+                (u32::from(area.width()) * 8, u32::from(area.height()) * 16),
+                16,
+            )
+            .expect("the heart equations should fit a wide terminal");
         assert!(rt
             .frame()
             .raster_cells()
-            .all(|(_, _, r)| r.target.height == GRAPH_ROWS));
+            .any(|(_, _, r)| r.canvas.pixels() == image.pixels()));
+        let graph = WidgetPath::root().child(WidgetKey::Named("output".into()));
+        assert_eq!(
+            rt.layout_geometry(&graph).unwrap().target.width(),
+            area.width()
+        );
+    }
+
+    #[test]
+    fn native_formula_and_graph_share_content_width_and_leave_blank_space() {
+        for source in ["sin(x)", "param(cos(t),sin(t),0,2*pi)"] {
+            let (rt, clock) = timed_with_pixels((8, 16));
+            let mut rt = rt.size(160, 32);
+            send(&mut rt, Msg::Edit(source.into()));
+            clock.advance(PREVIEW_DELAY);
+            rt.step(&[]).unwrap();
+            let columns = rt.state().output.as_ref().unwrap().formula.width((8, 16));
+            assert!(columns < 158);
+            for terminal_width in [160, 200, 12, 160] {
+                rt.step(&[Event::Resize(terminal_width, 32)]).unwrap();
+                let formula = WidgetPath::root().child(WidgetKey::Named("formula".into()));
+                let graph = WidgetPath::root().child(WidgetKey::Named("output".into()));
+                let f = rt.layout_geometry(&formula).unwrap().target;
+                let g = rt.layout_geometry(&graph).unwrap().target;
+                assert_eq!(f.width(), columns.min(terminal_width - 2));
+                assert_eq!((f.x(), f.width()), (g.x(), g.width()));
+                for (x, _, raster) in rt.frame().raster_cells() {
+                    assert!(x < f.x() + f.width());
+                    assert_eq!(raster.canvas.width(), u32::from(f.width()) * 8);
+                }
+            }
+        }
     }
 
     #[test]

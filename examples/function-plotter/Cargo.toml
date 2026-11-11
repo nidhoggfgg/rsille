@@ -11,3 +11,5 @@ sixel = ["rsille/sixel"]
 [dependencies]
 rsille = { path = "../.." }
 meval = "0.2"
+rsille-typst = { path = "../../packages/rsille-typst" }
+typst-assets = { version = "=0.13.1", features = ["fonts"] }
