@@ -73,8 +73,8 @@ cargo run -p rsille-typst --example formula -- --help
 ```
 
 `--sixel` explicitly asserts terminal/multiplexer capabilities and never silently
-falls back. See the extension README for measured cell-pixel overrides,
-`--text-only` previews (readability not guaranteed), and no-TTY `--headless` checks.
+falls back. See the extension README for measured cell-pixel overrides
+and no-TTY `--headless` checks.
 
 Default features are empty. Enable `syntax-highlighting` for Syntect highlighting in
 code viewers:
@@ -95,16 +95,17 @@ adjusting the path to your checkout.
 rectangles and circles, independently of the existing sample-based `Canvas`.
 Embed it with `raster_canvas(...)` or use revision-cached
 `RasterCanvasWidget::from_draw(...)`. Layout, clipping, scrolling and opaque
-coverage retain raster metadata; HalfBlock (or Braille) fallback is always
-available, including headless frames.
+coverage retain raster metadata, including in headless frames. Raster terminal
+output is Sixel-only; existing Canvas character encodings are unchanged.
 
-The optional `sixel` feature enables native encoding. `Auto` defaults to text for
-unknown terminals. The renderer never discovers cell pixels or reads terminal input.
-`TextOnly` disables native output, and `RequireSixel` returns an error when safety
-conditions are missing. Native output currently requires
-explicit verified capabilities, alternate-screen mode and supported cell-pixel
-metrics. **Automatic capability negotiation and real-terminal certification are
-not yet implemented; enabling the feature alone does not enable native output.**
+The optional `sixel` feature enables native encoding. `RasterOutput` contains
+only host-supplied capabilities; its default asserts no Sixel support. Real raster
+output fails when safety conditions are missing, never falling back to characters.
+The renderer never discovers cell pixels or reads terminal input. Native output
+requires explicit capabilities and valid physical cell metrics: fullscreen uses
+an alternate screen and `reliable_erase`; inline uses `reliable_inline_erase`.
+**Automatic capability negotiation and real-terminal certification are not yet
+implemented; enabling the feature alone does not enable native output.**
 There is no alpha/transparency API or `Encoding::Sixel`.
 
 See the [raster guide](docs/raster.md) for configuration and limits, and the
@@ -116,12 +117,10 @@ single-file [`sixel_windows`](examples/sixel_windows.rs) demo, not a standalone 
 
 ```sh
 cargo run --release --features sixel --example sixel_windows -- --sixel
-cargo run --release --example sixel_windows -- --text-only
 ```
 
 `--sixel` explicitly asserts that the whole terminal path supports Sixel, graphics
-ED 2 erasure, non-scrolling output and stable palettes; `RequireSixel` never silently
-falls back. Before starting **any input reader**, call `CellPixels::probe(timeout)`
+ED 2 erasure, non-scrolling output and stable palettes; unsupported output returns an error. Before starting **any input reader**, call `CellPixels::probe(timeout)`
 and store the result as `RasterCapabilities.cell_pixels: Some(pixels)`. The probe
 tries OS window metrics first, then a bounded `CSI 16 t` query on Unix/WSL with
 stdin/stdout TTYs attached to the controlling terminal. It returns on reply; the
@@ -129,8 +128,8 @@ timeout is configurable, not a guaranteed elapsed time. `resolve(None)` retains
 a 500 ms timeout for compatibility; `resolve(Some(pixels))` only validates.
 Native Windows has no query fallback. Optional `--cell-pixels 8x18` bypasses
 probing and must match **actual font metrics** (1..=1024 per dimension, at most
-65,536 pixels). With no stored pixels, eligible native rendering falls back to
-text in `Auto` or errors in `RequireSixel`; text/unused paths are unaffected.
+65,536 pixels). With no stored pixels, real raster rendering errors; frames without raster
+content are unaffected.
 
 Probing is permanently rejected after managed input initialization; external
 readers cannot be detected, so standalone hosts must probe before starting theirs.
@@ -145,8 +144,7 @@ well as the erase/no-scroll assertions; this is not real-terminal certification.
 Drag titles to move, drag bottom grips to resize, and click to bring a window forward.
 `e` cycles Canvas Braille/HalfBlock/Quadrant, `r` restores starting rectangles, and
 `q`/Esc quits. Prefer 100×32 cells; smaller sizes and terminal resizing are supported.
-There is no live animation. No flags or `--help` shows help; `--text-only` explicitly
-selects a preview, and `--headless` runs finite terminal-independent drag/occlusion
+There is no live animation. No flags or `--help` shows help; `--headless` runs finite terminal-independent drag/occlusion
 checks. See the [showcase guide](docs/raster.md#run-the-showcase) for validation commands.
 
 ## Develop with an AI coding agent

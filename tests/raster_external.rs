@@ -4,8 +4,8 @@ use rsille::render::{
     buffer::Buffer,
     chunk::Chunk,
     raster::{
-        RasterAlign, RasterCanvas, RasterCell, RasterError, RasterFallback, RasterOptions,
-        RasterScale, Rgb, MAX_RASTER_PIXELS,
+        RasterAlign, RasterCanvas, RasterCell, RasterError, RasterOptions, RasterScale, Rgb,
+        MAX_RASTER_PIXELS,
     },
     raster_output::CellPixels,
     style::Stylized,
@@ -157,7 +157,7 @@ fn original_alignment_crops_and_pads_each_axis_without_resampling() {
 }
 
 #[test]
-fn external_rgb8_to_widget_and_chunk_preserves_owners_and_fallback() {
+fn external_rgb8_to_widget_and_chunk_preserves_owners_and_placeholders() {
     let bytes: Vec<u8> = (0..72).collect();
     let source = RasterCanvas::from_rgb8(6, 4, BG, &bytes).unwrap();
     // Explicit metrics: no probing, global state, or image-library dependency.
@@ -168,12 +168,12 @@ fn external_rgb8_to_widget_and_chunk_preserves_owners_and_fallback() {
     .size_for_pixels(6, 4)
     .unwrap();
     let area = Area::new((0, 0).into(), size);
-    for fallback in [RasterFallback::HalfBlock, RasterFallback::Braille] {
+    {
         let options = RasterOptions {
             scale: RasterScale::Original,
             align_x: RasterAlign::Start,
             align_y: RasterAlign::Start,
-            fallback,
+
             ..Default::default()
         };
         let widget = raster_canvas::<()>(source.clone())
@@ -195,7 +195,7 @@ fn external_rgb8_to_widget_and_chunk_preserves_owners_and_fallback() {
             .unwrap();
         for (x, y, owner) in frame.raster_cells() {
             assert_eq!(Some(owner), direct.raster_at((x, y).into()));
-            assert_eq!(frame.get((x, y).into()), Some(&owner.fallback()));
+            assert_eq!(frame.get((x, y).into()), Some(&owner.placeholder()));
             assert_eq!(owner.canvas.pixels().as_ptr(), source.pixels().as_ptr());
             assert_eq!(
                 owner.sample(0, 0, 2, 2),

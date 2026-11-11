@@ -67,7 +67,7 @@ cargo run -p rsille-typst --example formula -- --help
 ```
 
 `--sixel` 显式断言终端/复用器能力，不会静默降级。单格物理像素手动 override、
-`--text-only` 预览（不保证可读性）和无 TTY 的 `--headless` 自检详见扩展 README。
+和无 TTY 的 `--headless` 自检详见扩展 README。
 
 默认没有启用任何 feature。代码查看器需要 Syntect 语法高亮时，启用 `syntax-highlighting`：
 
@@ -85,11 +85,11 @@ rsille = { version = "3.0.4", features = ["syntax-highlighting"] }
 `rsille::raster::RasterCanvas` 提供固定分辨率 RGB 像素、线段、矩形和圆，
 与现有采样式 `Canvas` 相互独立。通过 `raster_canvas(...)` 嵌入布局，或使用
 按内容版本缓存回调的 `RasterCanvasWidget::from_draw(...)`。布局、裁剪、滚动和
-不透明遮挡会保留栅格元数据；始终提供 HalfBlock（可选 Braille）降级及无终端帧。
+不透明遮挡会保留栅格元数据；headless 帧同样保留元数据。Raster 终端输出仅支持 Sixel，Canvas 编码不变。
 
-可选 `sixel` feature 启用原生编码。`Auto` 对未知终端默认字符降级，
+可选 `sixel` feature 启用原生编码。`RasterOutput` 仅携带 capabilities，默认不声明 Sixel 支持。
 渲染器绝不自行探测每格像素尺寸，也不读取终端输入。
-`TextOnly` 禁用原生输出，`RequireSixel` 在条件不足时返回错误。
+真实栅格输出在条件不足时返回错误，不再提供字符降级或 text-only 后端。
 原生输出要求显式提供已验证的终端能力及受支持的每格像素尺寸：全屏使用备用屏幕与
 `reliable_erase`，inline 使用独立的 `reliable_inline_erase`，不要求备用屏幕。
 **自动能力协商与真实终端认证尚未完成；仅启用 feature 不会启用原生输出。**
@@ -104,19 +104,18 @@ rsille = { version = "3.0.4", features = ["syntax-highlighting"] }
 
 ```sh
 cargo run --release --features sixel --example sixel_windows -- --sixel
-cargo run --release --example sixel_windows -- --text-only
 ```
 
 在 `sixel_windows` 中，`--sixel` 表示用户明确确认整个终端链路支持 Sixel、ED 2 图形擦除、
 Sixel 本身无滚屏输出及稳定调色板；
-`RequireSixel` 不会静默降级。必须在启动**任何输入读取器之前**调用
+不支持的栅格输出会报错。必须在启动**任何输入读取器之前**调用
 `CellPixels::probe(timeout)`，并将结果存为 `RasterCapabilities.cell_pixels: Some(pixels)`。
 探测优先使用操作系统窗口度量；不可用时在 Unix/WSL 回退到有界的 `CSI 16 t` 查询，
 要求 stdin/stdout 均为连接到控制终端的 TTY。收到回复即返回；超时可配置，不保证精确耗时。
 `resolve(None)` 为兼容保留 500 ms 超时；`resolve(Some(pixels))` 仅验证尺寸。
 原生 Windows 无查询回退。可选的 `--cell-pixels 8x18` 跳过探测，必须匹配**实际字体度量**
 （每个维度为 1..=1024，乘积不超过 65,536）。未存储尺寸时，符合其他原生条件的渲染
-在 `Auto` 下字符降级，在 `RequireSixel` 下报错；纯文本和未使用栅格的路径不受影响。
+会报错；纯文本和未使用栅格的路径不受影响。
 
 托管输入初始化后永久拒绝探测；无法检测外部读取器，因此独立宿主也必须先探测再启动读取器。
 探测可能消耗无关输入，超时后仍可能收到迟到回复，不会清空输入。
@@ -131,7 +130,7 @@ Sixel 本身无滚屏输出及稳定调色板；
 拖动标题移动窗口，拖动底部手柄调整大小，点击置前。
 `e` 循环切换 Canvas 的 Braille/HalfBlock/Quadrant，`r` 恢复初始窗口位置和大小，
 `q`/Esc 退出。建议使用 100×32 字符格，也支持更小尺寸及终端缩放；没有实时动画。
-不带参数或使用 `--help` 显示帮助，`--text-only` 显式选择字符预览，`--headless`
+不带参数或使用 `--help` 显示帮助，`--headless`
 执行有限的、无需终端的拖动与遮挡检查。验证命令见[演示指南](docs/raster.md#run-the-showcase)。
 
 需要 inline Sixel 动画时，运行 [AI Babies](examples/ai-babies/README.md#raster-and-sixel)：
@@ -141,7 +140,7 @@ cargo run --release --features sixel --manifest-path examples/ai-babies/Cargo.to
 ```
 
 AI Babies 的所有动画模式均使用普通屏幕 inline 输出，不启用备用屏幕或鼠标捕获；
-`--sixel` 无需额外 `--inline` 参数，采用 `RequireSixel`，不会静默降级。它要求可靠的
+`--sixel` 无需额外 `--inline` 参数，不支持时会报错。它要求可靠的
 EL 2 行局部图形擦除（不影响其他行），以及预留行导致文字滚动时图形跟随移动，配置为
 `reliable_inline_erase: true`、`reliable_erase: false`。`no_scroll` 要求 Sixel 安全定位、
 透明 padding 不擦除相邻字符格且输出本身不滚屏；inline 通过底部保护行容纳末带 padding，

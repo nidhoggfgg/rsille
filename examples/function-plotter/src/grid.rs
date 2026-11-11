@@ -57,7 +57,8 @@ impl State {
             .collect::<Result<_, String>>()?;
         Ok(Self {
             panels,
-            pixels: (1, 2),
+            // Synthetic dimensions for metadata-only headless runs.
+            pixels: (8, 16),
             angle: 0.0,
             started: None,
             frozen: false,
@@ -275,10 +276,8 @@ pub(crate) fn panels_view<M: 'static>(
     }
 }
 fn builder(mut state: State, output: RasterOutput) -> App<State, Msg> {
-    if output.policy == RasterPolicy::RequireSixel {
-        if let Some(pixels) = output.capabilities.cell_pixels {
-            state.pixels = (pixels.width, pixels.height);
-        }
+    if let Some(pixels) = output.capabilities.cell_pixels {
+        state.pixels = (pixels.width, pixels.height);
     }
     App::new(state)
         .mode(Mode::Inline)
@@ -296,7 +295,7 @@ pub(crate) fn application(state: State, output: RasterOutput) -> Runtime<State, 
     runtime
 }
 pub(crate) fn smoke_test(state: State) -> Result<(), Box<dyn std::error::Error>> {
-    let mut runtime = application(state, RasterOutput::text_only()).size(100, 32);
+    let mut runtime = application(state, RasterOutput::default()).size(100, 32);
     runtime.step(&[])?;
     assert!(runtime.frame().has_raster());
     runtime.handle().send(Msg::Submit)?;
@@ -384,7 +383,7 @@ mod tests {
         for (width, height) in [(100, 32), (160, 32), (30, 20), (100, 10)] {
             let mut state = State::new(Vec::new(), crate::X_RANGE).unwrap();
             state.pixels = (8, 16);
-            let mut rt = builder(state, RasterOutput::text_only())
+            let mut rt = builder(state, RasterOutput::default())
                 .update(State::update)
                 .view(view)
                 .build()
@@ -436,7 +435,7 @@ mod tests {
             let clock = rsille::tui::runtime::ManualClock::default();
             let mut state = State::new(Vec::new(), crate::X_RANGE).unwrap();
             state.pixels = pixels;
-            let mut rt = builder(state, RasterOutput::text_only())
+            let mut rt = builder(state, RasterOutput::default())
                 .with_clock(clock.clone())
                 .update(State::update)
                 .view(view)

@@ -174,24 +174,7 @@ impl<'a> Chunk<'a> {
         self.buffer.set_raster(pos, cell)
     }
 
-    /// Copies a raster owner with its already sampled fallback across render/TUI
-    /// package boundaries. Internal compositors use this to avoid resampling.
-    #[doc(hidden)]
-    pub fn set_raster_cell_with_fallback(
-        &mut self,
-        x: u16,
-        y: u16,
-        cell: RasterCell,
-        fallback: Stylized,
-    ) -> Result<(), DrawErr> {
-        let pos = self
-            .area
-            .to_absolute(x, y)
-            .ok_or_else(|| DrawErr::out_of_bounds((x, y).into(), self.area.size()))?;
-        self.buffer.set_raster_with_fallback(pos, cell, fallback)
-    }
-
-    /// Fills this chunk with an opaque raster and its character fallback.
+    /// Fills this chunk with an opaque raster and its background placeholder.
     ///
     /// Each cell retains the full chunk size as its target and its original
     /// local offsets. Empty chunks are a no-op. Canvas clones share pixel data.
@@ -482,7 +465,7 @@ mod raster_tests {
     }
 
     #[test]
-    fn raster_fallback_stays_one_cell_under_cjk_metrics() {
+    fn raster_placeholder_stays_one_cell_under_cjk_metrics() {
         let canvas = RasterCanvas::new(2, 2, Default::default()).unwrap();
         let mut buffer = Buffer::new((2, 1).into());
         buffer.set_text_metrics(TextMetrics {

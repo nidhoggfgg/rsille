@@ -46,7 +46,6 @@ require Linux; it starts in a disposable demo directory unless given `--path`.
 
 ```sh
 cargo run --release --features sixel --example sixel_windows -- --sixel
-cargo run --release --example sixel_windows -- --text-only
 cargo run --example sixel_windows -- --help
 ```
 
@@ -63,8 +62,9 @@ and click to bring a window forward. `e` cycles Canvas Braille/HalfBlock/Quadran
 smaller terminals and terminal resizing are supported.
 
 `--sixel` is your explicit assertion that the entire terminal/multiplexer path
-supports Sixel, graphics ED 2 erasure, no scrolling and stable palettes. It uses
-`RequireSixel`, with no silent fallback. Startup probing uses OS window metrics first;
+supports Sixel, graphics ED 2 erasure, no scrolling and stable palettes.
+Unsupported raster output returns an error, with no silent fallback. Startup probing
+uses OS window metrics first;
 unusable OS dimensions trigger a `CSI 16 t` query on Unix (including WSL), requiring
 stdin/stdout TTYs attached to the controlling terminal and a 500 ms absolute timeout.
 Native Windows has no query fallback and still needs explicit dimensions. Optional
@@ -72,14 +72,13 @@ Native Windows has no query fallback and still needs explicit dimensions. Option
 an arbitrary size. Measured dimensions are stored as a startup snapshot and are
 not refreshed on resize; restart after font or DPI changes. Probing precedes all
 input readers and may consume unrelated input. Runtime input uses native crossterm.
-This query does not negotiate Sixel support. `--text-only` sends no cell-pixel query.
+This query does not negotiate Sixel support.
 The feature and backend limits (1..=1024 per dimension, at most 65,536 pixels)
 are checked before entering the managed terminal session. Actual 10×20 cells are supported with
 `--cell-pixels 10x20`; do not round the height to 18 or 24. The terminal must honor
 transparent partial-band padding and the erase/no-scroll assertions; accepting
 these metrics does not certify real-terminal behavior.
-No flags shows help, not a fallback demo;
-`--text-only` explicitly selects a character preview. See the
+No flags shows help; there is no Raster character preview. See the
 [raster guide](../docs/raster.md) for the full safety contract.
 
 Finite, terminal-independent mouse-drag and occlusion checks and example tests:

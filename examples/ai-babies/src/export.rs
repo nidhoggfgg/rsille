@@ -1,4 +1,4 @@
-//! Export character fallbacks (Quadrant or raster HalfBlock), not native Sixel pixels.
+//! Export Canvas Quadrant frames only; raster image export is unsupported.
 use std::{error::Error, fs, time::Instant};
 
 use crossterm::style::Color;
@@ -16,6 +16,10 @@ pub fn frame(nursery: &mut Nursery, size: Size) -> Result<Buffer, Box<dyn Error>
 }
 
 pub fn rgba(buffer: &Buffer) -> Vec<[u8; 4]> {
+    assert!(
+        !buffer.has_raster(),
+        "Raster image exports are not supported"
+    );
     let size = buffer.size();
     // Two output pixels across a cell and four down it, matching the static
     // Quadrant export. Every Quadrant sample occupies a 1x2 output rectangle.
@@ -27,7 +31,7 @@ pub fn rgba(buffer: &Buffer) -> Vec<[u8; 4]> {
             let mask = " ▖▗▄▘▌▚▙▝▞▐▟▀▛▜█"
                 .chars()
                 .position(|symbol| Some(symbol) == cell.as_char())
-                .expect("Quadrant or HalfBlock canvas symbol");
+                .expect("Quadrant canvas symbol");
             let bit = (1 - (y / 2) % 2) * 2 + x % 2;
             let foreground = mask & (1 << bit) != 0;
             let color = cell.style.colors.and_then(|colors| {
@@ -74,7 +78,7 @@ pub fn command(args: &[String], options: Options) -> Result<(), Box<dyn Error>> 
     if options.output == Output::Sixel
         && !matches!(args[0].as_str(), "--headless" | "--help" | "-h")
     {
-        return Err("Sixel exports are not supported; use --raster for character-fallback exports or --sixel --headless to check drawing".into());
+        return Err("Raster image exports are not supported; use the default Canvas mode for exports or --sixel --headless to check metadata".into());
     }
     let height = options.height;
     match args[0].as_str() {
@@ -129,10 +133,10 @@ pub fn command(args: &[String], options: Options) -> Result<(), Box<dyn Error>> 
                 assert!(buffer.content().iter().all(|cell| !cell.content.is_empty()));
                 assert_eq!(buffer.has_raster(), options.output != Output::Quadrant);
             }
-            println!("90 frames passed at {PREVIEW_WIDTH}x{height}; mean {:.2} ms/frame (drawing + encoding; no terminal I/O)", start.elapsed().as_secs_f64() * 1000.0 / 90.0);
+            println!("90 frames passed at {PREVIEW_WIDTH}x{height}; mean {:.2} ms/frame (Canvas drawing or Raster metadata only; no Sixel encoding or terminal I/O)", start.elapsed().as_secs_f64() * 1000.0 / 90.0);
         }
         "--help" | "-h" if args.len() == 1 => println!(
-            "AI BABIES / ChatGPT, DeepSeek and Claude pets\n\nRun without arguments for automatic inline playback (up to 24 rows). Use --height ROWS to set the height (24 or 32, limited by the terminal during playback).\nTab: next character; g: ChatGPT; d: DeepSeek; c: Claude; q / Esc / Ctrl+C: exit; Space: pause; 1: idle; 2: wave; 3: walk; 4: hop; 5: think; 6: sleep; 0: automatic\n\n--static [--height ROWS] [--snapshot FILE.ppm]  (default: 144 columns × 24 rows; height: 1..40)\n[--character chatgpt|deepseek|claude] [--height ROWS] [EXPORT OPTION]  (either order, before export options; defaults: chatgpt, 24 rows)\n--raster  (opaque 320x320 source, inline HalfBlock preview; supports fallback exports)\n--sixel   (requires --features sixel, inline animation; no silent fallback)\n--background RRGGBB  (raster/sixel only; default black)\n--cell-pixels WxH    (sixel only: measured physical pixels per character cell, NOT terminal columns x rows; omit for startup discovery)\n--force-cell-pixels  (confirm a measured override matching the terminal grid)\nAll animation modes use inline output without an alternate screen or mouse capture. Sixel asserts terminal/multiplexer support for Sixel, local EL 2 graphics erasure, images following text scrolling, stable palettes, safe positioned Sixel output and transparent partial-band padding that does not erase adjacent cells. Inline reserves a bottom guard margin to prevent final-band scrolling; transparency alone is insufficient. Metrics do not detect Sixel support; restart after font/DPI changes. Native output uses at most 320x320 physical pixels (16 content rows + 1 blank guard row with 10x20 cells when space permits; no extra guard row with 8x18). Guard rows are ceil(((6 - h % 6) % 6) / h) for cell height h (5 at h=1). Content height is capped by --height and terminal height minus guard rows, scaling down to fit. Successful frames leave the cursor on the last content row; an exit newline can use the guard. See README for compatibility details.\nAll playback options precede export options. Sixel permits --headless only, not image exports. Headless checks drawing, not terminal compatibility.\n--headless\n--snapshot FILE.ppm [SECONDS [COLUMNS ROWS]]  (explicit dimensions override --height)\n--frames DIRECTORY  (one complete action playlist at 24 FPS)\n--action idle|wave|walk|hop|think|sleep DIRECTORY"
+            "AI BABIES / ChatGPT, DeepSeek and Claude pets\n\nRun without arguments for automatic inline playback (up to 24 rows). Use --height ROWS to set the height (24 or 32, limited by the terminal during playback).\nTab: next character; g: ChatGPT; d: DeepSeek; c: Claude; q / Esc / Ctrl+C: exit; Space: pause; 1: idle; 2: wave; 3: walk; 4: hop; 5: think; 6: sleep; 0: automatic\n\n--static [--height ROWS] [--snapshot FILE.ppm]  (default: 144 columns × 24 rows; height: 1..40)\n[--character chatgpt|deepseek|claude] [--height ROWS] [EXPORT OPTION]  (either order, before export options; defaults: chatgpt, 24 rows)\n--raster  (opaque 320x320 source, inline HalfBlock preview; supports fallback exports)\n--sixel   (requires --features sixel, inline animation; no silent fallback)\n--background RRGGBB  (sixel only; default black)\n--cell-pixels WxH    (sixel only: measured physical pixels per character cell, NOT terminal columns x rows; omit for startup discovery)\n--force-cell-pixels  (confirm a measured override matching the terminal grid)\nAll animation modes use inline output without an alternate screen or mouse capture. Sixel asserts terminal/multiplexer support for Sixel, local EL 2 graphics erasure, images following text scrolling, stable palettes, safe positioned Sixel output and transparent partial-band padding that does not erase adjacent cells. Inline reserves a bottom guard margin to prevent final-band scrolling; transparency alone is insufficient. Metrics do not detect Sixel support; restart after font/DPI changes. Native output uses at most 320x320 physical pixels (16 content rows + 1 blank guard row with 10x20 cells when space permits; no extra guard row with 8x18). Guard rows are ceil(((6 - h % 6) % 6) / h) for cell height h (5 at h=1). Content height is capped by --height and terminal height minus guard rows, scaling down to fit. Successful frames leave the cursor on the last content row; an exit newline can use the guard. See README for compatibility details.\nAll playback options precede export options. Sixel permits --headless only, not image exports. Headless checks drawing, not terminal compatibility.\n--headless\n--snapshot FILE.ppm [SECONDS [COLUMNS ROWS]]  (explicit dimensions override --height)\n--frames DIRECTORY  (one complete action playlist at 24 FPS)\n--action idle|wave|walk|hop|think|sleep DIRECTORY"
         ),
         _ => return Err("Unknown or incomplete arguments; use --help".into()),
     }

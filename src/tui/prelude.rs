@@ -2,11 +2,9 @@
 
 pub use crate::canvas::Encoding;
 pub use crate::render::raster::{
-    RasterAlign, RasterCanvas, RasterError, RasterFallback, RasterOptions, RasterScale, Rgb,
+    RasterAlign, RasterCanvas, RasterError, RasterOptions, RasterScale, Rgb,
 };
-pub use crate::render::raster_output::{
-    CellPixels, RasterCapabilities, RasterOutput, RasterPolicy,
-};
+pub use crate::render::raster_output::{CellPixels, RasterCapabilities, RasterOutput};
 
 pub use crate::tui::animation::{
     AnimationSpec, AnimationTheme, AreaF, ClipMode, Direction as AnimationDirection, Easing,

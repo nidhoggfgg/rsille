@@ -78,7 +78,7 @@ pub(crate) fn blit_with_effects(
             report.skipped_cells += 1;
         }
     });
-    // Backdrops sample stored fallbacks, including a halo outside this chunk.
+    // Backdrops sample stored cells, including a halo outside this chunk.
     // Conservatively reject native composition if any lower raster is present.
     if blit_stats.unsupported_raster_composition || backdrop_uses_raster {
         chunk.mark_unsupported_raster_composition();

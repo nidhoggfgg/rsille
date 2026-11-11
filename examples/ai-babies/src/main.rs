@@ -144,9 +144,10 @@ impl Draw for Nursery {
             };
             // Bound native output to roughly 320 physical pixels per axis; Fit
             // preserves square proportions when the viewport is smaller.
+            // Only headless metadata checks omit metrics; real startup resolves them.
             let pixels = self.options.pixels.unwrap_or(CellPixels {
-                width: 1,
-                height: 2,
+                width: 10,
+                height: 20,
             });
             let width = size
                 .width
@@ -157,16 +158,14 @@ impl Draw for Nursery {
                 .min(raster::SIDE.div_ceil(u32::from(pixels.height)) as u16);
             let dx = size.width - width;
             let dy = size.height - height;
-            chunk
-                .shrink(dy / 2, dy - dy / 2, 0, dx)?
-                .raster(
-                    frames[character].frame(index),
-                    RasterOptions {
-                        background: self.options.background,
-                        align_x: RasterAlign::Start,
-                        ..RasterOptions::default()
-                    },
-                )?;
+            chunk.shrink(dy / 2, dy - dy / 2, 0, dx)?.raster(
+                frames[character].frame(index),
+                RasterOptions {
+                    background: self.options.background,
+                    align_x: RasterAlign::Start,
+                    ..RasterOptions::default()
+                },
+            )?;
             return Ok(size);
         }
         let w = size.width as usize * 2;
@@ -226,9 +225,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         return export::command(args, options);
     }
     if options.output == Output::Sixel && !cfg!(feature = "sixel") {
-        return Err(
-            "--sixel requires cargo --features sixel; use --raster for a character preview".into(),
-        );
+        return Err("--sixel requires cargo --features sixel".into());
     }
     let (width, height) = crossterm::terminal::size()?;
     // Resolve metrics before any input reader starts, and retain this snapshot.

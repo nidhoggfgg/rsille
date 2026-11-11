@@ -16,9 +16,7 @@
 cargo run -p rsille-typst --example formula -- --help
 cargo run -p rsille-typst --features sixel --example formula -- --sixel
 cargo run -p rsille-typst --features sixel --example formula -- --sixel 'sum_(k=1)^n k = frac(n(n+1), 2)'
-# 仅字符预览，不保证公式可读性：
-cargo run -p rsille-typst --example formula -- --text-only 'sqrt(x)'
-# 无需 TTY 的真实渲染及 Widget/Runtime 自检：
+# 无需 TTY 的元数据检查，以及显式 Sixel 内存编码自检：
 cargo run -p rsille-typst --example formula -- --headless
 cargo run -p rsille-typst --features sixel --example formula -- --sixel --cell-pixels 10x20 --headless
 cargo test -p rsille-typst
@@ -34,15 +32,15 @@ cargo fmt -p rsille-typst -- --check
 向上取整确定 widget 宽高，内容只占公式所需行数加一行标题（框架最多 50 行），
 原生模式另由现有 renderer 预留底部 guard。窄/矮终端或 resize 变小时裁剪，
 变大后重新显示，不重排、不缩放、不重新编译；超长公式可能无法完整显示。
-字符预览按 HalfBlock 的 1×2 采样换算，可能占更多行，同样裁剪。无参数显示用法；公式参数为一个带引号的 Typst 数学字符串，省略时
+无参数显示用法；公式参数为一个带引号的 Typst 数学字符串，省略时
 使用求和公式。以 `-` 开头的公式放在 `--` 之后。
 
 `--sixel` 是用户对终端**及复用器**能力的显式断言：支持 Sixel、局部 EL 2 图形清除、
 图像随文本滚动、稳定调色板、不滚屏的定位输出，以及最后不足六像素带的透明补齐。
 配置使用 `reliable_inline_erase: true`，不使用全屏 `reliable_erase`。不会自动检测能力。
-使用 `RequireSixel`，缺少 feature 或能力/指标错误时失败，绝不静默降级。
+Raster 仅支持 Sixel 输出，缺少 feature 或能力/指标错误时失败，绝不静默降级。
 新包 `sixel` feature 只转发 `rsille/sixel`，核心默认依赖与 feature 不变。
-`--text-only` 显式选择 HalfBlock 预览，不探测像素指标，**不保证公式可读性**。
+不再提供 Raster 字符预览或 text-only 后端。
 
 原生模式默认在启动输入 reader **之前**通过 `CellPixels::resolve(None)` 调用
 `CellPixels::probe`：先读 OS 指标，再尝试 Unix（含 WSL）CSI 16 t 查询，超时 500ms。
@@ -54,9 +52,9 @@ cargo fmt -p rsille-typst -- --check
 `--force-cell-pixels` 确认。指标仅启动时保存，改变字体或 DPI 后需重启。
 查询不是 Sixel 能力检测，可能消耗同时输入的按键，超时后的迟到响应可能进入 reader。
 
-`--headless` 不启动终端或输入 reader，默认检查 text-only；原生配置自检需显式
+`--headless` 不启动终端或输入 reader，默认仅检查保留 Raster 元数据的帧（使用合成 10×20 布局尺寸）；Sixel 编码自检需显式
 `--sixel --cell-pixels WxH`（此时允许合成测试指标）。检查同一 Runtime 的 raster
-布局、resize、字符 fallback 和两种退出键，并将帧交给真实终端编码器写入内存，
+布局、resize 和两种退出键。仅显式 Sixel 自检将帧交给真实终端编码器写入内存，
 检查完整 DCS 输出、tile 数量、不变帧复用和不使用备用屏幕/鼠标/全屏清除；
 不证明真实终端兼容性。
 
@@ -171,7 +169,8 @@ let widget = raster_canvas::<()>(canvas)
 也可以 `chunk.raster(&canvas, RasterOptions { scale: RasterScale::Original,
 ..Default::default() })?`。原始像素尺寸不等于字符格尺寸；不要硬编码字体像素与
 终端格子的换算。`Original` 保留原始比例/尺寸并允许裁剪；需要缩放时选择 `Fit`。
-Sixel 仍由 rsille 后端配置决定，字符 fallback 可继续使用。
+真实终端输出需启用可选 `sixel` feature 并显式配置有效 capabilities；不支持时会报错。
+生成 RGB 像素和 headless 元数据检查无需 Sixel feature。
 
 ## 公开接口
 

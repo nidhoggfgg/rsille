@@ -44,13 +44,11 @@ These opt-in animation modes leave default transparent Quadrant playback, static
 and existing exports unchanged:
 
 ```bash
-cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --raster --background 181820
 cargo run --release --features sixel --manifest-path examples/ai-babies/Cargo.toml -- --sixel
 cargo run --release --features sixel --manifest-path examples/ai-babies/Cargo.toml -- --sixel --character claude
 cargo run --release --features sixel --manifest-path examples/ai-babies/Cargo.toml -- --sixel --cell-pixels 8x16
 ```
 
-- `--raster` selects `RasterCanvas` with an opaque HalfBlock inline preview.
 - `--sixel` requires `--features sixel` and uses native inline output on the normal
   screen, with no silent fallback. No additional `--inline` argument is needed.
   Choose one rendering mode.
@@ -88,8 +86,8 @@ or `--height 32`; 8×18 cells need no extra guard row. For cell height `h`, the 
 is `ceil(((6 - h % 6) % 6) / h)` rows (five at `h = 1`). After each successful frame,
 the cursor returns to the last content row, so an exit newline can use the guard.
 Sixel left-aligns a native area up to
-approximately 320 × 320 physical pixels; smaller terminals scale it to fit. HalfBlock
-is a cell-based preview, not native Sixel resolution.
+approximately 320 × 320 physical pixels; smaller terminals scale it to fit.
+Raster character previews are not supported; the default Canvas mode is unchanged.
 
 ## Controls
 
@@ -113,7 +111,6 @@ cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --headless
 cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --snapshot /tmp/ai-babies.ppm 0
 cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --character deepseek --height 24 --frames /tmp/deepseek-frames
 cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --character claude --action wave /tmp/claude-wave
-cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --raster --background 181820 --snapshot /tmp/ai-babies-raster.ppm 0
 cargo run --release --features sixel --manifest-path examples/ai-babies/Cargo.toml -- --sixel --headless
 ```
 
@@ -131,10 +128,9 @@ Snapshots accept 0–86400 seconds and explicit sizes of 1–512 columns by 1–
 Each PPM has a matching `.pgm` alpha mask. In the default legacy mode, PPM alone shows
 transparent areas as black; this black is not painted in the terminal.
 
-`--raster` permits all existing export options, including `--snapshot`, `--frames` and
-`--action`. Its PPM/PGM output reconstructs the HalfBlock fallback as an opaque raster
-rectangle, not native Sixel pixels. `--sixel` permits only `--headless`; other export
-flags are rejected to avoid misleading output. Headless mode tests drawing without a
+`--sixel` permits only `--headless`; raster image exports (`--snapshot`,
+`--frames`, `--action`) are rejected rather than exporting placeholders.
+Image exports remain available in the default Canvas mode. Headless mode tests drawing without a
 terminal and does **not** certify terminal/multiplexer compatibility.
 
 Use fresh output directories to avoid mixing old and new frames. With Pillow installed,

@@ -123,7 +123,8 @@ pub mod render;
 /// Independent opaque RGB drawing, shared with the renderer.
 ///
 /// Unlike [`canvas`], raster coordinates are explicit pixels with y increasing
-/// downward. Native Sixel output is optional; character fallback is always available.
+/// downward. Image presentation requires Sixel; headless frames retain raster metadata
+/// and opaque background placeholders, not character previews.
 pub use render::raster;
 
 /// Sample-based graphics with Braille, half-block, and quadrant terminal encoding.

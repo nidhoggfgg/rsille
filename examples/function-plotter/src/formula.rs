@@ -248,6 +248,7 @@ impl Formula {
         }
     }
 
+    #[cfg(test)]
     pub fn text_rows(&self) -> impl Iterator<Item = (&str, usize)> {
         self.rows.iter().map(|(s, c)| (s.as_str(), *c))
     }
@@ -282,9 +283,6 @@ impl Formula {
     }
 
     pub fn width(&self, cell_pixels: (u16, u16)) -> u16 {
-        if cell_pixels == (1, 2) {
-            return 70;
-        }
         self.prepare(cell_pixels.1);
         let rendered = self.rendered.borrow();
         let columns = rendered

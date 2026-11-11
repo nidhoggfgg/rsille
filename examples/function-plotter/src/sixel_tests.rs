@@ -3,7 +3,7 @@ use rsille::render::{
     area::Size,
     chunk::Chunk,
     raster::{RasterCell, RasterOptions},
-    raster_output::{CellPixels, RasterCapabilities, RasterOutput, RasterPolicy},
+    raster_output::{CellPixels, RasterCapabilities, RasterOutput},
     Builder, Draw, DrawErr,
 };
 
@@ -42,8 +42,24 @@ fn number(bytes: &[u8], i: &mut usize) -> usize {
 // not a second implementation of the sampler. Retain palette indices so the
 // expected RGB332 quantization can be checked exactly for every output pixel.
 fn decode(bytes: &[u8], width: usize, height: usize) -> Vec<u8> {
-    let mut pixels = vec![None; width * height];
-    let (mut i, mut x, mut y, mut color) = (0, 0, 0, 0);
+    assert_eq!(bytes.first(), Some(&b'"'));
+    let mut i = 1;
+    let mut attributes = [0; 4];
+    for (index, value) in attributes.iter_mut().enumerate() {
+        if index > 0 {
+            assert_eq!(bytes[i], b';');
+            i += 1;
+        }
+        *value = number(bytes, &mut i);
+    }
+    assert_eq!(&attributes[..3], &[1, 1, width]);
+    let encoded_height = attributes[3];
+    let top_padding = encoded_height.checked_sub(height).expect("short raster");
+    // Bottom-edge fullscreen tiles may be anchored up to five cells higher.
+    assert_eq!(top_padding % height, 0);
+    assert!(top_padding <= 5 * height);
+    let mut pixels = vec![None; width * encoded_height];
+    let (mut x, mut y, mut color) = (0, 0, 0);
     while i < bytes.len() {
         let command = bytes[i];
         i += 1;
@@ -76,7 +92,7 @@ fn decode(bytes: &[u8], width: usize, height: usize) -> Vec<u8> {
                     assert!(x < width);
                     for bit in 0..6 {
                         if bits & (1 << bit) != 0 {
-                            assert!(y + bit < height, "painted padding");
+                            assert!(y + bit < encoded_height, "painted band padding");
                             let pixel = &mut pixels[(y + bit) * width + x];
                             assert!(pixel.is_none(), "overlapping color planes");
                             *pixel = Some(color);
@@ -88,8 +104,14 @@ fn decode(bytes: &[u8], width: usize, height: usize) -> Vec<u8> {
             _ => panic!("unexpected Sixel command {command}"),
         }
     }
+    let prefix = top_padding * width;
+    assert!(
+        pixels[..prefix].iter().all(Option::is_none),
+        "painted top padding"
+    );
     pixels
         .into_iter()
+        .skip(prefix)
         .map(|p| p.expect("missing output pixel"))
         .collect()
 }
@@ -156,7 +178,6 @@ fn native_sixel_output_preserves_connected_diagonal_at_large_cell_metrics() {
                     .clear(false)
                     .enable_alt_screen()
                     .raster_output(RasterOutput {
-                        policy: RasterPolicy::RequireSixel,
                         capabilities: RasterCapabilities {
                             sixel: true,
                             reliable_erase: true,

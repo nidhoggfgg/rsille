@@ -4,8 +4,8 @@ This describes the implementation, not completion of every requirement in the
 Sixel PRD. **Automatic graphics capability negotiation, real-terminal
 certification, allocation profiling, and controlled performance acceptance remain pending.
 Historical memory-writer [smoke measurements](raster-performance.md) are retained,
-but their harness has been removed.** The library's safe default is character
-fallback. The [`sixel_windows` showcase](../examples/sixel_windows.rs) instead
+but their harness has been removed.** Raster output is Sixel-only and rejects
+unsupported configurations. The [`sixel_windows` showcase](../examples/sixel_windows.rs)
 requires an explicit mode; no flags shows help. See [the user guide](raster.md)
 for configuration and controls.
 
@@ -24,17 +24,17 @@ shared terminal probing remain in their respective layers.
 
 | Source | Responsibility / principal API |
 | --- | --- |
-| `src/render/raster/canvas.rs` | `Rgb`, opaque `RasterCanvas`, identity/revision COW snapshots, clipped integer primitives, `RasterOptions`, full-target `RasterCell::sample`, explicit-color `fallback` |
+| `src/render/raster/canvas.rs` | `Rgb`, opaque `RasterCanvas`, identity/revision COW snapshots, clipped integer primitives, `RasterOptions`, full-target `RasterCell::sample` |
 | `src/tui/widgets/display/raster_canvas.rs` | `RasterCanvasWidget`, `raster_canvas`, fixed-resolution `from_draw`, persistent revision-keyed callback state |
-| `src/render/buffer.rs`, `chunk.rs` | Cell ownership, stored fallback, current/previous raster metadata, `Chunk::raster`, `Buffer::raster_at` / `raster_cells` |
-| `src/tui/offscreen.rs` | Copy original raster metadata with cell blits; flatten to stored text for character effects and propagate the unsupported-composition marker |
-| `src/render/raster/output.rs` | `RasterOutput`, `RasterPolicy`, host-supplied `RasterCapabilities`, `CellPixels`, `RasterStats`; conservative policy resolution |
+| `src/render/buffer.rs`, `chunk.rs` | Cell ownership, opaque placeholders, current/previous raster metadata, `Chunk::raster`, `Buffer::raster_at` / `raster_cells` |
+| `src/tui/offscreen.rs` | Copy original raster metadata with cell blits; reject raster composition under character effects and propagate the unsupported-composition marker |
+| `src/render/raster/output.rs` | `RasterOutput`, host-supplied `RasterCapabilities`, `CellPixels`, `RasterStats`; strict capability validation |
 | `src/render/raster/presenter.rs` | Per-renderer terminal-visible state, resource preflight, invalidation/erase plan, commit after successful flush |
 | `src/render/raster/sixel.rs` | Private, optional dependency-free RGB332 encoder and bounded encoded-tile LRU |
 | `src/render/render.rs` | Character diff, fullscreen ED 2 or inline row-local EL 2 cleanup, cursor positioning and Sixel writes; `set_raster_output`, `raster_stats` |
-| `src/tui/runtime/core.rs` | `frame()` retains graphics and text; `frame_text_only()` makes an explicit character-only copy |
+| `src/tui/runtime/core.rs` | `frame()` retains graphics metadata and text without terminal output |
 
-The core model, widget, and text fallback do not require the `sixel` feature.
+The core model, widget, and headless metadata frames do not require the `sixel` feature.
 `--features sixel` enables the private native encoder without adding an external
 encoding dependency; Unix terminal input/query handling uses `libc`. The feature
 does not assert that the active terminal is supported. Existing `Canvas` and
@@ -46,11 +46,11 @@ A Buffer always has its character cells. When raster content is used, it lazily
 allocates a dense `Option<RasterCell>` ownership table, one slot per buffer cell;
 frame history can retain a second table. There is no full-screen RGB framebuffer.
 Each owner shares a source snapshot and retains the full target size, original
-cell offset, and presentation options. A character fallback is stored alongside.
+cell offset, and presentation options. An opaque placeholder preserves cell ownership; it is not an image preview.
 
 Drawing/blitting order determines the surviving owner. Ordinary writes erase
 intersecting raster ownership, including wide-grapheme footprints. Raster writes
-replace text with an opaque fallback and then attach the owner. Overlay layout
+replace text with an opaque placeholder and then attach the owner. Overlay layout
 orders its children; Buffer receives those actual writes rather than a separate
 unordered graphics queue. The output phase can write surviving text followed by
 surviving raster tiles because those ownership regions no longer overlap; this
@@ -62,9 +62,8 @@ fitting the source into the remaining viewport. The raster widget submits only
 visible cells instead of allocating its entire unclipped target. The reusable
 offscreen pool releases frame contents/source references after reading and retains
 at most eight buffers / 8 MiB of cell storage per thread. Character-only visual effects
-consume the stored fallback and mark the frame as having unsupported raster
-composition. Auto can retain native tiles elsewhere; RequireSixel rejects the
-marked frame, even if later drawing covers the affected region. No alpha blending
+cannot consume raster pixels and mark unsupported raster
+composition. Real output rejects the marked frame, even if later drawing covers the affected region. No alpha blending
 or transparent text-over-raster contract is provided.
 
 ## Three distinct caches/state layers
@@ -149,8 +148,7 @@ is an explicit startup operation, never a renderer operation:
 runtime, without backend-limit validation, terminal input, or query fallback.
 
 The renderer **never discovers pixels or reads terminal input**. Eligible native
-raster frames require stored valid pixels. `None` means character fallback for
-`Auto` or an error for `RequireSixel`; text-only and unused raster paths are
+raster frames require stored valid pixels. `None` causes an error for raster output; frames without raster content are
 unaffected. Invalid dimensions never request discovery either.
 
 Probing is permanently rejected after managed input initialization, even after
@@ -194,7 +192,7 @@ Encode `s * h` transparent prefix pixels, then the unchanged cell crop, and emit
 CUP at `y - s`. At 10×20 the last row shifts two rows up: 40 transparent pixels
 plus 20 opaque pixels end exactly at the bottom. Prefix length is in the cache
 key; absolute position is not. No additional sampled-pixel allocation is needed.
-If no anchor fits, RequireSixel fails before any bytes and Auto uses fallback.
+If no anchor fits, rendering fails before any frame bytes.
 This preserves layout, title, sampling and all bottom-row pixels instead of
 reserving a blank fullscreen row or rounding physical metrics.
 
@@ -222,8 +220,7 @@ bypass resource limits.
 - Native frame: at most 32,768 visible raster cells and 16,777,216 physical pixels;
   staged encoded payload at most 32 MiB. Coordinate addition is checked too.
 
-Auto chooses text when policy/preflight frame limits fail; RequireSixel reports
-unsupported output. Encoder allocation/encoding errors and I/O errors may still
+Capability/preflight frame limit failures report unsupported output. Encoder allocation/encoding errors and I/O errors may still
 propagate. These are individual budgets, not a global memory limit for all source
 snapshots, offscreen buffers, caches, and staged frames combined.
 
@@ -241,9 +238,9 @@ scroll behavior. No real-terminal configuration is currently certified.
 | Layer | Automated checks / expected evidence | Remaining work |
 | --- | --- | --- |
 | Source model | Dimensions/overflow, COW branching, no-op revisions, clipped and extreme primitives | Broader performance measurements |
-| Sampling / fallback | Physical aspect, Fit/Stretch/alignment, original crop offsets, explicit colors, glyph width handling | Visual quality assessment across fonts |
-| TUI composition | Callback cache/invalidation, resize, borders/padding, scroll blits, opaque coverage, text snapshots, effect flattening | Interactive checks with representative layouts |
-| Policy / renderer | Unknown Auto fallback, TextOnly, strict rejection, feature/mode/metric gates, injected-writer bytes and invalidation | Actual terminal behavior, interrupted output, recovery |
+| Sampling | Physical aspect, Fit/Stretch/alignment, original crop offsets, explicit colors | Visual quality assessment across fonts |
+| TUI composition | Callback cache/invalidation, resize, borders/padding, scroll blits, opaque coverage, headless metadata frames, unsupported effect rejection | Interactive checks with representative layouts |
+| Policy / renderer | Strict rejection, feature/mode/metric gates, injected-writer bytes and invalidation | Actual terminal behavior, interrupted output, recovery |
 | Encoder / cache | RGB332 tile bytes, bounds, deterministic output, cache keys/eviction | Terminal decoding and palette interaction |
 | Startup metrics / input | OS-first probe, bounded Unix query, return-on-reply, configurable timeout, permanent managed-input guard, renderer uses stored pixels only | Real-terminal late replies, unrelated-input consumption, and explicit snapshot updates; DA/Sixel capability negotiation remains unimplemented |
 
@@ -262,7 +259,7 @@ OS, font/cell size, screen modes, and every multiplexer hop for each test run.
 | Each candidate through tmux or another multiplexer | **UNVERIFIED** independently of direct-terminal results |
 
 Do not turn on capability assertions merely because a candidate appears
-in this table. A missing or failed condition keeps Auto on text; RequireSixel must
+in this table. A missing or failed condition must
 reject an unsupported configuration.
 
 ### Manual checklist for a prospective native configuration
@@ -296,18 +293,18 @@ reject an unsupported configuration.
       the entire occupied rows, so do not place unrelated content beside it.
 - [ ] Send subsequent tiles with different used palettes; confirm older tiles
       retain their colors. This is part of the `no_scroll` assertion's contract.
-- [ ] Switch native to text and back in each mode; check mode-appropriate cleanup
-      and stable source/layout. Without `reliable_inline_erase`, inline must use
-      text for Auto or return a strict error for RequireSixel. With that assertion
-      and all shared native gates satisfied, inline may emit Sixel without an
-      alternate screen or `reliable_erase`. Native appended-newline output must
-      remain rejected (or fall back under Auto).
-- [ ] Verify empty/unknown capabilities stay on text. With other native conditions
-      satisfied but `cell_pixels: None`, `Auto` must fall back and `RequireSixel`
-      must error before frame output, without OS reads or queries. Text-only and
-      unused raster paths must remain unaffected.
-- [ ] Exercise visual effects and explicit text snapshots; do not silently drop
-      content or retain unsupported native ownership under a character effect.
+- [ ] Replace raster content with ordinary text and back in each mode; check
+      mode-appropriate cleanup and stable source/layout. Without
+      `reliable_inline_erase`, inline raster output must error before frame output.
+      With that assertion and all shared native gates satisfied, inline may emit
+      Sixel without an alternate screen or `reliable_erase`. Native appended-newline
+      output must remain rejected.
+- [ ] Verify empty/unknown capabilities reject raster output. With other native
+      conditions satisfied but `cell_pixels: None`, rendering must error before
+      frame output, without OS reads or queries. Frames without raster content
+      must remain unaffected.
+- [ ] Exercise visual effects and headless metadata frames; reject unsupported
+      raster composition rather than presenting placeholders as image content.
 - [ ] Exit normally, interrupt execution, and inject recoverable writer failures;
       check cursor/style/modes, alternate-screen restoration, and graphics residue.
 - [ ] In isolated startup-probe runs, exercise OS success, Unix/WSL fallback,
@@ -345,7 +342,6 @@ Treat recorded unit-test results and terminal-validation results as separate evi
 ```sh
 cargo run --release --features sixel --example sixel_windows -- --sixel
 
-cargo run --release --example sixel_windows -- --text-only
 
 cargo run --example sixel_windows -- --help
 ```
@@ -356,12 +352,11 @@ titles to move and bottom grips to resize; click to bring forward. `e` cycles
 Canvas Braille/HalfBlock/Quadrant, `r` restores starting rectangles, and `q`/Esc
 quits. Prefer 100×32 cells; small sizes and terminal resizing are supported. There
 is no live animation. This example is fullscreen-only and has no `--inline`
-option. No flags shows help; `--text-only` is an explicit fullscreen preview.
+option. No flags shows help; Raster has no character preview mode.
 
 For `sixel_windows`, `--sixel` asserts that the entire terminal path supports
 graphics, non-scrolling positioned output and stable palettes, plus ED 2 graphics
-erasure in fullscreen mode. Native output selects `RequireSixel`, never silent
-fallback. Startup checks the feature and current
+erasure in fullscreen mode. Native output rejects unsupported configurations, never silently falling back. Startup checks the feature and current
 backend cell-metric limits (1..=1024 per dimension, at most 65,536 pixels) before
 entering the managed terminal session. Without an override, startup explicitly
 probes OS metrics, then the bounded Unix/WSL cell-pixel query, before input starts
@@ -382,7 +377,7 @@ cargo run --release --features sixel --manifest-path examples/ai-babies/Cargo.to
 
 All its animation modes use the normal screen with inline output, no alternate
 screen and no mouse capture. No additional `--inline` argument is needed.
-`--sixel` selects `RequireSixel` and asserts reliable local EL 2 graphics erasure
+`--sixel` asserts reliable local EL 2 graphics erasure
 and graphics moving with text during row-reservation scrolling, using
 `reliable_inline_erase: true` and `reliable_erase: false`, alongside the shared
 Sixel, palette and positioned-output requirements. `no_scroll` prohibits the
@@ -408,7 +403,7 @@ statistically controlled acceptance, or allocation profiling. `sixel_windows` is
 an interaction showcase, not a replacement measurement harness, and no new
 measurements are claimed. Future benchmarking needs a new controlled harness for
 static raster beside changing text, moving but unchanged sources, scrolling,
-continuous source changes, opaque overlays, and forced fallback. Repeat both cold
+continuous source changes, opaque overlays, and unsupported-output rejection. Repeat both cold
 and warm cache runs at recorded dimensions and terminal/multiplexer versions.
 
 Record source callback count/time, allocations and retained memory, sampling and

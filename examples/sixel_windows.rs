@@ -1,6 +1,6 @@
 //! Two draggable windows, one native Sixel surface and one ordinary Canvas.
 //! Run `cargo run --release --features sixel --example sixel_windows -- --sixel`.
-//! Use `--text-only` for a preview, or `--headless` to exercise real mouse events.
+//! Use `--headless` to exercise real mouse events.
 
 use std::{error::Error, sync::Arc};
 
@@ -17,14 +17,12 @@ const HELP: &str = "SIXEL / CANVAS — two surfaces, one desktop
 
 Run from the repository root:
   cargo run --release --features sixel --example sixel_windows -- --sixel
-  cargo run --release --example sixel_windows -- --text-only
   cargo run --example sixel_windows -- --headless
 
 Options:
   --sixel               Require actual Sixel; never silently fall back
   --cell-pixels WxH     Skip OS/query discovery: physical pixels per character cell
   --force-cell-pixels   Confirm an override equal to the terminal columns x rows
-  --text-only           Explicit HalfBlock preview in the RGB window
   --headless            Check dragging, resizing, stacking and restoration in memory
   --help                Show this guide
 
@@ -48,7 +46,7 @@ columns and rows; do not guess 8x18. Explicit overrides skip all OS metric looku
 and terminal queries, and stay fixed after font changes. An override matching the
 grid requires --force-cell-pixels; use it only for a verified unusual cell size.
 Dimensions must be 1..=1024 with area <=65536 pixels per character cell.
---text-only does not query cell pixels. Metric queries do not detect Sixel support.
+Metric queries do not detect Sixel support.
 Startup probing must precede any input reader. It may consume unrelated input;
 late replies after timeout may reach the subsequent reader. Runtime input uses
 native crossterm. Standalone/embedded hosts can call CellPixels::probe(timeout)
@@ -65,7 +63,6 @@ The --headless checks do not certify terminal compatibility.";
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Output {
     Sixel,
-    Text,
 }
 
 #[derive(Default, Debug)]
@@ -83,17 +80,7 @@ impl Options {
         let mut args = arguments.into_iter();
         while let Some(argument) = args.next() {
             match argument.as_str() {
-                "--sixel" | "--text-only" => {
-                    let output = if argument == "--sixel" {
-                        Output::Sixel
-                    } else {
-                        Output::Text
-                    };
-                    if options.output.is_some_and(|previous| previous != output) {
-                        return Err("choose either --sixel or --text-only".into());
-                    }
-                    options.output = Some(output);
-                }
+                "--sixel" => options.output = Some(Output::Sixel),
                 "--cell-pixels" => {
                     let value = args.next().ok_or(
                         "--cell-pixels needs WxH: physical pixels per character cell, not terminal columns x rows; use --help",
@@ -130,22 +117,19 @@ impl Options {
         resolve: impl FnOnce(Option<CellPixels>) -> std::io::Result<CellPixels>,
     ) -> Result<RasterOutput, String> {
         if !cfg!(feature = "sixel") {
-            return Err(
-                "native output needs --features sixel; alternatively use --text-only".into(),
-            );
+            return Err("native output needs --features sixel".into());
         }
         // Resolve once before starting input; rendering only uses this snapshot.
         let pixels = resolve(self.pixels).map_err(|error| error.to_string())?;
         if self.pixels.is_some() && (pixels.width, pixels.height) == grid && !self.force_cell_pixels
         {
             return Err(format!(
-                "--cell-pixels {}x{} matches the terminal grid ({} columns x {} rows); this looks like columns x rows rather than physical pixels per character cell. Omit --cell-pixels to use automatic detection, or supply measured physical pixels per character cell (text-area pixels / columns and rows). If this unusual cell size is intentional, confirm it with --force-cell-pixels; otherwise use --text-only",
+                "--cell-pixels {}x{} matches the terminal grid ({} columns x {} rows); this looks like columns x rows rather than physical pixels per character cell. Omit --cell-pixels to use automatic detection, or supply measured physical pixels per character cell (text-area pixels / columns and rows). If this unusual cell size is intentional, confirm it with --force-cell-pixels",
                 pixels.width, pixels.height, grid.0, grid.1,
             ));
         }
 
         Ok(RasterOutput {
-            policy: RasterPolicy::RequireSixel,
             capabilities: RasterCapabilities {
                 // Enabled only by the explicit --sixel assertion documented above.
                 sixel: true,
@@ -334,7 +318,6 @@ fn view(state: &State) -> impl Widget<Msg> {
     let source = Arc::clone(&state.image);
     let left_title = match state.output {
         Output::Sixel => "01 / SIXEL / RGB pixels",
-        Output::Text => "01 / RGB / TEXT PREVIEW",
     };
     let window_style = |accent| Style::default().fg(accent).bg(Color::Rgb(8, 13, 25));
     let native = floating_window(
@@ -470,7 +453,7 @@ fn inside(area: Area, x: u16, y: u16) -> bool {
 }
 
 fn headless() -> Result<(), Box<dyn Error>> {
-    let mut runtime = application(110, 36, Output::Text, RasterOutput::text_only())?;
+    let mut runtime = application(110, 36, Output::Sixel, RasterOutput::default())?;
     runtime.step(&[])?;
     let initial = runtime.state().windows;
     let identity = runtime.state().image.id();
@@ -520,7 +503,7 @@ fn headless() -> Result<(), Box<dyn Error>> {
     assert_eq!(runtime.state().encoding, Encoding::Braille);
     runtime.step(&[Event::Key(KeyCode::Char('r').into())])?;
     assert_eq!(runtime.state().windows, initial);
-    assert!(!runtime.frame_text_only().has_raster());
+    assert!(runtime.frame().has_raster());
     println!("Headless checks passed: mouse dragging, resizing, stacking, raster occlusion/restoration, shared source, encoding and reset. Native terminal output was not tested.");
     Ok(())
 }
@@ -538,7 +521,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     let (width, height) = crossterm::terminal::size()?;
     let config = match output {
         Output::Sixel => options.native_config((width, height))?,
-        Output::Text => RasterOutput::text_only(),
     };
     application(width, height, output, config)?.run()?;
     Ok(())
@@ -555,11 +537,8 @@ mod tests {
     #[test]
     fn modes_are_explicit_and_conflicting_options_fail() {
         assert!(options(&[]).unwrap().output.is_none());
-        assert_eq!(
-            options(&["--text-only"]).unwrap().output,
-            Some(Output::Text)
-        );
-        assert!(options(&["--text-only", "--sixel"]).is_err());
+        assert!(options(&["--text-only"]).is_err());
+        assert_eq!(options(&["--sixel"]).unwrap().output, Some(Output::Sixel));
         assert!(options(&["--cell-pixels", "8x18"]).is_err());
         assert!(options(&["--sixel", "--cell-pixels", "8"]).is_err());
         assert!(options(&["--unknown"]).is_err());
@@ -570,7 +549,6 @@ mod tests {
         for args in [
             vec!["--inline"],
             vec!["--sixel", "--inline"],
-            vec!["--text-only", "--inline"],
             vec!["--headless", "--inline"],
         ] {
             assert_eq!(
@@ -587,7 +565,6 @@ mod tests {
             .native_config((110, 36));
         if cfg!(feature = "sixel") {
             let config = valid.unwrap();
-            assert_eq!(config.policy, RasterPolicy::RequireSixel);
             assert_eq!(
                 config.capabilities.cell_pixels,
                 Some(CellPixels {
@@ -618,12 +595,7 @@ mod tests {
         for args in [
             vec!["--force-cell-pixels"],
             vec!["--sixel", "--force-cell-pixels"],
-            vec![
-                "--text-only",
-                "--cell-pixels",
-                "120x36",
-                "--force-cell-pixels",
-            ],
+            vec!["--cell-pixels", "120x36", "--force-cell-pixels"],
         ] {
             assert!(options(&args).is_err());
         }
@@ -729,7 +701,6 @@ mod tests {
                     CellPixels::resolve(Some(pixels))
                 })
                 .unwrap();
-            assert_eq!(config.policy, RasterPolicy::RequireSixel);
             assert_eq!(config.capabilities.cell_pixels, Some(pixels));
         }
         let error = opts
@@ -780,7 +751,7 @@ mod tests {
 
     #[test]
     fn resize_and_encoding_changes_keep_both_renderers_visible() {
-        let mut runtime = application(110, 36, Output::Text, RasterOutput::text_only()).unwrap();
+        let mut runtime = application(110, 36, Output::Sixel, RasterOutput::default()).unwrap();
         for size in [(80, 24), (48, 16), (110, 36)] {
             runtime.resize(size.into());
             runtime.step(&[]).unwrap();
@@ -802,7 +773,7 @@ mod tests {
     #[test]
     fn both_documented_quit_keys_exit() {
         for key in [KeyCode::Esc, KeyCode::Char('q')] {
-            let mut runtime = application(80, 24, Output::Text, RasterOutput::text_only()).unwrap();
+            let mut runtime = application(80, 24, Output::Sixel, RasterOutput::default()).unwrap();
             runtime.step(&[]).unwrap();
             runtime.step(&[Event::Key(key.into())]).unwrap();
             assert!(runtime.exit_reason().is_some());

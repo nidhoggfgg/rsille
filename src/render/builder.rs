@@ -109,7 +109,8 @@ impl Builder {
         self
     }
 
-    /// Configures raster presentation. Unknown capabilities default to text.
+    /// Configures Sixel-only raster presentation, requiring the `sixel` feature.
+    /// Unknown capabilities reject raster frames; text-only frames are unaffected.
     ///
     /// The renderer never discovers cell pixels or reads terminal input. Native
     /// output requires valid `config.capabilities.cell_pixels: Some(pixels)`.
@@ -118,8 +119,8 @@ impl Builder {
     /// standalone hosts with external readers. Probing is permanently rejected
     /// after managed input initialization; external readers cannot be detected.
     /// The startup snapshot is not refreshed after font, DPI, or resize changes.
-    /// Missing metrics fail `RequireSixel` on eligible native raster frames;
-    /// `Auto` uses character fallback. Text-only and unused paths are unaffected.
+    /// Missing or invalid metrics reject raster frames before terminal output.
+    /// Raster images are never converted to characters.
     /// A standalone renderer does not enter an alternate screen: when enabling
     /// native output, the caller must establish the configured terminal modes.
     /// Inline Sixel requires `reliable_inline_erase` instead of `reliable_erase`:
@@ -245,7 +246,7 @@ impl Builder {
     /// It does not change cursor visibility. Disabling inline mode does not
     /// restore earlier settings; later setters can override these choices.
     /// Native Sixel additionally requires the raster configuration's independent
-    /// `reliable_inline_erase` assertion; unknown support uses character fallback.
+    /// `reliable_inline_erase` assertion; unknown support rejects raster frames.
     /// For cell height `h`, native inline output reserves
     /// `ceil(((6 - h % 6) % 6) / h)` blank guard rows: one at 10×20, none at 8×18,
     /// five at `h = 1`. A known viewport height limits content after deducting

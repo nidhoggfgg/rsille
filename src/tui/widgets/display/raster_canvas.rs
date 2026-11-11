@@ -7,8 +7,8 @@ use std::sync::Arc;
 use crate::render::area::Area;
 use crate::render::chunk::Chunk;
 use crate::render::raster::{
-    RasterAlign, RasterCanvas, RasterCell, RasterError, RasterFallback, RasterOptions, RasterScale,
-    Rgb, MAX_RASTER_PIXELS,
+    RasterAlign, RasterCanvas, RasterCell, RasterError, RasterOptions, RasterScale, Rgb,
+    MAX_RASTER_PIXELS,
 };
 use crate::render::style::Style as RenderStyle;
 use crate::tui::layout::{Constraints, Layout};
@@ -72,7 +72,7 @@ struct RasterState {
 /// A stable [`Self::key`] preserves the cache when siblings are reordered.
 ///
 /// Source dimensions and background also invalidate the callback cache. Layout,
-/// alignment, scale and fallback changes only affect presentation. Each callback
+/// alignment and scale changes only affect presentation. Each callback
 /// starts with a fresh, opaque canvas, not the previous revision's pixels.
 ///
 /// Borders and padding belong to the surrounding container. The widget uses its
@@ -86,7 +86,6 @@ struct RasterState {
 /// let image = RasterCanvas::new(320, 180, Rgb(20, 20, 20)).unwrap();
 /// let view = raster_canvas::<()>(image)
 ///     .scale(RasterScale::Fit)
-///     .fallback(RasterFallback::HalfBlock)
 ///     .fixed(40, 12);
 /// # let _ = view;
 /// ```
@@ -167,12 +166,6 @@ impl<M, F> RasterCanvasWidget<M, F> {
     /// Sets vertical alignment within the allocated content area.
     pub fn align_y(mut self, align: RasterAlign) -> Self {
         self.options.align_y = align;
-        self
-    }
-
-    /// Selects HalfBlock or Braille when native raster presentation is unavailable.
-    pub fn fallback(mut self, fallback: RasterFallback) -> Self {
-        self.options.fallback = fallback;
         self
     }
 
@@ -327,8 +320,7 @@ where
     /// .revision(1)
     /// .background(Rgb(0, 0, 0))
     /// .align_x(RasterAlign::Center)
-    /// .align_y(RasterAlign::Center)
-    /// .fallback(RasterFallback::Braille);
+    /// .align_y(RasterAlign::Center);
     /// # let _ = view;
     /// # Ok::<(), RasterError>(())
     /// ```
@@ -495,7 +487,6 @@ mod tests {
             scale: RasterScale::Stretch,
             align_x: RasterAlign::End,
             align_y: RasterAlign::Start,
-            fallback: RasterFallback::Braille,
         };
         let widget = raster_canvas::<()>(source.clone()).options(options);
         let bounds = area(2, 1, 4, 2);
@@ -710,21 +701,20 @@ mod tests {
     #[test]
     fn lifecycle_cache_survives_description_rebuilds_and_only_source_changes_redraw() {
         let calls = Cell::new(0);
-        let make = |revision, width, background, scale, fallback| {
+        let make = |revision, width, background, scale| {
             RasterCanvasWidget::<(), _>::from_draw(width, 5, |_, _| calls.set(calls.get() + 1))
                 .unwrap()
                 .revision(revision)
                 .background(background)
                 .scale(scale)
-                .fallback(fallback)
         };
         let mut store = WidgetStore::new();
         let bounds = area(0, 0, 4, 2);
-        let initial = make(0, 7, RED, RasterScale::Fit, RasterFallback::HalfBlock);
+        let initial = make(0, 7, RED, RasterScale::Fit);
         reconcile(&initial, &mut store, Lifecycle::Mount);
         let first = render(&initial, &store, bounds, bounds, true);
         drop(initial);
-        let rebuilt = make(0, 7, RED, RasterScale::Stretch, RasterFallback::Braille);
+        let rebuilt = make(0, 7, RED, RasterScale::Stretch);
         reconcile(&rebuilt, &mut store, Lifecycle::Sync);
         let second = render(&rebuilt, &store, bounds, bounds, false);
         assert_eq!(calls.get(), 1);
@@ -735,13 +725,7 @@ mod tests {
         for (revision, width, background, expected_calls) in
             [(1, 7, RED, 2), (1, 9, RED, 3), (1, 9, BLUE, 4)]
         {
-            let widget = make(
-                revision,
-                width,
-                background,
-                RasterScale::Fit,
-                RasterFallback::HalfBlock,
-            );
+            let widget = make(revision, width, background, RasterScale::Fit);
             reconcile(&widget, &mut store, Lifecycle::Sync);
             render(&widget, &store, bounds, bounds, false);
             assert_eq!(calls.get(), expected_calls);
@@ -785,31 +769,27 @@ mod tests {
             RasterScale::Stretch,
             RasterScale::Original,
         ] {
-            for fallback in [RasterFallback::HalfBlock, RasterFallback::Braille] {
-                let widget = raster_canvas::<()>(source.clone())
-                    .scale(scale)
-                    .fallback(fallback);
-                let frame = render(&widget, &WidgetStore::new(), allocation, clip, true);
-                assert_eq!(frame.size(), (5, 4).into());
-                assert_eq!(frame.content().len(), 20);
-                assert_eq!(frame.raster_cells().count(), 4);
-                for (x, y, cell) in frame.raster_cells() {
-                    assert_eq!(
-                        cell,
-                        &RasterCell {
-                            canvas: source.as_ref().clone(),
-                            target: allocation.size(),
-                            x,
-                            y,
-                            options: widget.options,
-                        }
-                    );
-                    let index = y as usize * frame.size().width as usize + x as usize;
-                    assert_eq!(frame.content()[index].content, cell.fallback());
-                }
-                assert!(frame.raster_at((2, 2).into()).is_none());
-                assert!(frame.raster_at((3, 1).into()).is_none());
+            let widget = raster_canvas::<()>(source.clone()).scale(scale);
+            let frame = render(&widget, &WidgetStore::new(), allocation, clip, true);
+            assert_eq!(frame.size(), (5, 4).into());
+            assert_eq!(frame.content().len(), 20);
+            assert_eq!(frame.raster_cells().count(), 4);
+            for (x, y, cell) in frame.raster_cells() {
+                assert_eq!(
+                    cell,
+                    &RasterCell {
+                        canvas: source.as_ref().clone(),
+                        target: allocation.size(),
+                        x,
+                        y,
+                        options: widget.options,
+                    }
+                );
+                let index = y as usize * frame.size().width as usize + x as usize;
+                assert_eq!(frame.content()[index].content, cell.placeholder());
             }
+            assert!(frame.raster_at((2, 2).into()).is_none());
+            assert!(frame.raster_at((3, 1).into()).is_none());
         }
     }
 
@@ -839,12 +819,12 @@ mod tests {
             assert_eq!(cell, full.raster_at((x, y).into()).unwrap());
             assert_eq!((cell.x, cell.y), (x - 2, y - 1));
             let index = y as usize * frame.size().width as usize + x as usize;
-            assert_eq!(frame.content()[index].content, cell.fallback());
+            assert_eq!(frame.content()[index].content, cell.placeholder());
         }
     }
 
     #[test]
-    fn clipping_preserves_target_geometry_source_offsets_and_fallback_cells() {
+    fn clipping_preserves_target_geometry_source_offsets_and_placeholder_cells() {
         let mut source = RasterCanvas::new(6, 8, BLUE).unwrap();
         source.fill_rect(0, 0, 3, 4, RED);
         let source = Arc::new(source);
@@ -854,24 +834,20 @@ mod tests {
             RasterScale::Stretch,
             RasterScale::Original,
         ] {
-            for fallback in [RasterFallback::HalfBlock, RasterFallback::Braille] {
-                let widget = raster_canvas::<()>(source.clone())
-                    .scale(scale)
-                    .fallback(fallback);
-                let store = WidgetStore::new();
-                let full = render(&widget, &store, allocation, allocation, true);
-                for clip in [area(3, 2, 2, 1), area(1, 1, 2, 2), area(5, 3, 2, 2)] {
-                    let cropped = render(&widget, &store, allocation, clip, false);
-                    assert_eq!(cropped.raster_cells().count(), clip.area());
-                    for (x, y, cell) in cropped.raster_cells() {
-                        let original = full.raster_at((x, y).into()).unwrap();
-                        assert_eq!(cell, original);
-                        assert_eq!(cell.target, allocation.size());
-                        assert_eq!((cell.x, cell.y), (x - allocation.x(), y - allocation.y()));
-                        assert_eq!(cell.fallback(), original.fallback());
-                        let index = y as usize * cropped.size().width as usize + x as usize;
-                        assert_eq!(cropped.content()[index].content, cell.fallback());
-                    }
+            let widget = raster_canvas::<()>(source.clone()).scale(scale);
+            let store = WidgetStore::new();
+            let full = render(&widget, &store, allocation, allocation, true);
+            for clip in [area(3, 2, 2, 1), area(1, 1, 2, 2), area(5, 3, 2, 2)] {
+                let cropped = render(&widget, &store, allocation, clip, false);
+                assert_eq!(cropped.raster_cells().count(), clip.area());
+                for (x, y, cell) in cropped.raster_cells() {
+                    let original = full.raster_at((x, y).into()).unwrap();
+                    assert_eq!(cell, original);
+                    assert_eq!(cell.target, allocation.size());
+                    assert_eq!((cell.x, cell.y), (x - allocation.x(), y - allocation.y()));
+                    assert_eq!(cell.placeholder(), original.placeholder());
+                    let index = y as usize * cropped.size().width as usize + x as usize;
+                    assert_eq!(cropped.content()[index].content, cell.placeholder());
                 }
             }
         }

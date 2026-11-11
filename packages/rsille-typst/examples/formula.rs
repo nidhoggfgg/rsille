@@ -8,9 +8,8 @@ use rsille_typst::{MathRenderer, RenderOptions};
 const DEFAULT_FORMULA: &str = "sum_(k=1)^n k = frac(n(n+1), 2)";
 const HELP: &str = "Typst block formula — direct terminal display
 
-Usage: formula (--sixel | --text-only) [OPTIONS] ['Typst math contents']
+Usage: formula --sixel [OPTIONS] ['Typst math contents']
   --sixel              Require native Sixel; never silently fall back
-  --text-only          HalfBlock preview; NOT a readable-formula guarantee
   --cell-pixels WxH    Measured physical pixels per character cell
   --force-cell-pixels  Confirm a measured override equal to the terminal grid
   --headless           Check the same widget/Runtime in memory, without TTY I/O
@@ -28,7 +27,7 @@ The framework caps inline content at 50 rows and reserves Sixel bottom guards.
 local EL 2 graphics erasure, images following text scrolling, stable palettes,
 non-scrolling positioned output, and
 transparent padding in partial final six-pixel bands. No capability detection.
-Build with --features sixel. RequireSixel errors rather than degrading to text.
+Build with --features sixel. Unsupported raster output errors rather than degrading to text.
 
 Cell pixels are ONE character cell's physical width x height, NOT columns x rows,
 window pixels or font points. Dimensions: 1..=1024, area <=65536.
@@ -39,13 +38,12 @@ query fallback. If discovery fails, supply measured --cell-pixels WxH.
 Overrides skip probing. A grid-sized override requires --force-cell-pixels.
 Metrics are stored once; restart after font/DPI changes. Queries do not detect
 Sixel support and may consume unrelated input; late replies may reach the reader.
-Text-only never probes. Headless Sixel requires explicit --cell-pixels (synthetic
+Headless metadata checks never probe. Headless Sixel requires explicit --cell-pixels (synthetic
 metrics are suitable for checks only); headless does not certify a real terminal.";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Output {
     Sixel,
-    Text,
 }
 
 #[derive(Default, Debug)]
@@ -72,17 +70,7 @@ impl Options {
             }
             match argument.as_str() {
                 "--" => literal = true,
-                "--sixel" | "--text-only" => {
-                    let output = if argument == "--sixel" {
-                        Output::Sixel
-                    } else {
-                        Output::Text
-                    };
-                    if options.output.is_some_and(|previous| previous != output) {
-                        return Err("choose either --sixel or --text-only".into());
-                    }
-                    options.output = Some(output);
-                }
+                "--sixel" => options.output = Some(Output::Sixel),
                 "--cell-pixels" => {
                     let value = args.next().ok_or("--cell-pixels needs WxH")?;
                     let (width, height) = value.split_once('x').ok_or("cell pixels must be WxH")?;
@@ -108,12 +96,10 @@ impl Options {
 
     fn config(&self, grid: (u16, u16)) -> Result<RasterOutput, String> {
         if self.output != Some(Output::Sixel) {
-            return Ok(RasterOutput::text_only());
+            return Ok(RasterOutput::default());
         }
         if !cfg!(feature = "sixel") {
-            return Err(
-                "native output needs --features sixel; alternatively use --text-only".into(),
-            );
+            return Err("native output needs --features sixel".into());
         }
         if self.headless && self.pixels.is_none() {
             return Err(
@@ -128,7 +114,6 @@ impl Options {
             return Err("--cell-pixels matches columns x rows, not usually physical cell pixels; confirm measured values with --force-cell-pixels".into());
         }
         Ok(RasterOutput {
-            policy: RasterPolicy::RequireSixel,
             capabilities: RasterCapabilities {
                 sixel: true,
                 reliable_erase: false,
@@ -146,11 +131,11 @@ struct State {
     formula_size: (u16, u16),
 }
 
-// HalfBlock has one horizontal and two vertical samples per character cell.
+// Headless metadata checks use synthetic cell dimensions, never terminal discovery.
 fn formula_size(canvas: &RasterCanvas, config: RasterOutput) -> (u16, u16) {
     let pixels = config.capabilities.cell_pixels.unwrap_or(CellPixels {
-        width: 1,
-        height: 2,
+        width: 10,
+        height: 20,
     });
     (
         canvas.width().div_ceil(u32::from(pixels.width)) as u16,
@@ -167,7 +152,6 @@ fn view(state: &State) -> impl Widget<Msg> {
     col()
         .child(label(match state.output {
             Output::Sixel => "Typst / Sixel / q or Esc: quit",
-            Output::Text => "Typst / TEXT PREVIEW (readability not guaranteed) / q or Esc: quit",
         }))
         .child(
             raster_canvas(Arc::clone(&state.canvas))
@@ -229,12 +213,10 @@ fn check_output(
     for forbidden in [b"\x1b[?1049h".as_slice(), b"\x1b[?1000h", b"\x1b[2J"] {
         assert!(!bytes.windows(forbidden.len()).any(|part| part == forbidden));
     }
-    if config.policy == RasterPolicy::RequireSixel {
+    {
         assert_eq!(stats.tiles_sent, frame.raster_cells().count() as u64);
         assert!(bytes.windows(2).any(|part| part == b"\x1bP"));
         assert!(bytes.windows(2).any(|part| part == b"\x1b\\"));
-    } else {
-        assert!(!bytes.windows(2).any(|part| part == b"\x1bP"));
     }
     Ok(())
 }
@@ -258,7 +240,9 @@ fn headless(
         );
         runtime.step(&[])?;
         assert!(runtime.frame().has_raster());
-        check_output(runtime.frame(), config)?;
+        if config.capabilities.sixel {
+            check_output(runtime.frame(), config)?;
+        }
         let bounds = runtime
             .bounds(&WidgetPath::root().child("formula"))
             .unwrap();
@@ -266,14 +250,17 @@ fn headless(
         assert_eq!(bounds.size().height, formula_size.1.min(rows.min(29) - 1));
         runtime.step(&[Event::Resize(12, rows.min(15))])?;
         assert!(runtime.frame().has_raster());
-        check_output(runtime.frame(), config)?;
-        assert!(!runtime.frame_text_only().has_raster());
+        if config.capabilities.sixel {
+            check_output(runtime.frame(), config)?;
+        }
         runtime.step(&[Event::Resize(100, rows.min(29))])?;
-        check_output(runtime.frame(), config)?;
+        if config.capabilities.sixel {
+            check_output(runtime.frame(), config)?;
+        }
         runtime.step(&[Event::Key(key.into())])?;
         assert!(runtime.exit_reason().is_some());
     }
-    println!("Headless checks passed: inline, natural size {formula_size:?}, content cap {rows} rows, no alternate screen/mouse/global erase; Typst -> RasterCanvas -> App/raster_canvas -> encoded output, resize, unchanged-frame reuse, text fallback, q/Esc. Real terminal behavior was not tested.");
+    println!("Headless checks passed: inline, natural size {formula_size:?}, content cap {rows} rows, no alternate screen/mouse/global erase; Typst -> RasterCanvas -> App/raster_canvas, resize and q/Esc; Sixel configurations additionally check encoded output and unchanged-frame reuse. Real terminal behavior was not tested.");
     Ok(())
 }
 
@@ -289,7 +276,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         crossterm::terminal::size()?
     };
     let config = options.config(size)?;
-    let output = options.output.unwrap_or(Output::Text);
+    let output = options.output.unwrap_or(Output::Sixel);
     // Fixed, explicit font assets; no system font search or runtime downloads.
     let renderer = MathRenderer::new(typst_assets::fonts(), "New Computer Modern Math")?;
     let result = renderer.render_with_diagnostics(
@@ -334,7 +321,7 @@ mod tests {
             .render(DEFAULT_FORMULA, &RenderOptions::default())
             .unwrap();
         for (width, height) in [(10, 20), (8, 18), (1, 1)] {
-            let mut config = RasterOutput::text_only();
+            let mut config = RasterOutput::default();
             config.capabilities.cell_pixels = Some(CellPixels { width, height });
             assert_eq!(
                 formula_size(&canvas, config),
@@ -344,18 +331,18 @@ mod tests {
                 )
             );
         }
-        headless(Arc::new(canvas), Output::Text, RasterOutput::text_only()).unwrap();
+        headless(Arc::new(canvas), Output::Sixel, RasterOutput::default()).unwrap();
     }
 
     #[test]
     fn explicit_modes_and_arguments() {
         assert!(options(&[]).unwrap().output.is_none());
-        assert!(options(&["--sixel", "--text-only"]).is_err());
         assert!(options(&["--cell-pixels", "8x18"]).is_err());
         assert!(options(&["--force-cell-pixels"]).is_err());
-        assert!(options(&["--text-only", "x", "y"]).is_err());
+        assert!(options(&["--text-only"]).is_err());
+        assert!(options(&["--sixel", "x", "y"]).is_err());
         assert_eq!(
-            options(&["--text-only", "--", "-x"])
+            options(&["--sixel", "--", "-x"])
                 .unwrap()
                 .formula
                 .as_deref(),
@@ -393,7 +380,6 @@ mod tests {
         assert!(config("100x30").is_err());
         if cfg!(feature = "sixel") {
             let native = config("10x20").unwrap();
-            assert_eq!(native.policy, RasterPolicy::RequireSixel);
             assert!(native.capabilities.reliable_inline_erase);
             assert!(!native.capabilities.reliable_erase);
             assert_eq!(

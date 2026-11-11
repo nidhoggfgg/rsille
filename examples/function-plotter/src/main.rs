@@ -15,7 +15,6 @@ const BOUNDS: [f64; 4] = [-10.0, 10.0, -3.0, 3.0];
 const HELP: &str = "Function plotter — 2D curves and shaded 3D surfaces
 
   --sixel                 Require native Sixel (build with --features sixel)
-  --text-only             Character preview, no terminal pixel queries
   --expr 'sin(x); x^2/8'   Initial functions (up to six)
   --grid                  Independent demo panels; no expr: four presets
                           Repeat --expr for 1–6 panels (4096 bytes each).
@@ -44,7 +43,7 @@ Commands are not expression history; added expressions are. :grid in grid is a n
 Inputs are capped at 4096 bytes. No session is saved; committed graphs are released.
 Mouse capture is disabled: use your terminal's normal scrollback controls.
 Single plots: formulas and graphs share max(70 columns, native formula width),
-capped by available terminal width. Text-only plots retain their 70-column cap.
+capped by available terminal width.
 Single graphs stay 14 rows high; grids request 30 rows with responsive 1–2 columns.
 Bounds auto-scale independently from finite samples.
 Polar/parametric plots use equal pixel-unit axes; Cartesian-only plots fill the frame.
@@ -88,13 +87,7 @@ impl Options {
         let mut args = args.into_iter();
         while let Some(arg) = args.next() {
             match arg.as_str() {
-                "--sixel" | "--text-only" => {
-                    let native = arg == "--sixel";
-                    if result.sixel.is_some_and(|old| old != native) {
-                        return Err("choose --sixel OR --text-only".into());
-                    }
-                    result.sixel = Some(native);
-                }
+                "--sixel" => result.sixel = Some(true),
                 "--x-range" => {
                     let mut range = [0.0_f64; 2];
                     for value in &mut range {
@@ -158,12 +151,11 @@ fn main() -> Result<(), Box<dyn Error>> {
             notebook::smoke_test(State::new(options.expr, x_range)?)
         };
     }
-    let output = if options.sixel == Some(true) {
+    let output = {
         if !cfg!(feature = "sixel") {
             return Err("--sixel needs --features sixel".into());
         }
         RasterOutput {
-            policy: RasterPolicy::RequireSixel,
             capabilities: RasterCapabilities {
                 sixel: true,
                 reliable_erase: true,
@@ -172,8 +164,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                 cell_pixels: Some(CellPixels::resolve(options.pixels)?),
             },
         }
-    } else {
-        RasterOutput::text_only()
     };
     if options.grid {
         grid::application(grid::State::new(options.panels, x_range)?, output).run()?;

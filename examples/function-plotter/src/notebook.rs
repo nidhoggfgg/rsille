@@ -62,7 +62,8 @@ impl State {
             output: None,
             angle: 0.0,
             rotation_started: None,
-            cell_pixels: (1, 2),
+            // Synthetic dimensions for metadata-only headless runs; real startup replaces them.
+            cell_pixels: (8, 16),
             error: None,
             validation_error: None,
             revision: 0,
@@ -515,11 +516,7 @@ impl<M> Widget<M> for FormulaOutput {
         Some("formula")
     }
     fn constraints(&self) -> Constraints {
-        let height = if self.cell_pixels == (1, 2) {
-            self.source.formula.text_rows().count() as u16
-        } else {
-            self.source.formula.height(self.cell_pixels.1)
-        };
+        let height = self.source.formula.height(self.cell_pixels.1);
         Constraints {
             min_width: 1,
             max_width: Some(
@@ -538,7 +535,7 @@ impl<M> Widget<M> for FormulaOutput {
         if area.width() == 0 || area.height() == 0 {
             return;
         }
-        if self.cell_pixels != (1, 2) {
+        {
             let size = (
                 u32::from(area.width()) * u32::from(self.cell_pixels.0),
                 u32::from(area.height()) * u32::from(self.cell_pixels.1),
@@ -555,16 +552,6 @@ impl<M> Widget<M> for FormulaOutput {
                     Style::default().to_render_style(),
                 );
             }
-            return;
-        }
-        for (y, (text, index)) in self.source.formula.text_rows().enumerate() {
-            let rsille::raster::Rgb(r, g, b) = crate::plot::COLORS[index];
-            let _ = chunk.set_string(
-                0,
-                y as u16,
-                text,
-                Style::default().fg(Color::Rgb(r, g, b)).to_render_style(),
-            );
         }
     }
 }
@@ -625,10 +612,8 @@ pub(crate) fn application(state: State, output: RasterOutput) -> Runtime<State, 
 }
 
 fn application_builder(mut state: State, output: RasterOutput) -> App<State, Msg> {
-    if output.policy == RasterPolicy::RequireSixel {
-        if let Some(pixels) = output.capabilities.cell_pixels {
-            state.cell_pixels = (pixels.width, pixels.height);
-        }
+    if let Some(pixels) = output.capabilities.cell_pixels {
+        state.cell_pixels = (pixels.width, pixels.height);
     }
     // Unset widget styles inherit theme backgrounds, so remove the fills at
     // their source. Keep caret/selection visible without a contrasting block.
@@ -660,7 +645,7 @@ fn start(runtime: Runtime<State, Msg>) -> Runtime<State, Msg> {
 
 pub(crate) fn smoke_test(state: State) -> Result<(), Box<dyn std::error::Error>> {
     let initial_expression = state.initial_expression;
-    let mut runtime = application(state, RasterOutput::text_only()).size(100, 32);
+    let mut runtime = application(state, RasterOutput::default()).size(100, 32);
     assert_eq!(runtime.step(&[])?.committed, initial_expression);
     if initial_expression {
         runtime.step(&[])?;
@@ -729,13 +714,13 @@ mod tests {
     fn runtime() -> Runtime<State, Msg> {
         application(
             State::new(Some("sin(x)".into()), crate::X_RANGE).unwrap(),
-            RasterOutput::text_only(),
+            RasterOutput::default(),
         )
         .size(100, 32)
     }
 
     fn timed() -> (Runtime<State, Msg>, rsille::tui::runtime::ManualClock) {
-        timed_with_pixels((1, 2))
+        timed_with_pixels((8, 16))
     }
 
     fn timed_with_pixels(
@@ -745,7 +730,7 @@ mod tests {
         let mut state = State::new(Some("sin(x)".into()), crate::X_RANGE).unwrap();
         state.cell_pixels = cell;
         let mut rt = start(
-            application_builder(state, RasterOutput::text_only())
+            application_builder(state, RasterOutput::default())
                 .with_clock(clock.clone())
                 .update(State::update)
                 .view(view)
@@ -812,7 +797,9 @@ mod tests {
             .filter(|(_, _, r)| r.x == 0 && r.y == 0)
             .map(|(_, _, r)| r.canvas.clone())
             .collect();
-        assert_eq!(before.len(), 2);
+        // Each panel now has both a raster formula and a raster graph.
+        assert_eq!(before.len(), 2 * rt.state().panels.len());
+        assert_eq!(after.len(), before.len());
         for (a, b) in before.iter().zip(&after) {
             assert_eq!(a.pixels(), b.pixels());
             assert_eq!((a.width(), a.height()), (b.width(), b.height()));
@@ -1323,7 +1310,7 @@ mod tests {
     }
 
     #[test]
-    fn inline_input_stays_linear_with_readable_formula_rows() {
+    fn inline_input_stays_linear_with_raster_formula_rows() {
         let (mut rt, clock) = timed();
         assert_inline_input(&rt, "In[2]:=");
         rt.step(&[Event::Paste("sin(x); cos(x)".into())]).unwrap();
@@ -1337,14 +1324,20 @@ mod tests {
         rt.step(&[]).unwrap();
         assert_inline_input(&rt, "In[2]:=sin(x); cos(x)");
         assert_eq!(frame_row(&rt, 1).trim(), "Preview (not submitted)");
-        assert_eq!(frame_row(&rt, 2).trim(), "sin(x)");
-        assert_eq!(frame_row(&rt, 3).trim(), "cos(x)");
+        let formula = WidgetPath::root().child(WidgetKey::Named("formula".into()));
+        let formula_area = rt.layout_geometry(&formula).unwrap().target;
+        assert_eq!(formula_area.y(), 2);
+        assert!(rt
+            .frame()
+            .raster_at((formula_area.x(), formula_area.y()).into())
+            .is_some());
         let graph = WidgetPath::root().child(WidgetKey::Named("output".into()));
-        assert_eq!(rt.layout_geometry(&graph).unwrap().target.y(), 4);
+        let graph_y = formula_area.y() + formula_area.height();
+        assert_eq!(rt.layout_geometry(&graph).unwrap().target.y(), graph_y);
         assert!(rt.step(&[key(KeyCode::Enter)]).unwrap().committed);
         assert_inline_input(&rt, "In[2]:=sin(x); cos(x)");
         assert_eq!(frame_row(&rt, 1).trim(), "Out[2]=");
-        assert_eq!(rt.layout_geometry(&graph).unwrap().target.y(), 4);
+        assert_eq!(rt.layout_geometry(&graph).unwrap().target.y(), graph_y);
         rt.step(&[]).unwrap();
         assert_inline_input(&rt, "In[3]:=");
         assert_eq!(rt.focused_key(), Some("editor"));
@@ -1447,7 +1440,7 @@ mod tests {
     fn one_row_editor_normalizes_paste_and_preserves_editing_and_history() {
         let mut rt = application(
             State::new(None, crate::X_RANGE).unwrap(),
-            RasterOutput::text_only(),
+            RasterOutput::default(),
         )
         .size(100, 32);
         rt.step(&[]).unwrap();
@@ -1494,7 +1487,7 @@ mod tests {
     fn blank_start_has_no_commit_history_or_graph_and_focuses_editor() {
         let mut rt = application(
             State::new(None, [-2.0, 4.0]).unwrap(),
-            RasterOutput::text_only(),
+            RasterOutput::default(),
         )
         .size(100, 32);
         assert!(!rt.step(&[]).unwrap().committed);
@@ -1525,7 +1518,7 @@ mod tests {
     fn explicit_empty_initial_expression_still_commits_error() {
         let mut rt = application(
             State::new(Some(String::new()), crate::X_RANGE).unwrap(),
-            RasterOutput::text_only(),
+            RasterOutput::default(),
         );
         assert!(rt.step(&[]).unwrap().committed);
         assert!(rt.state().error.is_some());
@@ -1535,7 +1528,7 @@ mod tests {
     fn initial_invalid_expression_is_a_committed_error() {
         let mut rt = application(
             State::new(Some("bad(x)".into()), crate::X_RANGE).unwrap(),
-            RasterOutput::text_only(),
+            RasterOutput::default(),
         );
         assert!(rt.step(&[]).unwrap().committed);
         assert!(rt.state().error.is_some());
@@ -1554,7 +1547,7 @@ mod tests {
             rt.step(&[]).unwrap();
             let source = Rc::clone(rt.state().output.as_ref().unwrap());
             let bounds = rt.state().bounds;
-            let columns = source.formula.width(cell).max(GRAPH_COLUMNS);
+            let columns = source.formula.width(cell).max(GRAPH_COLUMNS).min(98);
             let image = source.image(
                 bounds,
                 (
@@ -1603,7 +1596,7 @@ mod tests {
     }
 
     #[test]
-    fn formula_preview_commit_cache_and_explicit_text_mode() {
+    fn formula_preview_commit_cache_and_small_physical_cells() {
         let (mut rt, clock) = timed_with_pixels((8, 16));
         send(&mut rt, Msg::Edit("sqrt(1/(1+x^2))".into()));
         clock.advance(PREVIEW_DELAY);
@@ -1633,21 +1626,9 @@ mod tests {
             clock.advance(PREVIEW_DELAY);
             rt.step(&[]).unwrap();
             let path = WidgetPath::root().child(WidgetKey::Named("formula".into()));
-            if pixels == (1, 2) {
-                assert_eq!(frame_row(&rt, 2).trim(), "⎰ x(t) = cos(t)  t in [0, 2*pi]");
-                assert_eq!(frame_row(&rt, 3).trim(), "⎱ y(t) = sin(t)");
-                assert_eq!(rt.layout_geometry(&path).unwrap().target.height(), 2);
-                assert!(rt
-                    .frame()
-                    .raster_cells()
-                    .all(|(_, _, r)| r.target.height == GRAPH_ROWS));
-            } else {
-                assert!(rt
-                    .frame()
-                    .raster_cells()
-                    .any(|(_, _, r)| r.target.height != GRAPH_ROWS));
-                assert!(!frame_row(&rt, 2).contains("x(t)"));
-            }
+            assert!(rt.frame().raster_cells().any(|(_, y, _)| y == 2));
+            assert!(rt.layout_geometry(&path).unwrap().target.height() > 0);
+            assert!(!frame_row(&rt, 2).contains("x(t)"));
         }
     }
 

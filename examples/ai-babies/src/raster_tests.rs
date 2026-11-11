@@ -1,8 +1,5 @@
 use super::*;
-use rsille::{
-    raster::Rgb,
-    render::raster_output::{RasterOutput, RasterPolicy},
-};
+use rsille::{raster::Rgb, render::raster_output::RasterOutput};
 
 fn parse(args: &[&str]) -> Result<Options, Box<dyn Error>> {
     Ok(animation_args(&args.iter().map(|s| s.to_string()).collect::<Vec<_>>())?.0)
@@ -12,7 +9,7 @@ fn parse(args: &[&str]) -> Result<Options, Box<dyn Error>> {
 fn rendering_options_validate_modes_colors_and_physical_metrics() {
     for args in [
         vec![
-            "--raster",
+            "--sixel",
             "--background",
             "#18203a",
             "--character",
@@ -27,24 +24,23 @@ fn rendering_options_validate_modes_colors_and_physical_metrics() {
             "18203A",
             "--character",
             "claude",
-            "--raster",
+            "--sixel",
         ],
     ] {
         let options = parse(&args).unwrap();
-        assert_eq!(options.output, Output::Raster);
+        assert_eq!(options.output, Output::Sixel);
         assert_eq!(options.background, Rgb(24, 32, 58));
         assert_eq!(options.character, scene::Character::Claude);
         assert_eq!(options.height, 32);
     }
     for args in [
-        vec!["--raster", "--sixel"],
-        vec!["--sixel", "--raster"],
+        vec!["--raster"],
+        vec!["--text-only"],
         vec!["--background", "000000"],
-        vec!["--raster", "--background"],
-        vec!["--raster", "--background", "00000g"],
-        vec!["--raster", "--background", "00000"],
+        vec!["--sixel", "--background"],
+        vec!["--sixel", "--background", "00000g"],
+        vec!["--sixel", "--background", "00000"],
         vec!["--cell-pixels", "10x20"],
-        vec!["--raster", "--cell-pixels", "10x20"],
         vec!["--sixel", "--cell-pixels"],
         vec!["--sixel", "--cell-pixels", "0x20"],
         vec!["--sixel", "--cell-pixels", "1025x20"],
@@ -69,7 +65,7 @@ fn rendering_options_validate_modes_colors_and_physical_metrics() {
 
 #[test]
 fn text_output_never_probes_and_native_output_never_silently_falls_back() {
-    for output in [Output::Quadrant, Output::Raster] {
+    for output in [Output::Quadrant] {
         let options = Options {
             output,
             ..Options::default()
@@ -78,7 +74,7 @@ fn text_output_never_probes_and_native_output_never_silently_falls_back() {
             options
                 .native_config_with((80, 24), |_| panic!("text must not probe"))
                 .unwrap(),
-            RasterOutput::text_only()
+            RasterOutput::default()
         );
     }
     let options = parse(&["--sixel", "--cell-pixels", "10x20"]).unwrap();
@@ -89,7 +85,6 @@ fn text_output_never_probes_and_native_output_never_silently_falls_back() {
         return;
     }
     let config = options.native_config((80, 24)).unwrap();
-    assert_eq!(config.policy, RasterPolicy::RequireSixel);
     assert_eq!(config.capabilities.cell_pixels, options.pixels);
     assert!(
         config.capabilities.sixel
@@ -191,21 +186,21 @@ fn raster_playback_preserves_sources_across_holds_switches_and_resize() {
 }
 
 #[test]
-fn raster_exports_reconstruct_opaque_halfblock_fallbacks() {
-    let mut nursery =
-        Nursery::new(parse(&["--raster", "--background", "18203a"]).unwrap()).unwrap();
-    let buffer = export::frame(&mut nursery, (80, 24).into()).unwrap();
-    let rgba = export::rgba(&buffer);
-    assert_eq!(rgba.len(), 160 * 96);
-    assert!(rgba.iter().all(|pixel| pixel[3] == 255));
-    for y in 0..96usize {
-        for x in 0..160usize {
-            let cell = buffer
-                .raster_at(((x / 2) as u16, (y / 4) as u16).into())
-                .unwrap();
-            let rgb = cell.sample(0, (y % 4 / 2) as u32, 1, 2);
-            assert_eq!(rgba[y * 160 + x], [rgb.0, rgb.1, rgb.2, 255]);
-        }
+fn raster_image_exports_are_rejected() {
+    let options = parse(&["--sixel", "--background", "18203a"]).unwrap();
+    for args in [
+        vec!["--snapshot", "unused.ppm"],
+        vec!["--frames", "unused"],
+        vec!["--action", "idle", "unused"],
+    ] {
+        let error = export::command(
+            &args.into_iter().map(str::to_owned).collect::<Vec<_>>(),
+            options,
+        )
+        .unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("Raster image exports are not supported"));
     }
 }
 
@@ -239,7 +234,7 @@ fn native_inline_playback_is_compact_and_reuses_unchanged_frames() {
 
 #[test]
 fn playback_height_is_bounded_for_native_and_character_modes() {
-    for output in [Output::Quadrant, Output::Raster, Output::Sixel] {
+    for output in [Output::Quadrant, Output::Sixel] {
         for height in [24, 32] {
             let options = Options {
                 output,
@@ -251,7 +246,7 @@ fn playback_height_is_bounded_for_native_and_character_modes() {
                 ..Options::default()
             };
             // Geometry is independent of the encoder feature and terminal queries.
-            let mut config = RasterOutput::text_only();
+            let mut config = RasterOutput::default();
             config.capabilities.cell_pixels = options.pixels;
             for grid in [(80, 40), (80, 12), (1, 1)] {
                 let renderer = playback_builder(options, grid, config)

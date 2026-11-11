@@ -1,16 +1,32 @@
 # Opaque raster canvases
 
 `RasterCanvas` is a fixed-resolution RGB drawing resource. It is separate from
-`Canvas` and its character encodings: there is no `Encoding::Sixel`. The same
-source can be presented as text or, under explicit safety conditions, Sixel.
+`Canvas` and its character encodings: there is no `Encoding::Sixel`. Raster terminal output uses Sixel only, under explicit safety conditions.
 Widgets submit content to the renderer; they do not write terminal escapes.
 
-**Current status:** character fallback is the default usable path. Native Sixel
-is an opt-in, capability-gated implementation, not a certified terminal support
+**Current status:** Sixel is an opt-in, capability-gated implementation, not a certified terminal support
 claim. Automatic capability negotiation, real-terminal validation, and controlled
 performance acceptance are **pending**. Historical memory-writer measurements are
 retained in [the performance notes](raster-performance.md); their harness has been
 removed. See [the design and validation plan](raster-design.md).
+
+## Migrating from character fallback
+
+Raster terminal output is now Sixel-only. Remove `RasterPolicy`,
+`RasterOutput.policy`, and `RasterOutput::text_only()`; configure
+`RasterOutput { capabilities: ... }` instead. The optional `sixel` feature remains
+required for encoding, but does not assert terminal support.
+
+Remove `RasterFallback`, `RasterOptions.fallback`, and widget `.fallback(...)`
+calls. There is no replacement character-image backend. `frame_text_only()` was
+removed: use `frame()` and inspect its raster metadata in headless checks. Do not
+export its placeholder character cells as an image. To render on a terminal,
+supply valid capabilities and cell pixels or handle the resulting error.
+
+The demos no longer accept `--text-only` or the AI Babies `--raster` preview.
+AI Babies still defaults to Canvas and supports Canvas image exports; its Sixel
+mode rejects image export commands. `Canvas` and its Braille/HalfBlock/Quadrant
+encodings are unchanged.
 
 ## External pixel producers
 
@@ -54,9 +70,8 @@ are cropped. Start/Center/End alignment applies on each axis to both padding and
 cropping. With Center, an odd extra padded or cropped pixel is at bottom/right.
 Clipping, tiling and occlusion preserve the original full target and offsets;
 visible fragments are never refitted. Native Sixel uses physical cell pixels
-(and still quantizes colors to RGB332). Character fallback uses its existing
-1×2 HalfBlock or 2×4 Braille grid, **not physical metrics**, so Original can crop
-more source pixels in text mode. Use Fit for an overview in either backend.
+(and still quantizes colors to RGB332). There is no Raster character fallback.
+Use Fit for an overview of the source.
 The default remains centered Fit; Stretch is unchanged.
 
 The public `Chunk::raster` API accepts the same resource and options for custom
@@ -87,7 +102,7 @@ non-scrolling positioned output (including the last row), stable colors when
 later tile palettes are sent, and alternate-screen ED 2 graphics erasure.
 These capabilities must be verified on the actual terminal/multiplexer path;
 no terminal is certified here.
-The demo uses `RequireSixel`, so failure is an error,
+Raster output is strict, so failure is an error,
 not a silent character fallback. The feature and current backend cell-metric
 requirements are checked **before entering the managed terminal session**: each dimension must
 be 1..=1024 and the product at most 65,536. Cell height need not be divisible by six.
@@ -137,11 +152,10 @@ higher with transparent prefix pixels, without moving or cropping their visible
 pixels. For 20-pixel cells, the last-row DCS starts two rows earlier with 40
 transparent pixels followed by the original 20 pixels: all ten bands fit exactly.
 The encoder starts at 1:1 (`P1=7`), avoiding an initial 12-pixel segment on Windows
-Terminal. A viewport too short for any safe anchor fails before output under
-`RequireSixel` (or uses character fallback under `Auto`). Transparent prefixes,
+Terminal. A viewport too short for any safe anchor fails before output. Transparent prefixes,
 positioned output and `reliable_erase` still require host support. Accepting these metrics is
 **not real-terminal certification**;
-use `--text-only` if the terminal cannot satisfy that contract.
+do not run native output if the terminal cannot satisfy that contract.
 
 Prefer a 100×32-cell terminal with mouse reporting; smaller sizes and terminal
 resizing are supported. Controls:
@@ -155,14 +169,12 @@ resizing are supported. Controls:
 | `r` | Restore the starting window rectangles |
 | `q` / Esc | Quit |
 
-No flags, or `--help`, shows help without entering the interactive demo. Choose
-`--text-only` explicitly for a character preview; this does not demonstrate native
-Sixel. `--headless` runs finite, terminal-independent mouse-drag and occlusion
+No flags, or `--help`, shows help without entering the interactive demo.
+`--headless` runs finite, terminal-independent mouse-drag and occlusion
 checks and exits:
 
 ```sh
 cargo run --example sixel_windows -- --help
-cargo run --release --example sixel_windows -- --text-only
 
 cargo run --example sixel_windows -- --headless
 cargo run --features sixel --example sixel_windows -- --headless
@@ -191,8 +203,7 @@ cargo run --release --features sixel --manifest-path examples/ai-babies/Cargo.to
 ```
 
 All AI Babies animation modes use inline output, without an alternate screen or
-mouse capture. `--sixel` needs no extra `--inline` argument and selects
-`RequireSixel`, not silent fallback. It asserts Sixel support, stable palettes,
+mouse capture. `--sixel` needs no extra `--inline` argument and rejects unsupported output. It asserts Sixel support, stable palettes,
 non-scrolling positioned Sixel output, reliable row-local EL 2 graphics erasure,
 and graphics following text scrolling during row reservation. Its configuration
 uses `reliable_inline_erase: true` and `reliable_erase: false`. The `no_scroll`
@@ -283,7 +294,7 @@ invalidate the cached source**. Dimensions and background also invalidate it.
 Each cache miss starts with a newly background-filled canvas. A stable `.key()`
 helps preserve state when siblings are reordered.
 
-Resize, scale, alignment, fallback, and unrelated UI updates do not themselves
+Resize, scale, alignment, and unrelated UI updates do not themselves
 rerun the callback. A retained widget's `invalidate()` changes its revision but
 does not schedule a frame; rebuilt views should use application-owned revisions.
 `from_draw` validates dimensions immediately but defers pixel allocation/drawing
@@ -294,7 +305,7 @@ first if allocation errors must be handled before rendering.
 ## Presentation and composition
 
 `RasterOptions` defaults to a black presentation background, `Fit`, centered
-alignment on both axes, and `HalfBlock` fallback.
+alignment on both axes. Raster has no character fallback option.
 
 - `Fit` preserves aspect ratio using the **full target's physical pixel size**,
   rounds fitted dimensions down with a one-pixel minimum, and explicitly paints
@@ -309,13 +320,6 @@ The source background and presentation background are independent. The widget's
 existing shared source. Layout methods such as `.fixed(40, 12)` use terminal cells,
 not source pixels. Surrounding containers own borders and padding.
 
-Text fallback assumes a **1:2 cell aspect ratio**, not measured terminal pixels.
-HalfBlock samples a 1×2 grid and writes an upper-half block with explicit RGB
-foreground/background. Braille samples 2×4 and approximates the eight samples
-with two colors. Both are opaque, including uniform cells and letterboxing.
-If the configured text-width policy makes a fallback glyph wider than one cell,
-Buffer substitutes a styled space to preserve cell geometry.
-
 Clipping and scrolling crop the original scaled target rather than rescaling the
 visible fragment. Each `RasterCell` retains its full `target` size and original
 `x`, `y` cell offsets. Its `sample(pixel_x, pixel_y, cell_width, cell_height)` takes
@@ -324,9 +328,8 @@ where a cell is stored without changing that metadata.
 
 Drawing order resolves ownership per cell. A later opaque text panel covers the
 raster; a later raster submission replaces text. Do not rely on transparent text
-or alpha blending over native raster content. Character-based visual effects
-flatten their affected raster content before applying the effect; strict native
-policy rejects frames marked with unsupported raster composition.
+or alpha blending over native raster content. Character-based visual effects cannot represent raster content;
+real output rejects frames marked with unsupported raster composition.
 
 ## Headless and embedded frames
 
@@ -338,7 +341,6 @@ use rsille::tui::prelude::*;
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let image = RasterCanvas::new(16, 12, Rgb(40, 100, 160))?;
     let mut runtime = App::new(())
-        .raster_output(RasterOutput::text_only())
         .build(|_, ()| {}, move |_| raster_canvas::<()>(image.clone()))
         .size(20, 8);
     runtime.step(&[])?;
@@ -347,31 +349,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // x/y are buffer coordinates; cell.x/cell.y are original target offsets.
         let _ = (x, y, cell.canvas.id(), cell.canvas.version());
     }
-    let text = runtime.frame_text_only();
-    assert!(!text.has_raster());
     Ok(())
 }
 ```
 
 `Runtime::frame()` borrows the retained `Buffer`, including raster ownership and
-stored character fallbacks, **regardless of terminal output policy**. It is blank
-before the first step and immediately after resize, until another step draws.
-`Buffer::raster_at(position)` inspects a particular owner.
-`frame_text_only()` allocates a character-only copy using already-rendered
-fallbacks, preserving colors and text metrics. It neither redraws the source nor
-changes the retained frame. An embedding host must explicitly choose which
-representation it consumes rather than silently dropping graphics metadata.
+source metadata. It is blank before the first step and immediately after resize,
+until another step draws. `Buffer::raster_at(position)` inspects a particular owner.
+Headless stepping does not invoke the terminal renderer: it needs neither Sixel
+capabilities nor terminal pixel discovery. It is not a text-only output backend.
+There is no character snapshot conversion; hosts must consume raster metadata
+rather than silently dropping it. To test Sixel encoding, explicitly supply
+synthetic capabilities and cell pixels to a renderer writing to memory. This does
+not certify a real terminal.
 
 ## Terminal output policy
 
 Configure `App::raster_output(config)`, `render::Builder::raster_output(config)`,
 or change a renderer with `Render::set_raster_output(config)`:
 
-| Policy | Behavior |
-| --- | --- |
-| `RasterPolicy::Auto` (default) | Native only when all safety conditions, including stored valid pixels, are known; otherwise character fallback. |
-| `RasterPolicy::TextOnly` | No cell-pixel queries or Sixel output. Use `RasterOutput::text_only()`. |
-| `RasterPolicy::RequireSixel` | Reject unsupported raster frames before frame output, rather than silently falling back. Text-only frames need not satisfy native conditions. |
+`RasterOutput` contains only host-supplied `capabilities`; its default does not
+assert Sixel support. Any real frame containing raster content must satisfy all
+native safety conditions, or rendering returns an error before frame output.
+There is no `RasterPolicy`, text-only backend, or automatic character fallback.
+Frames containing only text or existing `Canvas` graphics need no Sixel support.
 
 Build with `--features sixel` to include the native encoder. The encoder uses no
 external encoding library; the Unix startup pixel query uses `libc`.
@@ -403,7 +404,6 @@ use rsille::tui::prelude::*;
 // These true values are host assertions, NOT detection results or mode setters.
 fn output_after_host_validation(pixels: CellPixels) -> RasterOutput {
     RasterOutput {
-        policy: RasterPolicy::RequireSixel,
         capabilities: RasterCapabilities {
             sixel: true,
             reliable_erase: true,
@@ -445,8 +445,8 @@ Terminal names and environment variables are not proof of support.
 
 **The renderer never discovers pixels or reads terminal input.** Eligible native
 raster rendering requires `RasterCapabilities.cell_pixels: Some(valid_pixels)`.
-Missing or invalid metrics mean text fallback for `Auto` or an error for
-`RequireSixel`, not a discovery request. Text-only and unused raster paths are
+Missing or invalid metrics cause an error for raster output, not a discovery
+request. Frames without raster content are
 unaffected by missing pixels.
 
 `CellPixels::probe(timeout: std::time::Duration) -> std::io::Result<CellPixels>`
@@ -561,8 +561,7 @@ sampled physical pixels per frame. These are safety budgets, not throughput
 or terminal frame-rate guarantees; the pixel and encoded-payload limits still
 apply independently.
 
-Auto falls back to text for native frame budget/coordinate-limit violations;
-RequireSixel returns an error. Encoder allocation/encoding and writer failures
+Native frame budget/coordinate-limit violations return an error. Encoder allocation/encoding and writer failures
 can still propagate as errors, rather than promising recovery from every failure.
 
 Native output uses **one positioned Sixel tile per visible terminal cell**.

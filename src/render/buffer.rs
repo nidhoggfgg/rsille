@@ -139,7 +139,7 @@ impl Buffer {
     ///
     /// This conservative frame-level marker survives subsequent writes, even
     /// if they cover the affected cells. Strict raster presenters must reject
-    /// such frames rather than silently presenting the character fallback.
+    /// such frames rather than silently discarding the image.
     pub fn has_unsupported_raster_composition(&self) -> bool {
         self.unsupported_raster_composition
     }
@@ -155,11 +155,10 @@ impl Buffer {
         self.dirty = true;
     }
 
-    /// Paints an opaque character fallback and then attaches its raster owner.
+    /// Paints an opaque background placeholder and attaches its raster owner.
     ///
     /// Replaces intersecting wide graphemes in full, without inheriting styles.
-    /// Under a text policy that makes the fallback wide, paints its background
-    /// as a single space instead, preserving the one-cell raster mapping.
+    /// The placeholder is always one space, independent of text-width policy.
     ///
     /// # Errors
     ///
@@ -167,8 +166,11 @@ impl Buffer {
     /// outside `cell.target`. Invalid writes do not modify the buffer.
     pub fn set_raster(&mut self, pos: Position, cell: RasterCell) -> Result<(), DrawErr> {
         self.validate_raster(pos, &cell)?;
-        let fallback = cell.fallback();
-        self.set_raster_with_fallback(pos, cell, fallback)
+        self.write(pos, cell.placeholder(), false)?;
+        let index = self.index(pos).unwrap();
+        self.raster
+            .get_or_insert_with(|| vec![None; self.content.len()])[index] = Some(cell);
+        Ok(())
     }
 
     fn validate_raster(&self, pos: Position, cell: &RasterCell) -> Result<(), DrawErr> {
@@ -178,23 +180,6 @@ impl Buffer {
         if cell.x >= cell.target.width || cell.y >= cell.target.height {
             return Err(DrawErr::out_of_bounds((cell.x, cell.y).into(), cell.target));
         }
-        Ok(())
-    }
-
-    pub(crate) fn set_raster_with_fallback(
-        &mut self,
-        pos: Position,
-        cell: RasterCell,
-        mut fallback: Stylized,
-    ) -> Result<(), DrawErr> {
-        self.validate_raster(pos, &cell)?;
-        if fallback.width_with(self.text_metrics, pos.x as usize) != 1 {
-            fallback = Stylized::new(' ', fallback.style);
-        }
-        self.write(pos, fallback, false)?;
-        let index = self.index(pos).unwrap();
-        self.raster
-            .get_or_insert_with(|| vec![None; self.content.len()])[index] = Some(cell);
         Ok(())
     }
 
@@ -936,11 +921,11 @@ mod tests {
         assert_eq!(buffer.get((1, 0).into()).unwrap().as_char(), Some(' '));
         for merge in [false, true] {
             buffer.set_raster((3, 0).into(), cell.clone()).unwrap();
-            let fallback = buffer.get((3, 0).into()).unwrap().clone();
+            let placeholder = buffer.get((3, 0).into()).unwrap().clone();
             if merge {
-                buffer.overwrite((3, 0).into(), fallback).unwrap();
+                buffer.overwrite((3, 0).into(), placeholder).unwrap();
             } else {
-                buffer.set((3, 0).into(), fallback).unwrap();
+                buffer.set((3, 0).into(), placeholder).unwrap();
             }
             assert!(buffer.raster_at((3, 0).into()).is_none());
         }
@@ -990,7 +975,7 @@ mod tests {
         let first = raster_cell();
         let mut second = first.clone();
         second.x = 1;
-        assert_eq!(first.fallback(), second.fallback());
+        assert_eq!(first.placeholder(), second.placeholder());
         buffer.set_raster((0, 0).into(), first).unwrap();
         buffer.clear();
         buffer.set_raster((0, 0).into(), second).unwrap();
@@ -1007,8 +992,8 @@ mod tests {
             LineState::Changed { .. }
         ));
         buffer.clear();
-        let fallback = buffer.previous().unwrap()[0].content.clone();
-        buffer.set((0, 0).into(), fallback).unwrap();
+        let placeholder = buffer.previous().unwrap()[0].content.clone();
+        buffer.set((0, 0).into(), placeholder).unwrap();
         assert_eq!(buffer.diff().unwrap().count(), 1);
     }
 
@@ -1034,7 +1019,7 @@ mod tests {
     }
 
     #[test]
-    fn raster_invalid_writes_are_atomic_and_fallback_is_opaque() {
+    fn raster_invalid_writes_are_atomic_and_placeholder_is_opaque() {
         let mut buffer = Buffer::new((2, 1).into());
         buffer.set((0, 0).into(), Stylized::plain('界')).unwrap();
         let before = buffer.content().to_vec();
@@ -1046,7 +1031,7 @@ mod tests {
         assert!(buffer.raster.is_none());
         let cell = raster_cell();
         buffer.set_raster((0, 0).into(), cell.clone()).unwrap();
-        assert_eq!(buffer.get((0, 0).into()), Some(&cell.fallback()));
+        assert_eq!(buffer.get((0, 0).into()), Some(&cell.placeholder()));
         assert!(buffer
             .get((0, 0).into())
             .unwrap()

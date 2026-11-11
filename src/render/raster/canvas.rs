@@ -419,8 +419,7 @@ pub enum RasterScale {
     ///
     /// Alignment places smaller images over the presentation background and
     /// selects the crop of larger images. Center leaves an odd extra padding or
-    /// cropped pixel at the bottom/right. Native output uses physical pixels;
-    /// character fallback uses its 1×2 or 2×4 sample grid, not physical metrics.
+    /// cropped pixel at the bottom/right. Sixel output uses physical pixels.
     Original,
 }
 
@@ -446,17 +445,7 @@ impl RasterAlign {
     }
 }
 
-/// Character-only approximation, independent of the source raster resolution.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub enum RasterFallback {
-    /// One upper and one lower RGB sample per cell.
-    #[default]
-    HalfBlock,
-    /// Eight samples per cell, approximated by two RGB colors and a dot mask.
-    Braille,
-}
-
-/// Presentation settings. Defaults: black letterbox, centered fit, half blocks.
+/// Presentation settings. Defaults: black letterbox and centered fit.
 ///
 /// `background` is independent of the source canvas background. Both are opaque.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -469,8 +458,6 @@ pub struct RasterOptions {
     pub align_x: RasterAlign,
     /// Vertical placement within the full target.
     pub align_y: RasterAlign,
-    /// Character representation when native raster output is unavailable.
-    pub fallback: RasterFallback,
 }
 
 /// A source snapshot and the original offset of one cell in its full target.
@@ -489,7 +476,7 @@ pub struct RasterCell {
     pub x: u16,
     /// Original row within `target`.
     pub y: u16,
-    /// Scaling, placement, and fallback settings.
+    /// Scaling, placement, and background settings.
     pub options: RasterOptions,
 }
 
@@ -561,28 +548,12 @@ impl RasterCell {
         self.canvas.pixels[(source_y * source_width + source_x) as usize]
     }
 
-    /// Produces one opaque styled terminal cell, without copying the source.
+    /// Returns an opaque background placeholder, never an image preview.
     ///
-    /// HalfBlock samples a 1×2 grid, Braille a 2×4 grid. Both assume a terminal
-    /// cell aspect ratio of 1:2; these grids are NOT measured terminal pixels.
-    /// Braille uses a deterministic two-color approximation: choose the farthest
-    /// RGB sample pair, assign each sample to its nearest seed (ties to the first),
-    /// then average each group. It cannot retain eight independent sample colors.
-    /// Both foreground/background and empty attributes are explicit, including
-    /// uniform cells and letterboxing. Glyph widths follow the renderer's normal
-    /// Unicode width policy.
-    pub fn fallback(&self) -> Stylized {
-        match self.options.fallback {
-            RasterFallback::HalfBlock => {
-                styled('▀', self.sample(0, 0, 1, 2), self.sample(0, 1, 1, 2))
-            }
-            RasterFallback::Braille => {
-                let samples = std::array::from_fn(|index| {
-                    self.sample((index % 2) as u32, (index / 2) as u32, 2, 4)
-                });
-                braille(samples)
-            }
-        }
+    /// Raster metadata remains authoritative; presenting the image requires Sixel.
+    /// Explicit colors and empty attributes prevent inheriting underlying text styles.
+    pub fn placeholder(&self) -> Stylized {
+        styled(' ', self.options.background, self.options.background)
     }
 }
 
@@ -598,48 +569,6 @@ fn styled(symbol: char, foreground: Rgb, background: Rgb) -> Stylized {
             Attributes::default(),
         ),
     )
-}
-
-fn distance(a: Rgb, b: Rgb) -> u32 {
-    let r = i32::from(a.0) - i32::from(b.0);
-    let g = i32::from(a.1) - i32::from(b.1);
-    let b = i32::from(a.2) - i32::from(b.2);
-    (r * r + g * g + b * b) as u32
-}
-
-fn braille(samples: [Rgb; 8]) -> Stylized {
-    let (mut first, mut second, mut farthest) = (0, 0, 0);
-    for i in 0..8 {
-        for j in i + 1..8 {
-            let distance = distance(samples[i], samples[j]);
-            if distance > farthest {
-                (first, second, farthest) = (i, j, distance);
-            }
-        }
-    }
-    if farthest == 0 {
-        return styled(' ', samples[0], samples[0]);
-    }
-    let mut sums = [[0u32; 3]; 2];
-    let mut counts = [0u32; 2];
-    let mut mask = 0u32;
-    let bits = [1, 8, 2, 16, 4, 32, 64, 128];
-    for (index, &sample) in samples.iter().enumerate() {
-        let group =
-            usize::from(distance(sample, samples[second]) < distance(sample, samples[first]));
-        counts[group] += 1;
-        sums[group][0] += u32::from(sample.0);
-        sums[group][1] += u32::from(sample.1);
-        sums[group][2] += u32::from(sample.2);
-        if group == 1 {
-            mask |= bits[index];
-        }
-    }
-    let mean = |group: usize| {
-        let average = |channel| ((sums[group][channel] + counts[group] / 2) / counts[group]) as u8;
-        Rgb(average(0), average(1), average(2))
-    };
-    styled(char::from_u32(0x2800 + mask).unwrap(), mean(1), mean(0))
 }
 
 #[cfg(test)]
@@ -930,13 +859,12 @@ mod tests {
     }
 
     #[test]
-    fn defaults_are_opaque_centered_fit_halfblock() {
+    fn defaults_are_opaque_centered_fit() {
         let options = RasterOptions::default();
         assert_eq!(options.background, BLACK);
         assert_eq!(options.scale, RasterScale::Fit);
         assert_eq!(options.align_x, RasterAlign::Center);
         assert_eq!(options.align_y, RasterAlign::Center);
-        assert_eq!(options.fallback, RasterFallback::HalfBlock);
         assert_eq!(Rgb::default(), BLACK);
     }
 
@@ -1077,59 +1005,15 @@ mod tests {
     }
 
     #[test]
-    fn halfblock_sets_both_colors_and_attributes() {
-        let mut source = canvas(1, 2);
-        source.set_pixel(0, 0, RED);
-        source.set_pixel(0, 1, BLUE);
-        let sample = cell(source, 1, 1);
-        assert_eq!(sample.fallback(), styled('▀', RED, BLUE));
-        assert_eq!(sample.fallback().width(), 1);
-        let mut empty = sample.clone();
-        empty.target = Size::default();
-        empty.options.background = WHITE;
-        assert_eq!(empty.fallback(), styled('▀', WHITE, WHITE));
-    }
-
-    #[test]
-    fn braille_dot_mapping_and_opaque_colors() {
-        let bits = [1, 8, 2, 16, 4, 32, 64, 128];
-        for (index, &bit) in bits.iter().enumerate() {
-            let mut source = canvas(2, 4);
-            source.set_pixel((index % 2) as i32, (index / 2) as i32, WHITE);
-            let mut sample = cell(source, 1, 1);
-            sample.options.fallback = RasterFallback::Braille;
-            let actual = sample.fallback();
-            // The first sample seeds the background, so the first-dot case
-            // uses an equivalent inverted mask and inverted colors.
-            let (mask, fg, bg) = if index == 0 {
-                (255 ^ bit, BLACK, WHITE)
-            } else {
-                (bit, WHITE, BLACK)
-            };
-            assert_eq!(
-                actual,
-                styled(char::from_u32(0x2800 + mask).unwrap(), fg, bg)
-            );
-            assert_eq!(actual.width(), 1);
-        }
-    }
-
-    #[test]
-    fn braille_uniform_and_same_brightness_colors_remain_opaque() {
-        assert_eq!(braille([RED; 8]), styled(' ', RED, RED));
-        let result = braille([RED, BLUE, RED, BLUE, RED, BLUE, RED, BLUE]);
-        assert_eq!(result, styled('\u{28b8}', BLUE, RED));
-        let result = braille([
-            BLACK,
-            WHITE,
-            Rgb(10, 0, 0),
-            Rgb(245, 255, 255),
-            BLACK,
-            WHITE,
-            BLACK,
-            WHITE,
-        ]);
-        assert_eq!(result, styled('\u{28b8}', Rgb(253, 255, 255), Rgb(3, 0, 0)));
+    fn placeholder_is_background_only_independent_of_source_and_geometry() {
+        let mut sample = cell(RasterCanvas::new(2, 4, RED).unwrap(), 1, 1);
+        sample.options.background = BLUE;
+        assert_eq!(sample.placeholder(), styled(' ', BLUE, BLUE));
+        assert_eq!(sample.placeholder().width(), 1);
+        sample.canvas.fill_rect(0, 0, 2, 4, WHITE);
+        sample.target = Size::default();
+        sample.options.scale = RasterScale::Original;
+        assert_eq!(sample.placeholder(), styled(' ', BLUE, BLUE));
     }
 
     #[test]
@@ -1176,7 +1060,6 @@ mod tests {
                         scale,
                         align_x,
                         align_y,
-                        fallback: RasterFallback::HalfBlock,
                     };
                     let mut fragment = whole.clone();
                     fragment.target = Size::from((3, 2));
@@ -1197,9 +1080,7 @@ mod tests {
                                     );
                                 }
                             }
-                            fragment.fallback();
-                            fragment.options.fallback = RasterFallback::Braille;
-                            fragment.fallback();
+                            assert_eq!(fragment.placeholder(), styled(' ', WHITE, WHITE));
                         }
                     }
                     assert_eq!(fragment.canvas.pixels().as_ptr(), pointer);

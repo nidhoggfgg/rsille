@@ -324,7 +324,7 @@ fn write_plane(output: &mut TileBytes, plane: &[u8]) -> io::Result<()> {
 mod tests {
     use super::*;
     use crate::render::area::Size;
-    use crate::render::raster::{RasterAlign, RasterCanvas, RasterFallback, RasterScale};
+    use crate::render::raster::{RasterAlign, RasterCanvas, RasterScale};
 
     fn cell(width: u32, height: u32) -> RasterCell {
         RasterCell {
@@ -651,7 +651,7 @@ mod tests {
         original.target = Size::from((3, 3));
         let mut cache = SixelCache::default();
         cache.encode(&original, 8, 12).unwrap();
-        let mut variants = vec![original.clone(); 9];
+        let mut variants = vec![original.clone(); 8];
         variants[0].x = 1;
         variants[1].y = 1;
         variants[2].target.width = 4;
@@ -660,13 +660,12 @@ mod tests {
         variants[5].options.scale = RasterScale::Fit;
         variants[6].options.align_x = RasterAlign::End;
         variants[7].options.align_y = RasterAlign::Start;
-        variants[8].options.fallback = RasterFallback::Braille;
         for variant in variants {
             cache.encode(&variant, 8, 12).unwrap();
         }
         cache.encode(&original, 9, 12).unwrap();
         cache.encode(&original, 8, 13).unwrap();
-        assert_eq!((cache.encodes(), cache.hits(), cache.len()), (12, 0, 12));
+        assert_eq!((cache.encodes(), cache.hits(), cache.len()), (11, 0, 11));
     }
 
     #[test]

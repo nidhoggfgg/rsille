@@ -188,12 +188,7 @@ pub(crate) fn blit_region(
         if let Some(raster) = source.raster_at((cell.source_x, cell.source_y).into()) {
             // Write first: erasing the previous grapheme must not erase the
             // incoming metadata, and copying must not resample cropped cells.
-            let _ = target.set_raster_cell_with_fallback(
-                cell.dest_x,
-                cell.dest_y,
-                raster.clone(),
-                cell.content,
-            );
+            let _ = target.set_raster_cell(cell.dest_x, cell.dest_y, raster.clone());
         } else {
             let _ = target.set_forced(cell.dest_x, cell.dest_y, cell.content);
         }
@@ -203,7 +198,7 @@ pub(crate) fn blit_region(
     }
 }
 
-/// Visits stored character fallbacks, discarding native raster metadata.
+/// Visits stored character placeholders, discarding native raster metadata.
 ///
 /// Effect callers must propagate `unsupported_raster_composition` from the
 /// returned stats to their destination via `Chunk::mark_unsupported_raster_composition`.
@@ -532,7 +527,7 @@ mod tests {
     }
 
     #[test]
-    fn dirty_only_blits_compare_raster_ownership_even_with_identical_fallbacks() {
+    fn dirty_only_blits_compare_raster_ownership_even_with_identical_placeholders() {
         let mut source = raster_source((2, 1).into());
         let mut changed = source.raster_at((0, 0).into()).unwrap().clone();
         let unchanged = source.raster_at((1, 0).into()).unwrap().clone();
@@ -559,8 +554,8 @@ mod tests {
         assert_eq!(target.raster_at((0, 0).into()), Some(&changed));
         assert!(!target.has_unsupported_raster_composition());
         source.clear();
-        let fallback = source.previous().unwrap()[0].content.clone();
-        source.set((0, 0).into(), fallback).unwrap();
+        let placeholder = source.previous().unwrap()[0].content.clone();
+        source.set((0, 0).into(), placeholder).unwrap();
         blit_region(
             &mut Chunk::new(&mut target, Area::new((0, 0).into(), (2, 1).into())).unwrap(),
             &source,
@@ -571,7 +566,7 @@ mod tests {
     }
 
     #[test]
-    fn effects_use_stored_fallback_and_report_unsupported_composition() {
+    fn effects_use_stored_placeholder_and_report_unsupported_composition() {
         let source = raster_source((2, 1).into());
         let mut target = Buffer::new((2, 1).into());
         let mut chunk = Chunk::new(&mut target, Area::new((0, 0).into(), (2, 1).into())).unwrap();
@@ -579,8 +574,9 @@ mod tests {
             &source,
             BlitRegion::new(0, 0, 0, 0, 2, 1),
             Some((2, 1).into()),
-            BlitOptions::default(),
+            BlitOptions::default().skip_blank(),
             |cell| {
+                assert_eq!(cell.content.as_char(), Some(' '));
                 assert_eq!(
                     Some(&cell.content),
                     source.get((cell.source_x, cell.source_y).into())
@@ -590,6 +586,8 @@ mod tests {
                     .unwrap();
             },
         );
+        assert_eq!(stats.visited, 2);
+        assert_eq!(stats.skipped_blank, 0);
         assert!(stats.unsupported_raster_composition);
         chunk.mark_unsupported_raster_composition();
         assert!(!target.has_raster());
@@ -880,7 +878,7 @@ mod tests {
                     )
                 );
                 assert_eq!(cell.canvas, canvas);
-                assert_eq!(buffer.get((x, y).into()), Some(&cell.fallback()));
+                assert_eq!(buffer.get((x, y).into()), Some(&cell.placeholder()));
             }
             assert!(!buffer.has_unsupported_raster_composition());
         }

@@ -2,7 +2,7 @@ use std::error::Error;
 
 use rsille::{
     raster::Rgb,
-    render::raster_output::{CellPixels, RasterCapabilities, RasterOutput, RasterPolicy},
+    render::raster_output::{CellPixels, RasterCapabilities, RasterOutput},
 };
 
 use crate::{scene::Character, INLINE_HEIGHT};
@@ -11,7 +11,6 @@ use crate::{scene::Character, INLINE_HEIGHT};
 pub enum Output {
     #[default]
     Quadrant,
-    Raster,
     Sixel,
 }
 
@@ -59,16 +58,11 @@ pub fn animation_args(mut args: &[String]) -> Result<(Options, &[String]), Box<d
                     return Err("--height must be 24 or 32 rows".into());
                 }
             }
-            "--raster" | "--sixel" => {
-                let output = if arg == "--raster" {
-                    Output::Raster
-                } else {
-                    Output::Sixel
-                };
-                if options.output != Output::Quadrant && options.output != output {
-                    return Err("Choose either --raster or --sixel".into());
-                }
-                options.output = output;
+            "--raster" | "--text-only" => {
+                return Err("Raster character previews were removed; use --sixel".into())
+            }
+            "--sixel" => {
+                options.output = Output::Sixel;
                 consumed = 1;
             }
             "--background" => {
@@ -98,7 +92,7 @@ pub fn animation_args(mut args: &[String]) -> Result<(Options, &[String]), Box<d
         args = &args[consumed..];
     }
     if background_set && options.output == Output::Quadrant {
-        return Err("--background requires --raster or --sixel".into());
+        return Err("--background requires --sixel".into());
     }
     if options.pixels.is_some() && options.output != Output::Sixel {
         return Err("--cell-pixels requires --sixel".into());
@@ -120,13 +114,10 @@ impl Options {
         resolve: impl FnOnce(Option<CellPixels>) -> std::io::Result<CellPixels>,
     ) -> Result<RasterOutput, Box<dyn Error>> {
         if self.output != Output::Sixel {
-            return Ok(RasterOutput::text_only());
+            return Ok(RasterOutput::default());
         }
         if !cfg!(feature = "sixel") {
-            return Err(
-                "--sixel requires cargo --features sixel; use --raster for a character preview"
-                    .into(),
-            );
+            return Err("--sixel requires cargo --features sixel".into());
         }
         let pixels = resolve(self.pixels)?;
         if self.pixels.is_some() && (pixels.width, pixels.height) == grid && !self.force_cell_pixels
@@ -134,7 +125,6 @@ impl Options {
             return Err("--cell-pixels matches terminal columns x rows; supply measured physical pixels per character cell, or confirm with --force-cell-pixels".into());
         }
         Ok(RasterOutput {
-            policy: RasterPolicy::RequireSixel,
             capabilities: RasterCapabilities {
                 // --sixel asserts local EL 2 graphics erasure and images following
                 // text scrolling on the normal screen; this is not detection.

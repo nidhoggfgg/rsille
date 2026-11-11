@@ -1,5 +1,11 @@
 # Historical raster performance smoke measurements
 
+> Historical results from the former multi-backend Raster implementation.
+> Raster now supports Sixel only: `RasterPolicy`, `TextOnly`, and character
+> fallback were removed. The measurements and old fixture names below are kept
+> unchanged for provenance; they are not current API examples or performance
+> measurements of the Sixel-only implementation.
+
 **The old `examples/raster_bench.rs` harness was removed at the user's request.**
 The data below is preserved as historical evidence, not a currently runnable
 benchmark. Its workload and timing descriptions refer to the removed harness;

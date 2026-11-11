@@ -1,8 +1,6 @@
 use super::*;
 use crate::render::raster::{RasterCanvas, RasterCell, RasterOptions, RasterScale, Rgb};
-use crate::render::raster_output::{
-    CellPixels, RasterCapabilities, RasterOutput, RasterPolicy, RasterStats,
-};
+use crate::render::raster_output::{CellPixels, RasterCapabilities, RasterOutput, RasterStats};
 use crate::render::Update;
 use std::io::{self, Write};
 
@@ -80,9 +78,8 @@ impl Update for Scene {
     }
 }
 
-fn verified(policy: RasterPolicy) -> RasterOutput {
+fn verified() -> RasterOutput {
     RasterOutput {
-        policy,
         capabilities: RasterCapabilities {
             sixel: true,
             reliable_erase: true,
@@ -105,8 +102,8 @@ fn renderer<W: Write>(config: RasterOutput, writer: W) -> Render<W, Scene> {
         .build_render(Scene::default(), writer)
 }
 
-fn inline_verified(policy: RasterPolicy) -> RasterOutput {
-    let mut config = verified(policy);
+fn inline_verified() -> RasterOutput {
+    let mut config = verified();
     config.capabilities.reliable_inline_erase = true;
     config.capabilities.reliable_erase = false;
     config
@@ -131,37 +128,27 @@ fn frame(render: &mut Render<Vec<u8>, Scene>) -> Vec<u8> {
 }
 
 #[test]
-fn unknown_auto_and_explicit_text_only_emit_fallback_without_dcs() {
-    let mut missing_pixels = verified(RasterPolicy::Auto);
-    missing_pixels.capabilities.cell_pixels = None;
-    for config in [
-        RasterOutput::default(),
-        verified(RasterPolicy::TextOnly),
-        missing_pixels,
-    ] {
-        for inline in [false, true] {
-            let mut render = renderer(config, Vec::new());
+fn frames_without_raster_work_with_unknown_capabilities() {
+    for inline in [false, true] {
+        for append_newline in [false, true] {
+            let mut render = renderer(RasterOutput::default(), Vec::new());
             render.inline_mode = inline;
+            render.append_newline = append_newline;
+            render.thing.visible = false;
             let output = frame(&mut render);
-            assert!(!contains(&output, b"\x1bP"));
-            assert!(!contains(&output, b"\x1b[16t"));
-            assert!(!contains(&output, b"\x1b[?2026"));
-            assert!(contains(&output, "▀".as_bytes()));
-            assert_eq!(render.raster_stats(), RasterStats::default());
+            assert!(!contains(&output, b"P"));
+            assert!(!contains(&output, b"[16t"));
             assert!(render.buffer.previous().is_some());
-            assert!(render.buffer.previous_raster_at((0, 0).into()).is_some());
+            assert_eq!(render.raster_stats(), RasterStats::default());
         }
     }
 }
 
 #[test]
 fn strict_unsupported_frames_write_nothing_and_do_not_commit() {
-    let mut unsupported = vec![RasterOutput {
-        policy: RasterPolicy::RequireSixel,
-        ..RasterOutput::default()
-    }];
+    let mut unsupported = vec![RasterOutput::default()];
     for missing in 0..6 {
-        let mut config = verified(RasterPolicy::RequireSixel);
+        let mut config = verified();
         match missing {
             0 => config.capabilities.sixel = false,
             1 => config.capabilities.reliable_erase = false,
@@ -202,52 +189,45 @@ fn strict_unsupported_frames_write_nothing_and_do_not_commit() {
 #[test]
 fn absolute_requires_alternate_screen_and_inline_requires_its_own_erase_assertion() {
     for inline in [false, true] {
-        for policy in [RasterPolicy::Auto, RasterPolicy::RequireSixel] {
-            let mut render = renderer(verified(policy), Vec::new());
-            render.inline_mode = inline;
-            render.set_alternate_screen(inline);
-            if policy == RasterPolicy::RequireSixel {
-                assert_eq!(
-                    render.render().unwrap_err().kind(),
-                    io::ErrorKind::Unsupported
-                );
-                assert!(render.out.is_empty());
-                assert!(render.buffer.previous().is_none());
-            } else {
-                let output = frame(&mut render);
-                assert!(!contains(&output, b"\x1bP"));
-                assert!(contains(&output, "▀".as_bytes()));
-            }
-            assert_eq!(render.raster_stats(), RasterStats::default());
-        }
+        let mut render = renderer(verified(), Vec::new());
+        render.inline_mode = inline;
+        render.set_alternate_screen(inline);
+
+        assert_eq!(
+            render.render().unwrap_err().kind(),
+            io::ErrorKind::Unsupported
+        );
+        assert!(render.out.is_empty());
+        assert!(render.buffer.previous().is_none());
+
+        assert_eq!(render.raster_stats(), RasterStats::default());
     }
 }
 
-fn newline_renderer(policy: RasterPolicy) -> Render<Vec<u8>, Scene> {
+fn newline_renderer() -> Render<Vec<u8>, Scene> {
     Builder::new()
         .size((4, 2))
         .clear(true)
         .enable_alt_screen()
         .append_newline(true)
-        .raster_output(verified(policy))
+        .raster_output(verified())
         .build_render(Scene::default(), Vec::new())
 }
 
 #[test]
-fn append_newline_auto_uses_character_fallback_without_dcs() {
-    let mut render = newline_renderer(RasterPolicy::Auto);
-    let output = frame(&mut render);
-    assert!(!contains(&output, b"\x1bP"));
-    assert!(contains(&output, "▀".as_bytes()));
-    assert!(output.ends_with(b"\n"));
-    assert!(render.buffer.previous().is_some());
-    assert!(render.buffer.previous_raster_at((0, 0).into()).is_some());
-    assert_eq!(render.raster_stats(), RasterStats::default());
+fn unknown_capabilities_reject_inline_raster_without_output() {
+    let mut render = inline_renderer(RasterOutput::default(), Vec::new());
+    assert_eq!(
+        render.render().unwrap_err().kind(),
+        io::ErrorKind::Unsupported
+    );
+    assert!(render.out.is_empty());
+    assert!(render.buffer.previous().is_none());
 }
 
 #[test]
 fn append_newline_strict_rejects_before_any_output_or_commit() {
-    let mut render = newline_renderer(RasterPolicy::RequireSixel);
+    let mut render = newline_renderer();
     assert_eq!(
         render.render().unwrap_err().kind(),
         io::ErrorKind::Unsupported
@@ -263,14 +243,8 @@ fn append_newline_strict_rejects_before_any_output_or_commit() {
 
 #[cfg(not(feature = "sixel"))]
 #[test]
-fn disabled_feature_falls_back_in_auto_and_rejects_strict_even_when_verified() {
-    let mut render = renderer(verified(RasterPolicy::Auto), Vec::new());
-    let output = frame(&mut render);
-    assert!(!contains(&output, b"\x1bP"));
-    assert!(contains(&output, "▀".as_bytes()));
-    assert_eq!(render.raster_stats(), RasterStats::default());
-
-    let mut render = renderer(verified(RasterPolicy::RequireSixel), Vec::new());
+fn disabled_feature_rejects_even_when_verified() {
+    let mut render = renderer(verified(), Vec::new());
     assert_eq!(
         render.render().unwrap_err().kind(),
         io::ErrorKind::Unsupported
@@ -281,59 +255,44 @@ fn disabled_feature_falls_back_in_auto_and_rejects_strict_even_when_verified() {
 }
 
 #[test]
-fn inline_missing_erase_or_appended_newline_falls_back_or_rejects() {
+fn inline_missing_erase_or_appended_newline_rejects() {
     for append_newline in [false, true] {
-        for policy in [RasterPolicy::Auto, RasterPolicy::RequireSixel] {
-            let mut config = inline_verified(policy);
-            if !append_newline {
-                // Even verified ED 2 cannot substitute for inline EL 2.
-                config.capabilities.reliable_erase = true;
-                config.capabilities.reliable_inline_erase = false;
-            }
-            let mut render = inline_renderer(config, Vec::new());
-            render.append_newline = append_newline;
-            if policy == RasterPolicy::RequireSixel {
-                assert_eq!(
-                    render.render().unwrap_err().kind(),
-                    io::ErrorKind::Unsupported
-                );
-                assert!(render.out.is_empty());
-                assert!(render.buffer.previous().is_none());
-                assert!(!render.buffer.has_raster());
-            } else {
-                let output = frame(&mut render);
-                assert!(!contains(&output, b"\x1bP"));
-                assert!(contains(&output, "▀".as_bytes()));
-                assert_eq!(output.ends_with(b"\n"), append_newline);
-                assert!(render.buffer.previous().is_some());
-            }
-            assert_eq!(render.raster_stats(), RasterStats::default());
-            assert_eq!(render.inline_raster_checkpoint, None);
+        let mut config = inline_verified();
+        if !append_newline {
+            // Even verified ED 2 cannot substitute for inline EL 2.
+            config.capabilities.reliable_erase = true;
+            config.capabilities.reliable_inline_erase = false;
         }
+        let mut render = inline_renderer(config, Vec::new());
+        render.append_newline = append_newline;
+
+        assert_eq!(
+            render.render().unwrap_err().kind(),
+            io::ErrorKind::Unsupported
+        );
+        assert!(render.out.is_empty());
+        assert!(render.buffer.previous().is_none());
+        assert!(!render.buffer.has_raster());
+
+        assert_eq!(render.raster_stats(), RasterStats::default());
+        assert_eq!(render.inline_raster_checkpoint, None);
     }
 }
 
 #[cfg(not(feature = "sixel"))]
 #[test]
-fn inline_disabled_feature_falls_back_or_rejects_even_with_inline_erase() {
-    for policy in [RasterPolicy::Auto, RasterPolicy::RequireSixel] {
-        let mut render = inline_renderer(inline_verified(policy), Vec::new());
-        if policy == RasterPolicy::Auto {
-            let output = frame(&mut render);
-            assert!(!contains(&output, b"\x1bP"));
-            assert!(contains(&output, "▀".as_bytes()));
-            assert!(render.buffer.previous().is_some());
-        } else {
-            assert_eq!(
-                render.render().unwrap_err().kind(),
-                io::ErrorKind::Unsupported
-            );
-            assert!(render.out.is_empty());
-            assert!(render.buffer.previous().is_none());
-            assert!(!render.buffer.has_raster());
-        }
-        assert_eq!(render.raster_stats(), RasterStats::default());
-    }
+fn inline_disabled_feature_rejects_even_with_inline_erase() {
+    let mut render = inline_renderer(inline_verified(), Vec::new());
+
+    assert_eq!(
+        render.render().unwrap_err().kind(),
+        io::ErrorKind::Unsupported
+    );
+    assert!(render.out.is_empty());
+    assert!(render.buffer.previous().is_none());
+    assert!(!render.buffer.has_raster());
+
+    assert_eq!(render.raster_stats(), RasterStats::default());
 }
 
 #[cfg(feature = "sixel")]
@@ -625,7 +584,7 @@ mod native {
 
     #[test]
     fn native_frames_and_cleanup_are_one_synchronized_update() {
-        let mut render = renderer(verified(RasterPolicy::RequireSixel), Vec::new());
+        let mut render = renderer(verified(), Vec::new());
         assert_synchronized(&frame(&mut render));
         for origin in [(1, 0), (1, 1), (0, 1), (0, 0)] {
             render.thing.origin = origin.into();
@@ -644,52 +603,50 @@ mod native {
 
         render.thing.visible = true;
         assert_synchronized(&frame(&mut render));
-        render.set_raster_output(RasterOutput::text_only());
-        let fallback = frame(&mut render);
-        assert_synchronized(&fallback);
-        assert_clear_before_paint(&events(&fallback));
-        assert!(contains(&fallback, "▀".as_bytes()));
+        render.thing.visible = false;
+        let cleanup = frame(&mut render);
+        assert_synchronized(&cleanup);
+        assert_clear_before_paint(&events(&cleanup));
+        assert!(!contains(&cleanup, b"P"));
         assert!(!contains(&frame(&mut render), b"\x1b[?2026"));
     }
 
     #[test]
     fn verified_builder_allows_native_and_identical_frames_do_no_raster_work() {
-        for policy in [RasterPolicy::Auto, RasterPolicy::RequireSixel] {
-            let mut render = renderer(verified(policy), Vec::new());
-            let first = events(&frame(&mut render));
-            let encoded = tiles(&first);
-            assert_eq!(
-                encoded
-                    .iter()
-                    .map(|(position, _)| *position)
-                    .collect::<Vec<_>>(),
-                [(0, 0).into(), (1, 0).into()]
-            );
-            assert!(!first
+        let mut render = renderer(verified(), Vec::new());
+        let first = events(&frame(&mut render));
+        let encoded = tiles(&first);
+        assert_eq!(
+            encoded
                 .iter()
-                .any(|event| matches!(event, Event::Print(_, '▀'))));
-            let stats = render.raster_stats();
-            assert_eq!(
-                (
-                    stats.encodes,
-                    stats.cache_hits,
-                    stats.cache_entries,
-                    stats.tiles_sent
-                ),
-                (2, 0, 2, 2)
-            );
-            assert_eq!(
-                stats.bytes_sent,
-                encoded
-                    .iter()
-                    .map(|(_, bytes)| bytes.len() as u64)
-                    .sum::<u64>()
-            );
-            assert_eq!(stats.cache_bytes as u64, stats.bytes_sent);
-            for _ in 0..3 {
-                assert!(events(&frame(&mut render)).is_empty());
-                assert_eq!(render.raster_stats(), stats);
-            }
+                .map(|(position, _)| *position)
+                .collect::<Vec<_>>(),
+            [(0, 0).into(), (1, 0).into()]
+        );
+        assert!(!first
+            .iter()
+            .any(|event| matches!(event, Event::Print(_, '▀'))));
+        let stats = render.raster_stats();
+        assert_eq!(
+            (
+                stats.encodes,
+                stats.cache_hits,
+                stats.cache_entries,
+                stats.tiles_sent
+            ),
+            (2, 0, 2, 2)
+        );
+        assert_eq!(
+            stats.bytes_sent,
+            encoded
+                .iter()
+                .map(|(_, bytes)| bytes.len() as u64)
+                .sum::<u64>()
+        );
+        assert_eq!(stats.cache_bytes as u64, stats.bytes_sent);
+        for _ in 0..3 {
+            assert!(events(&frame(&mut render)).is_empty());
+            assert_eq!(render.raster_stats(), stats);
         }
     }
 
@@ -703,7 +660,7 @@ mod native {
             .size((42, 31))
             .clear(false)
             .enable_alt_screen()
-            .raster_output(verified(RasterPolicy::RequireSixel))
+            .raster_output(verified())
             .build_render(scene, Vec::new());
         let initial = events(&frame(&mut render));
         let initial_tiles = tiles(&initial);
@@ -778,7 +735,7 @@ mod native {
 
     #[test]
     fn unrelated_text_diff_does_not_clear_resend_or_reencode_native_tiles() {
-        let mut render = renderer(verified(RasterPolicy::Auto), Vec::new());
+        let mut render = renderer(verified(), Vec::new());
         frame(&mut render);
         let before = render.raster_stats();
         render.thing.text.push(((3, 1).into(), '!'));
@@ -797,7 +754,7 @@ mod native {
 
     #[test]
     fn moving_source_or_renderer_origin_reuses_tiles_and_erases_old_coverage() {
-        let mut render = renderer(verified(RasterPolicy::Auto), Vec::new());
+        let mut render = renderer(verified(), Vec::new());
         let initial = events(&frame(&mut render));
         let initial_tiles = tiles(&initial);
         render.thing.origin = (1, 1).into();
@@ -840,7 +797,7 @@ mod native {
 
     #[test]
     fn opaque_text_occludes_exact_cells_and_removal_restores_cached_tile() {
-        let mut render = renderer(verified(RasterPolicy::Auto), Vec::new());
+        let mut render = renderer(verified(), Vec::new());
         let initial = events(&frame(&mut render));
         render.thing.text.push(((0, 0).into(), '#'));
         let covered = events(&frame(&mut render));
@@ -865,7 +822,7 @@ mod native {
 
     #[test]
     fn hiding_and_showing_restores_underlay_then_reuses_encodings() {
-        let mut render = renderer(verified(RasterPolicy::Auto), Vec::new());
+        let mut render = renderer(verified(), Vec::new());
         frame(&mut render);
         render.thing.visible = false;
         let hidden = events(&frame(&mut render));
@@ -886,7 +843,7 @@ mod native {
 
     #[test]
     fn shrinking_target_erases_old_cells_and_changes_sampling_cache_key() {
-        let mut render = renderer(verified(RasterPolicy::Auto), Vec::new());
+        let mut render = renderer(verified(), Vec::new());
         frame(&mut render);
         render.thing.target = (1, 1).into();
         let shrunk = events(&frame(&mut render));
@@ -909,7 +866,7 @@ mod native {
 
     #[test]
     fn resize_crops_original_target_and_restores_cached_cells_on_growth() {
-        let mut render = renderer(verified(RasterPolicy::Auto), Vec::new());
+        let mut render = renderer(verified(), Vec::new());
         let initial = events(&frame(&mut render));
         render.resize((1, 1).into());
         let cropped = events(&frame(&mut render));
@@ -935,10 +892,10 @@ mod native {
     }
 
     #[test]
-    fn physical_metric_changes_reencode_and_invalid_dimensions_fall_back() {
-        let mut render = renderer(verified(RasterPolicy::Auto), Vec::new());
+    fn physical_metric_changes_reencode_and_invalid_dimensions_reject() {
+        let mut render = renderer(verified(), Vec::new());
         frame(&mut render);
-        let mut config = verified(RasterPolicy::Auto);
+        let mut config = verified();
         config.capabilities.cell_pixels = Some(CellPixels {
             width: 10,
             height: 20,
@@ -960,25 +917,27 @@ mod native {
             height: 0,
         });
         render.set_raster_output(config);
-        let fallback = events(&frame(&mut render));
-        assert_clear_before_paint(&fallback);
-        assert!(tiles(&fallback).is_empty());
-        assert_print(&fallback, (0, 0), '▀');
+        assert_eq!(
+            render.render().unwrap_err().kind(),
+            io::ErrorKind::Unsupported
+        );
+        assert!(render.out.is_empty());
+        assert_no_raster_commit(&render, before);
         assert_eq!(render.raster_stats(), before);
     }
 
     #[test]
-    fn switching_sixel_text_only_sixel_clears_graphics_and_reuses_cache() {
-        let mut render = renderer(verified(RasterPolicy::Auto), Vec::new());
+    fn removing_and_restoring_raster_clears_graphics_and_reuses_cache() {
+        let mut render = renderer(verified(), Vec::new());
         let initial = events(&frame(&mut render));
-        render.set_raster_output(RasterOutput::text_only());
+        render.thing.visible = false;
         let text = events(&frame(&mut render));
         assert_clear_before_paint(&text);
         assert!(tiles(&text).is_empty());
-        assert_print(&text, (0, 0), '▀');
-        assert_print(&text, (1, 0), '▀');
+        assert_print(&text, (0, 0), '.');
+        assert_print(&text, (1, 0), '.');
         assert_eq!(render.raster_stats().tiles_sent, 2);
-        render.set_raster_output(verified(RasterPolicy::Auto));
+        render.thing.visible = true;
         let native = events(&frame(&mut render));
         assert_eq!(tiles(&native), tiles(&initial));
         assert!(!native
@@ -993,13 +952,10 @@ mod native {
 
     #[test]
     fn strict_rejection_after_native_frame_does_not_forget_old_graphics() {
-        let mut render = renderer(verified(RasterPolicy::Auto), Vec::new());
+        let mut render = renderer(verified(), Vec::new());
         frame(&mut render);
         let before = render.raster_stats();
-        render.set_raster_output(RasterOutput {
-            policy: RasterPolicy::RequireSixel,
-            ..Default::default()
-        });
+        render.set_raster_output(RasterOutput::default());
         assert_eq!(
             render.render().unwrap_err().kind(),
             io::ErrorKind::Unsupported
@@ -1007,11 +963,11 @@ mod native {
         assert!(render.out.is_empty());
         assert_no_raster_commit(&render, before);
         assert_eq!(render.raster_stats(), before);
-        render.set_raster_output(RasterOutput::text_only());
-        let fallback = events(&frame(&mut render));
-        assert_clear_before_paint(&fallback);
-        assert!(tiles(&fallback).is_empty());
-        assert_print(&fallback, (0, 0), '▀');
+        render.thing.visible = false;
+        let cleanup = events(&frame(&mut render));
+        assert_clear_before_paint(&cleanup);
+        assert!(tiles(&cleanup).is_empty());
+        assert_print(&cleanup, (0, 0), '.');
     }
 
     fn assert_bounded_tile(bytes: &[u8], width: usize, height: usize) {
@@ -1089,7 +1045,7 @@ mod native {
     #[test]
     fn bottom_row_tiles_are_cell_bounded_and_restore_the_saved_cursor() {
         for height in 1..=25 {
-            let mut config = verified(RasterPolicy::RequireSixel);
+            let mut config = verified();
             config.capabilities.cell_pixels = Some(CellPixels { width: 10, height });
             let mut render = renderer(config, Vec::new());
             render.resize((4, 6).into());
@@ -1138,7 +1094,7 @@ mod native {
 
     #[test]
     fn ten_by_twenty_cells_remain_bounded_when_moving_and_occluding() {
-        let mut config = verified(RasterPolicy::RequireSixel);
+        let mut config = verified();
         config.capabilities.cell_pixels = Some(CellPixels {
             width: 10,
             height: 20,
@@ -1355,7 +1311,7 @@ mod native {
     }
 
     fn band_config(width: u16, height: u16) -> RasterOutput {
-        let mut config = inline_verified(RasterPolicy::Auto);
+        let mut config = inline_verified();
         config.capabilities.cell_pixels = Some(CellPixels { width, height });
         config
     }
@@ -1376,7 +1332,7 @@ mod native {
     fn fullscreen_complete_stream_preserves_title_and_bottom_pixels() {
         for height in 1..=25 {
             let cell = CellPixels { width: 10, height };
-            let mut config = verified(RasterPolicy::RequireSixel);
+            let mut config = verified();
             config.capabilities.cell_pixels = Some(cell);
             let mut render = renderer(config, Vec::new());
             render.thing.origin = (0, 1).into();
@@ -1422,7 +1378,7 @@ mod native {
             width: 10,
             height: 20,
         };
-        let mut config = verified(RasterPolicy::RequireSixel);
+        let mut config = verified();
         config.capabilities.cell_pixels = Some(cell);
         let mut render = renderer(config, Vec::new());
         render.resize((32, 11).into());
@@ -1450,26 +1406,22 @@ mod native {
     }
 
     #[test]
-    fn fullscreen_too_short_for_a_band_rejects_before_output_or_falls_back() {
-        for policy in [RasterPolicy::Auto, RasterPolicy::RequireSixel] {
-            let mut config = verified(policy);
-            config.capabilities.cell_pixels = Some(CellPixels {
-                width: 10,
-                height: 20,
-            });
-            let mut render = renderer(config, Vec::new());
-            render.resize((4, 1).into());
-            if policy == RasterPolicy::RequireSixel {
-                assert_eq!(
-                    render.render().unwrap_err().kind(),
-                    io::ErrorKind::Unsupported
-                );
-                assert!(render.out.is_empty());
-            } else {
-                assert!(!contains(&frame(&mut render), b"\x1bP"));
-            }
-            assert_eq!(render.raster_stats().encodes, 0);
-        }
+    fn fullscreen_too_short_for_a_band_rejects_before_output() {
+        let mut config = verified();
+        config.capabilities.cell_pixels = Some(CellPixels {
+            width: 10,
+            height: 20,
+        });
+        let mut render = renderer(config, Vec::new());
+        render.resize((4, 1).into());
+
+        assert_eq!(
+            render.render().unwrap_err().kind(),
+            io::ErrorKind::Unsupported
+        );
+        assert!(render.out.is_empty());
+
+        assert_eq!(render.raster_stats().encodes, 0);
     }
 
     #[test]
@@ -1613,14 +1565,14 @@ mod native {
             assert_eq!(terminal.lf_scrolls, scrolls);
         }
         let scrolls = terminal.lf_scrolls;
-        render.set_raster_output(RasterOutput::text_only());
+        render.thing.visible = false;
         let cleanup = terminal.read(&frame(&mut render));
         assert!(tiles(&cleanup).is_empty());
         assert!(cleanup.iter().any(|e| matches!(e, Event::ClearLine(_))));
         assert!(terminal.pixels.iter().all(|pixel| !pixel));
         assert_eq!(render.inline_raster_padding, 0);
         assert_eq!(terminal.lf_scrolls, scrolls);
-        render.set_raster_output(band_config(10, 20));
+        render.thing.visible = true;
         let restored = terminal.read(&frame(&mut render));
         assert_band_tiles(&restored, terminal.cursor.y - 1, 4, 2, terminal.cell);
         terminal.assert_image(terminal.cursor.y - 1, 4, 2);
@@ -2014,53 +1966,51 @@ mod native {
 
     #[test]
     fn inline_native_reserves_before_save_ignores_absolute_origin_and_caches_repeated_frames() {
-        for policy in [RasterPolicy::Auto, RasterPolicy::RequireSixel] {
-            let mut render = inline_renderer(inline_verified(policy), Vec::new());
-            // An absolute origin would also overflow the presenter's coordinate checks.
-            render.pos = (u16::MAX, u16::MAX).into();
-            let mut terminal = InlineTerminal::new();
-            let bytes = frame(&mut render);
-            assert_synchronized(&bytes);
-            let trace = terminal.read(&bytes, 2);
-            assert_eq!(
-                &trace[..2],
-                &[Event::Newline((0, 6).into()), Event::Save((0, 6).into())]
-            );
-            assert_eq!(
-                trace
-                    .iter()
-                    .filter(|event| matches!(event, Event::Save(_)))
-                    .count(),
-                1
-            );
-            assert_eq!(
-                tiles(&trace).iter().map(|tile| tile.0).collect::<Vec<_>>(),
-                [(0, 5).into(), (1, 5).into()]
-            );
-            assert_inline_repaint(&trace, 4, 2);
-            assert_print(&trace, (3, 6), '.');
-            assert_eq!(trace.last(), Some(&Event::Restore((0, 6).into())));
+        let mut render = inline_renderer(inline_verified(), Vec::new());
+        // An absolute origin would also overflow the presenter's coordinate checks.
+        render.pos = (u16::MAX, u16::MAX).into();
+        let mut terminal = InlineTerminal::new();
+        let bytes = frame(&mut render);
+        assert_synchronized(&bytes);
+        let trace = terminal.read(&bytes, 2);
+        assert_eq!(
+            &trace[..2],
+            &[Event::Newline((0, 6).into()), Event::Save((0, 6).into())]
+        );
+        assert_eq!(
+            trace
+                .iter()
+                .filter(|event| matches!(event, Event::Save(_)))
+                .count(),
+            1
+        );
+        assert_eq!(
+            tiles(&trace).iter().map(|tile| tile.0).collect::<Vec<_>>(),
+            [(0, 5).into(), (1, 5).into()]
+        );
+        assert_inline_repaint(&trace, 4, 2);
+        assert_print(&trace, (3, 6), '.');
+        assert_eq!(trace.last(), Some(&Event::Restore((0, 6).into())));
+        assert_eq!(terminal.cursor, (0, 6).into());
+        assert_eq!(render.previous_inline_height, 2);
+        assert_eq!(render.inline_raster_checkpoint, None);
+        let stats = render.raster_stats();
+        assert_eq!((stats.encodes, stats.tiles_sent), (2, 2));
+        render.pos = (123, 456).into();
+        for _ in 0..3 {
+            let trace = terminal.read(&frame(&mut render), 2);
+            assert!(!trace.iter().any(|event| matches!(
+                event,
+                Event::Tile(..) | Event::Print(..) | Event::ClearLine(_) | Event::Newline(_)
+            )));
             assert_eq!(terminal.cursor, (0, 6).into());
-            assert_eq!(render.previous_inline_height, 2);
-            assert_eq!(render.inline_raster_checkpoint, None);
-            let stats = render.raster_stats();
-            assert_eq!((stats.encodes, stats.tiles_sent), (2, 2));
-            render.pos = (123, 456).into();
-            for _ in 0..3 {
-                let trace = terminal.read(&frame(&mut render), 2);
-                assert!(!trace.iter().any(|event| matches!(
-                    event,
-                    Event::Tile(..) | Event::Print(..) | Event::ClearLine(_) | Event::Newline(_)
-                )));
-                assert_eq!(terminal.cursor, (0, 6).into());
-                assert_eq!(render.raster_stats(), stats);
-            }
+            assert_eq!(render.raster_stats(), stats);
         }
     }
 
     #[test]
     fn inline_move_hide_show_clears_only_owned_rows_and_reuses_tiles() {
-        let mut render = inline_renderer(inline_verified(RasterPolicy::Auto), Vec::new());
+        let mut render = inline_renderer(inline_verified(), Vec::new());
         let mut terminal = InlineTerminal::new();
         let first = terminal.read(&frame(&mut render), 2);
         render.thing.origin = (1, 1).into();
@@ -2094,8 +2044,8 @@ mod native {
     }
 
     #[test]
-    fn inline_occlusion_and_text_only_cleanup_repaint_all_survivors() {
-        let mut render = inline_renderer(inline_verified(RasterPolicy::Auto), Vec::new());
+    fn inline_occlusion_and_raster_removal_repaint_all_survivors() {
+        let mut render = inline_renderer(inline_verified(), Vec::new());
         let mut terminal = InlineTerminal::new();
         let first = terminal.read(&frame(&mut render), 2);
         render.thing.text.push(((3, 1).into(), '!'));
@@ -2117,17 +2067,17 @@ mod native {
         assert!(!restored
             .iter()
             .any(|event| matches!(event, Event::ClearLine(_) | Event::Print(_, '▀'))));
-        render.set_raster_output(RasterOutput::text_only());
+        render.thing.visible = false;
         let bytes = frame(&mut render);
         assert_synchronized(&bytes);
         let text = terminal.read(&bytes, 2);
         assert_inline_clear(&text, 2);
         assert_inline_repaint(&text, 4, 2);
         assert!(tiles(&text).is_empty());
-        assert_print(&text, (0, 5), '▀');
-        assert_print(&text, (1, 5), '▀');
+        assert_print(&text, (0, 5), '.');
+        assert_print(&text, (1, 5), '.');
         assert_print(&text, (3, 6), '!');
-        render.set_raster_output(inline_verified(RasterPolicy::Auto));
+        render.thing.visible = true;
         let restored = terminal.read(&frame(&mut render), 2);
         assert_eq!(tiles(&restored), tiles(&first));
         assert_eq!(render.raster_stats().encodes, 2);
@@ -2136,7 +2086,7 @@ mod native {
 
     #[test]
     fn inline_used_height_and_resize_shrink_then_grow_from_the_new_bottom() {
-        let mut render = inline_renderer(inline_verified(RasterPolicy::Auto), Vec::new());
+        let mut render = inline_renderer(inline_verified(), Vec::new());
         render.thing.target = (2, 2).into();
         let mut terminal = InlineTerminal::new();
         let first = terminal.read(&frame(&mut render), 2);
@@ -2176,7 +2126,7 @@ mod native {
 
     #[test]
     fn inline_height_shrink_repaints_even_when_first_row_raster_is_unchanged() {
-        let mut render = inline_renderer(inline_verified(RasterPolicy::Auto), Vec::new());
+        let mut render = inline_renderer(inline_verified(), Vec::new());
         let mut terminal = InlineTerminal::new();
         let first = terminal.read(&frame(&mut render), 2);
         assert_inline_clear(&first, 2);
@@ -2211,7 +2161,7 @@ mod native {
 
     #[test]
     fn inline_blank_growth_clears_physical_text_and_paints_spaces_despite_equal_diff() {
-        let mut render = inline_renderer(inline_verified(RasterPolicy::Auto), Vec::new());
+        let mut render = inline_renderer(inline_verified(), Vec::new());
         render.thing.underlay = ' ';
         render.set_used_height(1);
         let mut terminal = InlineTerminal::new();
@@ -2299,8 +2249,7 @@ mod native {
             );
         };
         for failed_frame in [false, true] {
-            let mut render =
-                inline_renderer(inline_verified(RasterPolicy::Auto), FaultWriter::default());
+            let mut render = inline_renderer(inline_verified(), FaultWriter::default());
             render.resize((4, 4).into());
             render.set_inline_viewport_height(4);
             render.thing.target = (2, 2).into();
@@ -2394,8 +2343,7 @@ mod native {
     fn inline_io_failures_preserve_bottom_checkpoint_and_retry_locally_repaints() {
         for shrink in [false, true] {
             for failure in 0..3 {
-                let mut render =
-                    inline_renderer(inline_verified(RasterPolicy::Auto), FaultWriter::default());
+                let mut render = inline_renderer(inline_verified(), FaultWriter::default());
                 let mut terminal = InlineTerminal::new();
                 if shrink {
                     render.thing.target = (2, 2).into();
@@ -2616,10 +2564,10 @@ mod native {
 
     #[test]
     fn every_partial_native_write_releases_sync_and_retry_repaints() {
-        let mut probe = renderer(verified(RasterPolicy::Auto), FaultWriter::default());
+        let mut probe = renderer(verified(), FaultWriter::default());
         probe.render().unwrap();
         for offset in 0..probe.out.bytes.len() {
-            let mut render = renderer(verified(RasterPolicy::Auto), FaultWriter::default());
+            let mut render = renderer(verified(), FaultWriter::default());
             render.out.remaining = Some(offset);
             assert_eq!(
                 render.render().unwrap_err().kind(),
@@ -2644,7 +2592,7 @@ mod native {
     fn write_and_flush_failures_do_not_commit_and_retry_clears_and_reuses_cache() {
         for previous_frame in [false, true] {
             for failure in 0..3 {
-                let mut render = renderer(verified(RasterPolicy::Auto), FaultWriter::default());
+                let mut render = renderer(verified(), FaultWriter::default());
                 if previous_frame {
                     render.render().unwrap();
                     render.out.bytes.clear();
@@ -2697,7 +2645,7 @@ mod native {
 
     #[test]
     fn persistent_mid_dcs_failure_is_terminated_before_retry_clear_commands() {
-        let mut render = renderer(verified(RasterPolicy::Auto), FaultWriter::default());
+        let mut render = renderer(verified(), FaultWriter::default());
         let mut probe = render.clone();
         probe.render().unwrap();
         let dcs = probe

@@ -5,11 +5,11 @@ use std::io;
 use crate::render::area::{Position, Size};
 use crate::render::buffer::Buffer;
 
-use super::output::{CellPixels, RasterOutput, RasterPolicy, RasterStats};
+use super::output::{CellPixels, RasterOutput, RasterStats};
 use super::RasterCell;
 
 // Bound a single native frame as well as each encoded tile/cache. Oversized
-// layouts remain usable through character output rather than unbounded staging.
+// layouts are rejected before terminal output rather than staging unbounded data.
 const MAX_NATIVE_CELLS: usize = 32 * 1024;
 const MAX_NATIVE_PIXELS: u64 = 16 * 1024 * 1024;
 #[cfg(feature = "sixel")]
@@ -82,20 +82,17 @@ impl RasterPresenter {
         append_newline: bool,
         inline_shrank: bool,
     ) -> io::Result<RasterPlan> {
-        let mut metrics = self.config.resolve(
+        let metrics = self.config.resolve(
             buffer.has_raster(),
             buffer.has_unsupported_raster_composition(),
             self.alternate_screen,
             inline,
         )?;
         if metrics.is_some() && append_newline {
-            if self.config.policy == RasterPolicy::RequireSixel {
-                return Err(io::Error::new(
-                    io::ErrorKind::Unsupported,
-                    "native Sixel does not support appended-newline output",
-                ));
-            }
-            metrics = None;
+            return Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "native Sixel does not support appended-newline output",
+            ));
         }
         if let Some(pixels) = metrics {
             let count = buffer.raster_cells().count();
@@ -105,19 +102,16 @@ impl RasterPresenter {
             let valid =
                 count <= MAX_NATIVE_CELLS && pixel_count <= MAX_NATIVE_PIXELS && coordinates_valid;
             if !valid {
-                if self.config.policy == RasterPolicy::RequireSixel {
-                    return Err(io::Error::new(
-                        io::ErrorKind::Unsupported,
-                        format!(
-                            "native raster frame exceeds resource or coordinate limits: \
+                return Err(io::Error::new(
+                    io::ErrorKind::Unsupported,
+                    format!(
+                        "native raster frame exceeds resource or coordinate limits: \
                              {count} cells (limit {MAX_NATIVE_CELLS}), \
                              {pixel_count} physical pixels (limit {MAX_NATIVE_PIXELS}), \
                              cell pixels {}x{}, coordinates valid: {coordinates_valid}",
-                            pixels.width, pixels.height,
-                        ),
-                    ));
-                }
-                metrics = None;
+                        pixels.width, pixels.height,
+                    ),
+                ));
             }
         }
         if let Some(pixels) = metrics {
@@ -126,13 +120,10 @@ impl RasterPresenter {
                     .raster_cells()
                     .any(|(_, y, _)| anchor_shift(y, buffer.size().height, pixels.height).is_none())
             {
-                if self.config.policy == RasterPolicy::RequireSixel {
-                    return Err(io::Error::new(
+                return Err(io::Error::new(
                         io::ErrorKind::Unsupported,
                         "fullscreen viewport is too short to position a complete Sixel band without scrolling",
                     ));
-                }
-                metrics = None;
             }
         }
         let visible: Vec<_> = if metrics.is_some() {
@@ -203,24 +194,15 @@ impl RasterPresenter {
                 )?;
                 bytes = bytes.saturating_add(data.len());
                 if bytes > MAX_FRAME_BYTES {
-                    if self.config.policy == RasterPolicy::RequireSixel {
-                        return Err(io::Error::new(
-                            io::ErrorKind::Unsupported,
-                            "encoded raster frame exceeds 32 MiB",
-                        ));
-                    }
-                    plan.native = false;
-                    plan.inline_padding = 0;
-                    plan.metrics = None;
-                    plan.visible.clear();
-                    plan.encoded.clear();
-                    plan.clear |= !self.visible.is_empty();
-                    break;
+                    return Err(io::Error::new(
+                        io::ErrorKind::Unsupported,
+                        "encoded raster frame exceeds 32 MiB",
+                    ));
                 }
                 plan.encoded.push((*x, *y - shift, data));
             }
         }
-        // No source/cached encoded allocation is performed on the text-only path.
+        // Frames without raster cells do not allocate source or encoded data.
         #[cfg(not(feature = "sixel"))]
         let _ = &mut plan;
         Ok(plan)
@@ -303,10 +285,9 @@ mod tests {
         buffer
     }
 
-    fn presenter(policy: RasterPolicy, width: u16, height: u16) -> RasterPresenter {
+    fn presenter(width: u16, height: u16) -> RasterPresenter {
         RasterPresenter::new(
             RasterOutput {
-                policy,
                 capabilities: RasterCapabilities {
                     sixel: true,
                     reliable_erase: true,
@@ -325,39 +306,32 @@ mod tests {
             [((MAX_NATIVE_CELLS + 1) as u16, 1, 6), (300, 1000, 60)]
         {
             let buffer = frame(cells);
-            for policy in [RasterPolicy::Auto, RasterPolicy::RequireSixel] {
-                let mut presenter = presenter(policy, pixel_width, pixel_height);
-                let plan = presenter.prepare(&buffer, Position::default(), false, false, false);
-                if policy == RasterPolicy::Auto {
-                    let plan = plan.unwrap();
-                    assert!(!plan.native);
-                    assert!(plan.encoded.is_empty());
-                } else {
-                    assert_eq!(plan.err().unwrap().kind(), io::ErrorKind::Unsupported);
-                }
-                assert_eq!(presenter.stats(), RasterStats::default());
-            }
+
+            let mut presenter = presenter(pixel_width, pixel_height);
+            let plan = presenter.prepare(&buffer, Position::default(), false, false, false);
+
+            assert_eq!(plan.err().unwrap().kind(), io::ErrorKind::Unsupported);
+
+            assert_eq!(presenter.stats(), RasterStats::default());
         }
     }
 
     #[test]
     fn million_pixel_frame_and_cell_budget_boundary_use_native_output() {
         for cells in [5000, MAX_NATIVE_CELLS as u16] {
-            for policy in [RasterPolicy::Auto, RasterPolicy::RequireSixel] {
-                let mut presenter = presenter(policy, 10, 20);
-                let plan = presenter
-                    .prepare(&frame(cells), Position::default(), false, false, false)
-                    .unwrap();
-                assert!(plan.native);
-                assert_eq!(plan.encoded.len(), usize::from(cells));
-                assert_eq!(plan.visible.len(), usize::from(cells));
-            }
+            let mut presenter = presenter(10, 20);
+            let plan = presenter
+                .prepare(&frame(cells), Position::default(), false, false, false)
+                .unwrap();
+            assert!(plan.native);
+            assert_eq!(plan.encoded.len(), usize::from(cells));
+            assert_eq!(plan.visible.len(), usize::from(cells));
         }
     }
 
     #[test]
     fn strict_limit_error_reports_usage_and_limits() {
-        let mut presenter = presenter(RasterPolicy::RequireSixel, 10, 20);
+        let mut presenter = presenter(10, 20);
         let error = presenter
             .prepare(
                 &frame((MAX_NATIVE_CELLS + 1) as u16),
@@ -375,35 +349,78 @@ mod tests {
     }
 
     #[test]
-    fn coordinate_overflow_falls_back_before_encoding() {
-        let mut presenter = presenter(RasterPolicy::Auto, 8, 18);
-        let plan = presenter
-            .prepare(&frame(2), (u16::MAX, 0).into(), false, false, false)
+    fn encoded_frame_limit_rejects_without_committing_graphics() {
+        let mut canvas = RasterCanvas::new(24, 16, Rgb(0, 0, 0)).unwrap();
+        for y in 0..16 {
+            for x in 0..24 {
+                let value = (y * 24 + x) as u8;
+                canvas.set_pixel(
+                    x,
+                    y,
+                    Rgb(value, value.wrapping_mul(71), value.wrapping_mul(137)),
+                );
+            }
+        }
+        let cell = RasterCell {
+            canvas,
+            target: (1, 1).into(),
+            x: 0,
+            y: 0,
+            options: RasterOptions::default(),
+        };
+        let mut buffer = Buffer::new((MAX_NATIVE_CELLS as u16, 3).into());
+        for x in 0..MAX_NATIVE_CELLS as u16 {
+            buffer.set_raster((x, 0).into(), cell.clone()).unwrap();
+        }
+        let mut presenter = presenter(24, 16);
+        let error = presenter
+            .prepare(&buffer, Position::default(), false, false, false)
+            .err()
             .unwrap();
-        assert!(!plan.native);
+        assert_eq!(error.kind(), io::ErrorKind::Unsupported);
+        assert!(error.to_string().contains("encoded raster frame exceeds"));
+        assert!(presenter.visible.is_empty());
+        assert!(!presenter.needs_protocol_recovery());
+        assert_eq!(presenter.stats().tiles_sent, 0);
+        assert_eq!(presenter.stats().bytes_sent, 0);
+    }
+
+    #[test]
+    fn coordinate_overflow_is_rejected_before_encoding() {
+        let mut presenter = presenter(8, 18);
+        let error = presenter
+            .prepare(&frame(2), (u16::MAX, 0).into(), false, false, false)
+            .err()
+            .unwrap();
+        assert_eq!(error.kind(), io::ErrorKind::Unsupported);
         assert_eq!(presenter.stats().encodes, 0);
     }
 
     #[test]
-    fn resource_limit_fallback_clears_previously_visible_graphics() {
-        let mut presenter = presenter(RasterPolicy::Auto, 8, 18);
+    fn resource_limit_rejection_preserves_previously_visible_graphics() {
+        let mut presenter = presenter(8, 18);
         let first = presenter
             .prepare(&frame(1), Position::default(), false, false, false)
             .unwrap();
-        assert!(first.native);
         presenter.begin(&first);
         presenter.commit(first);
-        let plan = presenter
+        let before = presenter.stats();
+        assert!(presenter
             .prepare(
                 &frame((MAX_NATIVE_CELLS + 1) as u16),
                 Position::default(),
                 false,
                 false,
-                false,
+                false
             )
+            .is_err());
+        assert_eq!(presenter.stats(), before);
+        assert_eq!(presenter.visible.len(), 1);
+        let empty = Buffer::new((1, 3).into());
+        let cleanup = presenter
+            .prepare(&empty, Position::default(), false, false, false)
             .unwrap();
-        assert!(!plan.native);
-        assert!(plan.clear);
-        assert!(plan.encoded.is_empty());
+        assert!(cleanup.clear);
+        assert!(!cleanup.native);
     }
 }

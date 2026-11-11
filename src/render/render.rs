@@ -114,7 +114,11 @@ where
     /// # Errors
     ///
     /// Returns drawing failures converted to [`std::io::Error`], or errors
-    /// from writing or flushing output. A failed frame is not saved.
+    /// from writing or flushing output. Raster frames require the optional
+    /// `sixel` feature, verified terminal capabilities and valid pixel metrics.
+    /// Unsupported composition, output modes and resource limits are rejected
+    /// before frame output; raster content never falls back to characters.
+    /// A failed frame is not saved.
     pub fn render(&mut self) -> std::io::Result<()> {
         let result = self.render_frame();
         if result.is_err() {
@@ -197,7 +201,7 @@ where
         self.raster.begin(&raster_plan);
         // A flush is not an atomic terminal repaint. Hide the intermediate
         // clear/text/tile passes on terminals supporting DEC mode 2026, including
-        // the last native frame's cleanup when switching to character output.
+        // cleanup when raster content is removed from the frame.
         let synchronized = raster_plan.native || raster_plan.clear;
         if synchronized {
             crossterm::queue!(self.out, BeginSynchronizedUpdate)?;
@@ -344,8 +348,10 @@ where
         Ok(())
     }
 
-    /// Changes presentation policy or explicit pixel metrics for subsequent frames.
-    /// Old graphics are cleared on the next successful frame before text fallback.
+    /// Changes explicit terminal capabilities or pixel metrics for subsequent frames.
+    /// Raster frames with missing capabilities or invalid metrics fail without
+    /// replacing the last successful frame. Removing raster content clears its
+    /// old graphics on the next successful frame.
     pub fn set_raster_output(&mut self, config: super::raster_output::RasterOutput) {
         self.raster.config = config;
     }

@@ -38,12 +38,10 @@ cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --character
 以下可选动画模式不改变默认的透明 Quadrant 播放、静态模式及现有导出行为：
 
 ```bash
-cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --raster --background 181820
 cargo run --release --features sixel --manifest-path examples/ai-babies/Cargo.toml -- --sixel --character claude
 cargo run --release --features sixel --manifest-path examples/ai-babies/Cargo.toml -- --sixel --cell-pixels 8x16
 ```
 
-- `--raster` 选择 `RasterCanvas`，使用不透明 HalfBlock inline 预览。
 - `--sixel` 需要 `--features sixel`，使用 inline 动画，不会静默回退。无需额外的 `--inline` 参数。
   所有动画模式都不进入备用屏幕，也不捕获鼠标事件。渲染模式择一使用。
 - `--background RRGGBB` 可用于任一模式，默认黑色；允许前导 `#`（在 shell 命令中需加引号）。
@@ -70,7 +68,7 @@ cargo run --release --features sixel --manifest-path examples/ai-babies/Cargo.to
 **16 行图片内容 + 1 行空白保护行**，而非总共 16 行；8×18 无需额外保护行。
 字符格高度为 `h` 时，保护行数为 `ceil(((6 - h % 6) % 6) / h)`，因此极小的 `h = 1` 需要 5 行。
 成功绘帧后光标仍回到最后内容行，退出换行可落在保护行。较小终端会缩小显示以适应空间。
-HalfBlock 是基于字符格的预览，不是原生 Sixel 分辨率。
+Raster 不再提供字符预览；默认 Canvas 模式保持不变。
 
 ## 操作
 
@@ -94,7 +92,6 @@ cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --headless
 cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --snapshot /tmp/ai-babies.ppm 0
 cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --character deepseek --height 24 --frames /tmp/deepseek-frames
 cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --character claude --action wave /tmp/claude-wave
-cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --raster --background 181820 --snapshot /tmp/ai-babies-raster.ppm 0
 cargo run --release --features sixel --manifest-path examples/ai-babies/Cargo.toml -- --sixel --headless
 ```
 
@@ -112,9 +109,8 @@ cargo run --release --features sixel --manifest-path examples/ai-babies/Cargo.to
 每张 PPM 配套同名 `.pgm` 透明度掩码。默认旧模式下，单独打开 PPM 时透明区域显示为黑色，
 该黑色不会用于终端绘制。
 
-`--raster` 允许所有现有导出选项，包括 `--snapshot`、`--frames` 和 `--action`。
-其 PPM/PGM 输出还原 HalfBlock 回退画面，得到不透明的栅格矩形，而非原生 Sixel 像素。
-`--sixel` 仅允许 `--headless`，拒绝其他导出选项以免产生误导性输出。
+`--sixel` 仅允许 `--headless`；拒绝 Raster 的 `--snapshot`、`--frames`、`--action` 图片导出，
+避免把占位字符当作图像。默认 Canvas 模式继续支持图片导出。
 无终端模式测试绘制，但**不能**证明终端/复用器兼容。
 
 请使用新的输出目录，避免混入旧帧。安装 Pillow 后，可从两种文件制作预览

@@ -1,23 +1,11 @@
-//! Conservative terminal policy for opaque raster frames.
+//! Explicit terminal capabilities for opaque Sixel raster frames.
 //!
-//! Unknown graphics capabilities always use character fallback. Native output
+//! Unknown graphics capabilities reject raster presentation. Native output
 //! requires explicit cell metrics, optionally obtained with a startup probe.
 //! Rendering never reads terminal input or discovers dimensions. Measuring pixels
 //! does not negotiate Sixel support.
 
 use std::{io, time::Duration};
-
-/// Selects native raster output or the always-available character representation.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
-pub enum RasterPolicy {
-    /// Use Sixel only when every required capability is explicitly known.
-    #[default]
-    Auto,
-    /// Never probe for or emit Sixel.
-    TextOnly,
-    /// Reject unsupported raster frames before writing any frame bytes.
-    RequireSixel,
-}
 
 /// Actual terminal-cell pixel dimensions, not Canvas samples per cell.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -229,32 +217,21 @@ pub struct RasterCapabilities {
     /// Physical pixels per character cell, required for native Sixel output.
     /// Set `Some(pixels)` explicitly or store the result of [`CellPixels::probe`]
     /// before starting input. Rendering never measures or refreshes this value.
-    /// Missing/invalid metrics fail `RequireSixel`; `Auto` falls back to text.
+    /// Missing or invalid metrics reject raster frames before terminal output.
     pub cell_pixels: Option<CellPixels>,
 }
 
 /// Terminal raster settings shared by render builders and TUI applications.
+///
+/// Raster presentation uses only Sixel and requires the optional `sixel` feature.
+/// Defaults leave every capability unknown: frames without raster content work
+/// normally, while raster frames fail until the required capabilities are set.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct RasterOutput {
-    pub policy: RasterPolicy,
     pub capabilities: RasterCapabilities,
 }
 
 impl RasterOutput {
-    /// Character-only output, without capability queries.
-    pub const fn text_only() -> Self {
-        Self {
-            policy: RasterPolicy::TextOnly,
-            capabilities: RasterCapabilities {
-                sixel: false,
-                reliable_erase: false,
-                reliable_inline_erase: false,
-                no_scroll: false,
-                cell_pixels: None,
-            },
-        }
-    }
-
     pub(super) fn resolve(
         self,
         has_raster: bool,
@@ -262,11 +239,11 @@ impl RasterOutput {
         alternate_screen: bool,
         inline: bool,
     ) -> std::io::Result<Option<CellPixels>> {
-        if self.policy == RasterPolicy::TextOnly || (!has_raster && !unsupported_composition) {
+        if !has_raster && !unsupported_composition {
             return Ok(None);
         }
-        let reason = if unsupported_composition && self.policy == RasterPolicy::RequireSixel {
-            Some("visual effects require character raster fallback")
+        let reason = if unsupported_composition {
+            Some("Sixel raster output does not support this visual composition")
         } else if !cfg!(feature = "sixel") {
             Some("the sixel Cargo feature is disabled")
         } else if !inline && !alternate_screen {
@@ -281,10 +258,8 @@ impl RasterOutput {
             None
         };
         match reason {
-            Some(reason) if self.policy == RasterPolicy::RequireSixel => {
-                Err(std::io::Error::new(std::io::ErrorKind::Unsupported, reason))
-            }
-            Some(_) => Ok(None),
+            Some(reason) => Err(std::io::Error::new(std::io::ErrorKind::Unsupported, reason)),
+
             None if has_raster => {
                 let pixels = self.capabilities.cell_pixels.ok_or_else(|| {
                     io::Error::new(
@@ -292,11 +267,7 @@ impl RasterOutput {
                         "native Sixel requires RasterCapabilities.cell_pixels: set Some(CellPixels { width, height }) explicitly or call CellPixels::probe before starting input",
                     )
                 }).and_then(CellPixels::validate);
-                match pixels {
-                    Ok(pixels) => Ok(Some(pixels)),
-                    Err(error) if self.policy == RasterPolicy::RequireSixel => Err(error),
-                    Err(_) => Ok(None),
-                }
+                pixels.map(Some)
             }
             None => Ok(None),
         }
@@ -319,9 +290,8 @@ pub struct RasterStats {
 mod tests {
     use super::*;
 
-    fn verified(policy: RasterPolicy) -> RasterOutput {
+    fn verified() -> RasterOutput {
         RasterOutput {
-            policy,
             capabilities: RasterCapabilities {
                 sixel: true,
                 reliable_erase: true,
@@ -336,40 +306,36 @@ mod tests {
     }
 
     #[test]
-    fn unknown_auto_falls_back_and_text_only_ignores_capabilities() {
+    fn default_capabilities_are_unknown_and_raster_is_rejected() {
+        let config = RasterOutput::default();
+        assert_eq!(config.capabilities, RasterCapabilities::default());
         assert_eq!(
-            RasterOutput::default()
-                .resolve(true, false, true, false)
-                .unwrap(),
-            None
+            config.resolve(true, false, true, false).unwrap_err().kind(),
+            io::ErrorKind::Unsupported
         );
-        assert_eq!(
-            verified(RasterPolicy::TextOnly)
-                .resolve(true, true, false, true)
-                .unwrap(),
-            None
-        );
+        assert_eq!(config.resolve(false, false, false, true).unwrap(), None);
     }
 
     #[test]
     fn strict_is_lazy_and_rejects_unverified_inline_and_effects() {
-        let unknown = RasterOutput {
-            policy: RasterPolicy::RequireSixel,
-            ..Default::default()
-        };
+        let unknown = RasterOutput::default();
         assert!(unknown.resolve(false, false, false, true).is_ok());
         assert!(unknown.resolve(true, false, true, false).is_err());
-        let config = verified(RasterPolicy::RequireSixel);
+        let config = verified();
         assert!(config.resolve(true, false, true, true).is_err());
         assert!(config.resolve(true, false, false, false).is_err());
-        assert!(config.resolve(false, true, true, false).is_err());
+        for has_raster in [false, true] {
+            let error = config.resolve(has_raster, true, true, false).unwrap_err();
+            assert_eq!(error.kind(), io::ErrorKind::Unsupported);
+            assert!(error.to_string().contains("composition"));
+        }
     }
 
     #[test]
     fn feature_and_all_safety_conditions_are_required() {
-        let config = verified(RasterPolicy::Auto);
+        let config = verified();
         assert_eq!(
-            config.resolve(true, false, true, false).unwrap().is_some(),
+            config.resolve(true, false, true, false).is_ok(),
             cfg!(feature = "sixel")
         );
         for missing in 0..4 {
@@ -380,7 +346,7 @@ mod tests {
                 2 => config.capabilities.no_scroll = false,
                 _ => config.capabilities.cell_pixels = None,
             }
-            assert_eq!(config.resolve(true, false, true, false).unwrap(), None);
+            assert!(config.resolve(true, false, true, false).is_err());
         }
     }
 
@@ -524,56 +490,42 @@ mod tests {
 
     #[test]
     fn non_native_paths_do_not_require_pixels() {
-        for policy in [
-            RasterPolicy::Auto,
-            RasterPolicy::TextOnly,
-            RasterPolicy::RequireSixel,
-        ] {
-            let mut config = verified(policy);
-            config.capabilities.cell_pixels = None;
-            assert_eq!(config.resolve(false, false, true, false).unwrap(), None);
-            if policy == RasterPolicy::TextOnly {
-                assert_eq!(config.resolve(true, false, true, false).unwrap(), None);
-            }
-        }
+        let mut config = verified();
+        config.capabilities.cell_pixels = None;
+        assert_eq!(config.resolve(false, false, true, false).unwrap(), None);
     }
 
     #[cfg(feature = "sixel")]
     #[test]
     fn native_output_requires_explicit_valid_pixels_and_never_discovers_them() {
-        for policy in [RasterPolicy::Auto, RasterPolicy::RequireSixel] {
-            let mut config = verified(policy);
-            for pixels in [
-                None,
-                Some(CellPixels {
-                    width: 0,
-                    height: 20,
-                }),
-            ] {
-                config.capabilities.cell_pixels = pixels;
-                let result = config.resolve(true, false, true, false);
-                if policy == RasterPolicy::RequireSixel {
-                    let error = result.unwrap_err();
-                    assert!(error.to_string().contains(if pixels.is_none() {
-                        "CellPixels::probe before starting input"
-                    } else {
-                        "unsupported cell pixels"
-                    }));
-                } else {
-                    assert_eq!(result.unwrap(), None);
-                }
-            }
-            let pixels = CellPixels {
-                width: 10,
+        let mut config = verified();
+        for pixels in [
+            None,
+            Some(CellPixels {
+                width: 0,
                 height: 20,
-            };
-            config.capabilities.cell_pixels = Some(pixels);
-            for _ in 0..3 {
-                assert_eq!(
-                    config.resolve(true, false, true, false).unwrap(),
-                    Some(pixels)
-                );
-            }
+            }),
+        ] {
+            config.capabilities.cell_pixels = pixels;
+            let result = config.resolve(true, false, true, false);
+
+            let error = result.unwrap_err();
+            assert!(error.to_string().contains(if pixels.is_none() {
+                "CellPixels::probe before starting input"
+            } else {
+                "unsupported cell pixels"
+            }));
+        }
+        let pixels = CellPixels {
+            width: 10,
+            height: 20,
+        };
+        config.capabilities.cell_pixels = Some(pixels);
+        for _ in 0..3 {
+            assert_eq!(
+                config.resolve(true, false, true, false).unwrap(),
+                Some(pixels)
+            );
         }
     }
 
@@ -590,16 +542,14 @@ mod tests {
     #[cfg(feature = "sixel")]
     #[test]
     fn partial_band_heights_resolve_without_rounding() {
-        for policy in [RasterPolicy::Auto, RasterPolicy::RequireSixel] {
-            for height in 1..=25 {
-                let pixels = CellPixels { width: 10, height };
-                let mut config = verified(policy);
-                config.capabilities.cell_pixels = Some(pixels);
-                assert_eq!(
-                    config.resolve(true, false, true, false).unwrap(),
-                    Some(pixels)
-                );
-            }
+        for height in 1..=25 {
+            let pixels = CellPixels { width: 10, height };
+            let mut config = verified();
+            config.capabilities.cell_pixels = Some(pixels);
+            assert_eq!(
+                config.resolve(true, false, true, false).unwrap(),
+                Some(pixels)
+            );
         }
     }
 }
