@@ -12,6 +12,7 @@ struct Scene {
     origin: Position,
     target: Size,
     visible: bool,
+    underlay: char,
     text: Vec<(Position, char)>,
 }
 
@@ -24,6 +25,7 @@ impl Default for Scene {
             origin: (0, 0).into(),
             target: (2, 1).into(),
             visible: true,
+            underlay: '.',
             text: Vec::new(),
         }
     }
@@ -35,7 +37,7 @@ impl Draw for Scene {
         // An explicit underlay makes erased/moved/hidden raster coverage observable.
         for y in 0..size.height {
             for x in 0..size.width {
-                chunk.set(x, y, Stylized::plain('.'))?;
+                chunk.set(x, y, Stylized::plain(self.underlay))?;
             }
         }
         if self.visible {
@@ -84,6 +86,7 @@ fn verified(policy: RasterPolicy) -> RasterOutput {
         capabilities: RasterCapabilities {
             sixel: true,
             reliable_erase: true,
+            reliable_inline_erase: false,
             no_scroll: true,
             cell_pixels: Some(CellPixels {
                 width: 8,
@@ -98,6 +101,21 @@ fn renderer<W: Write>(config: RasterOutput, writer: W) -> Render<W, Scene> {
         .size((4, 2))
         .clear(false)
         .enable_alt_screen()
+        .raster_output(config)
+        .build_render(Scene::default(), writer)
+}
+
+fn inline_verified(policy: RasterPolicy) -> RasterOutput {
+    let mut config = verified(policy);
+    config.capabilities.reliable_inline_erase = true;
+    config.capabilities.reliable_erase = false;
+    config
+}
+
+fn inline_renderer<W: Write>(config: RasterOutput, writer: W) -> Render<W, Scene> {
+    Builder::new()
+        .inline_mode(true)
+        .size((4, 2))
         .raster_output(config)
         .build_render(Scene::default(), writer)
 }
@@ -182,7 +200,7 @@ fn strict_unsupported_frames_write_nothing_and_do_not_commit() {
 }
 
 #[test]
-fn alternate_screen_and_non_inline_mode_are_both_required() {
+fn absolute_requires_alternate_screen_and_inline_requires_its_own_erase_assertion() {
     for inline in [false, true] {
         for policy in [RasterPolicy::Auto, RasterPolicy::RequireSixel] {
             let mut render = renderer(verified(policy), Vec::new());
@@ -262,6 +280,62 @@ fn disabled_feature_falls_back_in_auto_and_rejects_strict_even_when_verified() {
     assert_eq!(render.raster_stats(), RasterStats::default());
 }
 
+#[test]
+fn inline_missing_erase_or_appended_newline_falls_back_or_rejects() {
+    for append_newline in [false, true] {
+        for policy in [RasterPolicy::Auto, RasterPolicy::RequireSixel] {
+            let mut config = inline_verified(policy);
+            if !append_newline {
+                // Even verified ED 2 cannot substitute for inline EL 2.
+                config.capabilities.reliable_erase = true;
+                config.capabilities.reliable_inline_erase = false;
+            }
+            let mut render = inline_renderer(config, Vec::new());
+            render.append_newline = append_newline;
+            if policy == RasterPolicy::RequireSixel {
+                assert_eq!(
+                    render.render().unwrap_err().kind(),
+                    io::ErrorKind::Unsupported
+                );
+                assert!(render.out.is_empty());
+                assert!(render.buffer.previous().is_none());
+                assert!(!render.buffer.has_raster());
+            } else {
+                let output = frame(&mut render);
+                assert!(!contains(&output, b"\x1bP"));
+                assert!(contains(&output, "▀".as_bytes()));
+                assert_eq!(output.ends_with(b"\n"), append_newline);
+                assert!(render.buffer.previous().is_some());
+            }
+            assert_eq!(render.raster_stats(), RasterStats::default());
+            assert_eq!(render.inline_raster_checkpoint, None);
+        }
+    }
+}
+
+#[cfg(not(feature = "sixel"))]
+#[test]
+fn inline_disabled_feature_falls_back_or_rejects_even_with_inline_erase() {
+    for policy in [RasterPolicy::Auto, RasterPolicy::RequireSixel] {
+        let mut render = inline_renderer(inline_verified(policy), Vec::new());
+        if policy == RasterPolicy::Auto {
+            let output = frame(&mut render);
+            assert!(!contains(&output, b"\x1bP"));
+            assert!(contains(&output, "▀".as_bytes()));
+            assert!(render.buffer.previous().is_some());
+        } else {
+            assert_eq!(
+                render.render().unwrap_err().kind(),
+                io::ErrorKind::Unsupported
+            );
+            assert!(render.out.is_empty());
+            assert!(render.buffer.previous().is_none());
+            assert!(!render.buffer.has_raster());
+        }
+        assert_eq!(render.raster_stats(), RasterStats::default());
+    }
+}
+
 #[cfg(feature = "sixel")]
 mod native {
     use super::*;
@@ -273,18 +347,56 @@ mod native {
         Tile(Position, Vec<u8>),
         Save(Position),
         Restore(Position),
+        Newline(Position),
+        ClearLine(Position),
     }
 
     // Parse terminal framing separately from Sixel data: palette digits and
     // printable sixel bytes must never be mistaken for ordinary text output.
     fn events(bytes: &[u8]) -> Vec<Event> {
+        events_at(bytes, &mut Position::default(), &mut None, false)
+    }
+
+    fn events_at(
+        bytes: &[u8],
+        position: &mut Position,
+        anchor: &mut Option<Position>,
+        inline: bool,
+    ) -> Vec<Event> {
+        events_in(bytes, position, anchor, inline, None)
+    }
+
+    fn events_in(
+        bytes: &[u8],
+        position: &mut Position,
+        anchor: &mut Option<Position>,
+        inline: bool,
+        mut terminal: Option<&mut BandTerminal>,
+    ) -> Vec<Event> {
         let mut events = Vec::new();
-        let mut cursor = Position::default();
-        let mut saved = None;
+        let mut cursor = *position;
+        let mut saved = *anchor;
         let mut index = 0;
         while index < bytes.len() {
             // CAN/SUB cancel protocol state without painting or moving the cursor.
             if matches!(bytes[index], 0x18 | 0x1a) {
+                index += 1;
+                continue;
+            }
+            if inline && matches!(bytes[index], b'\r' | b'\n') {
+                if bytes[index] == b'\r' {
+                    cursor.x = 0;
+                } else {
+                    cursor.y += 1;
+                    if let Some(terminal) = terminal.as_deref_mut() {
+                        if cursor.y == terminal.rows {
+                            terminal.scroll(1);
+                            terminal.lf_scrolls += 1;
+                            cursor.y -= 1;
+                        }
+                    }
+                    events.push(Event::Newline(cursor));
+                }
                 index += 1;
                 continue;
             }
@@ -307,16 +419,25 @@ mod native {
             index += 2;
             match bytes[start + 1] {
                 b'P' => {
+                    let tile_position = cursor;
+                    let body = index;
                     loop {
                         assert!(index < bytes.len(), "terminated or cancelled DCS");
                         if matches!(bytes[index], 0x18 | 0x1a) {
+                            // Execute even a cancelled prefix: pixels/scrolling are immediate.
+                            if let Some(terminal) = terminal.as_deref_mut() {
+                                terminal.sixel(&bytes[body..index], &mut cursor);
+                            }
                             // A cancelled partial tile is not a complete Tile event.
                             index += 1;
                             break;
                         }
                         if bytes[index..].starts_with(b"\x1b\\") {
+                            if let Some(terminal) = terminal.as_deref_mut() {
+                                terminal.sixel(&bytes[body..index], &mut cursor);
+                            }
                             index += 2;
-                            events.push(Event::Tile(cursor, bytes[start..index].to_vec()));
+                            events.push(Event::Tile(tile_position, bytes[start..index].to_vec()));
                             break;
                         }
                         index += 1;
@@ -329,7 +450,7 @@ mod native {
                     events.push(Event::Save(cursor));
                 }
                 b'8' => {
-                    cursor = saved.take().expect("cursor save before restore");
+                    cursor = saved.expect("cursor save before restore");
                     events.push(Event::Restore(cursor));
                 }
                 b'[' => {
@@ -352,6 +473,7 @@ mod native {
                     match command {
                         b'm' => {}
                         b'H' | b'f' => {
+                            assert!(!inline, "inline output must not use absolute CUP/HVP");
                             cursor = (
                                 values.get(1).copied().unwrap_or(1).max(1) - 1,
                                 values[0].max(1) - 1,
@@ -359,15 +481,40 @@ mod native {
                                 .into()
                         }
                         b'J' => {
+                            assert!(!inline, "inline output must not erase the screen");
                             assert_eq!(values, [2], "only verified ED 2 erases graphics");
                             events.push(Event::Clear);
+                        }
+                        b'E' | b'F' => {
+                            let count = values[0].max(1);
+                            cursor.y = if command == b'E' {
+                                cursor.y + count
+                            } else {
+                                cursor.y.saturating_sub(count)
+                            };
+                            if let Some(terminal) = terminal.as_deref() {
+                                cursor.y = cursor.y.min(terminal.rows - 1);
+                            }
+                            cursor.x = 0;
+                        }
+                        b'G' => cursor.x = values[0].max(1) - 1,
+                        b'K' => {
+                            assert_eq!(values, [2], "inline graphics require EL 2");
+                            if let Some(terminal) = terminal.as_deref_mut() {
+                                let start =
+                                    usize::from(cursor.y * terminal.cell.height) * terminal.columns;
+                                let end =
+                                    start + usize::from(terminal.cell.height) * terminal.columns;
+                                terminal.pixels[start..end].fill(false);
+                            }
+                            events.push(Event::ClearLine(cursor));
                         }
                         b's' => {
                             saved = Some(cursor);
                             events.push(Event::Save(cursor));
                         }
                         b'u' => {
-                            cursor = saved.take().expect("cursor save before restore");
+                            cursor = saved.expect("cursor save before restore");
                             events.push(Event::Restore(cursor));
                         }
                         _ => panic!("unexpected CSI command {}", char::from(command)),
@@ -376,7 +523,8 @@ mod native {
                 command => panic!("unexpected escape command {}", char::from(command)),
             }
         }
-        assert!(saved.is_none(), "unrestored cursor save");
+        *position = cursor;
+        *anchor = saved;
         events
     }
 
@@ -1019,6 +1167,1172 @@ mod native {
         assert!(tiles(&hidden).is_empty());
         assert_print(&hidden, (1, 0), '.');
         assert_print(&hidden, (1, 1), '!');
+    }
+
+    // A deliberately small WT-like model, not a general terminal emulator. Each
+    // slot records ink in one tile column at one physical pixel row. LF scrolls
+    // at the viewport bottom; CNL clamps without scrolling. Saved coordinates
+    // stay viewport-relative when the screen scrolls. Sixel reserves all six
+    // pixels of every band, including transparent bits, before painting it.
+    struct BandTerminal {
+        cursor: Position,
+        saved: Option<Position>,
+        rows: u16,
+        columns: usize,
+        cell: CellPixels,
+        pixels: Vec<bool>,
+        lf_scrolls: usize,
+        sixel_scrolls: usize,
+    }
+
+    impl BandTerminal {
+        fn new(rows: u16, columns: usize, cell: CellPixels) -> Self {
+            Self {
+                cursor: (0, rows - 1).into(),
+                saved: None,
+                rows,
+                columns,
+                cell,
+                pixels: vec![false; usize::from(rows) * usize::from(cell.height) * columns],
+                lf_scrolls: 0,
+                sixel_scrolls: 0,
+            }
+        }
+
+        fn read(&mut self, bytes: &[u8]) -> Vec<Event> {
+            let (mut cursor, mut saved) = (self.cursor, self.saved);
+            let trace = events_in(bytes, &mut cursor, &mut saved, true, Some(self));
+            self.cursor = cursor;
+            self.saved = saved;
+            assert!(cursor.y < self.rows);
+            trace
+        }
+
+        fn scroll(&mut self, rows: usize) {
+            let count =
+                (rows * usize::from(self.cell.height) * self.columns).min(self.pixels.len());
+            self.pixels.rotate_left(count);
+            let start = self.pixels.len() - count;
+            self.pixels[start..].fill(false);
+        }
+
+        fn resize(&mut self, rows: u16, cell: CellPixels) {
+            self.rows = rows;
+            self.cell = cell;
+            self.cursor.y = self.cursor.y.min(rows - 1);
+            self.saved = self.saved.map(|p| (p.x, p.y.min(rows - 1)).into());
+            // Resizing invalidates physical pixels; the next frame must repaint.
+            self.pixels = vec![false; usize::from(rows) * usize::from(cell.height) * self.columns];
+        }
+
+        fn sixel(&mut self, data: &[u8], cursor: &mut Position) {
+            let Some(q) = data.iter().position(|byte| *byte == b'q') else {
+                return; // A writer can fail inside the DCS header.
+            };
+            let mut index = q + 1;
+            let (mut x, mut band) = (0usize, 0i32);
+            let mut origin = i32::from(cursor.y) * i32::from(self.cell.height);
+            while index < data.len() {
+                let command = data[index];
+                index += 1;
+                match command {
+                    b'"' | b'#' => {
+                        while index < data.len()
+                            && (data[index].is_ascii_digit() || data[index] == b';')
+                        {
+                            index += 1;
+                        }
+                    }
+                    b'$' => x = 0,
+                    b'-' => {
+                        x = 0;
+                        band += 6;
+                    }
+                    b'!' | b'?'..=b'~' => {
+                        let (count, character) = if command == b'!' {
+                            let start = index;
+                            while index < data.len() && data[index].is_ascii_digit() {
+                                index += 1;
+                            }
+                            if index == data.len() {
+                                return; // Incomplete RLE in a cancelled write.
+                            }
+                            let count = std::str::from_utf8(&data[start..index])
+                                .unwrap()
+                                .parse::<usize>()
+                                .unwrap();
+                            let character = data[index];
+                            index += 1;
+                            (count, character)
+                        } else {
+                            (1, command)
+                        };
+                        assert!((b'?'..=b'~').contains(&character));
+                        assert!(count > 0 && x + count <= usize::from(self.cell.width));
+                        let overflow =
+                            origin + band + 6 - i32::from(self.rows) * i32::from(self.cell.height);
+                        if overflow > 0 {
+                            let rows = (overflow as usize).div_ceil(usize::from(self.cell.height));
+                            self.scroll(rows);
+                            self.sixel_scrolls += rows;
+                            origin -= rows as i32 * i32::from(self.cell.height);
+                            cursor.y = cursor.y.saturating_sub(rows as u16);
+                        }
+                        for bit in 0..6 {
+                            let y = origin + band + bit;
+                            if (character - b'?') & (1 << bit) != 0 && y >= 0 {
+                                let column = usize::from(cursor.x);
+                                assert!(column < self.columns);
+                                self.pixels[y as usize * self.columns + column] = true;
+                            }
+                        }
+                        x += count;
+                    }
+                    _ => panic!("unexpected Sixel command {command}"),
+                }
+            }
+        }
+
+        fn assert_image(&self, top: u16, width: u16, height: u16) {
+            let top = usize::from(top) * usize::from(self.cell.height);
+            let bottom = top + usize::from(height) * usize::from(self.cell.height);
+            for (index, painted) in self.pixels.iter().enumerate() {
+                let (y, x) = (index / self.columns, index % self.columns);
+                assert_eq!(
+                    *painted,
+                    (top..bottom).contains(&y) && x < usize::from(width),
+                    "incorrect ink at tile column {x}, pixel row {y}"
+                );
+            }
+        }
+    }
+
+    fn band_config(width: u16, height: u16) -> RasterOutput {
+        let mut config = inline_verified(RasterPolicy::Auto);
+        config.capabilities.cell_pixels = Some(CellPixels { width, height });
+        config
+    }
+
+    fn assert_band_tiles(trace: &[Event], top: u16, width: u16, height: u16, cell: CellPixels) {
+        assert_eq!(
+            tiles(trace).iter().map(|tile| tile.0).collect::<Vec<_>>(),
+            (top..top + height)
+                .flat_map(|y| (0..width).map(move |x| (x, y).into()))
+                .collect::<Vec<Position>>()
+        );
+        for (_, bytes) in tiles(trace) {
+            assert_bounded_tile(bytes, usize::from(cell.width), usize::from(cell.height));
+        }
+    }
+
+    #[test]
+    fn band_bottom_legacy_sequence_reproduces_32_column_staircase() {
+        for (width, height, padding) in [(10, 20, 1), (8, 18, 0), (10, 1, 5), (10, 2, 2)] {
+            let config = band_config(width, height);
+            let cell = config.capabilities.cell_pixels.unwrap();
+            let mut render = inline_renderer(config, Vec::new());
+            let trace = events_at(
+                &frame(&mut render),
+                &mut Position::default(),
+                &mut None,
+                true,
+            );
+            let tile = tiles(&trace)[0].1;
+            assert_bounded_tile(tile, usize::from(width), usize::from(height));
+            let mut terminal = BandTerminal::new(36, 32, cell);
+            // The old renderer saved at the content bottom, then restored that
+            // same physical row for every column. No guard row was reserved.
+            let mut old = b"\r\x1b7".to_vec();
+            for x in 1..=32 {
+                old.extend_from_slice(format!("\x1b8\x1b[{x}G").as_bytes());
+                old.extend_from_slice(tile);
+            }
+            terminal.read(&old);
+            assert_eq!(terminal.lf_scrolls, 0);
+            assert_eq!(terminal.sixel_scrolls, 32 * padding);
+            if height == 20 {
+                for x in 0..32 {
+                    let bottom = (0..36 * 20).rfind(|y| terminal.pixels[y * 32 + x]);
+                    assert_eq!(bottom, Some((4 + x) * 20 - 1), "staircase column {x}");
+                }
+            } else if height == 18 {
+                terminal.assert_image(35, 32, 1);
+            }
+        }
+        // Raster attributes and completely transparent bits do not suppress
+        // allocation of the last band: 18 + 6 still exceeds a 20px bottom cell.
+        let mut terminal = BandTerminal::new(
+            3,
+            1,
+            CellPixels {
+                width: 10,
+                height: 20,
+            },
+        );
+        terminal.read(b"\x1bP0;1;0q\"1;1;10;20?-?-?-?\x1b\\");
+        assert_eq!(terminal.sixel_scrolls, 1);
+        assert!(terminal.pixels.iter().all(|pixel| !pixel));
+    }
+
+    #[test]
+    fn band_bottom_reserves_before_paint_and_animation_reuses_guard_rows() {
+        for (width, height, padding) in [(10, 20, 1), (8, 18, 0), (10, 1, 5), (10, 2, 2)] {
+            for known_viewport in [false, true] {
+                let config = band_config(width, height);
+                let cell = config.capabilities.cell_pixels.unwrap();
+                let mut render = inline_renderer(config, Vec::new());
+                render.resize((32, 2).into());
+                render.thing.target = (32, 2).into();
+                if known_viewport {
+                    render.set_inline_viewport_height(10);
+                }
+                let mut terminal = BandTerminal::new(10, 32, cell);
+                let first = terminal.read(&frame(&mut render));
+                let top = 10 - padding - 2;
+                assert_eq!(terminal.lf_scrolls, usize::from(1 + padding));
+                assert_eq!(terminal.sixel_scrolls, 0);
+                let save = first
+                    .iter()
+                    .position(|e| matches!(e, Event::Save(_)))
+                    .unwrap();
+                assert!(first[..save].iter().all(|e| matches!(e, Event::Newline(_))));
+                assert_eq!(first[save], Event::Save((0, 9).into()));
+                assert_band_tiles(&first, top, 32, 2, cell);
+                terminal.assert_image(top, 32, 2);
+                assert_eq!(terminal.cursor, (0, top + 1).into());
+                assert_eq!(render.inline_raster_padding, padding);
+                let reserved = terminal.lf_scrolls;
+                for step in 0..4 {
+                    if step % 2 == 1 {
+                        render.thing.canvas = RasterCanvas::new(4, 3, Rgb(0, step, 255)).unwrap();
+                    }
+                    let trace = terminal.read(&frame(&mut render));
+                    assert!(!trace.iter().any(|e| matches!(e, Event::Newline(_))));
+                    if step % 2 == 1 {
+                        assert_band_tiles(&trace, top, 32, 2, cell);
+                    } else {
+                        assert!(tiles(&trace).is_empty());
+                    }
+                    assert_eq!(terminal.lf_scrolls, reserved);
+                    assert_eq!(terminal.sixel_scrolls, 0);
+                    assert_eq!(terminal.cursor, (0, top + 1).into());
+                    terminal.assert_image(top, 32, 2);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn band_bottom_resize_metrics_and_text_cleanup_keep_tiles_above_boundary() {
+        let mut render = inline_renderer(band_config(10, 20), Vec::new());
+        render.thing.target = (4, 2).into();
+        render.set_inline_viewport_height(12);
+        let mut terminal = BandTerminal::new(
+            12,
+            4,
+            CellPixels {
+                width: 10,
+                height: 20,
+            },
+        );
+        terminal.read(&frame(&mut render));
+        terminal.assert_image(9, 4, 2);
+        // UI shrink/growth and source scaling retain a common physical top.
+        for height in [1, 3, 2] {
+            render.resize((4, height).into());
+            render.thing.target = (4, height).into();
+            let trace = terminal.read(&frame(&mut render));
+            let top = terminal.cursor.y + 1 - height;
+            assert_band_tiles(&trace, top, 4, height, terminal.cell);
+            terminal.assert_image(top, 4, height);
+            assert_eq!(terminal.sixel_scrolls, 0);
+        }
+        // Change both pixel metrics and the number of guard rows in both directions.
+        for (width, height, padding) in
+            [(8, 18, 0), (10, 20, 1), (10, 1, 5), (10, 2, 2), (10, 20, 1)]
+        {
+            let config = band_config(width, height);
+            let cell = config.capabilities.cell_pixels.unwrap();
+            terminal.resize(12, cell);
+            render.set_raster_output(config);
+            let trace = terminal.read(&frame(&mut render));
+            let top = terminal.cursor.y - 1;
+            assert_band_tiles(&trace, top, 4, 2, cell);
+            terminal.assert_image(top, 4, 2);
+            assert_eq!(render.inline_raster_padding, padding);
+            assert_eq!(terminal.sixel_scrolls, 0);
+            let scrolls = terminal.lf_scrolls;
+            terminal.read(&frame(&mut render));
+            assert_eq!(terminal.lf_scrolls, scrolls);
+        }
+        let scrolls = terminal.lf_scrolls;
+        render.set_raster_output(RasterOutput::text_only());
+        let cleanup = terminal.read(&frame(&mut render));
+        assert!(tiles(&cleanup).is_empty());
+        assert!(cleanup.iter().any(|e| matches!(e, Event::ClearLine(_))));
+        assert!(terminal.pixels.iter().all(|pixel| !pixel));
+        assert_eq!(render.inline_raster_padding, 0);
+        assert_eq!(terminal.lf_scrolls, scrolls);
+        render.set_raster_output(band_config(10, 20));
+        let restored = terminal.read(&frame(&mut render));
+        assert_band_tiles(&restored, terminal.cursor.y - 1, 4, 2, terminal.cell);
+        terminal.assert_image(terminal.cursor.y - 1, 4, 2);
+        assert_eq!(terminal.sixel_scrolls, 0);
+    }
+
+    #[test]
+    fn band_bottom_viewport_shrink_clamps_content_padding_and_failed_checkpoint() {
+        for (height, padding) in [(20, 1), (18, 0), (1, 5), (2, 2)] {
+            for failed in [false, true] {
+                let config = band_config(10, height);
+                let cell = config.capabilities.cell_pixels.unwrap();
+                let mut render = inline_renderer(config, FaultWriter::default());
+                render.resize((4, 4).into());
+                render.thing.target = (4, 4).into();
+                render.set_inline_viewport_height(12);
+                let mut terminal = BandTerminal::new(12, 4, cell);
+                render.render().unwrap();
+                terminal.read(&std::mem::take(&mut render.out.bytes));
+                if failed {
+                    render.out.fail_flush = true;
+                    assert_eq!(
+                        render.render().unwrap_err().kind(),
+                        io::ErrorKind::BrokenPipe
+                    );
+                    terminal.read(&std::mem::take(&mut render.out.bytes));
+                    assert_eq!(render.inline_raster_checkpoint, Some(4 + padding));
+                }
+                let viewport = padding + 2;
+                terminal.resize(viewport, cell);
+                render.set_inline_viewport_height(viewport);
+                assert_eq!(render.inline_raster_checkpoint, failed.then_some(viewport));
+                assert!(render.previous_inline_height + render.inline_raster_padding <= viewport);
+                render.set_used_height(u16::MAX);
+                assert_eq!(render.used_height, 2);
+                render.resize((4, 2).into());
+                let scrolls = terminal.lf_scrolls;
+                let reserve_rows = (render.used_height + padding)
+                    .saturating_sub(render.previous_inline_height + render.inline_raster_padding);
+                render.render().unwrap();
+                let trace = terminal.read(&std::mem::take(&mut render.out.bytes));
+                assert_band_tiles(&trace, 0, 4, 2, cell);
+                terminal.assert_image(0, 4, 2);
+                assert_eq!(terminal.cursor, (0, 1).into());
+                assert_eq!(terminal.sixel_scrolls, 0);
+                assert_eq!(terminal.lf_scrolls, scrolls + usize::from(reserve_rows));
+                assert_eq!(render.inline_raster_checkpoint, None);
+                assert_eq!(render.inline_raster_padding, padding);
+                render.render().unwrap();
+                let repeat = terminal.read(&std::mem::take(&mut render.out.bytes));
+                assert!(tiles(&repeat).is_empty());
+                assert!(!repeat.iter().any(|e| matches!(e, Event::Newline(_))));
+            }
+        }
+    }
+
+    #[test]
+    fn band_bottom_clipped_guard_is_reserved_before_erasing_shell_rows() {
+        let config = band_config(10, 20);
+        let cell = config.capabilities.cell_pixels.unwrap();
+        let mut render = inline_renderer(config, Vec::new());
+        render.thing.target = (4, 2).into();
+        render.set_inline_viewport_height(12);
+        render.pos = (0, 11).into();
+        let mut terminal = BandTerminal::new(12, 4, cell);
+        let first = terminal.read(&frame(&mut render));
+        assert_band_tiles(&first, 9, 4, 2, cell);
+        terminal.assert_image(9, 4, 2);
+        assert_eq!(terminal.saved, Some((0, 11).into()));
+        assert_eq!(terminal.cursor, (0, 10).into());
+        assert_eq!(render.pos.y, 9);
+        assert_eq!(render.inline_raster_padding, 1);
+        assert_eq!(terminal.lf_scrolls, 2);
+
+        // Model shell glyph ink immediately above the owned rows. Unlike the
+        // general resize helper, clipping only the guard preserves all other
+        // pixels: otherwise an erroneous EL on shell row 8 would be invisible.
+        let stride = usize::from(cell.height) * terminal.columns;
+        let shell_ink: Vec<_> = (0..stride).map(|pixel| pixel % 3 == 0).collect();
+        terminal.pixels[8 * stride..9 * stride].copy_from_slice(&shell_ink);
+        terminal.rows = 11;
+        terminal.pixels.truncate(11 * stride);
+        terminal.saved = terminal.saved.map(|p| (p.x, p.y.min(10)).into());
+        assert_eq!(terminal.cursor, (0, 10).into());
+        render.set_inline_viewport_height(11);
+
+        let scrolls = terminal.lf_scrolls;
+        let trace = terminal.read(&frame(&mut render));
+
+        assert_eq!(
+            terminal.lf_scrolls,
+            scrolls + 1,
+            "a clipped guard needs LF, not clamped CNL"
+        );
+        assert_eq!(
+            &trace[..2],
+            &[Event::Newline((0, 10).into()), Event::Save((0, 10).into())],
+            "scroll before saving the anchor or touching the old shell row"
+        );
+        assert_eq!(
+            trace
+                .iter()
+                .filter_map(|event| match event {
+                    Event::ClearLine(position) => Some(*position),
+                    _ => None,
+                })
+                .collect::<Vec<_>>(),
+            [(0, 8).into(), (0, 9).into(), (0, 10).into()]
+        );
+        let last_clear = trace
+            .iter()
+            .rposition(|e| matches!(e, Event::ClearLine(_)))
+            .unwrap();
+        assert!(!trace[..last_clear]
+            .iter()
+            .any(|e| matches!(e, Event::Print(..) | Event::Tile(..))));
+        assert_band_tiles(&trace, 8, 4, 2, cell);
+        assert_eq!(
+            &terminal.pixels[7 * stride..8 * stride],
+            shell_ink.as_slice(),
+            "LF must move the original shell row 8 to row 7 without erasing it"
+        );
+        assert!(trace.iter().all(|event| match event {
+            Event::ClearLine(p) | Event::Print(p, _) | Event::Tile(p, _) => (8..=10).contains(&p.y),
+            _ => true,
+        }));
+        for (index, painted) in terminal.pixels.iter().enumerate() {
+            let row = index / stride;
+            let expected = match row {
+                7 => shell_ink[index % stride],
+                8 | 9 => true,
+                _ => false,
+            };
+            assert_eq!(
+                *painted, expected,
+                "incorrect ink after clipping at pixel {index}"
+            );
+        }
+        assert_eq!(terminal.cursor, (0, 9).into());
+        assert_eq!(terminal.sixel_scrolls, 0);
+        assert_eq!(render.pos.y, 8);
+        assert_eq!(render.inline_raster_padding, 1);
+        let repeat = terminal.read(&frame(&mut render));
+        assert!(!repeat
+            .iter()
+            .any(|e| matches!(e, Event::Newline(_) | Event::ClearLine(_) | Event::Tile(..))));
+        assert_eq!(terminal.lf_scrolls, scrolls + 1);
+        assert_eq!(
+            &terminal.pixels[7 * stride..8 * stride],
+            shell_ink.as_slice()
+        );
+    }
+
+    #[test]
+    fn band_bottom_failed_growth_keeps_scrolled_origin_on_smaller_retry() {
+        let config = band_config(10, 20);
+        let cell = config.capabilities.cell_pixels.unwrap();
+        let mut render = inline_renderer(config, FaultWriter::default());
+        render.resize((4, 6).into());
+        render.set_used_height(2);
+        render.thing.target = (4, 6).into();
+        render.set_inline_viewport_height(10);
+        render.pos = (0, 9).into();
+        let mut terminal = BandTerminal::new(10, 4, cell);
+        render.render().unwrap();
+        let first = terminal.read(&std::mem::take(&mut render.out.bytes));
+        assert_band_tiles(&first, 7, 4, 2, cell);
+        terminal.assert_image(7, 4, 2);
+        assert_eq!(terminal.cursor, (0, 8).into());
+        assert_eq!(render.pos.y, 7);
+        assert_eq!(render.inline_raster_padding, 1);
+        let scrolls = terminal.lf_scrolls;
+
+        render.set_used_height(6);
+        render.out.fail_flush = true;
+        assert_eq!(
+            render.render().unwrap_err().kind(),
+            io::ErrorKind::BrokenPipe
+        );
+        let failed = terminal.read(&std::mem::take(&mut render.out.bytes));
+
+        assert_eq!(terminal.lf_scrolls, scrolls + 4);
+        assert_eq!(
+            failed
+                .iter()
+                .filter(|e| matches!(e, Event::Newline(_)))
+                .count(),
+            4
+        );
+        // The existing two rows scroll from 7/8 to 3/4; only the four newly
+        // exposed rows need tile output when the source is unchanged.
+        assert_band_tiles(&failed, 5, 4, 4, cell);
+        terminal.assert_image(3, 4, 6);
+        assert_eq!(
+            terminal.cursor,
+            (0, 9).into(),
+            "failure restores the full-extent checkpoint"
+        );
+        assert_eq!(render.inline_raster_checkpoint, Some(7));
+        assert_eq!(render.previous_inline_height, 7);
+        assert_eq!(render.inline_raster_padding, 0);
+        assert_eq!(
+            render.pos.y, 3,
+            "successful reservation LFs must update origin even when flush fails"
+        );
+
+        render.set_used_height(2);
+        render.render().unwrap();
+        let retry = terminal.read(&std::mem::take(&mut render.out.bytes));
+        assert_band_tiles(&retry, 3, 4, 2, cell);
+        terminal.assert_image(3, 4, 2);
+        assert!(!retry.iter().any(|e| matches!(e, Event::Newline(_))));
+        assert_eq!(terminal.lf_scrolls, scrolls + 4);
+        assert_eq!(terminal.sixel_scrolls, 0);
+        assert_eq!(terminal.cursor, (0, 4).into());
+        assert_eq!(render.inline_raster_checkpoint, None);
+        assert_eq!(render.previous_inline_height, 2);
+        assert_eq!(render.inline_raster_padding, 1);
+        assert_eq!(render.pos.y, 3);
+
+        // Event-loop alignment only lowers origin to the viewport limit. It
+        // cannot recover the four scrolled rows from the smaller retry's size.
+        let max_origin = terminal.rows.saturating_sub(
+            render
+                .inline_used_height()
+                .saturating_add(render.inline_bottom_padding()),
+        );
+        assert_eq!(max_origin, 7);
+        render.set_inline_origin_y(render.inline_origin().y.min(max_origin));
+        assert_eq!(
+            render.inline_origin().y,
+            3,
+            "alignment must not revert origin to 7"
+        );
+        render.render().unwrap();
+        let repeat = terminal.read(&std::mem::take(&mut render.out.bytes));
+        assert!(tiles(&repeat).is_empty());
+        assert!(!repeat.iter().any(|e| matches!(e, Event::Newline(_))));
+        assert_eq!(terminal.lf_scrolls, scrolls + 4);
+        assert_eq!(render.pos.y, 3);
+        terminal.assert_image(3, 4, 2);
+    }
+
+    #[test]
+    fn band_bottom_partial_dcs_and_flush_failure_retry_reuse_full_extent() {
+        for (height, padding) in [(20, 1), (18, 0), (1, 5), (2, 2)] {
+            for failure in 0..3 {
+                let config = band_config(10, height);
+                let cell = config.capabilities.cell_pixels.unwrap();
+                let mut render = inline_renderer(config, FaultWriter::default());
+                render.thing.target = (4, 2).into();
+                render.set_inline_viewport_height(10);
+                let mut probe = render.clone();
+                probe.render().unwrap();
+                // Fail near the end of a tile, after its last band has executed.
+                let end = probe
+                    .out
+                    .bytes
+                    .windows(2)
+                    .rposition(|b| b == b"\x1b\\")
+                    .unwrap();
+                if failure < 2 {
+                    render.out.remaining = Some(end);
+                    render.out.persistent = failure == 1;
+                } else {
+                    render.out.fail_flush = true;
+                }
+                let mut terminal = BandTerminal::new(10, 4, cell);
+                assert_eq!(
+                    render.render().unwrap_err().kind(),
+                    io::ErrorKind::BrokenPipe
+                );
+                assert_eq!(render.inline_raster_checkpoint, Some(2 + padding));
+                assert_eq!(render.previous_inline_height, 2 + padding);
+                assert_eq!(render.inline_raster_padding, 0);
+                // Keep a persistent incomplete DCS together with the retry's CAN.
+                let failed_len = render.out.bytes.len();
+                render.out.remaining = None;
+                render.render().unwrap();
+                assert!(render.out.bytes[failed_len..].starts_with(b"\x18\x1b\\"));
+                assert!(!render.out.bytes[failed_len..].contains(&b'\n'));
+                let trace = terminal.read(&std::mem::take(&mut render.out.bytes));
+                let save = trace
+                    .iter()
+                    .rposition(|e| matches!(e, Event::Save(_)))
+                    .unwrap();
+                assert_band_tiles(&trace[save..], 8 - padding, 4, 2, cell);
+                terminal.assert_image(8 - padding, 4, 2);
+                assert_eq!(terminal.sixel_scrolls, 0);
+                assert_eq!(terminal.lf_scrolls, usize::from(1 + padding));
+                assert_eq!(terminal.cursor, (0, 9 - padding).into());
+                assert_eq!(render.inline_raster_checkpoint, None);
+                assert_eq!(render.inline_raster_padding, padding);
+                render.render().unwrap();
+                let repeat = terminal.read(&std::mem::take(&mut render.out.bytes));
+                assert!(tiles(&repeat).is_empty());
+                assert!(!repeat.iter().any(|e| matches!(e, Event::Newline(_))));
+                assert_eq!(terminal.sixel_scrolls, 0);
+            }
+        }
+    }
+
+    // Rows above 5 and below the owned extent represent surrounding shell text.
+    // Track the saved cursor across frames, just as a real terminal does.
+    struct InlineTerminal {
+        cursor: Position,
+        saved: Option<Position>,
+    }
+
+    impl InlineTerminal {
+        fn new() -> Self {
+            Self {
+                cursor: (7, 5).into(),
+                saved: None,
+            }
+        }
+
+        fn read(&mut self, bytes: &[u8], extent: u16) -> Vec<Event> {
+            let trace = events_at(bytes, &mut self.cursor, &mut self.saved, true);
+            for event in &trace {
+                if let Event::Print(position, _)
+                | Event::Tile(position, _)
+                | Event::ClearLine(position) = event
+                {
+                    assert!(
+                        (5..5 + extent).contains(&position.y),
+                        "must not overwrite/erase surrounding shell text: {event:?}"
+                    );
+                }
+            }
+            trace
+        }
+    }
+
+    fn assert_inline_clear(trace: &[Event], extent: u16) {
+        let cleared: Vec<_> = trace
+            .iter()
+            .filter_map(|event| match event {
+                Event::ClearLine(position) => Some(*position),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            cleared,
+            (5..5 + extent)
+                .map(|y| (0, y).into())
+                .collect::<Vec<Position>>()
+        );
+        let last_clear = trace
+            .iter()
+            .rposition(|event| matches!(event, Event::ClearLine(_)))
+            .unwrap();
+        assert!(
+            !trace[..last_clear]
+                .iter()
+                .any(|event| matches!(event, Event::Print(..) | Event::Tile(..))),
+            "clear every owned row before repainting text or graphics"
+        );
+    }
+
+    fn assert_inline_repaint(trace: &[Event], width: u16, height: u16) {
+        for y in 5..5 + height {
+            for x in 0..width {
+                assert!(trace.iter().any(|event| matches!(event,
+                    Event::Print(position, _) | Event::Tile(position, _) if *position == Position::from((x, y)))),
+                    "missing repaint at ({x}, {y})");
+            }
+        }
+    }
+
+    #[test]
+    fn inline_parser_keeps_save_for_repeated_restores_and_tracks_relative_controls() {
+        let mut terminal = InlineTerminal::new();
+        let trace = terminal.read(b"\r\n\x1b7\x1b[3Gx\x1b8\x1b[1F\x1b[2K\x1b8\x1b[1E.\x1b8", 3);
+        assert_eq!(
+            trace,
+            [
+                Event::Newline((0, 6).into()),
+                Event::Save((0, 6).into()),
+                Event::Print((2, 6).into(), 'x'),
+                Event::Restore((0, 6).into()),
+                Event::ClearLine((0, 5).into()),
+                Event::Restore((0, 6).into()),
+                Event::Print((0, 7).into(), '.'),
+                Event::Restore((0, 6).into()),
+            ]
+        );
+        assert_eq!(terminal.cursor, (0, 6).into());
+        assert_eq!(terminal.saved, Some((0, 6).into()));
+    }
+
+    #[test]
+    fn inline_native_reserves_before_save_ignores_absolute_origin_and_caches_repeated_frames() {
+        for policy in [RasterPolicy::Auto, RasterPolicy::RequireSixel] {
+            let mut render = inline_renderer(inline_verified(policy), Vec::new());
+            // An absolute origin would also overflow the presenter's coordinate checks.
+            render.pos = (u16::MAX, u16::MAX).into();
+            let mut terminal = InlineTerminal::new();
+            let bytes = frame(&mut render);
+            assert_synchronized(&bytes);
+            let trace = terminal.read(&bytes, 2);
+            assert_eq!(
+                &trace[..2],
+                &[Event::Newline((0, 6).into()), Event::Save((0, 6).into())]
+            );
+            assert_eq!(
+                trace
+                    .iter()
+                    .filter(|event| matches!(event, Event::Save(_)))
+                    .count(),
+                1
+            );
+            assert_eq!(
+                tiles(&trace).iter().map(|tile| tile.0).collect::<Vec<_>>(),
+                [(0, 5).into(), (1, 5).into()]
+            );
+            assert_inline_repaint(&trace, 4, 2);
+            assert_print(&trace, (3, 6), '.');
+            assert_eq!(trace.last(), Some(&Event::Restore((0, 6).into())));
+            assert_eq!(terminal.cursor, (0, 6).into());
+            assert_eq!(render.previous_inline_height, 2);
+            assert_eq!(render.inline_raster_checkpoint, None);
+            let stats = render.raster_stats();
+            assert_eq!((stats.encodes, stats.tiles_sent), (2, 2));
+            render.pos = (123, 456).into();
+            for _ in 0..3 {
+                let trace = terminal.read(&frame(&mut render), 2);
+                assert!(!trace.iter().any(|event| matches!(
+                    event,
+                    Event::Tile(..) | Event::Print(..) | Event::ClearLine(_) | Event::Newline(_)
+                )));
+                assert_eq!(terminal.cursor, (0, 6).into());
+                assert_eq!(render.raster_stats(), stats);
+            }
+        }
+    }
+
+    #[test]
+    fn inline_move_hide_show_clears_only_owned_rows_and_reuses_tiles() {
+        let mut render = inline_renderer(inline_verified(RasterPolicy::Auto), Vec::new());
+        let mut terminal = InlineTerminal::new();
+        let first = terminal.read(&frame(&mut render), 2);
+        render.thing.origin = (1, 1).into();
+        let moved = terminal.read(&frame(&mut render), 2);
+        assert_inline_clear(&moved, 2);
+        assert_inline_repaint(&moved, 4, 2);
+        assert_print(&moved, (0, 5), '.');
+        assert_eq!(
+            tiles(&moved),
+            [
+                ((1, 6).into(), tiles(&first)[0].1),
+                ((2, 6).into(), tiles(&first)[1].1)
+            ]
+        );
+        render.thing.visible = false;
+        let hidden = terminal.read(&frame(&mut render), 2);
+        assert_inline_clear(&hidden, 2);
+        assert_inline_repaint(&hidden, 4, 2);
+        assert!(tiles(&hidden).is_empty());
+        assert_print(&hidden, (1, 6), '.');
+        assert_print(&hidden, (2, 6), '.');
+        render.thing.visible = true;
+        let shown = terminal.read(&frame(&mut render), 2);
+        assert_eq!(tiles(&shown), tiles(&moved));
+        assert!(!shown
+            .iter()
+            .any(|event| matches!(event, Event::ClearLine(_) | Event::Newline(_))));
+        assert_eq!(render.raster_stats().encodes, 2);
+        assert_eq!(render.raster_stats().tiles_sent, 6);
+        assert_eq!(terminal.cursor, (0, 6).into());
+    }
+
+    #[test]
+    fn inline_occlusion_and_text_only_cleanup_repaint_all_survivors() {
+        let mut render = inline_renderer(inline_verified(RasterPolicy::Auto), Vec::new());
+        let mut terminal = InlineTerminal::new();
+        let first = terminal.read(&frame(&mut render), 2);
+        render.thing.text.push(((3, 1).into(), '!'));
+        let text_diff = terminal.read(&frame(&mut render), 2);
+        assert_print(&text_diff, (3, 6), '!');
+        assert!(tiles(&text_diff).is_empty());
+        assert!(!text_diff
+            .iter()
+            .any(|event| matches!(event, Event::ClearLine(_))));
+        render.thing.text.push(((0, 0).into(), '#'));
+        let covered = terminal.read(&frame(&mut render), 2);
+        assert_inline_clear(&covered, 2);
+        assert_inline_repaint(&covered, 4, 2);
+        assert_print(&covered, (0, 5), '#');
+        assert_eq!(tiles(&covered), [((1, 5).into(), tiles(&first)[1].1)]);
+        render.thing.text.pop();
+        let restored = terminal.read(&frame(&mut render), 2);
+        assert_eq!(tiles(&restored), [((0, 5).into(), tiles(&first)[0].1)]);
+        assert!(!restored
+            .iter()
+            .any(|event| matches!(event, Event::ClearLine(_) | Event::Print(_, '▀'))));
+        render.set_raster_output(RasterOutput::text_only());
+        let bytes = frame(&mut render);
+        assert_synchronized(&bytes);
+        let text = terminal.read(&bytes, 2);
+        assert_inline_clear(&text, 2);
+        assert_inline_repaint(&text, 4, 2);
+        assert!(tiles(&text).is_empty());
+        assert_print(&text, (0, 5), '▀');
+        assert_print(&text, (1, 5), '▀');
+        assert_print(&text, (3, 6), '!');
+        render.set_raster_output(inline_verified(RasterPolicy::Auto));
+        let restored = terminal.read(&frame(&mut render), 2);
+        assert_eq!(tiles(&restored), tiles(&first));
+        assert_eq!(render.raster_stats().encodes, 2);
+        assert_eq!(terminal.cursor, (0, 6).into());
+    }
+
+    #[test]
+    fn inline_used_height_and_resize_shrink_then_grow_from_the_new_bottom() {
+        let mut render = inline_renderer(inline_verified(RasterPolicy::Auto), Vec::new());
+        render.thing.target = (2, 2).into();
+        let mut terminal = InlineTerminal::new();
+        let first = terminal.read(&frame(&mut render), 2);
+        assert_eq!(tiles(&first).len(), 4);
+        render.used_height = 1;
+        let shrunk = terminal.read(&frame(&mut render), 2);
+        assert_inline_clear(&shrunk, 2);
+        assert_inline_repaint(&shrunk, 4, 1);
+        assert_eq!(tiles(&shrunk), tiles(&first)[..2]);
+        assert_eq!(terminal.cursor, (0, 5).into());
+        assert_eq!(render.previous_inline_height, 1);
+        render.used_height = 2;
+        let grown = terminal.read(&frame(&mut render), 2);
+        assert_eq!(
+            &grown[..2],
+            &[Event::Newline((0, 6).into()), Event::Save((0, 6).into())]
+        );
+        assert_eq!(tiles(&grown), tiles(&first)[2..]);
+        assert_eq!(terminal.cursor, (0, 6).into());
+        assert_eq!(render.previous_inline_height, 2);
+        render.resize((1, 1).into());
+        let cropped = terminal.read(&frame(&mut render), 2);
+        assert_inline_clear(&cropped, 2);
+        assert_inline_repaint(&cropped, 1, 1);
+        assert_eq!(tiles(&cropped), tiles(&first)[..1]);
+        assert_eq!(terminal.cursor, (0, 5).into());
+        render.resize((4, 2).into());
+        let grown = terminal.read(&frame(&mut render), 2);
+        assert_eq!(grown.first(), Some(&Event::Newline((0, 6).into())));
+        assert_inline_clear(&grown, 2);
+        assert_inline_repaint(&grown, 4, 2);
+        assert_eq!(tiles(&grown), tiles(&first));
+        assert_eq!(terminal.cursor, (0, 6).into());
+        assert_eq!(render.raster_stats().encodes, 4);
+        assert_eq!(render.inline_raster_checkpoint, None);
+    }
+
+    #[test]
+    fn inline_height_shrink_repaints_even_when_first_row_raster_is_unchanged() {
+        let mut render = inline_renderer(inline_verified(RasterPolicy::Auto), Vec::new());
+        let mut terminal = InlineTerminal::new();
+        let first = terminal.read(&frame(&mut render), 2);
+        assert_inline_clear(&first, 2);
+        let before = render.raster_stats();
+        let raster = render.buffer.previous_raster_at((0, 0).into()).cloned();
+        assert!(raster.is_some());
+        assert!(render.buffer.previous_raster_at((0, 1).into()).is_none());
+
+        render.set_used_height(1);
+        assert!(
+            render.buffer.previous().is_some(),
+            "exercise shrink without invalidating diff"
+        );
+        let shrunk = terminal.read(&frame(&mut render), 2);
+        assert_inline_clear(&shrunk, 2);
+        assert_inline_repaint(&shrunk, 4, 1);
+        assert_eq!(tiles(&shrunk), tiles(&first));
+        assert_eq!(
+            render.buffer.previous_raster_at((0, 0).into()),
+            raster.as_ref()
+        );
+        assert!(!shrunk.iter().any(|event| matches!(event,
+            Event::Print(position, _) | Event::Tile(position, _) if position.y != 5)));
+        assert_eq!(terminal.cursor, (0, 5).into());
+        assert_eq!(render.previous_inline_height, 1);
+        assert_eq!(render.inline_raster_checkpoint, None);
+        let after = render.raster_stats();
+        assert_eq!(after.encodes, before.encodes);
+        assert_eq!(after.cache_hits, before.cache_hits + 2);
+        assert_eq!(after.tiles_sent, before.tiles_sent + 2);
+    }
+
+    #[test]
+    fn inline_blank_growth_clears_physical_text_and_paints_spaces_despite_equal_diff() {
+        let mut render = inline_renderer(inline_verified(RasterPolicy::Auto), Vec::new());
+        render.thing.underlay = ' ';
+        render.set_used_height(1);
+        let mut terminal = InlineTerminal::new();
+        let first = terminal.read(&frame(&mut render), 1);
+        assert_inline_clear(&first, 1);
+        assert_eq!(render.buffer.size(), (4, 2).into());
+        let previous_row = render.buffer.previous().unwrap()[4..].to_vec();
+        assert!(previous_row
+            .iter()
+            .all(|cell| cell.content == Stylized::plain(' ')));
+        let before = render.raster_stats();
+
+        // LF moves into this existing physical row; it does not erase its tail.
+        let mut physical_row = ['o', 'l', 'd', ' ', 't', 'e', 'x', 't'];
+        render.set_used_height(2);
+        let grown = terminal.read(&frame(&mut render), 2);
+        assert_eq!(
+            &grown[..2],
+            &[Event::Newline((0, 6).into()), Event::Save((0, 6).into())]
+        );
+        let paint: Vec<_> = grown
+            .iter()
+            .filter(|event| {
+                matches!(
+                    event,
+                    Event::ClearLine(_) | Event::Print(..) | Event::Tile(..)
+                )
+            })
+            .collect();
+        let mut expected = vec![Event::ClearLine((0, 6).into())];
+        expected.extend((0..4).map(|x| Event::Print((x, 6).into(), ' ')));
+        assert_eq!(
+            paint,
+            expected.iter().collect::<Vec<_>>(),
+            "only initialize the new row, clearing before painting all four spaces"
+        );
+        for event in &grown {
+            match event {
+                Event::ClearLine(position) if position.y == 6 => physical_row.fill(' '),
+                Event::Print(position, character) if position.y == 6 => {
+                    physical_row[position.x as usize] = *character;
+                }
+                _ => {}
+            }
+        }
+        assert_eq!(
+            physical_row, [' '; 8],
+            "EL 2 must also erase beyond the buffer width"
+        );
+        assert_eq!(render.buffer.previous().unwrap()[4..], previous_row);
+        assert!(tiles(&grown).is_empty());
+        assert_eq!(render.raster_stats(), before);
+        assert_eq!(terminal.cursor, (0, 6).into());
+        assert_eq!(render.previous_inline_height, 2);
+    }
+
+    #[test]
+    fn inline_viewport_shrink_clamps_anchor_and_repaints_distinct_physical_rows() {
+        let assert_rows = |trace: &[Event], height: u16| {
+            let mut cleared = Vec::new();
+            let mut painted = Vec::new();
+            for event in trace {
+                match event {
+                    Event::ClearLine(position) => cleared.push((position.x, position.y)),
+                    Event::Print(position, _) | Event::Tile(position, _) => {
+                        painted.push((position.y, position.x));
+                    }
+                    Event::Save(position) | Event::Restore(position) | Event::Newline(position) => {
+                        assert!(
+                            position.y < height,
+                            "cursor outside physical viewport: {event:?}"
+                        );
+                    }
+                    Event::Clear => panic!("inline output must not clear the screen"),
+                }
+            }
+            assert_eq!(cleared, (0..height).map(|y| (0, y)).collect::<Vec<_>>());
+            painted.sort_unstable();
+            assert_eq!(
+                painted,
+                (0..height)
+                    .flat_map(|y| (0..4).map(move |x| (y, x)))
+                    .collect::<Vec<_>>(),
+                "paint each cell exactly once, with no rows collapsed onto the top row"
+            );
+        };
+        for failed_frame in [false, true] {
+            let mut render =
+                inline_renderer(inline_verified(RasterPolicy::Auto), FaultWriter::default());
+            render.resize((4, 4).into());
+            render.set_inline_viewport_height(4);
+            render.thing.target = (2, 2).into();
+            let mut cursor = Position::default();
+            let mut saved = None;
+            assert_eq!(render.pos, Position::default());
+            render.render().unwrap();
+            let first = events_at(&render.out.bytes, &mut cursor, &mut saved, true);
+            assert_rows(&first, 4);
+            assert_eq!(cursor, (0, 3).into());
+            render.out.bytes.clear();
+            if failed_frame {
+                render.out.fail_flush = true;
+                assert_eq!(
+                    render.render().unwrap_err().kind(),
+                    io::ErrorKind::BrokenPipe
+                );
+                events_at(&render.out.bytes, &mut cursor, &mut saved, true);
+                assert_eq!(render.inline_raster_checkpoint, Some(4));
+                render.out.bytes.clear();
+            } else {
+                assert!(render.buffer.previous().is_some());
+            }
+
+            // A physical resize clamps the terminal cursor, unlike a UI-only shrink.
+            cursor.y = cursor.y.min(1);
+            saved = saved.map(|position| (position.x, position.y.min(1)).into());
+            render.set_inline_viewport_height(2);
+            assert_eq!(render.previous_inline_height, 2);
+            assert_eq!(render.inline_raster_checkpoint, failed_frame.then_some(2));
+            assert!(
+                render.buffer.previous().is_none(),
+                "setter invalidates diff before resize"
+            );
+            assert_eq!(render.buffer.size(), (4, 4).into());
+            render.set_used_height(u16::MAX);
+            assert_eq!(
+                render.used_height, 2,
+                "viewport, not capacity, limits used height"
+            );
+            render.resize((4, 2).into());
+            render.render().unwrap();
+            let shrunk = events_at(&render.out.bytes, &mut cursor, &mut saved, true);
+            assert_rows(&shrunk, 2);
+            assert_eq!(tiles(&shrunk), tiles(&first));
+            assert_eq!(cursor, (0, 1).into());
+            assert_eq!(render.previous_inline_height, 2);
+            assert_eq!(render.inline_raster_checkpoint, None);
+            assert_eq!(render.raster_stats().encodes, 4);
+
+            // A reported zero-row viewport is normalized to one addressable row.
+            cursor.y = 0;
+            saved = saved.map(|position| (position.x, 0).into());
+            render.set_inline_viewport_height(0);
+            render.set_used_height(u16::MAX);
+            assert_eq!(render.used_height, 1);
+            render.out.bytes.clear();
+            render.render().unwrap();
+            assert_rows(
+                &events_at(&render.out.bytes, &mut cursor, &mut saved, true),
+                1,
+            );
+            render.set_used_height(0);
+            render.out.bytes.clear();
+            render.render().unwrap();
+            let empty = events_at(&render.out.bytes, &mut cursor, &mut saved, true);
+            assert_eq!(
+                empty
+                    .iter()
+                    .filter(|event| matches!(event, Event::ClearLine(_)))
+                    .collect::<Vec<_>>(),
+                [&Event::ClearLine((0, 0).into())]
+            );
+            assert!(tiles(&empty).is_empty());
+            assert_eq!(cursor, (0, 0).into());
+            assert_eq!(render.previous_inline_height, 0);
+            render.set_inline_viewport_height(2);
+            render.set_used_height(u16::MAX);
+            assert_eq!(render.used_height, 2);
+            render.out.bytes.clear();
+            render.render().unwrap();
+            let restored = events_at(&render.out.bytes, &mut cursor, &mut saved, true);
+            assert_rows(&restored, 2);
+            assert_eq!(tiles(&restored), tiles(&first));
+            assert_eq!(cursor, (0, 1).into());
+            assert_eq!(render.raster_stats().encodes, 4);
+        }
+    }
+
+    #[test]
+    fn inline_io_failures_preserve_bottom_checkpoint_and_retry_locally_repaints() {
+        for shrink in [false, true] {
+            for failure in 0..3 {
+                let mut render =
+                    inline_renderer(inline_verified(RasterPolicy::Auto), FaultWriter::default());
+                let mut terminal = InlineTerminal::new();
+                if shrink {
+                    render.thing.target = (2, 2).into();
+                    render.render().unwrap();
+                    terminal.read(&render.out.bytes, 2);
+                    render.out.bytes.clear();
+                    render.used_height = 1;
+                }
+                let before = render.raster_stats();
+                let mut probe = render.clone();
+                probe.render().unwrap();
+                let dcs = probe
+                    .out
+                    .bytes
+                    .windows(2)
+                    .position(|bytes| bytes == b"\x1bP")
+                    .unwrap();
+                match failure {
+                    0 => render.out.remaining = Some(dcs + 25),
+                    1 => {
+                        render.out.remaining = Some(dcs + 25);
+                        render.out.persistent = true;
+                    }
+                    _ => render.out.fail_flush = true,
+                }
+                assert_eq!(
+                    render.render().unwrap_err().kind(),
+                    io::ErrorKind::BrokenPipe
+                );
+                assert_no_raster_commit(&render, before);
+                assert_eq!(render.inline_raster_checkpoint, Some(2));
+                assert_eq!(render.previous_inline_height, 2);
+                if failure != 1 {
+                    assert!(contains(&render.out.bytes, b"\x18\x1b\\\x1b8\x1b[?2026l"));
+                    terminal.read(&render.out.bytes, 2);
+                    assert_eq!(
+                        terminal.cursor,
+                        (0, 6).into(),
+                        "error restores the old bottom, even after shrink"
+                    );
+                    render.out.bytes.clear();
+                } else {
+                    assert!(!contains(&render.out.bytes[dcs..], b"\x1b\\"));
+                }
+                let failed_stats = render.raster_stats();
+                let retry_start = render.out.bytes.len();
+                render.out.remaining = None;
+                render.render().unwrap();
+                let retry_bytes = &render.out.bytes[retry_start..];
+                assert!(
+                    retry_bytes.starts_with(b"\x18\x1b\\\x1b[?2026l\x1b8"),
+                    "cancel DCS and restore before any clear/repaint"
+                );
+                // For persistent failures parse the failed prefix together with retry,
+                // so an uncancelled DCS cannot hide the retry's erase commands.
+                let trace = terminal.read(&render.out.bytes, 2);
+                let retry = if failure == 1 {
+                    let save = trace
+                        .iter()
+                        .rposition(|event| matches!(event, Event::Save(_)))
+                        .unwrap();
+                    &trace[save..]
+                } else {
+                    trace.as_slice()
+                };
+                assert_inline_clear(retry, 2);
+                assert_inline_repaint(retry, 4, if shrink { 1 } else { 2 });
+                assert_eq!(tiles(retry).len(), 2);
+                assert_eq!(terminal.cursor, (0, if shrink { 5 } else { 6 }).into());
+                assert_eq!(render.inline_raster_checkpoint, None);
+                assert_eq!(render.previous_inline_height, if shrink { 1 } else { 2 });
+                assert_eq!(render.raster_stats().encodes, failed_stats.encodes);
+                assert_eq!(
+                    render.raster_stats().cache_hits,
+                    failed_stats.cache_hits + 2
+                );
+                assert_eq!(render.raster_stats().tiles_sent, before.tiles_sent + 2);
+                let stats = render.raster_stats();
+                render.out.bytes.clear();
+                render.render().unwrap();
+                assert!(tiles(&terminal.read(&render.out.bytes, 2)).is_empty());
+                assert_eq!(render.raster_stats(), stats);
+            }
+        }
     }
 
     #[derive(Clone, Default)]

@@ -2984,6 +2984,7 @@ mod tests {
                 capabilities: RasterCapabilities {
                     sixel: true,
                     reliable_erase: true,
+                    reliable_inline_erase: false,
                     no_scroll: true,
                     cell_pixels: Some(pixels),
                 },

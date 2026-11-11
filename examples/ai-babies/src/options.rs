@@ -136,9 +136,11 @@ impl Options {
         Ok(RasterOutput {
             policy: RasterPolicy::RequireSixel,
             capabilities: RasterCapabilities {
-                // --sixel is the user's explicit assertion, not capability detection.
+                // --sixel asserts local EL 2 graphics erasure and images following
+                // text scrolling on the normal screen; this is not detection.
                 sixel: true,
-                reliable_erase: true,
+                reliable_erase: false,
+                reliable_inline_erase: true,
                 no_scroll: true,
                 cell_pixels: Some(pixels),
             },

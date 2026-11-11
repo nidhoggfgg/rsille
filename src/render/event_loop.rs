@@ -251,6 +251,7 @@ where
         if self.inline_mode {
             if let Ok((width, height)) = terminal_size() {
                 self.terminal_size = (width, height).into();
+                self.render.set_inline_viewport_height(height);
             }
 
             match terminal_cursor_position() {
@@ -344,6 +345,7 @@ where
                 if let Event::Resize(width, height) = event {
                     self.terminal_size = (*width, *height).into();
                     if self.inline_mode {
+                        self.render.set_inline_viewport_height(*height);
                         self.render
                             .resize((*width, self.inline_buffer_height(*height)).into());
                     } else {
@@ -435,11 +437,10 @@ where
         }
 
         let used_height = self.render.inline_used_height();
-        let bottom_padding = if self.inline_mouse_mode.force_follows_viewport() {
-            1
-        } else {
-            0
-        };
+        let bottom_padding = self
+            .render
+            .inline_bottom_padding()
+            .max(u16::from(self.inline_mouse_mode.force_follows_viewport()));
         let reserved_height = used_height.saturating_add(bottom_padding);
         let max_origin_y = self.terminal_size.height.saturating_sub(reserved_height);
 

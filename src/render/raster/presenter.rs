@@ -38,6 +38,7 @@ pub(in crate::render) struct RasterPresenter {
 pub(in crate::render) struct RasterPlan {
     pub native: bool,
     pub clear: bool,
+    pub inline_padding: u16,
     pub encoded: Vec<EncodedCell>,
     visible: Vec<VisibleCell>,
     metrics: Option<CellPixels>,
@@ -54,11 +55,21 @@ impl RasterPresenter {
         }
     }
 
+    pub fn inline_padding_rows(&self) -> u16 {
+        self.config
+            .resolve(true, false, self.alternate_screen, true)
+            .ok()
+            .flatten()
+            .map_or(0, CellPixels::inline_padding_rows)
+    }
+
     pub fn prepare(
         &mut self,
         buffer: &Buffer,
         origin: Position,
         inline: bool,
+        append_newline: bool,
+        inline_shrank: bool,
     ) -> io::Result<RasterPlan> {
         let mut metrics = self.config.resolve(
             buffer.has_raster(),
@@ -66,6 +77,15 @@ impl RasterPresenter {
             self.alternate_screen,
             inline,
         )?;
+        if metrics.is_some() && append_newline {
+            if self.config.policy == RasterPolicy::RequireSixel {
+                return Err(io::Error::new(
+                    io::ErrorKind::Unsupported,
+                    "native Sixel does not support appended-newline output",
+                ));
+            }
+            metrics = None;
+        }
         if let Some(pixels) = metrics {
             let count = buffer.raster_cells().count();
             let valid = count <= MAX_NATIVE_CELLS
@@ -103,7 +123,10 @@ impl RasterPresenter {
             }
             current.peek().is_none_or(|new| *new != old)
         });
+        // Shrinking can abandon text-only rows while all raster cells stay
+        // unchanged. Erase those rows and repaint surviving tiles as well.
         let clear = self.uncertain
+            || (inline_shrank && metrics.is_some())
             || (!self.visible.is_empty()
                 && (old_changed
                     || metrics != self.metrics
@@ -113,6 +136,11 @@ impl RasterPresenter {
         let mut plan = RasterPlan {
             native: metrics.is_some(),
             clear,
+            inline_padding: if inline {
+                metrics.map_or(0, CellPixels::inline_padding_rows)
+            } else {
+                0
+            },
             encoded: Vec::new(),
             visible,
             metrics,
@@ -139,6 +167,7 @@ impl RasterPresenter {
                         ));
                     }
                     plan.native = false;
+                    plan.inline_padding = 0;
                     plan.metrics = None;
                     plan.visible.clear();
                     plan.encoded.clear();
@@ -228,6 +257,7 @@ mod tests {
                 capabilities: RasterCapabilities {
                     sixel: true,
                     reliable_erase: true,
+                    reliable_inline_erase: false,
                     no_scroll: true,
                     cell_pixels: Some(CellPixels { width, height }),
                 },
@@ -242,7 +272,7 @@ mod tests {
             let buffer = frame(cells);
             for policy in [RasterPolicy::Auto, RasterPolicy::RequireSixel] {
                 let mut presenter = presenter(policy, pixel_width, pixel_height);
-                let plan = presenter.prepare(&buffer, Position::default(), false);
+                let plan = presenter.prepare(&buffer, Position::default(), false, false, false);
                 if policy == RasterPolicy::Auto {
                     let plan = plan.unwrap();
                     assert!(!plan.native);
@@ -259,7 +289,7 @@ mod tests {
     fn coordinate_overflow_falls_back_before_encoding() {
         let mut presenter = presenter(RasterPolicy::Auto, 8, 18);
         let plan = presenter
-            .prepare(&frame(2), (u16::MAX, 0).into(), false)
+            .prepare(&frame(2), (u16::MAX, 0).into(), false, false, false)
             .unwrap();
         assert!(!plan.native);
         assert_eq!(presenter.stats().encodes, 0);
@@ -269,13 +299,13 @@ mod tests {
     fn resource_limit_fallback_clears_previously_visible_graphics() {
         let mut presenter = presenter(RasterPolicy::Auto, 8, 18);
         let first = presenter
-            .prepare(&frame(1), Position::default(), false)
+            .prepare(&frame(1), Position::default(), false, false, false)
             .unwrap();
         assert!(first.native);
         presenter.begin(&first);
         presenter.commit(first);
         let plan = presenter
-            .prepare(&frame(4097), Position::default(), false)
+            .prepare(&frame(4097), Position::default(), false, false, false)
             .unwrap();
         assert!(!plan.native);
         assert!(plan.clear);

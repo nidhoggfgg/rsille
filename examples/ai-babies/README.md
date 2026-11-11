@@ -23,7 +23,8 @@ cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --character
 cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --character claude --height 24
 ```
 
-Default animated playback uses inline mode, True Color and 2 × 2 Quadrant encoding. The default
+All animation modes use inline output on the normal screen, without an alternate
+screen or mouse capture. Default playback uses True Color and 2 × 2 Quadrant encoding. The default
 height cap is 24 terminal rows; `--height ROWS` accepts only 24 or 32 and is limited by
 the actual terminal during playback. An 80 × 26 terminal is recommended, allowing room for the
 shell prompt. Transparent pixels use the terminal's default background.
@@ -44,13 +45,15 @@ and existing exports unchanged:
 
 ```bash
 cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --raster --background 181820
+cargo run --release --features sixel --manifest-path examples/ai-babies/Cargo.toml -- --sixel
 cargo run --release --features sixel --manifest-path examples/ai-babies/Cargo.toml -- --sixel --character claude
 cargo run --release --features sixel --manifest-path examples/ai-babies/Cargo.toml -- --sixel --cell-pixels 8x16
 ```
 
 - `--raster` selects `RasterCanvas` with an opaque HalfBlock inline preview.
-- `--sixel` requires `--features sixel` and uses the alternate screen, with no silent
-  fallback. Choose one rendering mode.
+- `--sixel` requires `--features sixel` and uses native inline output on the normal
+  screen, with no silent fallback. No additional `--inline` argument is needed.
+  Choose one rendering mode.
 - `--background RRGGBB` (optional leading `#`, quoted in shell commands) applies to
   either mode and defaults to black. RGBA is composited onto this opaque background;
   neither mode preserves terminal transparency.
@@ -61,9 +64,15 @@ cargo run --release --features sixel --manifest-path examples/ai-babies/Cargo.to
   measured override consistent with the terminal grid. Restart after font or DPI changes.
 
 `--sixel` is your assertion that the **whole terminal/multiplexer path** supports Sixel,
-stable palettes, ED2 graphics clearing, and non-scrolling positioned output including
-partial bands. There is no capability auto-detection; these are compatibility
-requirements that headless checks cannot verify. The current Sixel encoder uses a
+stable palettes, reliable row-local EL 2 graphics erasure without damaging other rows,
+graphics following text scrolling during row reservation, safe positioned Sixel
+output, and transparent partial-band padding that does not erase adjacent cells. It sets `reliable_inline_erase: true` and
+`reliable_erase: false`; alternate-screen ED 2 erasure is not required or asserted.
+Inline owns the full width of its occupied rows, not just the image columns.
+`no_scroll` requires Sixel emission itself not to scroll; inline reserves a bottom
+margin for the final band's padding rather than relying on transparency alone.
+Controlled text scrolling to reserve inline rows is permitted. There is no capability auto-detection; these are
+compatibility requirements that headless checks cannot verify. The current Sixel encoder uses a
 fixed RGB332 256-color palette: native output improves spatial resolution, but is
 not lossless 24-bit color.
 
@@ -71,7 +80,14 @@ Both modes use embedded PNG atlases with 320 × 320 frames for all three charact
 The existing packers generate them directly from the original 256 × 256 source cells:
 this is upscaling, not new native 320-pixel detail or enlargement of the old 128 × 64
 frames. The added `png` 0.18 decoder decodes and caches frames once at startup.
-`--height` still accepts 24/32 and caps rendering. Sixel centers a native area up to
+`--height` still accepts only 24/32 (default 24) and caps content height. Native inline
+content is also limited to the rows needed for the 320-pixel image and the terminal
+height remaining after blank guard rows are reserved. With enough space, actual
+10×20-pixel cells use **16 content rows + 1 blank guard row**, even with `--height 24`
+or `--height 32`; 8×18 cells need no extra guard row. For cell height `h`, the guard
+is `ceil(((6 - h % 6) % 6) / h)` rows (five at `h = 1`). After each successful frame,
+the cursor returns to the last content row, so an exit newline can use the guard.
+Sixel left-aligns a native area up to
 approximately 320 × 320 physical pixels; smaller terminals scale it to fit. HalfBlock
 is a cell-based preview, not native Sixel resolution.
 

@@ -47,7 +47,12 @@ cargo run --example sixel_windows -- --help
 ```
 
 在同一个 `window_host` 中用两个 `floating_window` 展示同一颗程序化带环行星，
-没有实时动画。拖动标题移动窗口，拖动底部手柄调整大小，点击置前。
+仅使用全屏，没有实时动画或 `--inline` 选项。inline Sixel 动画请使用
+[AI Babies](ai-babies/README.md#raster-and-sixel)：
+`cargo run --release --features sixel --manifest-path examples/ai-babies/Cargo.toml -- --sixel`，
+无需额外 `--inline` 参数，不启用备用屏幕或鼠标捕获。
+
+拖动标题移动窗口，拖动底部手柄调整大小，点击置前。
 `e` 循环切换 Canvas 的 Braille/HalfBlock/Quadrant；`r` 恢复初始窗口位置和大小；
 `q`/Esc 退出。建议使用 100×32 字符格，也支持更小终端及终端缩放。
 

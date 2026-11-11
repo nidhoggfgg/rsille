@@ -31,7 +31,7 @@ shared terminal probing remain in their respective layers.
 | `src/render/raster/output.rs` | `RasterOutput`, `RasterPolicy`, host-supplied `RasterCapabilities`, `CellPixels`, `RasterStats`; conservative policy resolution |
 | `src/render/raster/presenter.rs` | Per-renderer terminal-visible state, resource preflight, invalidation/erase plan, commit after successful flush |
 | `src/render/raster/sixel.rs` | Private, optional dependency-free RGB332 encoder and bounded encoded-tile LRU |
-| `src/render/render.rs` | Character diff, ED 2/full-redraw cleanup, cursor positioning and Sixel writes; `set_raster_output`, `raster_stats` |
+| `src/render/render.rs` | Character diff, fullscreen ED 2 or inline row-local EL 2 cleanup, cursor positioning and Sixel writes; `set_raster_output`, `raster_stats` |
 | `src/tui/runtime/core.rs` | `frame()` retains graphics and text; `frame_text_only()` makes an explicit character-only copy |
 
 The core model, widget, and text fallback do not require the `sixel` feature.
@@ -82,26 +82,47 @@ or transparent text-over-raster contract is provided.
    still displays that tile.
 
 Removing/changing old coverage or changing origin, size, metrics, or frame-history
-validity can require ED 2 and a full redraw. Merely adding disjoint coverage need
-not erase old tiles. The presenter preflights a plan before frame output and
+validity can require cleanup and a full redraw: ED 2 in fullscreen, or EL 2 only
+on the `max(old, new)` occupied extents (including guard rows) in inline mode.
+Inline owns the full width of those rows and must not clear unrelated rows. Merely adding disjoint coverage
+need not erase old tiles. The presenter preflights a plan before frame output and
 commits visible state only after flush succeeds. It marks native I/O uncertain
 before writing; recoverable tile-write failure attempts DCS termination and
 cursor/style restoration, and a subsequent frame clears uncertain coverage.
 This is best-effort error handling, not a guarantee that an unavailable terminal
 can be repaired.
 
-Native emission is alternate-screen-only, disallows appended newlines, and requires explicit `sixel`,
-`reliable_erase`, and `no_scroll` host assertions. ED 2 is relied on for graphics
-cleanup only under that contract; neither space overwrite nor EL is treated as a
-portable image deletion primitive. The terminal guard's ordinary alternate-screen
-entry clear is separate from the presenter's graphics invalidation logic. Exit
-uses the existing mode-restoration/alternate-screen lifecycle, not a universal
-Sixel image-delete protocol.
+Native emission requires explicit `sixel` and `no_scroll` host assertions and
+stored valid cell pixels. Fullscreen additionally requires the alternate screen
+and `reliable_erase`; inline instead requires `reliable_inline_erase`, without
+requiring either an alternate screen or `reliable_erase`. Native appended-newline
+output remains unsupported in both modes.
+
+`reliable_inline_erase` defaults to **false**. It asserts that normal-screen EL 2
+locally erases graphics without damaging other rows, and graphics move with text
+scrolling when reserving rows. Inline reserves content and blank guard rows before
+drawing images and uses relative cursor positioning. `SavePosition` anchors the
+bottom of the reserved extent, including guard rows; after a successful frame,
+the cursor returns to the last content row, allowing an exit newline to land in
+a guard row. Changed old graphics trigger EL 2 over only `max(old, new)` inline
+extents, including their guard rows, and a text/raster redraw, never ED 2.
+Row reservation may scroll text; `no_scroll` requires safe positioned output,
+transparent padding that does not erase adjacent cells, and stable palettes.
+Inline's bottom margin keeps the final band from extending past the scrolling
+boundary; fullscreen still requires safe output at the screen's last row.
+
+ED 2 and EL 2 are relied on only under their respective contracts; neither space
+overwrite nor line erasure is a portable image deletion primitive. The terminal
+guard's ordinary alternate-screen entry clear is separate from the presenter's
+graphics invalidation logic. Exit uses the existing mode-restoration lifecycle,
+not a universal Sixel image-delete protocol. Both screen modes still need
+real-terminal validation.
 
 ## Input and metric discovery
 
 There is **no DA or Sixel capability negotiation** in this release. The `sixel`,
-`reliable_erase`, and `no_scroll` flags remain host assertions, not detection results.
+`reliable_erase`, `reliable_inline_erase`, and `no_scroll` flags remain host
+assertions, not detection results.
 Terminal names/environment heuristics and measured cell dimensions are not
 positive evidence of Sixel support.
 
@@ -154,12 +175,23 @@ content model.
 The presenter and example accept cell heights not divisible by six, within the
 unchanged limits of 1..=1024 per dimension and at most 65,536 pixels. Actual 10×20
 cells are supported without rounding to 18 or 24: the final band contains two
-pixel rows and four unset padding rows. The terminal/multiplexer path must honor
-that transparent padding without painting beyond the tile or scrolling at the
-bottom edge, and must still satisfy `no_scroll` and `reliable_erase` assertions.
-Partial-band allocation and bottom-edge behavior remain unverified on real
-terminals; accepting these metrics is not terminal certification. Setting host
-capabilities does not bypass resource limits.
+pixel rows and four unset padding rows. Transparent padding must not erase
+adjacent cells, but transparency and exact raster attributes alone do not prevent
+bottom scrolling. In the independent [Windows Terminal source investigation](https://github.com/microsoft/terminal/blob/5f7dc283013152f89bfb76950515c33f45157ad7/src/terminal/adapter/SixelParser.cpp#L861-L906),
+`_maybeFlushImageBuffer` checks the full segment/band height against available
+height and can schedule text scrolling even when the final band's unused bits
+are transparent. This source finding is not real-terminal certification.
+
+Inline therefore reserves `ceil(padding / h)` blank guard rows for cell height
+`h`, where `padding = (6 - h % 6) % 6` pixels. At 10×20 this is one row: the
+320-pixel AI Babies image uses **16 content rows + 1 blank guard row** when space
+permits. At 8×18 no guard row is needed; at tiny `h = 1`, five are needed.
+A known viewport height is reduced by the guard rows before limiting content
+height. This inline margin does not fix fullscreen bottom-edge behavior:
+fullscreen still requires safe positioned output at the last row and
+`reliable_erase`; inline requires `reliable_inline_erase`. Both retain the shared
+`no_scroll` contract and need real-terminal validation. Setting host capabilities
+does not bypass resource limits.
 
 - Source: at most 16,777,216 pixels, about 48 MiB RGB per distinct source buffer.
 - Tile: nonzero dimensions at most 1024, at most 65,536 pixels, at most 1 MiB
@@ -208,32 +240,46 @@ OS, font/cell size, screen modes, and every multiplexer hop for each test run.
 | Windows Terminal, direct (exact version/configuration to be recorded) | **UNVERIFIED** |
 | Each candidate through tmux or another multiplexer | **UNVERIFIED** independently of direct-terminal results |
 
-Do not turn on the three capability assertions merely because a candidate appears
+Do not turn on capability assertions merely because a candidate appears
 in this table. A missing or failed condition keeps Auto on text; RequireSixel must
 reject an unsupported configuration.
 
 ### Manual checklist for a prospective native configuration
 
-- [ ] Establish the exact environment and alternate-screen lifecycle; verify
+- [ ] Establish the exact environment and selected fullscreen/inline lifecycle; verify
       Sixel DCS/RGB palettes reach the terminal through every intermediary.
 - [ ] Before any reader starts, probe or validate measured cell pixels in
       1..=1024 with product at most 65,536, then store `Some(pixels)`. Do not round
       heights to complete six-row bands. After font/DPI/resize changes, verify
       that no automatic refresh occurs; update dimensions explicitly or restart.
 - [ ] With actual partial-band metrics such as 10×20, verify exact raster height
-      and transparent unset padding, especially at cell boundaries and the last
-      row; confirm no extra painting or scrolling.
+      and transparent padding without adjacent-cell erasure. Check inline's blank
+      guard rows (one at 10×20, none at 8×18, five at `h = 1`) prevent bottom
+      scrolling; separately validate fullscreen's unchanged last-row requirement.
 - [ ] Compare Fit/Stretch, all alignments, letterboxing, and corner pixels with
       the source; check black pixels are opaque and no background bleeds through.
 - [ ] Exercise nested clipping, both scroll axes, screen edges, and the last row;
       ensure no painting outside cells, cursor-origin drift, or scrolling.
-- [ ] Cover with opaque text and another raster, uncover, move, shrink, remove,
-      and replace the source; verify old graphics are actually erased by ED 2 and
-      the full text/raster scene is restored.
+- [ ] In fullscreen, cover with opaque text and another raster, uncover, move,
+      shrink, remove, and replace the source; verify old graphics are actually
+      erased by ED 2 and the full text/raster scene is restored.
+- [ ] Independently validate inline on the normal screen: put sentinel text and
+      graphics above/below the owned rows, then move, shrink, remove, and replace
+      raster content. EL 2 must erase only the `max(old, new)` inline extents,
+      including guard rows, restore current text/raster content, and leave other
+      rows intact; no ED 2 is allowed.
+- [ ] Start inline near the bottom of the screen and grow its reserved height.
+      Verify reservation precedes graphics output, existing graphics move with
+      text scrolling, and relative cursor positioning does not drift. Inline owns
+      the entire occupied rows, so do not place unrelated content beside it.
 - [ ] Send subsequent tiles with different used palettes; confirm older tiles
       retain their colors. This is part of the `no_scroll` assertion's contract.
-- [ ] Switch native to text and back; check full cleanup and stable source/layout.
-      Inline must use text or return a strict error, never native output.
+- [ ] Switch native to text and back in each mode; check mode-appropriate cleanup
+      and stable source/layout. Without `reliable_inline_erase`, inline must use
+      text for Auto or return a strict error for RequireSixel. With that assertion
+      and all shared native gates satisfied, inline may emit Sixel without an
+      alternate screen or `reliable_erase`. Native appended-newline output must
+      remain rejected (or fall back under Auto).
 - [ ] Verify empty/unknown capabilities stay on text. With other native conditions
       satisfied but `cell_pixels: None`, `Auto` must fall back and `RequireSixel`
       must error before frame output, without OS reads or queries. Text-only and
@@ -265,6 +311,7 @@ cargo test --example sixel_windows --features sixel
 cargo test --example sixel_windows --no-default-features
 cargo run --example sixel_windows -- --headless
 cargo run --features sixel --example sixel_windows -- --headless
+cargo run --features sixel --manifest-path examples/ai-babies/Cargo.toml -- --sixel --headless
 ```
 
 The finite `sixel_windows` headless mode checks mouse dragging and occlusion
@@ -275,7 +322,9 @@ Treat recorded unit-test results and terminal-validation results as separate evi
 
 ```sh
 cargo run --release --features sixel --example sixel_windows -- --sixel
+
 cargo run --release --example sixel_windows -- --text-only
+
 cargo run --example sixel_windows -- --help
 ```
 
@@ -284,11 +333,13 @@ ringed planet as native RGB raster and existing Canvas character sampling. Drag
 titles to move and bottom grips to resize; click to bring forward. `e` cycles
 Canvas Braille/HalfBlock/Quadrant, `r` restores starting rectangles, and `q`/Esc
 quits. Prefer 100×32 cells; small sizes and terminal resizing are supported. There
-is no live animation. No flags shows help; `--text-only` is an explicit preview.
+is no live animation. This example is fullscreen-only and has no `--inline`
+option. No flags shows help; `--text-only` is an explicit fullscreen preview.
 
-`--sixel` asserts that the entire terminal path supports graphics, ED 2 graphics
-erasure, non-scrolling positioned output and stable palettes. It selects
-`RequireSixel`, never silent fallback. Startup checks the feature and current
+For `sixel_windows`, `--sixel` asserts that the entire terminal path supports
+graphics, non-scrolling positioned output and stable palettes, plus ED 2 graphics
+erasure in fullscreen mode. Native output selects `RequireSixel`, never silent
+fallback. Startup checks the feature and current
 backend cell-metric limits (1..=1024 per dimension, at most 65,536 pixels) before
 entering the managed terminal session. Without an override, startup explicitly
 probes OS metrics, then the bounded Unix/WSL cell-pixel query, before input starts
@@ -300,6 +351,31 @@ there is no need to round the height to 18 or 24. Transparent partial-band paddi
 must be honored along with the erase/no-scroll assertions above;
 see the [startup and safety contract](raster.md#run-the-showcase). These assertions
 are user responsibility, not automatic negotiation or terminal certification.
+
+For inline animation, use [AI Babies](../examples/ai-babies/README.md):
+
+```sh
+cargo run --release --features sixel --manifest-path examples/ai-babies/Cargo.toml -- --sixel
+```
+
+All its animation modes use the normal screen with inline output, no alternate
+screen and no mouse capture. No additional `--inline` argument is needed.
+`--sixel` selects `RequireSixel` and asserts reliable local EL 2 graphics erasure
+and graphics moving with text during row-reservation scrolling, using
+`reliable_inline_erase: true` and `reliable_erase: false`, alongside the shared
+Sixel, palette and positioned-output requirements. `no_scroll` prohibits the
+Sixel emission itself from scrolling, not controlled text scrolling for row
+reservation. These are host assertions, not detection; `reliable_inline_erase`
+remains false by default in the library, and fullscreen validation does not
+establish inline safety.
+
+`--height` remains 24/32 (default 24). Native inline content height is additionally
+limited to the rows needed for the 320-pixel image and the terminal height after
+deducting guard rows. With enough space, actual 10×20-pixel cells use **16 content
+rows + 1 blank guard row**; 8×18 needs no extra row. The image is left-aligned and
+scaled down for smaller terminals. The AI Babies
+headless check above does not validate actual EL 2 cleanup, scrolling or terminal
+compatibility; use the independent inline manual checklist above.
 
 ## Benchmark follow-up
 

@@ -150,6 +150,7 @@ impl Options {
                 // Enabled only by the explicit --sixel assertion documented above.
                 sixel: true,
                 reliable_erase: true,
+                reliable_inline_erase: false,
                 no_scroll: true,
                 cell_pixels: Some(pixels),
             },
@@ -562,6 +563,21 @@ mod tests {
         assert!(options(&["--cell-pixels", "8x18"]).is_err());
         assert!(options(&["--sixel", "--cell-pixels", "8"]).is_err());
         assert!(options(&["--unknown"]).is_err());
+    }
+
+    #[test]
+    fn inline_argument_is_rejected() {
+        for args in [
+            vec!["--inline"],
+            vec!["--sixel", "--inline"],
+            vec!["--text-only", "--inline"],
+            vec!["--headless", "--inline"],
+        ] {
+            assert_eq!(
+                options(&args).unwrap_err(),
+                "unknown argument: --inline; use --help"
+            );
+        }
     }
 
     #[test]

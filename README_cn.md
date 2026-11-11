@@ -76,7 +76,8 @@ rsille = { version = "3.0.4", features = ["syntax-highlighting"] }
 可选 `sixel` feature 启用原生编码。`Auto` 对未知终端默认字符降级，
 渲染器绝不自行探测每格像素尺寸，也不读取终端输入。
 `TextOnly` 禁用原生输出，`RequireSixel` 在条件不足时返回错误。
-原生输出目前要求显式提供已验证的终端能力、备用屏幕模式及受支持的每格像素尺寸。
+原生输出要求显式提供已验证的终端能力及受支持的每格像素尺寸：全屏使用备用屏幕与
+`reliable_erase`，inline 使用独立的 `reliable_inline_erase`，不要求备用屏幕。
 **自动能力协商与真实终端认证尚未完成；仅启用 feature 不会启用原生输出。**
 不提供 alpha/透明度，也不增加 `Encoding::Sixel`。
 
@@ -84,14 +85,16 @@ rsille = { version = "3.0.4", features = ["syntax-highlighting"] }
 [实现与验证说明](docs/raster-design.md)。
 
 两个可拖动浮窗展示同一颗静态程序化带环行星，对比原生 RGB 栅格输出与现有 `Canvas`
-字符采样。[`sixel_windows`](examples/sixel_windows.rs) 是根包的单文件示例，不是独立项目：
+字符采样。[`sixel_windows`](examples/sixel_windows.rs) 是根包的单文件示例，不是独立项目；
+仅使用全屏备用屏幕，不提供 `--inline` 或实时动画：
 
 ```sh
 cargo run --release --features sixel --example sixel_windows -- --sixel
 cargo run --release --example sixel_windows -- --text-only
 ```
 
-`--sixel` 表示用户明确确认整个终端链路支持 Sixel、ED 2 图形擦除、无滚屏输出及稳定调色板；
+在 `sixel_windows` 中，`--sixel` 表示用户明确确认整个终端链路支持 Sixel、ED 2 图形擦除、
+Sixel 本身无滚屏输出及稳定调色板；
 `RequireSixel` 不会静默降级。必须在启动**任何输入读取器之前**调用
 `CellPixels::probe(timeout)`，并将结果存为 `RasterCapabilities.cell_pixels: Some(pixels)`。
 探测优先使用操作系统窗口度量；不可用时在 Unix/WSL 回退到有界的 `CSI 16 t` 查询，
@@ -108,12 +111,33 @@ cargo run --release --example sixel_windows -- --text-only
 `CellPixels::from_terminal()` 仍可在运行期调用，仅可选读取操作系统度量。
 探测不证明 Sixel 支持，能力标志仍是宿主断言。支持实际为 10×20 像素的
 字符格，可使用 `--cell-pixels 10x20`，无需将高度取整为 18 或 24。终端仍须正确处理
-末尾不完整六行带的透明填充，并满足图形擦除及无滚屏断言；这不代表已通过真实终端认证。
+末尾不完整六行带的透明填充，不擦除相邻字符格；透明填充本身不能保证底部不滚屏，
+全屏仍须满足最后一行安全定位输出、图形擦除及无滚屏断言，并未由 inline 保护行修复。
+这不代表已通过真实终端认证。
 拖动标题移动窗口，拖动底部手柄调整大小，点击置前。
 `e` 循环切换 Canvas 的 Braille/HalfBlock/Quadrant，`r` 恢复初始窗口位置和大小，
 `q`/Esc 退出。建议使用 100×32 字符格，也支持更小尺寸及终端缩放；没有实时动画。
 不带参数或使用 `--help` 显示帮助，`--text-only` 显式选择字符预览，`--headless`
 执行有限的、无需终端的拖动与遮挡检查。验证命令见[演示指南](docs/raster.md#run-the-showcase)。
+
+需要 inline Sixel 动画时，运行 [AI Babies](examples/ai-babies/README.md#raster-and-sixel)：
+
+```sh
+cargo run --release --features sixel --manifest-path examples/ai-babies/Cargo.toml -- --sixel
+```
+
+AI Babies 的所有动画模式均使用普通屏幕 inline 输出，不启用备用屏幕或鼠标捕获；
+`--sixel` 无需额外 `--inline` 参数，采用 `RequireSixel`，不会静默降级。它要求可靠的
+EL 2 行局部图形擦除（不影响其他行），以及预留行导致文字滚动时图形跟随移动，配置为
+`reliable_inline_erase: true`、`reliable_erase: false`。`no_scroll` 要求 Sixel 安全定位、
+透明 padding 不擦除相邻字符格且输出本身不滚屏；inline 通过底部保护行容纳末带 padding，
+不禁止预留行时受控的文字滚动。这些均为用户能力断言，不是能力探测。
+inline 占用整行，不应在同一行旁边放置无关内容；全屏 ED 2 验证不能证明 inline 安全。
+
+`--height` 仍仅接受 24/32（默认 24）；原生 inline 内容高度还受 320 像素图像所需的
+字符格行数及终端扣除保护行后的剩余高度限制。空间足够时，实际 10×20 像素字符格使用
+**16 行图片内容 + 1 行空白保护行**，不是总共 16 行；8×18 无需额外行。
+图像靠左显示，较小终端会缩小显示。保护行计算、光标及清理约定见[栅格指南](docs/raster.md#terminal-output-policy)。
 
 ## 配合 AI 编程助手开发
 

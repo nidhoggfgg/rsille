@@ -122,6 +122,14 @@ impl Builder {
     /// `Auto` uses character fallback. Text-only and unused paths are unaffected.
     /// A standalone renderer does not enter an alternate screen: when enabling
     /// native output, the caller must establish the configured terminal modes.
+    /// Inline Sixel requires `reliable_inline_erase` instead of `reliable_erase`:
+    /// EL 2 must erase graphics locally and images must follow text scrolling.
+    /// Inline rendering owns complete rows, including blank guard rows for
+    /// partial-band padding. `no_scroll` requires safe positioned graphics and
+    /// transparent padding that does not erase adjacent cells; transparency alone
+    /// does not prevent bottom scrolling. Inline reserves a bottom margin, while
+    /// fullscreen still requires safe output at the last row. Native appended-
+    /// newline output is unsupported. These are host assertions, not detection.
     pub fn raster_output(
         &mut self,
         config: crate::render::raster_output::RasterOutput,
@@ -236,6 +244,14 @@ impl Builder {
     /// Enabling this also disables alternate-screen setup and screen clearing.
     /// It does not change cursor visibility. Disabling inline mode does not
     /// restore earlier settings; later setters can override these choices.
+    /// Native Sixel additionally requires the raster configuration's independent
+    /// `reliable_inline_erase` assertion; unknown support uses character fallback.
+    /// For cell height `h`, native inline output reserves
+    /// `ceil(((6 - h % 6) % 6) / h)` blank guard rows: one at 10×20, none at 8×18,
+    /// five at `h = 1`. A known viewport height limits content after deducting
+    /// these rows. The saved bottom anchor and cleanup extent include guard rows;
+    /// successful frames leave the cursor on the last content row, so an exit
+    /// newline can land in the guard.
     pub fn inline_mode(&mut self, enable: bool) -> &mut Self {
         self.inline_mode = enable;
         if enable {

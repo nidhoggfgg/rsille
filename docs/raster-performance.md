@@ -8,9 +8,27 @@ No new measurements were made for this replacement.
 
 The current single-file root example is
 [`examples/sixel_windows.rs`](../examples/sixel_windows.rs), a draggable two-window
-Sixel-versus-Canvas showcase. See the [showcase guide](raster.md#run-the-showcase)
-for startup, controls and finite headless checks. It is **not** a benchmark and
-does not reproduce the historical workload or timings below.
+Sixel-versus-Canvas showcase. It is fullscreen-only, with no live animation or
+`--inline` option. See the [showcase guide](raster.md#run-the-showcase) for startup,
+controls and finite headless checks. For inline Sixel animation, use
+[AI Babies](../examples/ai-babies/README.md):
+
+```sh
+cargo run --release --features sixel --manifest-path examples/ai-babies/Cargo.toml -- --sixel
+```
+
+Neither example is a benchmark or reproduces the historical workload or timings
+below. AI Babies uses inline output for all animation modes, without an alternate
+screen or mouse capture; `--sixel` needs no extra `--inline` argument. Its inline
+path is not covered by these historical alternate-screen measurements: they
+provide no timing or compatibility evidence for row reservation, relative cursor
+positioning, or row-local EL 2 graphics cleanup. It asserts
+`reliable_inline_erase: true` and `reliable_erase: false`: local graphics erasure
+and graphics following text scrolling must be independently validated.
+`no_scroll` requires Sixel emission itself not to scroll; it does not forbid
+controlled row-reservation scrolling and is not capability detection. See the
+[inline guide](raster.md#inline-sixel-animation) for sizing and the library's
+separate, default-off `reliable_inline_erase` capability contract.
 
 The removed harness was a small, deterministic, dependency-free workload using
 public `Draw`, `Canvas`, `RasterCanvas`, `RasterCell`, `Builder`, and

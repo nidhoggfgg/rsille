@@ -50,7 +50,13 @@ cargo run --example sixel_windows -- --help
 ```
 
 Two `floating_window` widgets in a `window_host` show the same procedural ringed
-planet, without live animation. Drag a title to move, drag a bottom grip to resize,
+planet in fullscreen only, without live animation or an `--inline` option.
+For inline Sixel animation without an alternate screen or mouse capture, use
+[AI Babies](ai-babies/README.md#raster-and-sixel):
+`cargo run --release --features sixel --manifest-path examples/ai-babies/Cargo.toml -- --sixel`.
+No extra `--inline` argument is needed there.
+
+Drag a title to move, drag a bottom grip to resize,
 and click to bring a window forward. `e` cycles Canvas Braille/HalfBlock/Quadrant;
 `r` restores the starting window rectangles; `q`/Esc quits. Ideally use 100×32 cells;
 smaller terminals and terminal resizing are supported.

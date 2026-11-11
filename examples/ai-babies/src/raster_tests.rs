@@ -93,7 +93,8 @@ fn text_output_never_probes_and_native_output_never_silently_falls_back() {
     assert_eq!(config.capabilities.cell_pixels, options.pixels);
     assert!(
         config.capabilities.sixel
-            && config.capabilities.reliable_erase
+            && config.capabilities.reliable_inline_erase
+            && !config.capabilities.reliable_erase
             && config.capabilities.no_scroll
     );
     assert!(options.native_config((10, 20)).is_err());
@@ -139,7 +140,9 @@ fn raster_playback_preserves_sources_across_holds_switches_and_resize() {
     let mut nursery = Nursery::new(options).unwrap();
     let size = (80, 24).into();
     let first = export::frame(&mut nursery, size).unwrap();
-    let cell = first.raster_at((24, 4).into()).unwrap();
+    let cell = first.raster_at((0, 4).into()).unwrap();
+    assert!(first.raster_at((31, 4).into()).is_some());
+    assert!(first.raster_at((32, 4).into()).is_none());
     assert_eq!(cell.target, (32, 16).into());
     assert_eq!((cell.canvas.width(), cell.canvas.height()), (320, 320));
     assert_eq!(cell.options.background, options.background);
@@ -147,7 +150,7 @@ fn raster_playback_preserves_sources_across_holds_switches_and_resize() {
     let identity = (cell.canvas.id(), cell.canvas.version());
     nursery.time = 0.5;
     let held = export::frame(&mut nursery, size).unwrap();
-    let cell = held.raster_at((24, 4).into()).unwrap();
+    let cell = held.raster_at((0, 4).into()).unwrap();
     assert_eq!((cell.canvas.id(), cell.canvas.version()), identity);
 
     nursery.paused = true;
@@ -170,7 +173,9 @@ fn raster_playback_preserves_sources_across_holds_switches_and_resize() {
         for dimensions in [(1, 1), (17, 5), (80, 24), (120, 40), (0, 0)] {
             let buffer = export::frame(&mut nursery, dimensions.into()).unwrap();
             assert_eq!(buffer.has_raster(), dimensions != (0, 0));
-            for (_, _, cell) in buffer.raster_cells() {
+            for (x, _, cell) in buffer.raster_cells() {
+                assert_eq!(x, cell.x, "raster must start at the left edge after resize");
+                assert_eq!(cell.options.align_x, RasterAlign::Start);
                 assert_eq!((cell.canvas.width(), cell.canvas.height()), (320, 320));
                 assert!(cell.x < cell.target.width && cell.y < cell.target.height);
                 assert_eq!(cell.options.background, options.background);
@@ -180,7 +185,7 @@ fn raster_playback_preserves_sources_across_holds_switches_and_resize() {
     nursery.action = None;
     let returned = export::frame(&mut nursery, size).unwrap();
     assert_eq!(
-        returned.raster_at((24, 4).into()).unwrap().canvas.id(),
+        returned.raster_at((0, 4).into()).unwrap().canvas.id(),
         identity.0
     );
 }
@@ -206,17 +211,16 @@ fn raster_exports_reconstruct_opaque_halfblock_fallbacks() {
 
 #[cfg(feature = "sixel")]
 #[test]
-fn native_playback_emits_sixel_and_reuses_unchanged_frames() {
+fn native_inline_playback_is_compact_and_reuses_unchanged_frames() {
     // Synthetic safety assertions apply to the memory writer, not a real terminal.
     let options = parse(&["--sixel", "--cell-pixels", "10x20"]).unwrap();
     let nursery = Nursery::new(options).unwrap();
     let mut bytes = Vec::new();
     {
-        let mut renderer = Builder::new()
-            .size((80, 24))
-            .enable_alt_screen()
-            .raster_output(options.native_config((80, 24)).unwrap())
-            .build_render(nursery, &mut bytes);
+        let mut renderer =
+            playback_builder(options, (80, 40), options.native_config((80, 40)).unwrap())
+                .build_render(nursery, &mut bytes);
+        assert_eq!(renderer.size(), (80, 16).into());
         renderer.render().unwrap();
         let stats = renderer.raster_stats();
         assert_eq!(stats.tiles_sent, 32 * 16);
@@ -228,4 +232,33 @@ fn native_playback_emits_sixel_and_reuses_unchanged_frames() {
     }
     let header = b"\x1bP0;1;0q\"1;1;10;20";
     assert!(bytes.windows(header.len()).any(|part| part == header));
+    assert!(bytes.windows(4).any(|part| part == b"\x1b[2K"));
+    assert!(!bytes.windows(4).any(|part| part == b"\x1b[2J"));
+    assert!(!bytes.windows(8).any(|part| part == b"\x1b[?1049h"));
+}
+
+#[test]
+fn playback_height_is_bounded_for_native_and_character_modes() {
+    for output in [Output::Quadrant, Output::Raster, Output::Sixel] {
+        for height in [24, 32] {
+            let options = Options {
+                output,
+                height,
+                pixels: Some(CellPixels {
+                    width: 10,
+                    height: 20,
+                }),
+                ..Options::default()
+            };
+            // Geometry is independent of the encoder feature and terminal queries.
+            let mut config = RasterOutput::text_only();
+            config.capabilities.cell_pixels = options.pixels;
+            for grid in [(80, 40), (80, 12), (1, 1)] {
+                let renderer = playback_builder(options, grid, config)
+                    .build_render(Nursery::default(), Vec::new());
+                let expected = if output == Output::Sixel { 16 } else { height };
+                assert_eq!(renderer.size(), (grid.0, grid.1.min(expected)).into());
+            }
+        }
+    }
 }

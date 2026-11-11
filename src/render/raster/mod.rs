@@ -11,4 +11,4 @@ mod presenter;
 mod sixel;
 
 pub use canvas::*;
-pub(super) use presenter::RasterPresenter;
+pub(super) use presenter::{RasterPlan, RasterPresenter};

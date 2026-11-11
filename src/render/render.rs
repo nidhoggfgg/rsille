@@ -1,7 +1,9 @@
 //! Buffered terminal output with cell-level and line-level frame comparison.
 
 use crossterm::{
-    cursor::{MoveTo, MoveToNextLine, MoveToPreviousLine, RestorePosition, SavePosition},
+    cursor::{
+        MoveTo, MoveToColumn, MoveToNextLine, MoveToPreviousLine, RestorePosition, SavePosition,
+    },
     style::{Attribute, Attributes, Color, Colors, Print, ResetColor, SetAttributes, SetColors},
     terminal::{BeginSynchronizedUpdate, Clear, ClearType, EndSynchronizedUpdate},
 };
@@ -86,6 +88,11 @@ pub struct Render<W, T> {
     append_newline: bool,
     inline_mode: bool,
     previous_inline_height: u16,
+    inline_viewport_height: Option<u16>,
+    inline_raster_padding: u16,
+    // Saved bottom-row anchor while a native inline frame is being written.
+    // Retained after I/O failure so recovery never needs an absolute position.
+    inline_raster_checkpoint: Option<u16>,
     used_height: u16, // Actual height to render (for inline mode, avoids buffer reallocation)
     raster: super::raster::RasterPresenter,
 }
@@ -119,6 +126,11 @@ where
                 // Keep the presenter uncertain: a failed writer may reject this
                 // cleanup too, so the next frame must repeat it and fully repaint.
                 let _ = self.out.write_all(b"\x18\x1b\\");
+                if let Some(height) = self.inline_raster_checkpoint {
+                    let _ = crossterm::queue!(self.out, RestorePosition);
+                    self.previous_inline_height = height;
+                    self.inline_raster_padding = 0;
+                }
                 let _ = crossterm::queue!(self.out, EndSynchronizedUpdate, ResetColor);
                 let _ = self.out.flush();
             }
@@ -140,6 +152,9 @@ where
 
         // the position in chunk should be (0, 0), the render already move to the target position
         let buffer_size = self.buffer.size();
+        if self.inline_mode {
+            self.used_height = self.used_height.min(self.inline_height_limit());
+        }
         // In inline mode, use used_height to ensure borders render within visible area
         let render_size = if self.inline_mode {
             Size {
@@ -152,12 +167,19 @@ where
         let chunk = Chunk::new(&mut self.buffer, render_size.into())?;
         self.thing.draw(chunk)?;
 
-        // An appended LF can scroll even when Sixel itself cannot. Treat this
-        // contract like inline output rather than commit stale screen positions.
+        // Inline tiles are anchored relative to the cursor after reserving rows,
+        // not to the startup screen coordinates (which can move during scrolling).
+        let raster_origin = if self.inline_mode {
+            Position::default()
+        } else {
+            self.pos
+        };
         let raster_plan = self.raster.prepare(
             &self.buffer,
-            self.pos,
-            self.inline_mode || self.append_newline,
+            raster_origin,
+            self.inline_mode,
+            self.append_newline,
+            self.inline_mode && self.previous_inline_height > self.used_height,
         )?;
         if self.raster.needs_protocol_recovery() {
             // A prior writer failure may have prevented even the best-effort
@@ -165,6 +187,12 @@ where
             // before issuing SGR/ED commands on the recovered writer.
             self.out.write_all(b"\x18\x1b\\")?;
             crossterm::queue!(self.out, EndSynchronizedUpdate)?;
+            if let Some(height) = self.inline_raster_checkpoint {
+                crossterm::queue!(self.out, RestorePosition)?;
+                self.previous_inline_height = height;
+                self.inline_raster_padding = 0;
+            }
+            self.inline_raster_checkpoint = None;
         }
         self.raster.begin(&raster_plan);
         // A flush is not an atomic terminal repaint. Hide the intermediate
@@ -179,7 +207,9 @@ where
         // drawing or erasing. Cursor movement and clearing do not reset SGR.
         crossterm::queue!(self.out, ResetColor)?;
 
-        if raster_plan.clear || (self.clear && self.buffer.previous().is_none()) {
+        let inline_raster = self.inline_mode && (raster_plan.native || raster_plan.clear);
+        if !inline_raster && (raster_plan.clear || (self.clear && self.buffer.previous().is_none()))
+        {
             // Native output is enabled only for hosts that verified ED 2 erases
             // graphics. Spaces/EL are not assumed to remove old Sixel pixels.
             crossterm::queue!(self.out, Clear(ClearType::All))?;
@@ -189,14 +219,16 @@ where
         }
 
         // Inline mode: use relative positioning with line-level differential rendering
-        if self.inline_mode {
+        if inline_raster {
+            self.render_inline_raster(&raster_plan)?;
+        } else if self.inline_mode {
             self.render_inline()?;
         } else if raster_plan.native {
             self.render_raster_characters()?;
         } else {
             self.render_fullscreen()?;
         }
-        if !raster_plan.encoded.is_empty() {
+        if !inline_raster && !raster_plan.encoded.is_empty() {
             crossterm::queue!(self.out, SavePosition)?;
             for (x, y, bytes) in &raster_plan.encoded {
                 crossterm::queue!(self.out, MoveTo(self.pos.x + x, self.pos.y + y))?;
@@ -221,6 +253,11 @@ where
         }
         // Commit display history only after the entire synchronized frame flushes.
         self.out.flush()?;
+        if inline_raster {
+            self.previous_inline_height = self.used_height;
+            self.inline_raster_padding = raster_plan.inline_padding;
+            self.inline_raster_checkpoint = None;
+        }
         self.raster.commit(raster_plan);
 
         // Save current buffer for next frame's diff
@@ -276,6 +313,50 @@ where
     /// Returns Sixel work counters and bounded cache occupancy.
     pub fn raster_stats(&self) -> super::raster_output::RasterStats {
         self.raster.stats()
+    }
+
+    fn inline_height_limit(&self) -> u16 {
+        let padding = if self.inline_mode && !self.append_newline {
+            self.raster.inline_padding_rows()
+        } else {
+            0
+        };
+        self.inline_viewport_height
+            .unwrap_or(u16::MAX)
+            .saturating_sub(padding)
+    }
+
+    pub(crate) fn inline_bottom_padding(&self) -> u16 {
+        self.inline_raster_padding
+    }
+
+    /// Updates the physical viewport height for inline positioning.
+    ///
+    /// Managed event loops call this on startup and terminal resize. Standalone
+    /// inline hosts should do the same before rendering: buffer size alone does
+    /// not describe which old rows remain addressable after a terminal shrink.
+    /// Zero is treated as one row. This does not resize the drawing buffer.
+    pub fn set_inline_viewport_height(&mut self, height: u16) {
+        if !self.inline_mode {
+            return;
+        }
+        let height = height.max(1);
+        if self.inline_viewport_height != Some(height) {
+            if self.inline_viewport_height.is_some_and(|old| height < old) {
+                // The terminal can clip the rows below the content cursor while
+                // leaving that cursor unchanged. Re-reserve padding with LF;
+                // CNL would clamp at the new bottom and give us a false anchor.
+                self.inline_raster_padding = 0;
+            }
+            self.inline_viewport_height = Some(height);
+            self.used_height = self.used_height.min(self.inline_height_limit());
+            self.previous_inline_height = self.previous_inline_height.min(height);
+            self.inline_raster_padding = self
+                .inline_raster_padding
+                .min(height - self.previous_inline_height);
+            self.inline_raster_checkpoint = self.inline_raster_checkpoint.map(|h| h.min(height));
+            self.buffer.reset_diff();
+        }
     }
 
     pub(crate) fn set_alternate_screen(&mut self, enabled: bool) {
@@ -336,6 +417,103 @@ where
         Ok(())
     }
 
+    fn render_inline_raster(&mut self, plan: &super::raster::RasterPlan) -> std::io::Result<()> {
+        // Reserve new rows before painting any pixels. LF may scroll existing
+        // output; the saved anchor must describe the viewport AFTER that scroll.
+        let displayed_height = self.previous_inline_height;
+        let previous_extent = displayed_height
+            .max(1)
+            .saturating_add(self.inline_raster_padding);
+        let current_extent = self.used_height.max(1).saturating_add(plan.inline_padding);
+        let extent = previous_extent.max(current_extent);
+        crossterm::queue!(self.out, Print("\r"))?;
+        if self.inline_raster_padding > 0 {
+            // Successful frames leave the cursor on the last content row. The
+            // already-reserved padding below it must not generate another LF.
+            crossterm::queue!(self.out, MoveToNextLine(self.inline_raster_padding))?;
+        }
+        self.previous_inline_height = previous_extent;
+        self.inline_raster_padding = 0;
+        for height in previous_extent..extent {
+            crossterm::queue!(self.out, Print("\r\n"))?;
+            self.previous_inline_height = height + 1;
+            if let Some(viewport_height) = self.inline_viewport_height {
+                // Reservation can scroll before the frame flush succeeds. Keep
+                // mouse/input coordinates aligned even if a smaller frame is
+                // retried after a write failure.
+                self.pos.y = self.pos.y.min(viewport_height.saturating_sub(height + 1));
+            }
+        }
+        crossterm::queue!(self.out, SavePosition)?;
+        self.inline_raster_checkpoint = Some(extent);
+        self.previous_inline_height = extent;
+
+        // EL 2 graphics erasure is a separate host assertion from ED 2.
+        // New rows also need initialization: away from the viewport bottom,
+        // LF only moves the cursor and does not erase existing contents.
+        let clear_from = if plan.clear {
+            0
+        } else if extent > previous_extent || self.used_height > displayed_height {
+            displayed_height
+        } else {
+            extent
+        };
+        for y in clear_from..extent {
+            Self::position_inline(&mut self.out, extent, 0, y)?;
+            crossterm::queue!(self.out, Clear(ClearType::CurrentLine))?;
+        }
+
+        let mut style = TerminalStyleState::default();
+        let mut paint = |x, y, cell: &crate::render::buffer::Cell| -> std::io::Result<()> {
+            if y < self.used_height
+                && !(plan.native && self.buffer.raster_at((x, y).into()).is_some())
+            {
+                Self::position_inline(&mut self.out, extent, x, y)?;
+                // DECRC may restore SGR as well as the cursor, so each restore
+                // invalidates the style cache. Do not leak a previous cell's style.
+                style.reset(&mut self.out)?;
+                style.queue(&cell.content, &mut self.out)?;
+            }
+            Ok(())
+        };
+        if let Some(diff) = self.buffer.diff() {
+            for (x, y, cell) in diff {
+                if y < displayed_height {
+                    paint(x, y, cell)?;
+                }
+            }
+            // Capacity rows can compare equal even though they were never
+            // displayed. Paint their spaces too, rather than trusting the diff.
+            for (x, y, cell) in self.buffer.all_cells() {
+                if y >= displayed_height {
+                    paint(x, y, cell)?;
+                }
+            }
+        } else {
+            for (x, y, cell) in self.buffer.all_cells() {
+                paint(x, y, cell)?;
+            }
+        }
+        for (x, y, bytes) in &plan.encoded {
+            Self::position_inline(&mut self.out, extent, *x, *y)?;
+            self.out.write_all(bytes)?;
+        }
+        crossterm::queue!(self.out, RestorePosition, ResetColor)?;
+        let current_extent = self.used_height.max(1);
+        if extent > current_extent {
+            crossterm::queue!(self.out, MoveToPreviousLine(extent - current_extent))?;
+        }
+        Ok(())
+    }
+
+    fn position_inline(out: &mut W, height: u16, x: u16, y: u16) -> std::io::Result<()> {
+        crossterm::queue!(out, RestorePosition)?;
+        if y < height - 1 {
+            crossterm::queue!(out, MoveToPreviousLine(height - 1 - y))?;
+        }
+        crossterm::queue!(out, MoveToColumn(x))
+    }
+
     fn render_inline(&mut self) -> std::io::Result<()> {
         let current_height = self.used_height;
 
@@ -349,7 +527,9 @@ where
         // Move cursor back to the start position first
         // NOTE: After rendering, cursor is at the end of the last line (not next line's start)
         // because we skip MoveToNextLine for the last line to prevent scrolling.
-        if self.buffer.previous().is_some() && self.previous_inline_height > 0 {
+        // Buffer history can be invalidated by a resize while the cursor still
+        // sits at the previous inline bottom.
+        if self.previous_inline_height > 0 {
             // Move to line start first
             crossterm::queue!(self.out, Print("\r"))?;
             // Then move up to first line (if not already there)
@@ -459,6 +639,9 @@ where
             append_newline: builder.append_newline,
             inline_mode: builder.inline_mode,
             previous_inline_height: 0,
+            inline_viewport_height: None,
+            inline_raster_padding: 0,
+            inline_raster_checkpoint: None,
             used_height: builder.size.height, // Initialize to buffer capacity
             raster: super::raster::RasterPresenter::new(
                 builder.raster_output,
@@ -493,16 +676,17 @@ where
     /// If dimensions change, current and previous frame contents are discarded.
     pub fn resize(&mut self, new_size: Size) {
         self.buffer.resize(new_size);
-        self.used_height = new_size.height; // Update used_height when resizing
+        self.set_used_height(new_size.height);
     }
 
     /// Set the used height for rendering (inline mode optimization)
     ///
     /// This changes the actual height rendered without reallocating the buffer.
     /// Used in inline mode to avoid frequent buffer reallocations.
-    /// Heights exceeding the buffer's capacity are clamped to that capacity.
+    /// Heights are clamped to the buffer capacity and, when supplied, the
+    /// physical inline viewport height minus any Sixel band-padding rows.
     pub fn set_used_height(&mut self, height: u16) {
-        let max_height = self.buffer.size().height;
+        let max_height = self.buffer.size().height.min(self.inline_height_limit());
         self.used_height = height.min(max_height);
     }
 

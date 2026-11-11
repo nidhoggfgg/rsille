@@ -9,8 +9,13 @@ use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
 use options::{animation_args, Options, Output};
 use rsille::{
     canvas::{Canvas, Encoding},
-    raster::RasterOptions,
-    render::{area::Size, chunk::Chunk, raster_output::CellPixels, Builder, Draw, DrawErr, Update},
+    raster::{RasterAlign, RasterOptions},
+    render::{
+        area::Size,
+        chunk::Chunk,
+        raster_output::{CellPixels, RasterOutput},
+        Builder, Draw, DrawErr, Update,
+    },
 };
 use std::{error::Error, time::Instant};
 
@@ -153,11 +158,12 @@ impl Draw for Nursery {
             let dx = size.width - width;
             let dy = size.height - height;
             chunk
-                .shrink(dy / 2, dy - dy / 2, dx / 2, dx - dx / 2)?
+                .shrink(dy / 2, dy - dy / 2, 0, dx)?
                 .raster(
                     frames[character].frame(index),
                     RasterOptions {
                         background: self.options.background,
+                        align_x: RasterAlign::Start,
                         ..RasterOptions::default()
                     },
                 )?;
@@ -183,6 +189,33 @@ impl Draw for Nursery {
     }
 }
 
+fn playback_builder(options: Options, grid: (u16, u16), output: RasterOutput) -> Builder {
+    // Native pixels need fewer rows than the character preview. Reserve only
+    // the image's height, rather than centering it inside a screen-sized region.
+    let max_height = if options.output == Output::Sixel {
+        output
+            .capabilities
+            .cell_pixels
+            .map_or(options.height, |pixels| {
+                options
+                    .height
+                    .min(raster::SIDE.div_ceil(u32::from(pixels.height)) as u16)
+            })
+    } else {
+        options.height
+    };
+    let mut builder = Builder::new();
+    builder
+        .inline_mode(true)
+        .size((grid.0, grid.1.min(max_height)))
+        .inline_max_height(max_height)
+        .raster_output(output)
+        .enable_raw_mode()
+        .enable_hide_cursor()
+        .frame_limit(24);
+    builder
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     let args: Vec<_> = std::env::args().skip(1).collect();
     if args.first().is_some_and(|arg| arg == "--static") {
@@ -202,21 +235,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     let output = options.native_config((width, height))?;
     options.pixels = output.capabilities.cell_pixels;
     let nursery = Nursery::new(options)?;
-    let mut builder = Builder::new();
-    builder
-        .raster_output(output)
-        .enable_raw_mode()
-        .enable_hide_cursor()
-        .frame_limit(24);
-    if options.output == Output::Sixel {
-        builder.size((width, height)).enable_alt_screen();
-    } else {
-        builder
-            .size((width, height.min(options.height)))
-            .inline_mode(true)
-            .inline_max_height(options.height);
-    }
-    builder.build_event_loop(nursery).run()?;
+    playback_builder(options, (width, height), output)
+        .build_event_loop(nursery)
+        .run()?;
     println!();
     Ok(())
 }

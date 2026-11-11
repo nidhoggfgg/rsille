@@ -160,6 +160,14 @@ impl CellPixels {
         })
     }
 
+    pub(super) fn inline_padding_rows(self) -> u16 {
+        // Some terminals reserve the whole final six-pixel band, even when its
+        // unused bits are transparent and raster attributes specify a shorter
+        // image. Keep that padding above the scrolling boundary.
+        let padding = (6 - self.height % 6) % 6;
+        padding.div_ceil(self.height.max(1))
+    }
+
     pub(super) fn supported(self) -> bool {
         // The encoder leaves unused bits in a partial final band transparent;
         // physical cell dimensions must not be rounded to six-pixel multiples.
@@ -174,18 +182,26 @@ impl CellPixels {
 /// Explicit host assertions about the entire terminal/multiplexer path.
 ///
 /// All fields default to unknown/false. Setting these flags asserts that the
-/// behavior was tested in the active alternate screen; it is not a request to
-/// change terminal modes. The library currently has no certified terminal list.
+/// behavior was tested in the selected screen and output mode; it is not a
+/// request to change terminal modes. The library has no certified terminal list.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct RasterCapabilities {
     /// Sixel DCS output and RGB palette definitions reach the terminal intact.
     pub sixel: bool,
     /// ED 2 erases graphics as well as characters in the alternate screen.
     pub reliable_erase: bool,
-    /// Cell-positioned graphics (including the last row) do not scroll or move
-    /// their origin, and retain their colors when subsequent palettes are sent.
-    /// This includes transparent padding in a partial final six-pixel band:
-    /// unset bits must not erase adjacent cells or cause bottom-edge scrolling.
+    /// EL 2 erases graphics and characters only on the addressed inline row.
+    ///
+    /// Inline output owns its complete rows, not just the buffer's columns.
+    /// Graphics must also follow text scrolling when rows are reserved or the
+    /// viewport is followed. This is independent of alternate-screen ED 2;
+    /// leave it false unless the entire terminal/multiplexer path was verified.
+    pub reliable_inline_erase: bool,
+    /// Cell-positioned graphics do not scroll or move their origin, and retain
+    /// their colors when subsequent palettes are sent. Unset bits in a partial
+    /// final six-pixel band must not erase adjacent cells.
+    /// Inline output reserves trailing rows for that band's padding; fullscreen
+    /// output still requires safe positioned graphics at the screen's last row.
     pub no_scroll: bool,
     /// Physical pixels per character cell, required for native Sixel output.
     /// Set `Some(pixels)` explicitly or store the result of [`CellPixels::probe`]
@@ -209,6 +225,7 @@ impl RasterOutput {
             capabilities: RasterCapabilities {
                 sixel: false,
                 reliable_erase: false,
+                reliable_inline_erase: false,
                 no_scroll: false,
                 cell_pixels: None,
             },
@@ -229,11 +246,13 @@ impl RasterOutput {
             Some("visual effects require character raster fallback")
         } else if !cfg!(feature = "sixel") {
             Some("the sixel Cargo feature is disabled")
-        } else if inline || !alternate_screen {
-            Some("native Sixel requires an alternate screen without inline or appended-newline output")
+        } else if !inline && !alternate_screen {
+            Some("native Sixel requires inline mode or an alternate screen")
         } else if !self.capabilities.sixel {
             Some("Sixel support is unknown or unavailable")
-        } else if !self.capabilities.reliable_erase || !self.capabilities.no_scroll {
+        } else if inline && !self.capabilities.reliable_inline_erase {
+            Some("inline Sixel requires verified EL 2 graphics erasure and graphics following text scrolling")
+        } else if (!inline && !self.capabilities.reliable_erase) || !self.capabilities.no_scroll {
             Some("graphics erase, palette, and non-scrolling behavior have not been verified")
         } else {
             None
@@ -283,6 +302,7 @@ mod tests {
             capabilities: RasterCapabilities {
                 sixel: true,
                 reliable_erase: true,
+                reliable_inline_erase: false,
                 no_scroll: true,
                 cell_pixels: Some(CellPixels {
                     width: 8,
@@ -309,7 +329,7 @@ mod tests {
     }
 
     #[test]
-    fn strict_is_lazy_and_rejects_unknown_inline_and_effects() {
+    fn strict_is_lazy_and_rejects_unverified_inline_and_effects() {
         let unknown = RasterOutput {
             policy: RasterPolicy::RequireSixel,
             ..Default::default()

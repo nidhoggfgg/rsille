@@ -4,8 +4,11 @@
 //! placement, clipping, terminal capabilities, and graphics cleanup. Arbitrary
 //! cell heights use a partial final band: P2=1 leaves unset padding transparent,
 //! raster attributes keep the actual dimensions, and no trailing band advance
-//! is emitted. The host must support transparent padding and non-scrolling
-//! positioned graphics, including at the bottom edge.
+//! is emitted. Transparency alone does not prevent bottom scrolling: terminals
+//! such as Windows Terminal may check the full band's height. Inline reserves
+//! ceil(((6 - cell_height % 6) % 6) / cell_height) guard rows in the parent.
+//! The host must support safe positioned graphics and padding that does not
+//! erase adjacent cells; fullscreen still requires safe output at the last row.
 
 use std::collections::VecDeque;
 use std::io::{self, Write};
@@ -227,6 +230,7 @@ fn encode_tile(cell: &RasterCell, cell_width: u16, cell_height: u16) -> io::Resu
     let mut output = TileBytes::default();
     // Transparent *unset bits* avoid filling the final band's padding. All real
     // pixels, including the presentation background, are explicitly set below.
+    // This does not prevent full-band scroll checks; inline needs a bottom margin.
     write!(output, "\x1bP0;1;0q\"1;1;{width};{height}")?;
     for (index, &present) in used.iter().enumerate() {
         if present {
@@ -257,7 +261,8 @@ fn encode_tile(cell: &RasterCell, cell_width: u16, cell_height: u16) -> io::Resu
             write!(output, "#{index}")?;
             write_plane(&mut output, &plane[..=last])?;
         }
-        // Never advance beyond the final band: that can scroll at screen bottom.
+        // Avoid an extra advance past the final band. The band itself may still
+        // trigger bottom scrolling without the parent's inline guard rows.
         if top + 6 < height {
             output.write_all(b"-")?;
         }
