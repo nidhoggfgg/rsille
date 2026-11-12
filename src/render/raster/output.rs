@@ -227,7 +227,7 @@ pub struct RasterCapabilities {
 
 /// Terminal raster settings shared by render builders and TUI applications.
 ///
-/// Raster presentation uses only Sixel and requires the optional `sixel` feature.
+/// Raster presentation uses only Sixel and requires the default-enabled `sixel` feature.
 /// Defaults leave every capability unknown: frames without raster content work
 /// normally, while raster frames fail until the required capabilities are set.
 /// Both modes require `sixel`, `no_scroll`, and valid `cell_pixels`. Fullscreen

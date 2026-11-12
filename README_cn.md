@@ -45,11 +45,11 @@
 
 ## 在应用中引入 rsille
 
-在应用中添加 rsille `3.0.4` 依赖：
+在应用中添加 rsille `3.1.0` 依赖：
 
 ```toml
 [dependencies]
-rsille = "3.0.4"
+rsille = "3.1.0"
 ```
 
 对外的包名是 `rsille`。仓库中的 `tui`、`render`、`canvas` 都是内部开发用 crate，
@@ -71,11 +71,12 @@ cargo run -p rsille-typst --example formula -- --help
 无滚屏的定位输出及末尾不完整六行带的透明填充。这些能力不会自动检测，也不会静默降级。
 单格物理像素手动 override 和无 TTY 的 `--headless` 自检详见扩展 README。
 
-默认没有启用任何 feature。代码查看器需要 Syntect 语法高亮时，启用 `syntax-highlighting`：
+默认启用 `sixel` feature，可通过 `default-features = false` 关闭。
+代码查看器需要 Syntect 语法高亮时，启用 `syntax-highlighting`：
 
 ```toml
 [dependencies]
-rsille = { version = "3.0.4", features = ["syntax-highlighting"] }
+rsille = { version = "3.1.0", features = ["syntax-highlighting"] }
 ```
 
 未启用时，代码查看器仍支持纯文本显示和导航。
@@ -89,7 +90,7 @@ rsille = { version = "3.0.4", features = ["syntax-highlighting"] }
 `RasterCanvasWidget::from_draw(...)`。栅格内容支持布局、裁剪、滚动和不透明遮挡，
 与采样式 `Canvas` 相互独立。
 
-终端输出需要启用可选的 `sixel` feature，显式配置终端能力和真实的每格像素尺寸。
+终端输出需要默认启用的 `sixel` feature，显式配置终端能力和真实的每格像素尺寸。
 不会自动检测终端能力；配置不满足要求时返回错误，不降级为字符图。
 输出使用 RGB332 色彩量化，不支持 alpha。全屏要求备用屏幕上的图形擦除；
 inline 要求可靠的行局部图形擦除，以及图形随文字滚动。
@@ -257,7 +258,7 @@ TUI 的 `canvas(...)` 组件把同一套绘图能力嵌入布局。通过 `.view
 
 ## API 与源码入口
 
-当前仓库使用 **v3 API**（`Cargo.toml` 中版本为 `3.0.4`）。
+当前仓库使用 **v3 API**（`Cargo.toml` 中版本为 `3.1.0`）。
 
 | 公开模块 | 职责 | 共用实现 |
 | --- | --- | --- |

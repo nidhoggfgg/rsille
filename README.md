@@ -50,11 +50,11 @@ For one API at a time, start with the [small TUI examples](packages/tui/examples
 
 ## Add rsille to an application
 
-Add rsille `3.0.4` to your application:
+Add rsille `3.1.0` to your application:
 
 ```toml
 [dependencies]
-rsille = "3.0.4"
+rsille = "3.1.0"
 ```
 
 The public package is `rsille`. The repository's `tui`, `render` and `canvas` crates
@@ -80,12 +80,12 @@ These capabilities are not automatically detected, and output never silently
 falls back. See the extension README for measured cell-pixel overrides
 and no-TTY `--headless` checks.
 
-Default features are empty. Enable `syntax-highlighting` for Syntect highlighting in
-code viewers:
+The `sixel` feature is enabled by default; use `default-features = false` to disable it.
+Enable `syntax-highlighting` for Syntect highlighting in code viewers:
 
 ```toml
 [dependencies]
-rsille = { version = "3.0.4", features = ["syntax-highlighting"] }
+rsille = { version = "3.1.0", features = ["syntax-highlighting"] }
 ```
 
 Without that feature, code viewers still support plain text and navigation.
@@ -100,7 +100,7 @@ primitives. Embed it with `raster_canvas(...)` or use the revision-cached
 `RasterCanvasWidget::from_draw(...)`. Raster content supports layout, clipping,
 scrolling and opaque coverage independently of the sample-based `Canvas`.
 
-Terminal output requires the optional `sixel` feature, explicit terminal
+Terminal output requires the default-enabled `sixel` feature, explicit terminal
 capabilities and actual pixels per character cell. Capabilities are not detected
 automatically; unsupported configurations return an error without character
 fallback. Output uses RGB332 color quantization and does not support alpha.
@@ -283,7 +283,7 @@ Compare encodings with `cargo run -p tui --example canvas`.
 
 ## API and source map
 
-This checkout contains the **v3 API** (`3.0.4` in `Cargo.toml`).
+This checkout contains the **v3 API** (`3.1.0` in `Cargo.toml`).
 
 | Public module | Responsibility | Shared implementation |
 | --- | --- | --- |
