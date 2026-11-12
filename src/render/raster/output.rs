@@ -10,7 +10,9 @@ use std::{io, time::Duration};
 /// Actual terminal-cell pixel dimensions, not Canvas samples per cell.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct CellPixels {
+    /// Physical width of one terminal character cell in pixels, not columns.
     pub width: u16,
+    /// Physical height of one terminal character cell in pixels, not rows.
     pub height: u16,
 }
 
@@ -228,6 +230,7 @@ pub struct RasterCapabilities {
 /// normally, while raster frames fail until the required capabilities are set.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct RasterOutput {
+    /// Verified host behavior and measured cell dimensions for native output.
     pub capabilities: RasterCapabilities,
 }
 
@@ -277,10 +280,15 @@ impl RasterOutput {
 /// Cumulative Sixel work and current bounded cache occupancy for one renderer.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct RasterStats {
+    /// Cumulative number of tiles encoded rather than reused from the cache.
     pub encodes: u64,
+    /// Cumulative number of encoded-tile cache lookups that reused an entry.
     pub cache_hits: u64,
+    /// Encoded payload bytes currently retained in the cache.
     pub cache_bytes: usize,
+    /// Number of encoded tiles currently retained in the cache.
     pub cache_entries: usize,
+    /// Cumulative number of tiles sent in successfully committed frames.
     pub tiles_sent: u64,
     /// Sixel payload bytes, excluding cursor positioning and character output.
     pub bytes_sent: u64,

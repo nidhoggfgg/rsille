@@ -18,7 +18,14 @@ use crate::render::style::{Style, Stylized};
 
 /// An opaque, eight-bit-per-channel RGB color; the default is black.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
-pub struct Rgb(pub u8, pub u8, pub u8);
+pub struct Rgb(
+    /// Red intensity, from 0 to 255.
+    pub u8,
+    /// Green intensity, from 0 to 255.
+    pub u8,
+    /// Blue intensity, from 0 to 255.
+    pub u8,
+);
 
 /// Maximum source pixel count (48 MiB of RGB storage per distinct snapshot).
 pub const MAX_RASTER_PIXELS: usize = 16 * 1024 * 1024;
@@ -72,6 +79,27 @@ fn next_token() -> u64 {
 /// Drawing is not antialiased. Work is bounded by canvas dimensions, not the
 /// magnitude of offscreen coordinates or radii. Mutations are infallible APIs:
 /// COW allocation failure follows the standard allocator failure behavior.
+///
+/// Coordinates start at the top-left pixel, with x increasing rightward and y
+/// increasing downward. Drawing outside the canvas is clipped, not an error.
+/// Source dimensions are pixels, independent of terminal rows and columns.
+///
+/// # Examples
+///
+/// ```
+/// use rsille::render::raster::{RasterCanvas, Rgb};
+///
+/// let mut canvas = RasterCanvas::new(32, 24, Rgb(0, 0, 0))?;
+/// let snapshot = canvas.clone();
+/// canvas.fill_rect(2, 3, 8, 6, Rgb(255, 0, 0));
+/// canvas.line(0, 0, 31, 23, Rgb(255, 255, 255));
+///
+/// assert_eq!(canvas.pixels()[3 * 32 + 2], Rgb(255, 0, 0));
+/// assert_eq!(snapshot.pixels()[3 * 32 + 2], Rgb(0, 0, 0));
+/// assert_eq!(canvas.id(), snapshot.id());
+/// assert_ne!(canvas.version(), snapshot.version());
+/// # Ok::<(), rsille::render::raster::RasterError>(())
+/// ```
 #[derive(Clone, Debug)]
 pub struct RasterCanvas {
     width: u32,
@@ -95,6 +123,13 @@ impl RasterCanvas {
     ///
     /// Dimensions are checked before allocation; at most [`MAX_RASTER_PIXELS`]
     /// pixels are accepted. Dimensions never change after construction.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RasterError::EmptyDimensions`] if either dimension is zero,
+    /// [`RasterError::TooManyPixels`] if the pixel count overflows or exceeds the
+    /// resource limit, or [`RasterError::AllocationFailed`] if pixel storage
+    /// cannot be reserved.
     pub fn new(width: u32, height: u32, background: Rgb) -> Result<Self, RasterError> {
         let len = Self::checked_len(width, height)?;
         let mut pixels = Vec::new();
@@ -126,6 +161,13 @@ impl RasterCanvas {
     /// Dimensions must be nonzero, within [`MAX_RASTER_PIXELS`], and match the
     /// exact input length. `background` is metadata, not a fill or alpha color.
     /// The canvas has a fresh identity and version zero; clones use normal COW.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RasterError::EmptyDimensions`] for a zero dimension,
+    /// [`RasterError::TooManyPixels`] for dimensions exceeding storage limits,
+    /// or [`RasterError::InvalidPixelLength`] unless there are exactly
+    /// `width * height` pixels. Dimensions are validated before the input length.
     pub fn from_pixels(
         width: u32,
         height: u32,
@@ -151,6 +193,25 @@ impl RasterCanvas {
     /// storage. Allocation failure returns [`RasterError::AllocationFailed`].
     /// Alpha compositing and stride removal are the caller's responsibility.
     /// Identity, background metadata and COW semantics match [`Self::from_pixels`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RasterError::EmptyDimensions`] for a zero dimension,
+    /// [`RasterError::TooManyPixels`] for dimensions exceeding storage limits,
+    /// [`RasterError::InvalidPixelLength`] unless the byte length is exactly
+    /// `width * height * 3`, or [`RasterError::AllocationFailed`] if pixel storage
+    /// cannot be reserved.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rsille::render::raster::{RasterCanvas, Rgb};
+    ///
+    /// let bytes = [255, 0, 0, 0, 255, 0];
+    /// let canvas = RasterCanvas::from_rgb8(2, 1, Rgb(0, 0, 0), &bytes)?;
+    /// assert_eq!(canvas.pixels(), &[Rgb(255, 0, 0), Rgb(0, 255, 0)]);
+    /// # Ok::<(), rsille::render::raster::RasterError>(())
+    /// ```
     pub fn from_rgb8(
         width: u32,
         height: u32,
@@ -185,6 +246,9 @@ impl RasterCanvas {
     }
 
     /// Immutable row-major RGB pixels, without padding or alpha.
+    ///
+    /// Pixel `(x, y)` is at index `y * width + x`. The slice always contains
+    /// exactly `width * height` pixels; use [`Self::set_pixel`] to modify them.
     pub fn pixels(&self) -> &[Rgb] {
         self.pixels.as_slice()
     }

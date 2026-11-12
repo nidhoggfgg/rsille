@@ -20,6 +20,9 @@ use crossterm::style::{Attributes, Color, Colors};
 ///
 /// These are deliberately independent of terminal cells, clipping, scaling and
 /// presentation backend. Resizing the widget does not rerun the callback.
+/// Both dimensions are nonzero and match the dimensions supplied to
+/// [`RasterCanvasWidget::from_draw`]. Pixel coordinates start at the top-left;
+/// x increases to the right and y increases downward.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RasterCanvasContext {
     pixel_width: u32,
@@ -80,6 +83,11 @@ struct RasterState {
 /// visible, rather than fitting the whole source into the visible fragment.
 /// Raster submission is protocol-independent and never writes to the terminal.
 ///
+/// Layout sizes are measured in terminal cells, not source pixels. By default,
+/// the widget requests at least one column and one row, with a flex weight of
+/// `1.0`; use [`Self::fixed`] to request a specific cell allocation without
+/// changing the source resolution.
+///
 /// ```
 /// use rsille::tui::prelude::*;
 ///
@@ -112,6 +120,10 @@ impl<M, F> fmt::Debug for RasterCanvasWidget<M, F> {
 
 impl<M> RasterCanvasWidget<M> {
     /// Displays an owned canvas or an `Arc<RasterCanvas>` without copying pixels.
+    ///
+    /// The widget retains the supplied source, rather than drawing into it. To
+    /// show updated pixels, rebuild the widget with the updated canvas; neither
+    /// [`Self::revision`] nor [`Self::invalidate`] changes shared source pixels.
     pub fn new(canvas: impl Into<Arc<RasterCanvas>>) -> Self {
         Self::with_source(Source::Shared(canvas.into()))
     }
@@ -145,7 +157,10 @@ impl<M, F> RasterCanvasWidget<M, F> {
     }
 
     /// Sets the opaque letterbox color and callback canvas's initial background.
-    /// This does not recolor an existing shared canvas.
+    ///
+    /// Changing this color invalidates a procedural source, so its next visible
+    /// render draws on a fresh canvas filled with this color. This does not
+    /// recolor an existing shared canvas.
     pub fn background(mut self, background: Rgb) -> Self {
         self.options.background = background;
         self
@@ -173,6 +188,27 @@ impl<M, F> RasterCanvasWidget<M, F> {
     ///
     /// Keep this value stable across unrelated view rebuilds, and change it when
     /// drawing inputs change. Shared sources use their own resource id/version.
+    /// Revisions are compared for equality, not ordering; a new value need not
+    /// be greater than the previous one. Only the current result is cached, so
+    /// returning to an older revision redraws rather than restoring old pixels.
+    ///
+    /// ```
+    /// use rsille::tui::prelude::*;
+    ///
+    /// fn view(color: Rgb, revision: u64) -> impl Widget<()> {
+    ///     RasterCanvasWidget::<(), _>::from_draw(16, 16, move |canvas, _| {
+    ///         canvas.set_pixel(8, 8, color);
+    ///     })
+    ///     .expect("valid source dimensions")
+    ///     .key("indicator")
+    ///     .revision(revision)
+    /// }
+    ///
+    /// // When the captured color changes, change the revision as well.
+    /// let first = view(Rgb(255, 0, 0), 0);
+    /// let updated = view(Rgb(0, 255, 0), 1);
+    /// # let _ = (first, updated);
+    /// ```
     pub fn revision(mut self, revision: u64) -> Self {
         self.revision = revision;
         self
@@ -298,6 +334,13 @@ where
     /// Validates dimensions without allocating pixels. Allocation and `draw` are
     /// deferred until the widget is visible and its source cache misses. Unrelated
     /// view rebuilds neither allocate source pixels nor rerun the callback.
+    ///
+    /// `draw` is an [`Fn`] callback, not a per-frame update hook. It receives a
+    /// fresh canvas initialized with [`Self::background`] and the fixed source
+    /// dimensions in [`RasterCanvasContext`]. Keep animation or other changing
+    /// inputs in application state and update [`Self::revision`] when those
+    /// inputs change. A fully clipped or empty allocation defers drawing until
+    /// the source is visible again.
     ///
     /// # Errors
     ///
@@ -425,6 +468,22 @@ where
 
 /// Creates a raster widget from an owned canvas or a shared `Arc<RasterCanvas>`.
 /// For cached procedural drawing, use [`RasterCanvasWidget::from_draw`].
+///
+/// Equivalent to [`RasterCanvasWidget::new`]. The message type `M` can usually
+/// be inferred from the surrounding view; specify `::<()>` for a standalone
+/// widget that does not use application messages.
+///
+/// ```
+/// use std::sync::Arc;
+/// use rsille::tui::prelude::*;
+///
+/// let source = Arc::new(RasterCanvas::new(64, 32, Rgb(20, 30, 40))?);
+/// // Both widgets share the same source pixels, with independent cell sizes.
+/// let thumbnail = raster_canvas::<()>(Arc::clone(&source)).fixed(8, 4);
+/// let preview = raster_canvas::<()>(source).fixed(32, 16);
+/// # let _ = (thumbnail, preview);
+/// # Ok::<(), RasterError>(())
+/// ```
 pub fn raster_canvas<M>(canvas: impl Into<Arc<RasterCanvas>>) -> RasterCanvasWidget<M> {
     RasterCanvasWidget::new(canvas)
 }
