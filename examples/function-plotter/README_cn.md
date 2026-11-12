@@ -9,11 +9,12 @@
 在仓库根目录执行：
 
 ```sh
-cargo run --release --features sixel --manifest-path examples/function-plotter/Cargo.toml -- --sixel
-cargo run --release --features sixel --manifest-path examples/function-plotter/Cargo.toml -- --sixel --expr 'sin(x); cos(x); x^2/8'
+cargo run --release --features sixel --manifest-path examples/function-plotter/Cargo.toml
+cargo run --manifest-path examples/function-plotter/Cargo.toml -- --help
+cargo run --release --features sixel --manifest-path examples/function-plotter/Cargo.toml -- --expr 'sin(x); cos(x); x^2/8'
 ```
 
-无参数显示帮助，建议使用 100×32 字符格。未指定 `--expr` 时，直接打开空白、无边框的 `In[1]:=` 输入框，不绘图、不添加历史、不提交。只有显式指定 `--expr` 才在启动时执行并提交图像或错误，然后打开空白 `In[2]:=` 提示符。以后每次执行都会把 `In[n]:=` 输入及其 `Out[n]=` 图像或错误留在终端历史中，再打开下一个空白提示符。使用现有无边框 `TextArea` 控件，限制为一行，不绘制外围方框或底线；编辑中和提交后的表达式均紧接在同一行的 `In[n]:=` 后。输入框与周围文字使用终端默认背景，光标和选区以下划线表示，不再使用背景色高亮；图像保留自身的背景色。`Out[n]=` 或预览标题下方先显示只读公式区，再显示图像；编辑输入仍保持线性文本。粘贴的 CRLF、CR、LF 换行转换为空格，保持单行输入。不使用备用屏幕，不再维护可滚动编辑的笔记本，也不保存会话。不能原地修改历史输出。
+正常启动默认运行 Sixel REPL，构建时需要 `--features sixel`；使用 `--help` 显示帮助。建议使用 100×32 字符格。未指定 `--expr` 时，直接打开空白、无边框的 `In[1]:=` 输入框，不绘图、不添加历史、不提交。只有显式指定 `--expr` 才在启动时执行并提交图像或错误，然后打开空白 `In[2]:=` 提示符。以后每次执行都会把 `In[n]:=` 输入及其 `Out[n]=` 图像或错误留在终端历史中，再打开下一个空白提示符。使用现有无边框 `TextArea` 控件，限制为一行，不绘制外围方框或底线；编辑中和提交后的表达式均紧接在同一行的 `In[n]:=` 后。输入框与周围文字使用终端默认背景，光标和选区以下划线表示，不再使用背景色高亮；图像保留自身的背景色。`Out[n]=` 或预览标题下方先显示只读公式区，再显示图像；编辑输入仍保持线性文本。粘贴的 CRLF、CR、LF 换行转换为空格，保持单行输入。不使用备用屏幕，不再维护可滚动编辑的笔记本，也不保存会话。不能原地修改历史输出。
 
 原生单图模式下，公式与曲线图共用 `min(可用列数, max(70, 公式内容列数))` 的宽度。公式内容宽度含内边距并向上取整到完整字符格；可用宽度扣除左右各一列的留白。图像高度仍为 14 行。这替代了此前有意采用的仅按公式内容定宽策略：`sin(x); cos(x)` 等短公式在空间足够时也有 70 列宽的曲线图，不再成为窄条；窄窗口中两者仍缩小至可用宽度。右侧未使用的空间保留终端背景，不绘制 Sixel。先布局，再按分配的列数/行数乘以真实字符格像素尺寸确定栅格大小。因此 70×14 字符格在每格 8×16 像素时直接绘制 560×224 图像，没有中间图像或降采样。仅绘制普通函数时，图像有意填满可用矩形：采样得到的数学范围在调整尺寸时保持固定，但横纵比例随终端大小及字符格尺寸变化，两个轴的单位长度不保证相等。边距及网格密度按像素预算调整；仅在至少 160×80 时显示 3×5 像素数字刻度，更小时省略文字与边距以优先显示曲线。曲线使用约 1.5 个目标像素宽的抗锯齿圆头描边，与已有网格、坐标轴及先绘制的曲线混合。每条函数先累积覆盖率再混合，避免自适应细分接点重复叠加而变亮。端点圆头及边缘最多延伸 1.25 像素，小于描边覆盖范围的间隙无法保留；抗锯齿描边本身不增加函数采样，也不使用中间超采样图像或缩放。
 
@@ -21,13 +22,13 @@ cargo run --release --features sixel --manifest-path examples/function-plotter/C
 
 UI 状态保存不可变的已解析函数源，而不是布局前生成的图像。每个源拥有以数学范围及目标像素尺寸为键的单项缓存，源身份由对象所有权区分。普通重绘及未编辑预览的提交复用缓存；调整尺寸时直接重新绘制，不重新解析。`meval` 绑定闭包不是 `Send`，因此采用 UI 线程内的 `Rc` 共享和 `RefCell` 缓存，不启动后台任务。替换源或进入下一提示符会释放旧缓存。
 
-`--sixel` 是**用户明确确认**终端及复用器支持 Sixel、ED 2 和 **EL2 图形擦除**、图形随文本滚动、稳定调色板以及无滚屏的定位输出。程序不检测这些能力。此选项设置 `reliable_inline_erase`，不支持的栅格输出会报错，不静默降级。**滚动历史是否保留图像取决于终端**；提交帧并不保证 Sixel 图像在滚动后仍然可见。
+正常启动**要求**终端及复用器支持 Sixel、ED 2 和 **EL2 图形擦除**、图形随文本滚动、稳定调色板以及无滚屏的定位输出。程序不检测这些能力。程序设置 `reliable_inline_erase`，不支持的栅格输出会报错，不静默降级。**滚动历史是否保留图像取决于终端**；提交帧并不保证 Sixel 图像在滚动后仍然可见。
 
 启动时在输入读取前测量字符格像素尺寸，测量失败则报错。可用 `--cell-pixels WxH` 提供**真实的每格像素尺寸**，不是终端列数×行数。原生 Windows 没有查询回退。字体/DPI 改变后请重启。详见[栅格指南](../../docs/raster.md)。
 
 ## 交互式独立多图
 
-用 `--sixel` 启动普通 REPL，**无需 `--grid`**。
+不加运行时参数即可启动普通 REPL，**无需 `--grid`**。
 输入以下各行并按 Enter：
 
 ```text
@@ -51,9 +52,9 @@ surface(x*y, -2, 2, -2, 2)
 
 ```sh
 # 默认四图：曲面、螺旋线、三叶结、极坐标玫瑰线
-cargo run --release --features sixel --manifest-path examples/function-plotter/Cargo.toml -- --sixel --grid
+cargo run --release --features sixel --manifest-path examples/function-plotter/Cargo.toml -- --grid
 # 每个 --expr 对应独立面板；分号仍表示同一面板内叠加
-cargo run --release --features sixel --manifest-path examples/function-plotter/Cargo.toml -- --sixel --grid --expr 'sin(x); cos(x)' --expr 'polar(2, 0, 2*pi)' --expr 'surface(x*y, -2, 2, -2, 2)'
+cargo run --release --features sixel --manifest-path examples/function-plotter/Cargo.toml -- --grid --expr 'sin(x); cos(x)' --expr 'polar(2, 0, 2*pi)' --expr 'surface(x*y, -2, 2, -2, 2)'
 cargo run --manifest-path examples/function-plotter/Cargo.toml -- --headless --grid
 ```
 
@@ -83,7 +84,7 @@ Sixel 预览和提交结果支持较小的上标幂、上下分式、带横线�
 
 绘图包含网格、零轴和数值刻度，采用有预算上限的自适应中点细分，非有限值及无法解析的间断区间不连线。但有限采样不是连续性证明，极窄特征和高频振荡可能遗漏。没有自动求根、积分、隐式曲线或符号求解功能。不兼容 Mathematica 的 `Plot[...]` 语法。
 
-x 采样区间默认为 `[-10, 10]`，可用 `--x-range MIN MAX` 指定，例如 `--sixel --x-range -2 4 --expr '0.05*sin(x)'`。支持负数参数；端点必须有限、递增，且跨度有限。不能从任意表达式推断 x 区间。
+x 采样区间默认为 `[-10, 10]`，可用 `--x-range MIN MAX` 指定，例如 `--x-range -2 4 --expr '0.05*sin(x)'`。支持负数参数；端点必须有限、递增，且跨度有限。不能从任意表达式推断 x 区间。
 
 y 范围在每次解析输入后估算一次，不随栅格尺寸变化：每条函数在 x 区间等距采样 1025 点，忽略非有限值。将各函数采样极值限制在第一/第三四分位数向外各延伸三倍四分位距的范围内，再合并各函数范围，两侧各增加 5% 留白。四分位距为零时使用四分位数本身。这能限制极点尖峰，但也可能裁掉真实窄峰或偏斜长尾，**不保证找到全部全局极值**。常量使用其绝对值的 5% 留白，零使用 ±1；全部样本非有限时回退到 `[-1, 1]`。不强制 y 范围包含零。刻度采用随范围变化的 1/2/5 步长，小范围使用相应精度的小数或科学计数法。未增加额外的 y 范围操作界面。
 
@@ -114,7 +115,7 @@ sin(x); polar(2, 0, 2*pi); param(t, t^2, -2, 2)
 依次为玫瑰线、阿基米德螺线、心形线、利萨如曲线、爱心、波瓣闭合曲线及混合绘图。例如：
 
 ```sh
-cargo run --release --features sixel --manifest-path examples/function-plotter/Cargo.toml -- --sixel --expr 'polar(2*cos(5*theta), 0, 2*pi)'
+cargo run --release --features sixel --manifest-path examples/function-plotter/Cargo.toml -- --expr 'polar(2*cos(5*theta), 0, 2*pi)'
 ```
 
 只要包含极坐标或参数曲线，就对两个坐标轴分别估算范围（每条曲线 1025 点，仅接受两个坐标都有限的样本，使用上述四分位距过滤及留白），再根据最终绘图区像素尺寸扩展可见范围，使横纵单位具有相同像素长度。调整尺寸可能改变可见范围，但不会改变参数区间或混合图中普通函数的采样区间。Sixel 下圆不会因宽屏绘图区被拉成椭圆。网格仍为直角坐标网格，不是极坐标网格。
@@ -133,7 +134,7 @@ cargo run --release --features sixel --manifest-path examples/function-plotter/C
 `surface(z, xmin, xmax, ymin, ymax)` 绘制 `z=f(x,y)`；`param3(x, y, z, tmin, tmax)` 绘制空间轨迹。所有区间必须有限、递增、跨度有限，端点支持常量表达式。三维对象可以用 `;` 叠加，总数最多六个，但不能与二维表达式混用。`--x-range` 不影响三维对象。公式区显示曲面的两个定义域，或带大括号的三行空间参数方程。
 
 ```sh
-cargo run --release --features sixel --manifest-path examples/function-plotter/Cargo.toml -- --sixel --expr 'surface(sin(x)*cos(y), -pi, pi, -pi, pi)'
+cargo run --release --features sixel --manifest-path examples/function-plotter/Cargo.toml -- --expr 'surface(sin(x)*cos(y), -pi, pi, -pi, pi)'
 ```
 
 可直接输入：

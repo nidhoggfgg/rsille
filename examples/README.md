@@ -42,10 +42,24 @@ mouse support is needed for pointer interactions. See each guide for window size
 keys, data persistence and export options. Orbit Files' complete filesystem operations
 require Linux; it starts in a disposable demo directory unless given `--path`.
 
+## Function Plotter
+
+```sh
+cargo run --release --features sixel --manifest-path examples/function-plotter/Cargo.toml
+cargo run --manifest-path examples/function-plotter/Cargo.toml -- --help
+```
+
+No arguments starts the interactive Sixel REPL; `--help` shows help.
+The terminal and any multiplexer must support Sixel,
+ED 2 and local EL 2 graphics erasure, graphics following text scrolling, stable
+palettes and non-scrolling positioned output. These capabilities are not
+automatically detected. See the [Function Plotter guide](function-plotter/README.md)
+for controls, measured cell-pixel overrides and headless checks.
+
 ## Sixel vs Canvas windows
 
 ```sh
-cargo run --release --features sixel --example sixel_windows -- --sixel
+cargo run --release --features sixel --example sixel_windows
 cargo run --example sixel_windows -- --help
 ```
 
@@ -61,8 +75,9 @@ and click to bring a window forward. `e` cycles Canvas Braille/HalfBlock/Quadran
 `r` restores the starting window rectangles; `q`/Esc quits. Ideally use 100×32 cells;
 smaller terminals and terminal resizing are supported.
 
-`--sixel` is your explicit assertion that the entire terminal/multiplexer path
-supports Sixel, graphics ED 2 erasure, no scrolling and stable palettes.
+The entire terminal/multiplexer path must support Sixel, graphics ED 2 erasure,
+non-scrolling positioned output and stable palettes. The demo configures these
+capabilities without automatically detecting them.
 Unsupported raster output returns an error, with no silent fallback. Startup probing
 uses OS window metrics first;
 unusable OS dimensions trigger a `CSI 16 t` query on Unix (including WSL), requiring
@@ -78,7 +93,7 @@ are checked before entering the managed terminal session. Actual 10×20 cells ar
 `--cell-pixels 10x20`; do not round the height to 18 or 24. The terminal must honor
 transparent partial-band padding and the erase/no-scroll assertions; accepting
 these metrics does not certify real-terminal behavior.
-No flags shows help; there is no Raster character preview. See the
+No arguments starts the interactive demo; `--help` shows help. See the
 [raster guide](../docs/raster.md) for the full safety contract.
 
 Finite, terminal-independent mouse-drag and occlusion checks and example tests:

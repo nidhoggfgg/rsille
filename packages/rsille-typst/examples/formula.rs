@@ -8,12 +8,11 @@ use rsille_typst::{MathRenderer, RenderOptions};
 const DEFAULT_FORMULA: &str = "sum_(k=1)^n k = frac(n(n+1), 2)";
 const HELP: &str = "Typst block formula — direct terminal display
 
-Usage: formula --sixel [OPTIONS] ['Typst math contents']
-  --sixel              Require native Sixel; never silently fall back
+Usage: formula [OPTIONS] ['Typst math contents']
   --cell-pixels WxH    Measured physical pixels per character cell
   --force-cell-pixels  Confirm a measured override equal to the terminal grid
   --headless           Check the same widget/Runtime in memory, without TTY I/O
-  --help, -h           Show usage (also shown with no arguments)
+  --help, -h           Show usage
   --                   Treat the remaining argument as formula source
 
 q / Esc quits. Formula defaults to sum_(k=1)^n k = frac(n(n+1), 2).
@@ -23,7 +22,8 @@ Original pixels are never enlarged: reserve formula-sized rows plus a title.
 Narrow/short terminals clip the formula; resize reveals it again, without reflow.
 The framework caps inline content at 50 rows and reserves Sixel bottom guards.
 
---sixel explicitly asserts that your terminal AND multiplexer support Sixel,
+Interactive output always uses Sixel, including with no arguments.
+Running interactively assumes your terminal AND multiplexer support Sixel,
 local EL 2 graphics erasure, images following text scrolling, stable palettes,
 non-scrolling positioned output, and
 transparent padding in partial final six-pixel bands. No capability detection.
@@ -38,17 +38,13 @@ query fallback. If discovery fails, supply measured --cell-pixels WxH.
 Overrides skip probing. A grid-sized override requires --force-cell-pixels.
 Metrics are stored once; restart after font/DPI changes. Queries do not detect
 Sixel support and may consume unrelated input; late replies may reach the reader.
-Headless metadata checks never probe. Headless Sixel requires explicit --cell-pixels (synthetic
-metrics are suitable for checks only); headless does not certify a real terminal.";
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Output {
-    Sixel,
-}
+--headless alone checks metadata without the sixel feature or probing, using
+synthetic 10x20 layout metrics. Adding --cell-pixels selects in-memory Sixel
+encoding and requires --features sixel; it never probes. Synthetic metrics are
+suitable for checks only; headless does not certify a real terminal.";
 
 #[derive(Default, Debug)]
 struct Options {
-    output: Option<Output>,
     pixels: Option<CellPixels>,
     force_cell_pixels: bool,
     headless: bool,
@@ -70,7 +66,6 @@ impl Options {
             }
             match argument.as_str() {
                 "--" => literal = true,
-                "--sixel" => options.output = Some(Output::Sixel),
                 "--cell-pixels" => {
                     let value = args.next().ok_or("--cell-pixels needs WxH")?;
                     let (width, height) = value.split_once('x').ok_or("cell pixels must be WxH")?;
@@ -85,27 +80,21 @@ impl Options {
                 _ => return Err(format!("unknown argument: {argument}; use --help")),
             }
         }
-        if options.pixels.is_some() && options.output != Some(Output::Sixel) {
-            return Err("--cell-pixels requires --sixel".into());
-        }
+
         if options.force_cell_pixels && options.pixels.is_none() {
-            return Err("--force-cell-pixels requires --sixel --cell-pixels WxH".into());
+            return Err("--force-cell-pixels requires --cell-pixels WxH".into());
         }
         Ok(options)
     }
 
     fn config(&self, grid: (u16, u16)) -> Result<RasterOutput, String> {
-        if self.output != Some(Output::Sixel) {
+        if self.headless && self.pixels.is_none() {
             return Ok(RasterOutput::default());
         }
         if !cfg!(feature = "sixel") {
             return Err("native output needs --features sixel".into());
         }
-        if self.headless && self.pixels.is_none() {
-            return Err(
-                "headless Sixel checks require explicit --cell-pixels WxH (no probing)".into(),
-            );
-        }
+
         // resolve(None) probes before App::run starts its input reader. An explicit
         // override is validated without OS lookup or terminal queries.
         let pixels = CellPixels::resolve(self.pixels).map_err(|error| error.to_string())?;
@@ -127,7 +116,6 @@ impl Options {
 
 struct State {
     canvas: Arc<RasterCanvas>,
-    output: Output,
     formula_size: (u16, u16),
 }
 
@@ -149,16 +137,12 @@ enum Msg {
 }
 
 fn view(state: &State) -> impl Widget<Msg> {
-    col()
-        .child(label(match state.output {
-            Output::Sixel => "Typst / Sixel / q or Esc: quit",
-        }))
-        .child(
-            raster_canvas(Arc::clone(&state.canvas))
-                .key("formula")
-                .scale(RasterScale::Original)
-                .fixed(state.formula_size.0, state.formula_size.1),
-        )
+    col().child(label("Typst / Sixel / q or Esc: quit")).child(
+        raster_canvas(Arc::clone(&state.canvas))
+            .key("formula")
+            .scale(RasterScale::Original)
+            .fixed(state.formula_size.0, state.formula_size.1),
+    )
 }
 
 fn application(state: State, config: RasterOutput, size: (u16, u16)) -> Runtime<State, Msg> {
@@ -221,18 +205,13 @@ fn check_output(
     Ok(())
 }
 
-fn headless(
-    canvas: Arc<RasterCanvas>,
-    output: Output,
-    config: RasterOutput,
-) -> Result<(), Box<dyn Error>> {
+fn headless(canvas: Arc<RasterCanvas>, config: RasterOutput) -> Result<(), Box<dyn Error>> {
     let formula_size = formula_size(&canvas, config);
     let rows = formula_size.1.saturating_add(1).min(50);
     for key in [KeyCode::Char('q'), KeyCode::Esc] {
         let mut runtime = application(
             State {
                 canvas: Arc::clone(&canvas),
-                output,
                 formula_size,
             },
             config,
@@ -266,7 +245,7 @@ fn headless(
 
 fn main() -> Result<(), Box<dyn Error>> {
     let options = Options::parse(std::env::args().skip(1))?;
-    if options.help || (options.output.is_none() && !options.headless) {
+    if options.help {
         println!("{HELP}");
         return Ok(());
     }
@@ -276,7 +255,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         crossterm::terminal::size()?
     };
     let config = options.config(size)?;
-    let output = options.output.unwrap_or(Output::Sixel);
+
     // Fixed, explicit font assets; no system font search or runtime downloads.
     let renderer = MathRenderer::new(typst_assets::fonts(), "New Computer Modern Math")?;
     let result = renderer.render_with_diagnostics(
@@ -288,13 +267,12 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
     let canvas = Arc::new(result.canvas);
     if options.headless {
-        headless(canvas, output, config)
+        headless(canvas, config)
     } else {
         let formula_size = formula_size(&canvas, config);
         application(
             State {
                 canvas,
-                output,
                 formula_size,
             },
             config,
@@ -331,21 +309,22 @@ mod tests {
                 )
             );
         }
-        headless(Arc::new(canvas), Output::Sixel, RasterOutput::default()).unwrap();
+        headless(Arc::new(canvas), RasterOutput::default()).unwrap();
     }
 
     #[test]
     fn explicit_modes_and_arguments() {
-        assert!(options(&[]).unwrap().output.is_none());
-        assert!(options(&["--cell-pixels", "8x18"]).is_err());
+        let default = options(&[]).unwrap();
+        assert!(!default.help && !default.headless && default.pixels.is_none());
+        assert!(options(&["--cell-pixels", "8x18"]).is_ok());
+        assert!(options(&["--sixel"]).is_err());
+        assert!(options(&["--help"]).unwrap().help);
+        assert!(options(&["-h"]).unwrap().help);
         assert!(options(&["--force-cell-pixels"]).is_err());
         assert!(options(&["--text-only"]).is_err());
-        assert!(options(&["--sixel", "x", "y"]).is_err());
+        assert!(options(&["x", "y"]).is_err());
         assert_eq!(
-            options(&["--sixel", "--", "-x"])
-                .unwrap()
-                .formula
-                .as_deref(),
+            options(&["--", "-x"]).unwrap().formula.as_deref(),
             Some("-x")
         );
     }
@@ -355,31 +334,36 @@ mod tests {
     fn default_and_custom_formula_reach_native_output() {
         let renderer =
             MathRenderer::new(typst_assets::fonts(), "New Computer Modern Math").unwrap();
-        let config = options(&["--sixel", "--headless", "--cell-pixels", "10x20"])
+        let config = options(&["--headless", "--cell-pixels", "10x20"])
             .unwrap()
             .config((100, 30))
             .unwrap();
         for formula in [DEFAULT_FORMULA, "integral_0^1 x^2 dif x = frac(1, 3)"] {
             let canvas = renderer.render(formula, &RenderOptions::default()).unwrap();
-            headless(Arc::new(canvas), Output::Sixel, config).unwrap();
+            headless(Arc::new(canvas), config).unwrap();
         }
     }
 
     #[test]
     fn native_mode_is_strict_and_headless_never_probes() {
-        assert!(options(&["--sixel", "--headless"])
-            .unwrap()
-            .config((100, 30))
-            .is_err());
+        let metadata = options(&["--headless"]).unwrap().config((100, 30)).unwrap();
+        assert!(!metadata.capabilities.sixel);
+        assert!(metadata.capabilities.cell_pixels.is_none());
         let config = |pixels: &str| {
-            options(&["--sixel", "--headless", "--cell-pixels", pixels])
+            options(&["--headless", "--cell-pixels", pixels])
                 .unwrap()
                 .config((100, 30))
         };
         assert!(config("0x18").is_err());
         assert!(config("100x30").is_err());
         if cfg!(feature = "sixel") {
+            let interactive = options(&["--cell-pixels", "10x20"])
+                .unwrap()
+                .config((100, 30))
+                .unwrap();
+            assert!(interactive.capabilities.sixel);
             let native = config("10x20").unwrap();
+            assert!(native.capabilities.sixel);
             assert!(native.capabilities.reliable_inline_erase);
             assert!(!native.capabilities.reliable_erase);
             assert_eq!(
@@ -390,7 +374,6 @@ mod tests {
                 })
             );
             assert!(options(&[
-                "--sixel",
                 "--headless",
                 "--cell-pixels",
                 "100x30",
@@ -401,6 +384,10 @@ mod tests {
             .is_ok());
         } else {
             assert!(config("10x20").is_err());
+            assert_eq!(
+                options(&[]).unwrap().config((100, 30)).unwrap_err(),
+                "native output needs --features sixel"
+            );
         }
     }
 }

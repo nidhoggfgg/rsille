@@ -6,7 +6,7 @@ certification, allocation profiling, and controlled performance acceptance remai
 Historical memory-writer [smoke measurements](raster-performance.md) are retained,
 but their harness has been removed.** Raster output is Sixel-only and rejects
 unsupported configurations. The [`sixel_windows` showcase](../examples/sixel_windows.rs)
-requires an explicit mode; no flags shows help. See [the user guide](raster.md)
+starts interactively with no arguments; `--help` shows help. See [the user guide](raster.md)
 for configuration and controls.
 
 ## Modules, features, and API boundaries
@@ -340,7 +340,7 @@ Treat recorded unit-test results and terminal-validation results as separate evi
 ### Interactive showcase
 
 ```sh
-cargo run --release --features sixel --example sixel_windows -- --sixel
+cargo run --release --features sixel --example sixel_windows
 
 
 cargo run --example sixel_windows -- --help
@@ -352,10 +352,12 @@ titles to move and bottom grips to resize; click to bring forward. `e` cycles
 Canvas Braille/HalfBlock/Quadrant, `r` restores starting rectangles, and `q`/Esc
 quits. Prefer 100×32 cells; small sizes and terminal resizing are supported. There
 is no live animation. This example is fullscreen-only and has no `--inline`
-option. No flags shows help; Raster has no character preview mode.
+option. No arguments starts the interactive demo; `--help` shows help.
 
-For `sixel_windows`, `--sixel` asserts that the entire terminal path supports
-graphics, non-scrolling positioned output and stable palettes, plus ED 2 graphics
+
+`sixel_windows` configures host capability assertions without automatically
+detecting support. The entire terminal/multiplexer path must support Sixel,
+non-scrolling positioned output and stable palettes, plus ED 2 graphics
 erasure in fullscreen mode. Native output rejects unsupported configurations, never silently falling back. Startup checks the feature and current
 backend cell-metric limits (1..=1024 per dimension, at most 65,536 pixels) before
 entering the managed terminal session. Without an override, startup explicitly

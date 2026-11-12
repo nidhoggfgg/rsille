@@ -14,7 +14,8 @@ const X_RANGE: [f64; 2] = [-10.0, 10.0];
 const BOUNDS: [f64; 4] = [-10.0, 10.0, -3.0, 3.0];
 const HELP: &str = "Function plotter — 2D curves and shaded 3D surfaces
 
-  --sixel                 Require native Sixel (build with --features sixel)
+Normal invocation uses native Sixel (build with --features sixel).
+
   --expr 'sin(x); x^2/8'   Initial functions (up to six)
   --grid                  Independent demo panels; no expr: four presets
                           Repeat --expr for 1–6 panels (4096 bytes each).
@@ -63,7 +64,7 @@ Polar/parametric ranges are required, finite and increasing; endpoints may use p
 Live 3D previews rotate around vertical z; submission freezes the displayed angle.
 Explicit ranges override --x-range. Fixed sampling can miss narrow features/poles.
 
---sixel asserts that your terminal/multiplexer supports Sixel, ED 2 and EL2
+Normal invocation requires that your terminal/multiplexer supports Sixel, ED 2 and EL2
  graphics erase, graphics following text scroll, stable palettes and non-scrolling
  positioned output. Image scrollback retention is terminal dependent. No capability
  detection is performed. Cell metrics are resolved before input starts; restart
@@ -72,7 +73,6 @@ Explicit ranges override --x-range. Fixed sampling can miss narrow features/pole
 
 #[derive(Default)]
 struct Options {
-    sixel: Option<bool>,
     pixels: Option<CellPixels>,
     expr: Option<String>,
     panels: Vec<String>,
@@ -87,7 +87,6 @@ impl Options {
         let mut args = args.into_iter();
         while let Some(arg) = args.next() {
             match arg.as_str() {
-                "--sixel" => result.sixel = Some(true),
                 "--x-range" => {
                     let mut range = [0.0_f64; 2];
                     for value in &mut range {
@@ -127,9 +126,7 @@ impl Options {
                 _ => return Err(format!("unknown option: {arg}")),
             }
         }
-        if result.pixels.is_some() && result.sixel != Some(true) {
-            return Err("--cell-pixels requires --sixel".into());
-        }
+
         if result.grid && result.panels.len() > grid::MAX_PANELS {
             return Err("--grid accepts at most six --expr panels".into());
         }
@@ -139,7 +136,7 @@ impl Options {
 
 fn main() -> Result<(), Box<dyn Error>> {
     let options = Options::parse(std::env::args().skip(1))?;
-    if options.help || (options.sixel.is_none() && !options.headless) {
+    if options.help {
         println!("{HELP}");
         return Ok(());
     }
@@ -153,7 +150,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
     let output = {
         if !cfg!(feature = "sixel") {
-            return Err("--sixel needs --features sixel".into());
+            return Err("Sixel output requires building with --features sixel".into());
         }
         RasterOutput {
             capabilities: RasterCapabilities {
@@ -211,10 +208,34 @@ mod tests {
     }
 
     #[test]
-    fn rejects_conflicting_modes_and_orphan_metrics() {
+    fn normal_invocation_and_cell_metrics_need_no_mode_flag() {
+        let options = Options::parse([]).unwrap();
+        assert!(!options.help);
+        assert!(!options.headless);
+        assert!(options.pixels.is_none());
+        let options = Options::parse(["--cell-pixels", "8x18"].map(str::to_owned)).unwrap();
+        let pixels = options.pixels.unwrap();
+        assert_eq!(pixels.width, 8);
+        assert_eq!(pixels.height, 18);
+    }
+
+    #[test]
+    fn help_and_headless_remain_explicit_modes() {
+        for flag in ["--help", "-h"] {
+            assert!(Options::parse([flag.to_owned()]).unwrap().help);
+        }
+        assert!(Options::parse(["--headless".to_owned()]).unwrap().headless);
+        assert!(!HELP.contains("--sixel"));
+        assert!(HELP.contains("--features sixel"));
+    }
+
+    #[test]
+    fn rejects_removed_flags_and_missing_values() {
         for args in [
-            vec!["--sixel", "--text-only"],
-            vec!["--cell-pixels", "8x18"],
+            vec!["--sixel"],
+            vec!["--text-only"],
+            vec!["--cell-pixels"],
+            vec!["--cell-pixels", "invalid"],
             vec!["--expr"],
         ] {
             assert!(Options::parse(args.into_iter().map(str::to_owned)).is_err());

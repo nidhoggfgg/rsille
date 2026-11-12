@@ -9,23 +9,24 @@ A small inline terminal math REPL: `meval` evaluates expressions and rsille rend
 From the repository root:
 
 ```sh
-cargo run --release --features sixel --manifest-path examples/function-plotter/Cargo.toml -- --sixel
-cargo run --release --features sixel --manifest-path examples/function-plotter/Cargo.toml -- --sixel --expr 'sin(x); cos(x); x^2/8'
+cargo run --release --features sixel --manifest-path examples/function-plotter/Cargo.toml
+cargo run --manifest-path examples/function-plotter/Cargo.toml -- --help
+cargo run --release --features sixel --manifest-path examples/function-plotter/Cargo.toml -- --expr 'sin(x); cos(x); x^2/8'
 ```
 
-No arguments prints help. Recommended terminal: 100×32 cells. Without `--expr`, startup opens a blank, borderless `In[1]:=` editor with no graph, history entry, or commit. An explicit `--expr` evaluates automatically and commits its graph or error, followed by a blank `In[2]:=` prompt. Each subsequent evaluation commits its `In[n]:=` input and `Out[n]=` graph (or error) to terminal history, then opens a new blank prompt. The editor uses the existing borderless `TextArea`, constrained to one row with no outline or bottom rule; editable and committed expressions both start immediately after `In[n]:=` on the same row. The editor and surrounding text use the terminal's default background, with an underlined caret/selection instead of background highlighting. The graph retains its own intentional background. `Out[n]=` (or the preview heading) is followed by a read-only formula area above the graph; the editable input remains linear. Pasted CRLF, CR, and LF line endings become spaces, preserving single-line input. There is no alternate screen, scrolling editable notebook, or saved session. Old results cannot be edited in place.
+Normal invocation starts the Sixel REPL and requires building with `--features sixel`; use `--help` to print help. Recommended terminal: 100×32 cells. Without `--expr`, startup opens a blank, borderless `In[1]:=` editor with no graph, history entry, or commit. An explicit `--expr` evaluates automatically and commits its graph or error, followed by a blank `In[2]:=` prompt. Each subsequent evaluation commits its `In[n]:=` input and `Out[n]=` graph (or error) to terminal history, then opens a new blank prompt. The editor uses the existing borderless `TextArea`, constrained to one row with no outline or bottom rule; editable and committed expressions both start immediately after `In[n]:=` on the same row. The editor and surrounding text use the terminal's default background, with an underlined caret/selection instead of background highlighting. The graph retains its own intentional background. `Out[n]=` (or the preview heading) is followed by a read-only formula area above the graph; the editable input remains linear. Pasted CRLF, CR, and LF line endings become spaces, preserving single-line input. There is no alternate screen, scrolling editable notebook, or saved session. Old results cannot be edited in place.
 
 For a single plot in native mode, the formula and graph share `min(available columns, max(70, formula content columns))`. Formula content width includes padding and is rounded up to whole character cells; available width excludes the one-column padding on each side. The graph stays 14 rows high. This replaces the deliberate formula-only width policy: short formulas such as `sin(x); cos(x)` now get a useful 70-column graph when space permits, rather than a narrow strip. Narrow viewports still shrink both areas to fit. Unused space to the right retains the terminal background. Layout determines the raster dimensions before functions are sampled: allocated columns/rows multiplied by actual physical cell pixels. A 70×14 allocation therefore draws directly at 560×224 for 8×16 cells. There is no intermediate image or downsampling. For Cartesian-only inputs, the plot intentionally fills the available rectangle: the sampled bounds stay fixed across resize, but pixel aspect and x/y scale proportions can change with terminal size and cell metrics; equal mathematical units need not have equal screen lengths. Margins and grid density adapt to the pixel budget. Numeric 3×5 pixel labels appear only at sizes of at least 160×80; smaller plots omit labels and margins to prioritize curves. Curves use an approximately 1.5-target-pixel antialiased round stroke, blended over the existing grid, axes, and earlier curves. Coverage is accumulated per function before blending, so adaptive subdivision joints do not become brighter. Stroke caps/fringes extend up to 1.25 pixels beyond accepted endpoints; gaps smaller than the stroke footprint cannot be represented. The AA stroke itself does not increase function sampling or supersample/rescale the image.
 
 UI state holds an immutable parsed plot source, not a pre-layout image. Its single-entry cache is keyed by bounds and target pixel size (source identity is implicit in ownership). Ordinary redraws and submission of an unchanged preview reuse it; resize redraws at the new resolution without reparsing. Bound `meval` closures are not `Send`, so the source uses UI-thread-local `Rc` sharing and `RefCell` caching, not a background task. Replacing the source or advancing to the next prompt releases the old cache.
 
-`--sixel` is an explicit **user assertion** that the terminal and any multiplexer support Sixel, ED 2 and **EL2 graphics erase**, graphics following text scrolling, stable palettes, and non-scrolling positioned output. These capabilities are not detected. It sets `reliable_inline_erase` and rejects unsupported raster output, never silently falling back. **Image retention in scrollback is terminal dependent**; committing a frame does not guarantee Sixel images survive scrolling.
+Normal invocation **requires** the terminal and any multiplexer to support Sixel, ED 2 and **EL2 graphics erase**, graphics following text scrolling, stable palettes, and non-scrolling positioned output. These capabilities are not detected. The application sets `reliable_inline_erase` and rejects unsupported raster output, never silently falling back. **Image retention in scrollback is terminal dependent**; committing a frame does not guarantee Sixel images survive scrolling.
 
 Cell pixels are measured before input starts; failure is an error. Override with `--cell-pixels WxH` only using **actual pixels per character cell**, not terminal columns/rows. Native Windows has no query fallback. Restart after font/DPI changes. See the [raster guide](../../docs/raster.md).
 
 ## Interactive independent panels
 
-Start the normal REPL with `--sixel`; **no `--grid` is needed**.
+Start the normal REPL without runtime flags; **no `--grid` is needed**.
 Type each command below into the input line and press Enter:
 
 ```text
@@ -58,9 +59,9 @@ surface(x*y, -2, 2, -2, 2)
 
 ```sh
 # Four presets: shaded surface, helix, trefoil knot and polar rose
-cargo run --release --features sixel --manifest-path examples/function-plotter/Cargo.toml -- --sixel --grid
+cargo run --release --features sixel --manifest-path examples/function-plotter/Cargo.toml -- --grid
 # Each repeated --expr is a separate panel; semicolons remain overlays
-cargo run --release --features sixel --manifest-path examples/function-plotter/Cargo.toml -- --sixel --grid --expr 'sin(x); cos(x)' --expr 'polar(2, 0, 2*pi)' --expr 'surface(x*y, -2, 2, -2, 2)'
+cargo run --release --features sixel --manifest-path examples/function-plotter/Cargo.toml -- --grid --expr 'sin(x); cos(x)' --expr 'polar(2, 0, 2*pi)' --expr 'surface(x*y, -2, 2, -2, 2)'
 cargo run --manifest-path examples/function-plotter/Cargo.toml -- --headless --grid
 ```
 
@@ -109,7 +110,7 @@ Native mode never falls back to source-expression text: successfully rendered fo
 
 Expressions include `sin(x)`, `cos(x)`, `tan(x)`, `sqrt(x)`, `exp(x)`, `ln(x)`, `abs(x)`, powers `x^2`, and constants `pi`, `e`. Write multiplication explicitly: `2*x`. Try `1/x; tan(x)`, `sqrt(x); ln(x)`, or `sin(x)*exp(-x^2/20)`.
 
-The graph includes grid lines, zero axes and numeric ticks. Budgeted adaptive midpoint subdivision skips nonfinite and unresolved intervals instead of joining suspected discontinuities. Finite sampling cannot prove continuity: narrow features and high-frequency oscillations may be missed. This is not a root finder, integrator, implicit plotter or symbolic solver. The x domain defaults to `[-10, 10]`; choose it explicitly with `--x-range MIN MAX`, e.g. `--sixel --x-range -2 4 --expr '0.05*sin(x)'`. Negative arguments are supported; endpoints must be finite and increasing with a finite span. Arbitrary expressions do not imply an x domain.
+The graph includes grid lines, zero axes and numeric ticks. Budgeted adaptive midpoint subdivision skips nonfinite and unresolved intervals instead of joining suspected discontinuities. Finite sampling cannot prove continuity: narrow features and high-frequency oscillations may be missed. This is not a root finder, integrator, implicit plotter or symbolic solver. The x domain defaults to `[-10, 10]`; choose it explicitly with `--x-range MIN MAX`, e.g. `--x-range -2 4 --expr '0.05*sin(x)'`. Negative arguments are supported; endpoints must be finite and increasing with a finite span. Arbitrary expressions do not imply an x domain.
 
 Y auto-scales once per parsed input from 1025 evenly spaced samples per function across that domain, independent of raster size. Nonfinite samples are ignored. Each function's sampled extrema are clipped to fences three interquartile ranges beyond its first/third quartiles, then the function ranges are combined and padded by 5% on each side. A zero interquartile range uses the quartiles themselves. This limits pole spikes but can also clip real narrow peaks or skewed tails; it does **not** find all global extrema. Constants receive 5% relative padding (zero uses ±1); all-nonfinite inputs use `[-1, 1]`. Zero is not forced into the y range. Ticks use range-dependent 1/2/5 steps and decimal/scientific labels for small scales. No additional y-range UI is provided. Mathematica's `Plot[...]` syntax is not supported.
 
@@ -140,7 +141,7 @@ sin(x); polar(2, 0, 2*pi); param(t, t^2, -2, 2)
 For example:
 
 ```sh
-cargo run --release --features sixel --manifest-path examples/function-plotter/Cargo.toml -- --sixel --expr 'polar(2*cos(5*theta), 0, 2*pi)'
+cargo run --release --features sixel --manifest-path examples/function-plotter/Cargo.toml -- --expr 'polar(2*cos(5*theta), 0, 2*pi)'
 ```
 
 When any polar/parametric curve is present, both axes are surveyed using 1025 samples per curve, accepting only points with two finite coordinates and applying the outlier fences and padding described above. The visible bounds then expand to give equal pixel-unit axes at the final plot size. Resizing may change visible bounds, but never parameter intervals or the Cartesian sampling domain in mixed plots. Circles stay circular using measured physical cell metrics. The grid remains Cartesian, not polar.
@@ -152,7 +153,7 @@ Geometric curves use budgeted adaptive 2D subdivision and clipping against all f
 Use `surface(z_expr, xmin, xmax, ymin, ymax)` for a height field with variables `x,y`, or `param3(x_expr, y_expr, z_expr, tmin, tmax)` for a space curve with variable `t`. Bounds accept constant expressions and must be finite, increasing, with finite spans. Combine up to six 3D objects with `;`; mixing 2D and 3D is rejected. `--x-range` does not affect 3D sampling.
 
 ```sh
-cargo run --release --features sixel --manifest-path examples/function-plotter/Cargo.toml -- --sixel --expr 'surface(sin(x)*cos(y), -pi, pi, -pi, pi)'
+cargo run --release --features sixel --manifest-path examples/function-plotter/Cargo.toml -- --expr 'surface(sin(x)*cos(y), -pi, pi, -pi, pi)'
 ```
 
 Try a saddle, Gaussian hill, helix, trefoil knot, or a curve passing through a plane:

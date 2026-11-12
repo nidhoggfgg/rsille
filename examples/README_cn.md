@@ -39,10 +39,22 @@ cargo run --release --manifest-path examples/lumen/Cargo.toml
 终端支持鼠标事件。窗口尺寸、按键、数据持久化和导出选项见各示例文档。
 Orbit Files 的完整文件操作需要 Linux；不传 `--path` 时使用一次性演示目录。
 
+## 函数绘图
+
+```sh
+cargo run --release --features sixel --manifest-path examples/function-plotter/Cargo.toml
+cargo run --manifest-path examples/function-plotter/Cargo.toml -- --help
+```
+
+不带参数启动交互式 Sixel REPL，`--help` 显示帮助。
+终端及复用器必须支持 Sixel、ED 2 和局部 EL 2 图形擦除、图形随文字滚动、
+稳定调色板及无滚屏的定位输出。这些能力不会自动检测。
+操作方式、实际字符格像素覆盖值和 headless 检查见[函数绘图指南](function-plotter/README_cn.md)。
+
 ## Sixel 与 Canvas 浮窗
 
 ```sh
-cargo run --release --features sixel --example sixel_windows -- --sixel
+cargo run --release --features sixel --example sixel_windows
 cargo run --example sixel_windows -- --help
 ```
 
@@ -56,8 +68,8 @@ cargo run --example sixel_windows -- --help
 `e` 循环切换 Canvas 的 Braille/HalfBlock/Quadrant；`r` 恢复初始窗口位置和大小；
 `q`/Esc 退出。建议使用 100×32 字符格，也支持更小终端及终端缩放。
 
-`--sixel` 表示用户明确确认整个终端/复用器链路支持 Sixel、ED 2 图形擦除、
-无滚屏及稳定调色板。不支持的栅格输出会报错，不会静默降级。每格像素尺寸优先来自
+整个终端/复用器链路必须支持 Sixel、ED 2 图形擦除、无滚屏的定位输出及稳定调色板。
+示例配置这些能力，但不会自动检测。不支持的栅格输出会报错，不会静默降级。每格像素尺寸优先来自
 操作系统窗口度量；不可用时在 Unix（包括 WSL）回退到 `CSI 16 t` 查询，要求
 stdin/stdout 均为连接到控制终端的 TTY，绝对超时为 500 ms。原生 Windows 尚无查询回退，
 仍需显式尺寸。可选的 `--cell-pixels 8x18` 跳过上述两种来源，必须匹配**实际字体度量**，
@@ -67,7 +79,7 @@ stdin/stdout 均为连接到控制终端的 TTY，绝对超时为 500 ms。原�
 支持实际为 10×20 像素的字符格，可使用 `--cell-pixels 10x20`，不要将高度取整为 18 或 24。
 终端仍须正确处理末尾不完整六行带的透明填充，并满足图形擦除及无滚屏断言；
 接受这些尺寸不代表已通过真实终端认证。
-不带参数显示帮助，不再提供 Raster 字符预览。
+不带参数启动交互演示，`--help` 显示帮助。
 完整安全约定见[栅格指南](../docs/raster.md)。
 
 有限的、无需终端的鼠标拖动与遮挡检查，以及示例测试：

@@ -47,7 +47,7 @@ restored = termios.tcgetattr(0) == original
 print(f"RSILLE_TTY_RESTORED={restored}", flush=True)
 sys.exit(child.returncode if restored else 1)
 """
-    args = [str(binary), "--sixel"]
+    args = [str(binary)]
     if mode == "explicit":
         args += ["--cell-pixels", "10x20"]
     if formula:

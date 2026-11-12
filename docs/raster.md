@@ -93,10 +93,11 @@ animation, use [AI Babies](#inline-sixel-animation) below.
 From the repository root, after verifying the terminal safety contract below:
 
 ```sh
-cargo run --release --features sixel --example sixel_windows -- --sixel
+cargo run --release --features sixel --example sixel_windows
 ```
 
-In `sixel_windows`, `--sixel` is an **explicit user assertion**, not capability
+`sixel_windows` starts interactively without runtime flags and no longer accepts
+`--sixel`. It configures host capability assertions, not automatic capability
 detection: the entire terminal/multiplexer path must support Sixel,
 non-scrolling positioned output (including the last row), stable colors when
 later tile palettes are sent, and alternate-screen ED 2 graphics erasure.
@@ -117,7 +118,7 @@ a guaranteed elapsed time. Native Windows has no query fallback. If probing
 fails, supply a measured override:
 
 ```sh
-cargo run --release --features sixel --example sixel_windows -- --sixel --cell-pixels 8x18
+cargo run --release --features sixel --example sixel_windows -- --cell-pixels 8x18
 ```
 
 **Use `8x18` only if it matches your actual terminal font/cell metrics.** It is not
@@ -169,7 +170,7 @@ resizing are supported. Controls:
 | `r` | Restore the starting window rectangles |
 | `q` / Esc | Quit |
 
-No flags, or `--help`, shows help without entering the interactive demo.
+No arguments starts the interactive demo; `--help` shows help without entering it.
 `--headless` runs finite, terminal-independent mouse-drag and occlusion
 checks and exits:
 

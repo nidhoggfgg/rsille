@@ -14,11 +14,11 @@
 
 ```sh
 cargo run -p rsille-typst --example formula -- --help
-cargo run -p rsille-typst --features sixel --example formula -- --sixel
-cargo run -p rsille-typst --features sixel --example formula -- --sixel 'sum_(k=1)^n k = frac(n(n+1), 2)'
+cargo run -p rsille-typst --features sixel --example formula
+cargo run -p rsille-typst --features sixel --example formula -- 'sum_(k=1)^n k = frac(n(n+1), 2)'
 # 无需 TTY 的元数据检查，以及显式 Sixel 内存编码自检：
 cargo run -p rsille-typst --example formula -- --headless
-cargo run -p rsille-typst --features sixel --example formula -- --sixel --cell-pixels 10x20 --headless
+cargo run -p rsille-typst --features sixel --example formula -- --cell-pixels 10x20 --headless
 cargo test -p rsille-typst
 cargo test -p rsille-typst --features sixel --all-targets
 cargo build -p rsille-typst --features sixel --examples
@@ -32,10 +32,11 @@ cargo fmt -p rsille-typst -- --check
 向上取整确定 widget 宽高，内容只占公式所需行数加一行标题（框架最多 50 行），
 原生模式另由现有 renderer 预留底部 guard。窄/矮终端或 resize 变小时裁剪，
 变大后重新显示，不重排、不缩放、不重新编译；超长公式可能无法完整显示。
-无参数显示用法；公式参数为一个带引号的 Typst 数学字符串，省略时
-使用求和公式。以 `-` 开头的公式放在 `--` 之后。
+无参数直接使用 Sixel 展示默认求和公式；`--help` / `-h` 显示用法。
+公式参数为一个带引号的 Typst 数学字符串。以 `-` 开头的公式放在 `--` 之后。
 
-`--sixel` 是用户对终端**及复用器**能力的显式断言：支持 Sixel、局部 EL 2 图形清除、
+运行前须确认终端**及复用器**
+支持 Sixel、局部 EL 2 图形清除、
 图像随文本滚动、稳定调色板、不滚屏的定位输出，以及最后不足六像素带的透明补齐。
 配置使用 `reliable_inline_erase: true`，不使用全屏 `reliable_erase`。不会自动检测能力。
 Raster 仅支持 Sixel 输出，缺少 feature 或能力/指标错误时失败，绝不静默降级。
@@ -52,8 +53,10 @@ Raster 仅支持 Sixel 输出，缺少 feature 或能力/指标错误时失败�
 `--force-cell-pixels` 确认。指标仅启动时保存，改变字体或 DPI 后需重启。
 查询不是 Sixel 能力检测，可能消耗同时输入的按键，超时后的迟到响应可能进入 reader。
 
-`--headless` 不启动终端或输入 reader，默认仅检查保留 Raster 元数据的帧（使用合成 10×20 布局尺寸）；Sixel 编码自检需显式
-`--sixel --cell-pixels WxH`（此时允许合成测试指标）。检查同一 Runtime 的 raster
+`--headless` 不启动终端或输入 reader，也不探测指标。未提供 `--cell-pixels` 时，
+仅检查保留 Raster 元数据的帧（使用合成 10×20 布局尺寸），无需 `sixel` feature。
+添加 `--cell-pixels WxH` 即选择 Sixel 内存编码自检，需要 `--features sixel`
+（此时允许合成测试指标）；无 feature 或指标无效时失败，不退回元数据检查。检查同一 Runtime 的 raster
 布局、resize 和两种退出键。仅显式 Sixel 自检将帧交给真实终端编码器写入内存，
 检查完整 DCS 输出、tile 数量、不变帧复用和不使用备用屏幕/鼠标/全屏清除；
 不证明真实终端兼容性。
@@ -64,18 +67,9 @@ cell 高度为 h 时，guard 行数为 `ceil(((6 - h % 6) % 6) / h)`：10×20 �
 先预留行再绘制，使用保存的底部锚点相对定位；透明补齐本身不足以防止滚屏。
 成功帧光标停在最后一行内容，退出换行可进入 guard。不修改实际 cell pixels。
 参见[协议与回归说明](../../docs/raster-design.md#encoder-and-budgets)。
-本次仅验证内存编码及 PTY 协议，尚未在真实图形终端/复用器上验证 inline 显示。
-
-Unix/WSL 可运行完整启动/输出的 PTY 回归（不是实际图形终端）：
-
-```sh
-python3 scripts/check-sixel-query.py --formula
-python3 scripts/check-sixel-query.py --formula 'integral_0^1 x^2 dif x = frac(1, 3)'
-```
-
-这会检查无 override 的 OS/CSI 查询路径、普通屏幕且无鼠标捕获、完整相对定位/DCS
-边界、紧凑内容行数及安全底部余量、12×6 窄矮窗口 resize、q/Esc 退出及光标/termios
-恢复，以及探测失败路径。启动光标模拟在底行，确保覆盖绘制前的行预留。PTY 的 10×20 是合成测试指标，不是建议用户设置的 override。
+内存自检不验证真实图形终端/复用器上的 inline 显示。
+可运行 `python3 scripts/check-sixel-query.py --formula` 检查 PTY 下的启动探测、
+输入和终端状态恢复；这同样不验证真实终端的视觉效果。
 
 示例显式使用 dev-dependency `typst-assets = 0.13.1` 的 `fonts` feature，其中包含
 New Computer Modern Math；不扫描系统目录，不在运行时联网。不要省略该 feature：

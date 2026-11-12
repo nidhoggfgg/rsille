@@ -68,11 +68,15 @@ terminal (`q` / `Esc` to quit). Original pixel size is preserved; narrow/short
 viewports clip rather than enlarge or reflow the formula:
 
 ```sh
-cargo run -p rsille-typst --features sixel --example formula -- --sixel 'sqrt(x)'
+cargo run -p rsille-typst --features sixel --example formula -- 'sqrt(x)'
 cargo run -p rsille-typst --example formula -- --help
 ```
 
-`--sixel` explicitly asserts terminal/multiplexer capabilities and never silently
+No arguments starts the interactive default formula; `--help` shows help.
+The terminal and any multiplexer must support
+Sixel, local EL 2 graphics erasure, graphics following text scrolling, stable
+palettes, non-scrolling positioned output and transparent partial-band padding.
+These capabilities are not automatically detected, and output never silently
 falls back. See the extension README for measured cell-pixel overrides
 and no-TTY `--headless` checks.
 
@@ -116,11 +120,12 @@ RGB raster output versus existing `Canvas` character sampling. This is the root-
 single-file [`sixel_windows`](examples/sixel_windows.rs) demo, not a standalone project:
 
 ```sh
-cargo run --release --features sixel --example sixel_windows -- --sixel
+cargo run --release --features sixel --example sixel_windows
 ```
 
-`--sixel` explicitly asserts that the whole terminal path supports Sixel, graphics
-ED 2 erasure, non-scrolling output and stable palettes; unsupported output returns an error. Before starting **any input reader**, call `CellPixels::probe(timeout)`
+The whole terminal/multiplexer path must support Sixel, graphics ED 2 erasure,
+non-scrolling positioned output and stable palettes. The demo configures these
+capabilities without automatically detecting them; unsupported output returns an error. Before starting **any input reader**, call `CellPixels::probe(timeout)`
 and store the result as `RasterCapabilities.cell_pixels: Some(pixels)`. The probe
 tries OS window metrics first, then a bounded `CSI 16 t` query on Unix/WSL with
 stdin/stdout TTYs attached to the controlling terminal. It returns on reply; the
@@ -144,7 +149,8 @@ well as the erase/no-scroll assertions; this is not real-terminal certification.
 Drag titles to move, drag bottom grips to resize, and click to bring a window forward.
 `e` cycles Canvas Braille/HalfBlock/Quadrant, `r` restores starting rectangles, and
 `q`/Esc quits. Prefer 100×32 cells; smaller sizes and terminal resizing are supported.
-There is no live animation. No flags or `--help` shows help; `--headless` runs finite terminal-independent drag/occlusion
+There is no live animation. No arguments starts the interactive demo; `--help`
+shows help. `--headless` runs finite terminal-independent drag/occlusion
 checks. See the [showcase guide](docs/raster.md#run-the-showcase) for validation commands.
 
 ## Develop with an AI coding agent

@@ -1,5 +1,5 @@
 //! Two draggable windows, one native Sixel surface and one ordinary Canvas.
-//! Run `cargo run --release --features sixel --example sixel_windows -- --sixel`.
+//! Run `cargo run --release --features sixel --example sixel_windows`.
 //! Use `--headless` to exercise real mouse events.
 
 use std::{error::Error, sync::Arc};
@@ -16,11 +16,11 @@ const AMBER: Color = Color::Rgb(255, 191, 115);
 const HELP: &str = "SIXEL / CANVAS — two surfaces, one desktop
 
 Run from the repository root:
-  cargo run --release --features sixel --example sixel_windows -- --sixel
+  cargo run --release --features sixel --example sixel_windows
   cargo run --example sixel_windows -- --headless
 
 Options:
-  --sixel               Require actual Sixel; never silently fall back
+
   --cell-pixels WxH     Skip OS/query discovery: physical pixels per character cell
   --force-cell-pixels   Confirm an override equal to the terminal columns x rows
   --headless            Check dragging, resizing, stacking and restoration in memory
@@ -41,7 +41,7 @@ The CSI 6 ; height ; width t reply is pixels per cell directly, not window pixel
 do not divide it by columns/rows. The result is stored once at startup, not refreshed
 while running. After font or DPI changes, restart to measure again.
 Native Windows has no query fallback; explicit dimensions are still needed there.
-If both automatic sources fail, --sixel startup fails: measure text-area pixels /
+If both automatic sources fail, native startup fails: measure text-area pixels /
 columns and rows; do not guess 8x18. Explicit overrides skip all OS metric lookup
 and terminal queries, and stay fixed after font changes. An override matching the
 grid requires --force-cell-pixels; use it only for a verified unusual cell size.
@@ -53,21 +53,16 @@ native crossterm. Standalone/embedded hosts can call CellPixels::probe(timeout)
 before starting input and store the result as Some(pixels) in their configuration.
 Incorrect metrics can distort images and misalign graphics while dragging.
 
---sixel is your explicit assertion that the terminal AND any multiplexer support
-Sixel, ED 2 graphics erasure, stable palettes, and non-scrolling positioned output.
+Normal invocation requires native Sixel; it never silently falls back. Build with
+--features sixel and use a terminal AND multiplexer that support Sixel, ED 2 graphics
+erasure, stable palettes, and non-scrolling positioned output.
 Partial final six-pixel bands must preserve transparent padding without scrolling.
 Actual cell sizes such as 10x20 are supported; do not round the height to 18 or 24.
 No automatic capability detection is performed.
 The --headless checks do not certify terminal compatibility.";
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Output {
-    Sixel,
-}
-
 #[derive(Default, Debug)]
 struct Options {
-    output: Option<Output>,
     pixels: Option<CellPixels>,
     force_cell_pixels: bool,
     headless: bool,
@@ -80,7 +75,6 @@ impl Options {
         let mut args = arguments.into_iter();
         while let Some(argument) = args.next() {
             match argument.as_str() {
-                "--sixel" => options.output = Some(Output::Sixel),
                 "--cell-pixels" => {
                     let value = args.next().ok_or(
                         "--cell-pixels needs WxH: physical pixels per character cell, not terminal columns x rows; use --help",
@@ -98,11 +92,9 @@ impl Options {
                 _ => return Err(format!("unknown argument: {argument}; use --help")),
             }
         }
-        if options.pixels.is_some() && options.output != Some(Output::Sixel) {
-            return Err("--cell-pixels requires --sixel".into());
-        }
+
         if options.force_cell_pixels && options.pixels.is_none() {
-            return Err("--force-cell-pixels requires --sixel --cell-pixels WxH".into());
+            return Err("--force-cell-pixels requires --cell-pixels WxH".into());
         }
         Ok(options)
     }
@@ -131,7 +123,7 @@ impl Options {
 
         Ok(RasterOutput {
             capabilities: RasterCapabilities {
-                // Enabled only by the explicit --sixel assertion documented above.
+                // Normal invocation requires the terminal capabilities documented above.
                 sixel: true,
                 reliable_erase: true,
                 reliable_inline_erase: false,
@@ -147,7 +139,6 @@ struct State {
     windows: [WindowRect; 2],
     initial: [WindowRect; 2],
     encoding: Encoding,
-    output: Output,
 }
 
 #[derive(Debug)]
@@ -159,7 +150,7 @@ enum Msg {
 }
 
 impl State {
-    fn new(width: u16, height: u16, output: Output) -> Result<Self, RasterError> {
+    fn new(width: u16, height: u16) -> Result<Self, RasterError> {
         let available_height = height.saturating_sub(4);
         let w = ((u32::from(width) * 3 / 5) as u16)
             .clamp(24, 58)
@@ -181,7 +172,6 @@ impl State {
             windows,
             initial: windows,
             encoding: Encoding::HalfBlock,
-            output,
         })
     }
 }
@@ -316,9 +306,7 @@ impl Widget<Msg> for Desktop {
 
 fn view(state: &State) -> impl Widget<Msg> {
     let source = Arc::clone(&state.image);
-    let left_title = match state.output {
-        Output::Sixel => "01 / SIXEL / RGB pixels",
-    };
+
     let window_style = |accent| Style::default().fg(accent).bg(Color::Rgb(8, 13, 25));
     let native = floating_window(
         col()
@@ -330,7 +318,7 @@ fn view(state: &State) -> impl Widget<Msg> {
             .child(label(" 320 x 200 RGB / fixed source / fit").style(window_style(CYAN))),
     )
     .key("sixel")
-    .title(left_title)
+    .title("01 / SIXEL / RGB pixels")
     .title_key("sixel-title")
     .rect(state.windows[0])
     .on_rect_change(|rect| Msg::Move(0, rect))
@@ -394,10 +382,9 @@ fn view(state: &State) -> impl Widget<Msg> {
 fn application(
     width: u16,
     height: u16,
-    output: Output,
     config: RasterOutput,
 ) -> Result<Runtime<State, Msg>, RasterError> {
-    Ok(App::new(State::new(width, height, output)?)
+    Ok(App::new(State::new(width, height)?)
         .mode(Mode::Fullscreen)
         .focus_events(true)
         .with_motion_policy(MotionPolicy::disabled())
@@ -453,7 +440,7 @@ fn inside(area: Area, x: u16, y: u16) -> bool {
 }
 
 fn headless() -> Result<(), Box<dyn Error>> {
-    let mut runtime = application(110, 36, Output::Sixel, RasterOutput::default())?;
+    let mut runtime = application(110, 36, RasterOutput::default())?;
     runtime.step(&[])?;
     let initial = runtime.state().windows;
     let identity = runtime.state().image.id();
@@ -510,19 +497,16 @@ fn headless() -> Result<(), Box<dyn Error>> {
 
 fn main() -> Result<(), Box<dyn Error>> {
     let options = Options::parse(std::env::args().skip(1))?;
-    if options.help || (options.output.is_none() && !options.headless) {
+    if options.help {
         println!("{HELP}");
         return Ok(());
     }
     if options.headless {
         return headless();
     }
-    let output = options.output.expect("explicit mode");
     let (width, height) = crossterm::terminal::size()?;
-    let config = match output {
-        Output::Sixel => options.native_config((width, height))?,
-    };
-    application(width, height, output, config)?.run()?;
+    let config = options.native_config((width, height))?;
+    application(width, height, config)?.run()?;
     Ok(())
 }
 
@@ -535,20 +519,37 @@ mod tests {
     }
 
     #[test]
-    fn modes_are_explicit_and_conflicting_options_fail() {
-        assert!(options(&[]).unwrap().output.is_none());
+    fn native_is_default_and_obsolete_flags_are_rejected() {
+        let defaults = options(&[]).unwrap();
+        assert!(!defaults.help);
+        assert!(!defaults.headless);
+        assert_eq!(defaults.pixels, None);
         assert!(options(&["--text-only"]).is_err());
-        assert_eq!(options(&["--sixel"]).unwrap().output, Some(Output::Sixel));
-        assert!(options(&["--cell-pixels", "8x18"]).is_err());
-        assert!(options(&["--sixel", "--cell-pixels", "8"]).is_err());
+        assert_eq!(
+            options(&["--sixel"]).unwrap_err(),
+            "unknown argument: --sixel; use --help"
+        );
+        assert!(options(&["--cell-pixels", "8x18"]).is_ok());
+        assert!(options(&["--cell-pixels", "8"]).is_err());
+        assert!(options(&["--cell-pixels"]).is_err());
         assert!(options(&["--unknown"]).is_err());
+    }
+
+    #[test]
+    fn help_and_headless_remain_available() {
+        assert!(options(&["--help"]).unwrap().help);
+        assert!(options(&["-h"]).unwrap().help);
+        assert!(options(&["--headless"]).unwrap().headless);
+        assert!(HELP.contains("--features sixel"));
+        assert!(HELP.contains("Normal invocation requires native Sixel"));
+        assert!(!HELP.contains("--sixel"));
     }
 
     #[test]
     fn inline_argument_is_rejected() {
         for args in [
             vec!["--inline"],
-            vec!["--sixel", "--inline"],
+            vec!["--cell-pixels", "8x18", "--inline"],
             vec!["--headless", "--inline"],
         ] {
             assert_eq!(
@@ -560,7 +561,7 @@ mod tests {
 
     #[test]
     fn native_mode_never_silently_falls_back() {
-        let valid = options(&["--sixel", "--cell-pixels", "10x20"])
+        let valid = options(&["--cell-pixels", "10x20"])
             .unwrap()
             .native_config((110, 36));
         if cfg!(feature = "sixel") {
@@ -576,12 +577,12 @@ mod tests {
             assert!(valid.is_err());
         }
         for value in ["0x18", "8x0", "1025x18", "8x1025", "257x256", "1024x1020"] {
-            assert!(options(&["--sixel", "--cell-pixels", value])
+            assert!(options(&["--cell-pixels", value])
                 .unwrap()
                 .native_config((110, 36))
                 .is_err());
         }
-        assert!(options(&["--sixel"])
+        assert!(options(&[])
             .unwrap()
             .native_config_with_resolver((110, 36), |explicit| {
                 assert_eq!(explicit, None);
@@ -592,31 +593,29 @@ mod tests {
 
     #[test]
     fn forcing_grid_sized_cells_requires_an_explicit_override() {
-        for args in [
-            vec!["--force-cell-pixels"],
-            vec!["--sixel", "--force-cell-pixels"],
-            vec!["--cell-pixels", "120x36", "--force-cell-pixels"],
-        ] {
-            assert!(options(&args).is_err());
-        }
-        assert!(
-            options(&["--force-cell-pixels", "--cell-pixels", "120x36", "--sixel",])
-                .unwrap()
-                .force_cell_pixels
+        assert_eq!(
+            options(&["--force-cell-pixels"]).unwrap_err(),
+            "--force-cell-pixels requires --cell-pixels WxH"
         );
+        for args in [
+            vec!["--cell-pixels", "120x36", "--force-cell-pixels"],
+            vec!["--force-cell-pixels", "--cell-pixels", "120x36"],
+        ] {
+            assert!(options(&args).unwrap().force_cell_pixels);
+        }
     }
 
     #[cfg(feature = "sixel")]
     #[test]
     fn terminal_grid_is_not_a_cell_pixel_measurement() {
-        let opts = options(&["--sixel", "--cell-pixels", "120x36"]).unwrap();
+        let opts = options(&["--cell-pixels", "120x36"]).unwrap();
         let error = opts.native_config((120, 36)).unwrap_err();
         assert!(error.contains("120 columns x 36 rows"));
         assert!(error.contains("physical pixels per character cell"));
         assert!(error.contains("Omit --cell-pixels"));
         assert!(error.contains("--force-cell-pixels"));
         // Detection is based on the current grid, not a hardcoded 120x36 ban.
-        let error = options(&["--sixel", "--cell-pixels", "80x24"])
+        let error = options(&["--cell-pixels", "80x24"])
             .unwrap()
             .native_config((80, 24))
             .unwrap_err();
@@ -631,8 +630,7 @@ mod tests {
             width: 120,
             height: 36,
         };
-        let forced =
-            options(&["--sixel", "--cell-pixels", "120x36", "--force-cell-pixels"]).unwrap();
+        let forced = options(&["--cell-pixels", "120x36", "--force-cell-pixels"]).unwrap();
         assert_eq!(
             forced
                 .native_config((120, 36))
@@ -650,12 +648,10 @@ mod tests {
             ("257x256", (257, 256)),
             ("1024x1020", (1024, 1020)),
         ] {
-            assert!(
-                options(&["--sixel", "--cell-pixels", value, "--force-cell-pixels"])
-                    .unwrap()
-                    .native_config(grid)
-                    .is_err()
-            );
+            assert!(options(&["--cell-pixels", value, "--force-cell-pixels"])
+                .unwrap()
+                .native_config(grid)
+                .is_err());
         }
     }
 
@@ -666,7 +662,7 @@ mod tests {
             "8x16", "8x18", "9x18", "10x20", "18x18", "36x6", "120x36", "1x1024", "1024x1",
             "256x256", "1024x64",
         ] {
-            let opts = options(&["--sixel", "--cell-pixels", value]).unwrap();
+            let opts = options(&["--cell-pixels", value]).unwrap();
             assert_eq!(
                 opts.native_config((110, 36))
                     .unwrap()
@@ -680,7 +676,7 @@ mod tests {
     #[cfg(feature = "sixel")]
     #[test]
     fn startup_metrics_are_validated_and_stored_in_configuration() {
-        let opts = options(&["--sixel"]).unwrap();
+        let opts = options(&[]).unwrap();
         for pixels in [
             CellPixels {
                 width: 10,
@@ -751,7 +747,7 @@ mod tests {
 
     #[test]
     fn resize_and_encoding_changes_keep_both_renderers_visible() {
-        let mut runtime = application(110, 36, Output::Sixel, RasterOutput::default()).unwrap();
+        let mut runtime = application(110, 36, RasterOutput::default()).unwrap();
         for size in [(80, 24), (48, 16), (110, 36)] {
             runtime.resize(size.into());
             runtime.step(&[]).unwrap();
@@ -773,7 +769,7 @@ mod tests {
     #[test]
     fn both_documented_quit_keys_exit() {
         for key in [KeyCode::Esc, KeyCode::Char('q')] {
-            let mut runtime = application(80, 24, Output::Sixel, RasterOutput::default()).unwrap();
+            let mut runtime = application(80, 24, RasterOutput::default()).unwrap();
             runtime.step(&[]).unwrap();
             runtime.step(&[Event::Key(key.into())]).unwrap();
             assert!(runtime.exit_reason().is_some());
@@ -798,11 +794,11 @@ mod tests {
             }
         }
         // Synthetic verified capabilities apply ONLY to this memory writer.
-        let config = options(&["--sixel", "--cell-pixels", "10x20"])
+        let config = options(&["--cell-pixels", "10x20"])
             .unwrap()
             .native_config((110, 36))
             .unwrap();
-        let mut runtime = application(110, 36, Output::Sixel, config).unwrap();
+        let mut runtime = application(110, 36, config).unwrap();
         runtime.step(&[]).unwrap();
         let native_cells = runtime.frame().raster_cells().count();
         assert!(native_cells > 0);

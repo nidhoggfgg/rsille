@@ -62,12 +62,14 @@ Typst 数学公式 → RGB 像素画布由独立扩展
 选择裁剪而非放大或重排：
 
 ```sh
-cargo run -p rsille-typst --features sixel --example formula -- --sixel 'sqrt(x)'
+cargo run -p rsille-typst --features sixel --example formula -- 'sqrt(x)'
 cargo run -p rsille-typst --example formula -- --help
 ```
 
-`--sixel` 显式断言终端/复用器能力，不会静默降级。单格物理像素手动 override、
-和无 TTY 的 `--headless` 自检详见扩展 README。
+不带参数直接交互展示默认公式，`--help` 显示帮助。
+终端及复用器必须支持 Sixel、局部 EL 2 图形擦除、图形随文字滚动、稳定调色板、
+无滚屏的定位输出及末尾不完整六行带的透明填充。这些能力不会自动检测，也不会静默降级。
+单格物理像素手动 override 和无 TTY 的 `--headless` 自检详见扩展 README。
 
 默认没有启用任何 feature。代码查看器需要 Syntect 语法高亮时，启用 `syntax-highlighting`：
 
@@ -103,11 +105,11 @@ rsille = { version = "3.0.4", features = ["syntax-highlighting"] }
 仅使用全屏备用屏幕，不提供 `--inline` 或实时动画：
 
 ```sh
-cargo run --release --features sixel --example sixel_windows -- --sixel
+cargo run --release --features sixel --example sixel_windows
 ```
 
-在 `sixel_windows` 中，`--sixel` 表示用户明确确认整个终端链路支持 Sixel、ED 2 图形擦除、
-Sixel 本身无滚屏输出及稳定调色板；
+`sixel_windows` 要求整个终端/复用器链路支持 Sixel、ED 2 图形擦除、
+Sixel 本身无滚屏的定位输出及稳定调色板；示例配置这些能力，但不会自动检测；
 不支持的栅格输出会报错。必须在启动**任何输入读取器之前**调用
 `CellPixels::probe(timeout)`，并将结果存为 `RasterCapabilities.cell_pixels: Some(pixels)`。
 探测优先使用操作系统窗口度量；不可用时在 Unix/WSL 回退到有界的 `CSI 16 t` 查询，
@@ -130,7 +132,7 @@ Sixel 本身无滚屏输出及稳定调色板；
 拖动标题移动窗口，拖动底部手柄调整大小，点击置前。
 `e` 循环切换 Canvas 的 Braille/HalfBlock/Quadrant，`r` 恢复初始窗口位置和大小，
 `q`/Esc 退出。建议使用 100×32 字符格，也支持更小尺寸及终端缩放；没有实时动画。
-不带参数或使用 `--help` 显示帮助，`--headless`
+不带参数启动交互演示，`--help` 显示帮助。`--headless`
 执行有限的、无需终端的拖动与遮挡检查。验证命令见[演示指南](docs/raster.md#run-the-showcase)。
 
 需要 inline Sixel 动画时，运行 [AI Babies](examples/ai-babies/README.md#raster-and-sixel)：
