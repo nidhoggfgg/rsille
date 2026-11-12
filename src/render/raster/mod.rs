@@ -22,6 +22,11 @@
 //! character-based fallback. Measuring cell pixels does not establish Sixel
 //! support. See [`output::CellPixels::probe`] for startup probing restrictions.
 //!
+//! Native output uses one positioned tile per visible terminal cell, favoring
+//! precise clipping and ownership over transport throughput; tiles are not merged.
+//! Colors use a fixed RGB332 palette (3 red, 3 green, 2 blue bits), not lossless
+//! 24-bit output or adaptive quantization. Source pixels remain unchanged.
+//!
 //! # Example
 //!
 //! Sample a two-pixel image stretched across one terminal cell, without terminal

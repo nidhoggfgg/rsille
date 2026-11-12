@@ -21,7 +21,7 @@ cargo run --release --manifest-path examples/lumen/Cargo.toml
 
 | 示例 | 文件 / 目录 | 展示内容 |
 | --- | --- | --- |
-| [Sixel 与 Canvas 浮窗](../docs/raster.md#run-the-showcase) | `sixel_windows.rs`（根包示例） | 两个可拖动、调整大小的浮窗，以原生 RGB 栅格和 Canvas 字符采样展示同一颗静态带环行星。 |
+| [Sixel 与 Canvas 浮窗](sixel_windows.rs) | `sixel_windows.rs`（根包示例） | 两个可拖动、调整大小的浮窗，以原生 RGB 栅格和 Canvas 字符采样展示同一颗静态带环行星。 |
 | [函数绘图](function-plotter/README_cn.md) | `function-plotter` | Mathematica 风格输入/输出单元、紧凑 Sixel 函数图像、重新执行与滚动历史。 |
 | [TUI showcase](tui-showcase/README_cn.md) | `tui-showcase` | 七页组件展厅：表单、数据、内容、布局、动画和主题。 |
 | [Lumen](lumen/README_cn.md) | `lumen` | 包含流程、笔记和浮动桌面的交互工作台。 |
@@ -80,7 +80,7 @@ stdin/stdout 均为连接到控制终端的 TTY，绝对超时为 500 ms。原�
 终端仍须正确处理末尾不完整六行带的透明填充，并满足图形擦除及无滚屏断言；
 接受这些尺寸不代表已通过真实终端认证。
 不带参数启动交互演示，`--help` 显示帮助。
-完整安全约定见[栅格指南](../docs/raster.md)。
+终端能力要求见 [`RasterCapabilities`](../src/render/raster/output.rs) 的 API 注释。
 
 有限的、无需终端的鼠标拖动与遮挡检查，以及示例测试：
 

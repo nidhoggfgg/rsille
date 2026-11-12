@@ -61,12 +61,9 @@ Raster 仅支持 Sixel 输出，缺少 feature 或能力/指标错误时失败�
 检查完整 DCS 输出、tile 数量、不变帧复用和不使用备用屏幕/鼠标/全屏清除；
 不证明真实终端兼容性。
 
-Inline 沿用现有底部 guard/no-scroll 规则，不依赖全屏底行的锚点上移修复。
-cell 高度为 h 时，guard 行数为 `ceil(((6 - h % 6) % 6) / h)`：10×20 时
-为 1 行、8×18 时为 0 行、h=1 时为 5 行。renderer 从终端可用高度扣除 guard，
-先预留行再绘制，使用保存的底部锚点相对定位；透明补齐本身不足以防止滚屏。
-成功帧光标停在最后一行内容，退出换行可进入 guard。不修改实际 cell pixels。
-参见[协议与回归说明](../../docs/raster-design.md#encoder-and-budgets)。
+Inline 会为 Sixel 末尾填充预留空白保护行，相应减少可用内容高度：
+10×20 像素字符格需要 1 行，8×18 无需额外行。终端能力要求见
+[`RasterCapabilities`](../../src/render/raster/output.rs) 的 API 注释。
 内存自检不验证真实图形终端/复用器上的 inline 显示。
 可运行 `python3 scripts/check-sixel-query.py --formula` 检查 PTY 下的启动探测、
 输入和终端状态恢复；这同样不验证真实终端的视觉效果。

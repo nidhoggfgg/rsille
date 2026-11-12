@@ -84,75 +84,29 @@ rsille = { version = "3.0.4", features = ["syntax-highlighting"] }
 
 ## 不透明栅格绘制
 
-`rsille::raster::RasterCanvas` 提供固定分辨率 RGB 像素、线段、矩形和圆，
-与现有采样式 `Canvas` 相互独立。通过 `raster_canvas(...)` 嵌入布局，或使用
-按内容版本缓存回调的 `RasterCanvasWidget::from_draw(...)`。布局、裁剪、滚动和
-不透明遮挡会保留栅格元数据；headless 帧同样保留元数据。Raster 终端输出仅支持 Sixel，Canvas 编码不变。
+`rsille::raster::RasterCanvas` 提供固定分辨率 RGB 像素和绘图操作，通过
+`raster_canvas(...)` 嵌入界面，或使用按内容版本缓存的
+`RasterCanvasWidget::from_draw(...)`。栅格内容支持布局、裁剪、滚动和不透明遮挡，
+与采样式 `Canvas` 相互独立。
 
-可选 `sixel` feature 启用原生编码。`RasterOutput` 仅携带 capabilities，默认不声明 Sixel 支持。
-渲染器绝不自行探测每格像素尺寸，也不读取终端输入。
-真实栅格输出在条件不足时返回错误，不再提供字符降级或 text-only 后端。
-原生输出要求显式提供已验证的终端能力及受支持的每格像素尺寸：全屏使用备用屏幕与
-`reliable_erase`，inline 使用独立的 `reliable_inline_erase`，不要求备用屏幕。
-**自动能力协商与真实终端认证尚未完成；仅启用 feature 不会启用原生输出。**
-不提供 alpha/透明度，也不增加 `Encoding::Sixel`。
+终端输出需要启用可选的 `sixel` feature，显式配置终端能力和真实的每格像素尺寸。
+不会自动检测终端能力；配置不满足要求时返回错误，不降级为字符图。
+输出使用 RGB332 色彩量化，不支持 alpha。全屏要求备用屏幕上的图形擦除；
+inline 要求可靠的行局部图形擦除，以及图形随文字滚动。
 
-配置与限制见 [栅格指南](docs/raster.md)，设计及待验证项目见
-[实现与验证说明](docs/raster-design.md)。
+API 说明见源码中的 [`RasterCanvas`](src/render/raster/canvas.rs) 和
+[`RasterOutput` / `CellPixels`](src/render/raster/output.rs)。
+`CellPixels::probe` 必须在任何输入读取器启动前调用，可能消耗输入，且不证明 Sixel 支持。
+字体或 DPI 改变后应更新存储的尺寸或重启。
 
-两个可拖动浮窗展示同一颗静态程序化带环行星，对比原生 RGB 栅格输出与现有 `Canvas`
-字符采样。[`sixel_windows`](examples/sixel_windows.rs) 是根包的单文件示例，不是独立项目；
-仅使用全屏备用屏幕，不提供 `--inline` 或实时动画：
+运行全屏 [Sixel 与 Canvas 对比示例](examples/sixel_windows.rs)：
 
 ```sh
 cargo run --release --features sixel --example sixel_windows
 ```
 
-`sixel_windows` 要求整个终端/复用器链路支持 Sixel、ED 2 图形擦除、
-Sixel 本身无滚屏的定位输出及稳定调色板；示例配置这些能力，但不会自动检测；
-不支持的栅格输出会报错。必须在启动**任何输入读取器之前**调用
-`CellPixels::probe(timeout)`，并将结果存为 `RasterCapabilities.cell_pixels: Some(pixels)`。
-探测优先使用操作系统窗口度量；不可用时在 Unix/WSL 回退到有界的 `CSI 16 t` 查询，
-要求 stdin/stdout 均为连接到控制终端的 TTY。收到回复即返回；超时可配置，不保证精确耗时。
-`resolve(None)` 为兼容保留 500 ms 超时；`resolve(Some(pixels))` 仅验证尺寸。
-原生 Windows 无查询回退。可选的 `--cell-pixels 8x18` 跳过探测，必须匹配**实际字体度量**
-（每个维度为 1..=1024，乘积不超过 65,536）。未存储尺寸时，符合其他原生条件的渲染
-会报错；纯文本和未使用栅格的路径不受影响。
-
-托管输入初始化后永久拒绝探测；无法检测外部读取器，因此独立宿主也必须先探测再启动读取器。
-探测可能消耗无关输入，超时后仍可能收到迟到回复，不会清空输入。
-托管运行期的所有输入由原生 crossterm `EventStream` 处理。存储的尺寸只是启动快照，
-不会随字体、DPI 或窗口大小变化自动更新；需显式更新或重启。
-`CellPixels::from_terminal()` 仍可在运行期调用，仅可选读取操作系统度量。
-探测不证明 Sixel 支持，能力标志仍是宿主断言。支持实际为 10×20 像素的
-字符格，可使用 `--cell-pixels 10x20`，无需将高度取整为 18 或 24。终端仍须正确处理
-末尾不完整六行带的透明填充，不擦除相邻字符格；透明填充本身不能保证底部不滚屏，
-全屏仍须满足最后一行安全定位输出、图形擦除及无滚屏断言，并未由 inline 保护行修复。
-这不代表已通过真实终端认证。
-拖动标题移动窗口，拖动底部手柄调整大小，点击置前。
-`e` 循环切换 Canvas 的 Braille/HalfBlock/Quadrant，`r` 恢复初始窗口位置和大小，
-`q`/Esc 退出。建议使用 100×32 字符格，也支持更小尺寸及终端缩放；没有实时动画。
-不带参数启动交互演示，`--help` 显示帮助。`--headless`
-执行有限的、无需终端的拖动与遮挡检查。验证命令见[演示指南](docs/raster.md#run-the-showcase)。
-
-需要 inline Sixel 动画时，运行 [AI Babies](examples/ai-babies/README.md#raster-and-sixel)：
-
-```sh
-cargo run --release --features sixel --manifest-path examples/ai-babies/Cargo.toml -- --sixel
-```
-
-AI Babies 的所有动画模式均使用普通屏幕 inline 输出，不启用备用屏幕或鼠标捕获；
-`--sixel` 无需额外 `--inline` 参数，不支持时会报错。它要求可靠的
-EL 2 行局部图形擦除（不影响其他行），以及预留行导致文字滚动时图形跟随移动，配置为
-`reliable_inline_erase: true`、`reliable_erase: false`。`no_scroll` 要求 Sixel 安全定位、
-透明 padding 不擦除相邻字符格且输出本身不滚屏；inline 通过底部保护行容纳末带 padding，
-不禁止预留行时受控的文字滚动。这些均为用户能力断言，不是能力探测。
-inline 占用整行，不应在同一行旁边放置无关内容；全屏 ED 2 验证不能证明 inline 安全。
-
-`--height` 仍仅接受 24/32（默认 24）；原生 inline 内容高度还受 320 像素图像所需的
-字符格行数及终端扣除保护行后的剩余高度限制。空间足够时，实际 10×20 像素字符格使用
-**16 行图片内容 + 1 行空白保护行**，不是总共 16 行；8×18 无需额外行。
-图像靠左显示，较小终端会缩小显示。保护行计算、光标及清理约定见[栅格指南](docs/raster.md#terminal-output-policy)。
+示例假定终端及复用器具备所需能力。探测失败时，可用 `--cell-pixels WxH` 提供真实的
+每格像素尺寸；操作和选项见 `--help`。inline 动画及其他用法见[示例目录](examples/README_cn.md)。
 
 ## 配合 AI 编程助手开发
 

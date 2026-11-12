@@ -95,63 +95,34 @@ adjusting the path to your checkout.
 
 ## Opaque raster drawing
 
-`rsille::raster::RasterCanvas` provides fixed-resolution RGB pixels, lines,
-rectangles and circles, independently of the existing sample-based `Canvas`.
-Embed it with `raster_canvas(...)` or use revision-cached
-`RasterCanvasWidget::from_draw(...)`. Layout, clipping, scrolling and opaque
-coverage retain raster metadata, including in headless frames. Raster terminal
-output is Sixel-only; existing Canvas character encodings are unchanged.
+`rsille::raster::RasterCanvas` provides fixed-resolution RGB pixels and drawing
+primitives. Embed it with `raster_canvas(...)` or use the revision-cached
+`RasterCanvasWidget::from_draw(...)`. Raster content supports layout, clipping,
+scrolling and opaque coverage independently of the sample-based `Canvas`.
 
-The optional `sixel` feature enables native encoding. `RasterOutput` contains
-only host-supplied capabilities; its default asserts no Sixel support. Real raster
-output fails when safety conditions are missing, never falling back to characters.
-The renderer never discovers cell pixels or reads terminal input. Native output
-requires explicit capabilities and valid physical cell metrics: fullscreen uses
-an alternate screen and `reliable_erase`; inline uses `reliable_inline_erase`.
-**Automatic capability negotiation and real-terminal certification are not yet
-implemented; enabling the feature alone does not enable native output.**
-There is no alpha/transparency API or `Encoding::Sixel`.
+Terminal output requires the optional `sixel` feature, explicit terminal
+capabilities and actual pixels per character cell. Capabilities are not detected
+automatically; unsupported configurations return an error without character
+fallback. Output uses RGB332 color quantization and does not support alpha.
+Fullscreen requires alternate-screen graphics erasure; inline requires reliable
+row-local graphics erasure and graphics that follow text scrolling.
 
-See the [raster guide](docs/raster.md) for configuration and limits, and the
-[design/validation notes](docs/raster-design.md) for remaining work.
+See the source API documentation for
+[`RasterCanvas`](src/render/raster/canvas.rs) and
+[`RasterOutput` / `CellPixels`](src/render/raster/output.rs).
+Call `CellPixels::probe` before starting any input reader; probing may consume
+input and does not establish Sixel support. Update stored metrics or restart
+after font/DPI changes.
 
-Compare the same static procedural ringed planet in two draggable windows: native
-RGB raster output versus existing `Canvas` character sampling. This is the root-package,
-single-file [`sixel_windows`](examples/sixel_windows.rs) demo, not a standalone project:
+Try the fullscreen [Sixel vs Canvas demo](examples/sixel_windows.rs):
 
 ```sh
 cargo run --release --features sixel --example sixel_windows
 ```
 
-The whole terminal/multiplexer path must support Sixel, graphics ED 2 erasure,
-non-scrolling positioned output and stable palettes. The demo configures these
-capabilities without automatically detecting them; unsupported output returns an error. Before starting **any input reader**, call `CellPixels::probe(timeout)`
-and store the result as `RasterCapabilities.cell_pixels: Some(pixels)`. The probe
-tries OS window metrics first, then a bounded `CSI 16 t` query on Unix/WSL with
-stdin/stdout TTYs attached to the controlling terminal. It returns on reply; the
-timeout is configurable, not a guaranteed elapsed time. `resolve(None)` retains
-a 500 ms timeout for compatibility; `resolve(Some(pixels))` only validates.
-Native Windows has no query fallback. Optional `--cell-pixels 8x18` bypasses
-probing and must match **actual font metrics** (1..=1024 per dimension, at most
-65,536 pixels). With no stored pixels, real raster rendering errors; frames without raster
-content are unaffected.
-
-Probing is permanently rejected after managed input initialization; external
-readers cannot be detected, so standalone hosts must probe before starting theirs.
-The probe may consume unrelated input; late replies can arrive after timeout,
-and no input is flushed. Native crossterm `EventStream` handles all managed runtime
-input. Stored pixels are a startup snapshot, not refreshed on font/DPI/resize
-changes; update them explicitly or restart. `CellPixels::from_terminal()` remains
-an optional OS-only read usable at runtime. Probing does not establish Sixel support.
-Actual 10×20 cells are supported with `--cell-pixels 10x20`, without rounding the
-height to 18 or 24. The terminal must honor transparent partial-band padding as
-well as the erase/no-scroll assertions; this is not real-terminal certification.
-Drag titles to move, drag bottom grips to resize, and click to bring a window forward.
-`e` cycles Canvas Braille/HalfBlock/Quadrant, `r` restores starting rectangles, and
-`q`/Esc quits. Prefer 100×32 cells; smaller sizes and terminal resizing are supported.
-There is no live animation. No arguments starts the interactive demo; `--help`
-shows help. `--headless` runs finite terminal-independent drag/occlusion
-checks. See the [showcase guide](docs/raster.md#run-the-showcase) for validation commands.
+The demo assumes a compatible terminal/multiplexer. Use `--cell-pixels WxH`
+to supply actual cell dimensions if probing fails, and `--help` for controls
+and options. See [examples](examples/README.md) for inline animation and other uses.
 
 ## Develop with an AI coding agent
 

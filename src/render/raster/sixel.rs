@@ -26,6 +26,8 @@ const MAX_CACHE_ENTRIES: usize = 1024;
 const ENTRY_OVERHEAD: usize = std::mem::size_of::<Entry>() + 2 * std::mem::size_of::<usize>();
 const MAX_CACHE_PAYLOAD: usize = MAX_CACHE_BYTES - MAX_CACHE_ENTRIES * ENTRY_OVERHEAD;
 
+// Screen coordinates are excluded so movement can reuse bytes; original crop
+// offsets and transparent prefix length remain part of the encoded content.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Key {
     canvas_id: u64,
@@ -189,6 +191,8 @@ fn zeroed(len: usize) -> io::Result<Vec<u8>> {
     Ok(bytes)
 }
 
+// Fixed RGB332 indices keep palette meanings stable across independently emitted
+// tiles; each tile defines only the colors it uses, without adaptive quantization.
 fn palette_index(Rgb(red, green, blue): Rgb) -> u8 {
     (red & 0xe0) | ((green >> 3) & 0x1c) | (blue >> 6)
 }

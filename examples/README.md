@@ -23,7 +23,7 @@ directory name in the table. Prefer release builds for animations and 3D scenes.
 
 | Example | File / directory | What it demonstrates |
 | --- | --- | --- |
-| [Sixel vs Canvas windows](../docs/raster.md#run-the-showcase) | `sixel_windows.rs` (root example) | Two draggable, resizable windows showing the same static ringed planet as native RGB raster and Canvas character sampling. |
+| [Sixel vs Canvas windows](sixel_windows.rs) | `sixel_windows.rs` (root example) | Two draggable, resizable windows showing the same static ringed planet as native RGB raster and Canvas character sampling. |
 | [Function Plotter](function-plotter/README.md) | `function-plotter` | Mathematica-style input/output cells, compact Sixel function graphs, reevaluation and scrollable history. |
 | [TUI showcase](tui-showcase/README.md) | `tui-showcase` | Seven pages of controls, data, content, layout, motion and themes. |
 | [Lumen](lumen/README.md) | `lumen` | Interactive workspace with flows, a notebook and floating windows. |
@@ -93,8 +93,8 @@ are checked before entering the managed terminal session. Actual 10×20 cells ar
 `--cell-pixels 10x20`; do not round the height to 18 or 24. The terminal must honor
 transparent partial-band padding and the erase/no-scroll assertions; accepting
 these metrics does not certify real-terminal behavior.
-No arguments starts the interactive demo; `--help` shows help. See the
-[raster guide](../docs/raster.md) for the full safety contract.
+No arguments starts the interactive demo; `--help` shows help. Terminal capability
+requirements are documented on [`RasterCapabilities`](../src/render/raster/output.rs).
 
 Finite, terminal-independent mouse-drag and occlusion checks and example tests:
 

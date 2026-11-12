@@ -42,7 +42,9 @@ impl CellPixels {
     /// Reads OS-reported window pixels without querying or reading terminal input.
     ///
     /// Returns `None` for unavailable, zero, or non-integral cell metrics. This
-    /// says nothing about Sixel support. Call again after resize/font changes.
+    /// says nothing about Sixel support and does not validate backend limits;
+    /// use [`Self::resolve`] with `Some(pixels)` before storing the result.
+    /// Call again after resize/font changes.
     pub fn from_terminal() -> Option<Self> {
         Self::read_terminal().ok()
     }
@@ -228,6 +230,15 @@ pub struct RasterCapabilities {
 /// Raster presentation uses only Sixel and requires the optional `sixel` feature.
 /// Defaults leave every capability unknown: frames without raster content work
 /// normally, while raster frames fail until the required capabilities are set.
+/// Both modes require `sixel`, `no_scroll`, and valid `cell_pixels`. Fullscreen
+/// additionally requires an active alternate screen and `reliable_erase`; inline
+/// instead requires `reliable_inline_erase`. Appended-newline output and
+/// character-effect composition of raster content are unsupported.
+///
+/// Native frames are limited to 32,768 visible raster cells, 16,777,216 physical
+/// pixels, and 32 MiB of staged encoded payload; each tile is limited to 1 MiB.
+/// These independent safety bounds are neither a global memory budget for source
+/// snapshots and caches nor a terminal throughput guarantee.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct RasterOutput {
     /// Verified host behavior and measured cell dimensions for native output.
@@ -278,6 +289,9 @@ impl RasterOutput {
 }
 
 /// Cumulative Sixel work and current bounded cache occupancy for one renderer.
+///
+/// Unchanged visible tiles can skip cache lookup entirely. Cache hits avoid
+/// encoding, not necessarily transmission or cleanup of a tile's old position.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct RasterStats {
     /// Cumulative number of tiles encoded rather than reused from the cache.

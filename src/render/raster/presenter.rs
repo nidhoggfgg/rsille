@@ -1,4 +1,9 @@
 //! Terminal-visible raster state, separate from the bounded encoding cache.
+//!
+//! A cache hit does not prove that a tile is still displayed. Preflight stages
+//! output before any frame bytes; visible state is committed only after flush.
+//! Changed old coverage requires mode-specific erasure and repaint, even when
+//! all replacement tile bytes can be reused.
 
 use std::io;
 

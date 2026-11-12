@@ -29,6 +29,3 @@ Thumbs.db
 *.swp
 
 docs/*
-!docs/raster.md
-!docs/raster-design.md
-!docs/raster-performance.md

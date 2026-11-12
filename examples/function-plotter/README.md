@@ -22,7 +22,7 @@ UI state holds an immutable parsed plot source, not a pre-layout image. Its sing
 
 Normal invocation **requires** the terminal and any multiplexer to support Sixel, ED 2 and **EL2 graphics erase**, graphics following text scrolling, stable palettes, and non-scrolling positioned output. These capabilities are not detected. The application sets `reliable_inline_erase` and rejects unsupported raster output, never silently falling back. **Image retention in scrollback is terminal dependent**; committing a frame does not guarantee Sixel images survive scrolling.
 
-Cell pixels are measured before input starts; failure is an error. Override with `--cell-pixels WxH` only using **actual pixels per character cell**, not terminal columns/rows. Native Windows has no query fallback. Restart after font/DPI changes. See the [raster guide](../../docs/raster.md).
+Cell pixels are measured before input starts; failure is an error. Override with `--cell-pixels WxH` only using **actual pixels per character cell**, not terminal columns/rows. Native Windows has no query fallback. Restart after font/DPI changes. See [`CellPixels`](../../src/render/raster/output.rs) for probing requirements.
 
 ## Interactive independent panels
 
