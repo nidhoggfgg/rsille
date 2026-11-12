@@ -31,7 +31,7 @@ type LoopOutput = std::io::Stdout;
 // Exercise the real loop and renderer without writing control sequences to the
 // test runner's terminal. Terminal setup is bypassed by run_loop_with_stream.
 #[cfg(test)]
-type LoopOutput = Vec<u8>;
+type LoopOutput = tests::TestOutput;
 
 /// Owns an application, its standard-output renderer, and terminal settings.
 ///
@@ -68,7 +68,7 @@ where
         #[cfg(not(test))]
         let output = stdout();
         #[cfg(test)]
-        let output = Vec::new();
+        let output = LoopOutput::default();
         Self {
             render: Render::from_builder(builder, thing, output),
             raw_mode: builder.enable_raw_mode,
@@ -262,17 +262,12 @@ where
 
         if self.inline_mode {
             if let Ok((width, height)) = terminal_size() {
-                self.terminal_size = (width, height).into();
-                self.render.set_inline_viewport_height(height);
+                self.apply_terminal_size(width, height, true);
             }
 
             match terminal_cursor_position() {
                 Ok((x, y)) => {
-                    self.render.pos = (x, y).into();
-                    if x != 0 {
-                        execute!(stdout(), MoveToNextLine(1))?;
-                        self.render.pos.down(1);
-                    }
+                    self.initialize_inline_origin(x, y, &mut stdout())?;
                 }
                 Err(e) => {
                     warn!(
@@ -387,14 +382,7 @@ where
             };
             for event in &events {
                 if let Event::Resize(width, height) = event {
-                    self.terminal_size = (*width, *height).into();
-                    if self.inline_mode {
-                        self.render.set_inline_viewport_height(*height);
-                        self.render
-                            .resize((*width, self.inline_buffer_height(*height)).into());
-                    } else {
-                        self.render.resize((*width, *height).into());
-                    }
+                    self.apply_terminal_size(*width, *height, false);
                 }
             }
 
@@ -452,7 +440,7 @@ where
                     error!("Error rendering: {}", e);
                 } else {
                     pending_render = false;
-                    if force_inline_frame && !committing {
+                    if self.can_force_inline_viewport_follow() && !committing {
                         if let Err(e) = self.render.force_inline_viewport_follow() {
                             error!("Error following inline viewport: {}", e);
                         }
@@ -486,14 +474,67 @@ where
         Ok(())
     }
 
-    fn inline_buffer_height(&self, viewport_height: u16) -> u16 {
-        let available = if self.inline_mouse_mode.force_follows_viewport() {
+    fn initialize_inline_origin(
+        &mut self,
+        x: u16,
+        y: u16,
+        output: &mut impl std::io::Write,
+    ) -> std::io::Result<()> {
+        self.render.pos = (x, y).into();
+        if x != 0 {
+            execute!(output, MoveToNextLine(1))?;
+            self.render.pos.x = 0;
+            self.render.pos.down(1);
+        }
+        Ok(())
+    }
+
+    fn apply_terminal_size(&mut self, width: u16, height: u16, initializing: bool) {
+        self.terminal_size = (width, height).into();
+        if self.inline_mode {
+            let initial_size = self.render.size();
+            let initial_used = self.render.inline_used_height();
+            self.render.set_inline_viewport_height(height);
+            if initializing {
+                // Builder::size owns the initial allocation; the height cap is
+                // a resize policy. Startup only clips for physical row space.
+                let available = self.inline_available_height(height);
+                self.render
+                    .resize((initial_size.width, initial_size.height.min(available)).into());
+                self.render.set_used_height(initial_used);
+            } else {
+                self.render
+                    .resize((width, self.inline_buffer_height(height)).into());
+            }
+        } else {
+            self.render.resize(
+                (
+                    width.saturating_sub(self.render.pos.x),
+                    height.saturating_sub(self.render.pos.y),
+                )
+                    .into(),
+            );
+        }
+    }
+
+    fn can_force_inline_viewport_follow(&self) -> bool {
+        self.inline_mode
+            && self.inline_mouse_mode.force_follows_viewport()
+            // The extra newline must not scroll a full-height UI off screen.
+            && self.terminal_size.height > self.render.inline_used_height()
+    }
+
+    fn inline_available_height(&self, viewport_height: u16) -> u16 {
+        if self.inline_mouse_mode.force_follows_viewport() {
             viewport_height.saturating_sub(1).max(1)
         } else {
             viewport_height
-        };
+        }
+    }
 
-        self.inline_max_height.min(available)
+    fn inline_buffer_height(&self, viewport_height: u16) -> u16 {
+        self.inline_max_height
+            .min(self.inline_available_height(viewport_height))
     }
 
     fn align_inline_origin_after_render(&mut self) {
@@ -505,7 +546,7 @@ where
         let bottom_padding = self
             .render
             .inline_bottom_padding()
-            .max(u16::from(self.inline_mouse_mode.force_follows_viewport()));
+            .max(u16::from(self.can_force_inline_viewport_follow()));
         let reserved_height = used_height.saturating_add(bottom_padding);
         let max_origin_y = self.terminal_size.height.saturating_sub(reserved_height);
 
@@ -680,6 +721,20 @@ mod tests {
 
     use super::*;
     use crate::render::{area::Size, chunk::Chunk, Draw, Update};
+
+    #[derive(Clone, Default)]
+    pub(super) struct TestOutput(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+    impl std::io::Write for TestOutput {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
 
     #[test]
     fn exit_ignores_releases_repeats_and_keyboard_state_bits() {
@@ -975,6 +1030,321 @@ mod tests {
         event_loop.render.pos = (2, 3).into();
         event_loop.render.set_used_height(4);
         event_loop
+    }
+
+    #[test]
+    fn inline_resize_respects_viewport_reservation_and_height_cap() {
+        for (mode, viewport, cap, expected) in [
+            (InlineMouseMode::ForceFollowViewport, 8, 50, 7),
+            (InlineMouseMode::ForceFollowViewport, 8, 3, 3),
+            (InlineMouseMode::ForceFollowViewport, 1, 50, 1),
+            (InlineMouseMode::Local, 8, 50, 8),
+        ] {
+            let mut event_loop = inline_loop(Noop);
+            event_loop.inline_mouse_mode = mode;
+            event_loop.inline_max_height = cap;
+            event_loop.apply_terminal_size(30, viewport, false);
+            assert_eq!(event_loop.terminal_size, (30, viewport).into());
+            assert_eq!(event_loop.render.size(), (30, expected).into());
+            assert_eq!(event_loop.render.inline_used_height(), expected);
+            event_loop.apply_terminal_size(20, 2, false);
+            event_loop.apply_terminal_size(30, viewport, false);
+            assert_eq!(event_loop.render.size(), (30, expected).into());
+        }
+    }
+
+    #[test]
+    fn inline_startup_preserves_builder_size_and_initial_used_height() {
+        for (mode, height, used, expected_height, expected_used) in [
+            (InlineMouseMode::Local, 5, 3, 5, 3),
+            (InlineMouseMode::ForceFollowViewport, 5, 3, 5, 3),
+            (InlineMouseMode::ForceFollowViewport, 10, 10, 7, 7),
+            (InlineMouseMode::Local, 10, 10, 8, 8),
+        ] {
+            let mut event_loop = Builder::new()
+                .inline_mode(true)
+                .inline_mouse_mode(mode)
+                .inline_max_height(2)
+                .size((12, height))
+                .build_event_loop(Noop);
+            event_loop.render.set_used_height(used);
+            event_loop.apply_terminal_size(80, 8, true);
+            assert_eq!(event_loop.render.size(), (12, expected_height).into());
+            assert_eq!(event_loop.render.inline_used_height(), expected_used);
+            event_loop.apply_terminal_size(80, 8, false);
+            assert_eq!(event_loop.render.size(), (80, 2).into());
+        }
+    }
+
+    #[cfg(feature = "sixel")]
+    #[tokio::test]
+    async fn initial_full_height_raster_force_follow_preserves_identical_frame() {
+        use crate::render::raster::{RasterCanvas, RasterCell, RasterOptions, RasterScale, Rgb};
+        use crate::render::raster_output::{CellPixels, RasterCapabilities, RasterOutput};
+
+        struct FullRaster {
+            canvas: RasterCanvas,
+            draws: usize,
+        }
+        impl Draw for FullRaster {
+            fn draw(&mut self, mut chunk: Chunk) -> Result<Size, DrawErr> {
+                self.draws += 1;
+                let target = chunk.area().size();
+                for y in 0..target.height {
+                    for x in 0..target.width {
+                        chunk.set_raster_cell(
+                            x,
+                            y,
+                            RasterCell {
+                                canvas: self.canvas.clone(),
+                                target,
+                                x,
+                                y,
+                                options: RasterOptions {
+                                    scale: RasterScale::Stretch,
+                                    ..Default::default()
+                                },
+                            },
+                        )?;
+                    }
+                }
+                Ok(target)
+            }
+        }
+        impl Update for FullRaster {
+            fn on_events(&mut self, _: &[Event]) -> Result<(), DrawErr> {
+                Ok(())
+            }
+            fn update(&mut self) -> Result<bool, DrawErr> {
+                Ok(false)
+            }
+        }
+
+        // This small terminal tracks graphics by row. DCS bodies are consumed
+        // separately so Sixel data cannot be mistaken for text or cursor commands.
+        struct Terminal {
+            y: usize,
+            saved: usize,
+            rows: Vec<bool>,
+            tiles: usize,
+            lost_rows: usize,
+            line_feeds: usize,
+        }
+        impl Terminal {
+            fn read(&mut self, bytes: &[u8]) {
+                let mut i = 0;
+                while i < bytes.len() {
+                    match bytes[i] {
+                        b'\r' => i += 1,
+                        b'\n' => {
+                            self.line_feeds += 1;
+                            if self.y + 1 == self.rows.len() {
+                                self.lost_rows += usize::from(self.rows[0]);
+                                self.rows.rotate_left(1);
+                                *self.rows.last_mut().unwrap() = false;
+                            } else {
+                                self.y += 1;
+                            }
+                            i += 1;
+                        }
+                        0x1b => {
+                            let command = bytes[i + 1];
+                            i += 2;
+                            match command {
+                                b'7' => self.saved = self.y,
+                                b'8' => self.y = self.saved,
+                                b'P' => {
+                                    let end = i + bytes[i..]
+                                        .windows(2)
+                                        .position(|w| w == b"\x1b\\")
+                                        .unwrap();
+                                    let body = &bytes[i..end];
+                                    let attr = body.iter().position(|b| *b == b'"').unwrap() + 1;
+                                    let dims: Vec<usize> = body[attr..]
+                                        .split(|b| !b.is_ascii_digit() && *b != b';')
+                                        .next()
+                                        .unwrap()
+                                        .split(|b| *b == b';')
+                                        .map(|n| std::str::from_utf8(n).unwrap().parse().unwrap())
+                                        .collect();
+                                    assert_eq!(
+                                        dims[3] % 18,
+                                        0,
+                                        "8x18 cells have no partial sixel bands"
+                                    );
+                                    let bottom = self.y + dims[3] / 18;
+                                    assert!(
+                                        bottom <= self.rows.len(),
+                                        "tile must fit in physical viewport"
+                                    );
+                                    self.rows[self.y..bottom].fill(true);
+                                    self.tiles += 1;
+                                    i = end + 2;
+                                }
+                                b'[' => {
+                                    let start = i;
+                                    while !(0x40..=0x7e).contains(&bytes[i]) {
+                                        i += 1;
+                                    }
+                                    let params = std::str::from_utf8(&bytes[start..i]).unwrap();
+                                    let count = params.parse::<usize>().unwrap_or(1).max(1);
+                                    match bytes[i] {
+                                        b'F' => self.y = self.y.saturating_sub(count),
+                                        b'E' => self.y = (self.y + count).min(self.rows.len() - 1),
+                                        b'K' => {
+                                            assert_eq!(params, "2");
+                                            self.rows[self.y] = false;
+                                        }
+                                        b'm' | b'G' | b'h' | b'l' => {}
+                                        other => panic!("unexpected CSI command {other}"),
+                                    }
+                                    i += 1;
+                                }
+                                other => panic!("unexpected escape {other}"),
+                            }
+                        }
+                        byte => {
+                            assert_eq!(byte, b' ');
+                            i += 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        for initial_y in [0, 5] {
+            let mut builder = Builder::new();
+            builder
+                .inline_mode(true)
+                .size((4, 6))
+                .force_inline_mouse_follow()
+                .raster_output(RasterOutput {
+                    capabilities: RasterCapabilities {
+                        sixel: true,
+                        reliable_erase: false,
+                        reliable_inline_erase: true,
+                        no_scroll: true,
+                        cell_pixels: Some(CellPixels {
+                            width: 8,
+                            height: 18,
+                        }),
+                    },
+                });
+            let output = TestOutput::default();
+            let mut event_loop = builder.build_event_loop(FullRaster {
+                canvas: RasterCanvas::new(4, 6, Rgb(255, 0, 0)).unwrap(),
+                draws: 0,
+            });
+            event_loop.render = builder.build_render(
+                FullRaster {
+                    canvas: RasterCanvas::new(4, 6, Rgb(255, 0, 0)).unwrap(),
+                    draws: 0,
+                },
+                output.clone(),
+            );
+            event_loop.apply_terminal_size(20, 6, true);
+            event_loop
+                .initialize_inline_origin(0, initial_y, &mut Vec::new())
+                .unwrap();
+            assert_eq!(event_loop.render.size(), (4, 5).into());
+            let mut terminal = Terminal {
+                y: initial_y as usize,
+                saved: 0,
+                rows: vec![false; 6],
+                tiles: 0,
+                lost_rows: 0,
+                line_feeds: 0,
+            };
+
+            // EOF presents one frame; a fresh stream presents an identical one
+            // through the same event-loop/render/force-follow path.
+            let mut first_stats = None;
+            for frame in 0..2 {
+                let mut reader = futures::stream::empty();
+                event_loop.run_loop_with_stream(&mut reader).await.unwrap();
+                let bytes = std::mem::take(&mut *output.0.lock().unwrap());
+                assert!(bytes.ends_with(b"\r\n\x1b[1F"), "force follow must run");
+                let old_lfs = terminal.line_feeds;
+                terminal.read(&bytes);
+                assert!(terminal.line_feeds > old_lfs);
+                assert_eq!(terminal.rows, [true, true, true, true, true, false]);
+                assert_eq!(terminal.lost_rows, 0, "no painted top row may scroll away");
+                assert_eq!(event_loop.render.inline_origin().y, 0);
+                let stats = event_loop.render.raster_stats();
+                if frame == 0 {
+                    assert!(terminal.tiles > 0);
+                    assert!(stats.tiles_sent > 0);
+                    first_stats = Some((
+                        stats.encodes,
+                        stats.tiles_sent,
+                        stats.bytes_sent,
+                        terminal.tiles,
+                    ));
+                } else {
+                    assert_eq!(
+                        Some((
+                            stats.encodes,
+                            stats.tiles_sent,
+                            stats.bytes_sent,
+                            terminal.tiles
+                        )),
+                        first_stats,
+                        "identical frame must not encode or resend tiles"
+                    );
+                }
+            }
+            assert_eq!(event_loop.render.thing().draws, 2);
+        }
+    }
+
+    #[test]
+    fn force_follow_requires_a_spare_physical_row() {
+        let mut event_loop = inline_loop(Noop);
+        event_loop.inline_mouse_mode = InlineMouseMode::ForceFollowViewport;
+        for (viewport, used, expected) in
+            [(1, 1, false), (4, 4, false), (4, 5, false), (4, 3, true)]
+        {
+            event_loop.terminal_size = (20, viewport).into();
+            event_loop.render.set_used_height(used);
+            assert_eq!(event_loop.can_force_inline_viewport_follow(), expected);
+        }
+        event_loop.inline_mouse_mode = InlineMouseMode::Local;
+        assert!(!event_loop.can_force_inline_viewport_follow());
+    }
+
+    #[test]
+    fn inline_startup_next_line_resets_the_column() {
+        for (x, y, expected, bytes) in [
+            (7, 3, (0, 4), b"\x1b[1E".as_slice()),
+            (0, 3, (0, 3), b"".as_slice()),
+        ] {
+            let mut event_loop = inline_loop(Noop);
+            let mut output = Vec::new();
+            event_loop
+                .initialize_inline_origin(x, y, &mut output)
+                .unwrap();
+            assert_eq!(event_loop.render.pos, expected.into());
+            assert_eq!(output, bytes);
+        }
+    }
+
+    #[tokio::test]
+    async fn fullscreen_resize_subtracts_origin_with_saturation() {
+        for (width, height, expected) in [
+            (30, 10, (28, 7)),
+            (1, 10, (0, 7)),
+            (30, 2, (28, 0)),
+            (1, 2, (0, 0)),
+            (2, 3, (0, 0)),
+        ] {
+            let mut event_loop = Builder::new().size((20, 5)).build_event_loop(Noop);
+            event_loop.render.pos = (2, 3).into();
+            let mut reader = futures::stream::iter([Ok(Event::Resize(width, height))]);
+            event_loop.run_loop_with_stream(&mut reader).await.unwrap();
+            assert_eq!(event_loop.terminal_size, (width, height).into());
+            assert_eq!(event_loop.render.size(), expected.into());
+            assert_eq!(event_loop.render.pos, (2, 3).into());
+        }
     }
 
     #[test]

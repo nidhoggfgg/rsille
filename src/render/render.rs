@@ -93,7 +93,8 @@ pub struct Render<W, T> {
     // Saved bottom-row anchor while a native inline frame is being written.
     // Retained after I/O failure so recovery never needs an absolute position.
     inline_raster_checkpoint: Option<u16>,
-    used_height: u16, // Actual height to render (for inline mode, avoids buffer reallocation)
+    used_height: u16,
+    inline_clipped_height: u16, // Restored before the next draw, which may be text-only.
     raster: super::raster::RasterPresenter,
 }
 
@@ -110,6 +111,11 @@ where
     ///
     /// On success, saves the frame for comparison and clears the working
     /// buffer. The size returned by [`Draw::draw`] is ignored.
+    ///
+    /// Inline drawing runs once at the requested height, bounded by the viewport.
+    /// If that frame contains native raster content, bottom rows are clipped as
+    /// needed to reserve Sixel guard rows. This preserves drawing side effects
+    /// and raster sampling geometry rather than invoking a second layout pass.
     ///
     /// # Errors
     ///
@@ -157,7 +163,11 @@ where
         // the position in chunk should be (0, 0), the render already move to the target position
         let buffer_size = self.buffer.size();
         if self.inline_mode {
-            self.used_height = self.used_height.min(self.inline_height_limit());
+            self.used_height = self
+                .used_height
+                .saturating_add(self.inline_clipped_height)
+                .min(self.inline_height_limit());
+            self.inline_clipped_height = 0;
         }
         // In inline mode, use used_height to ensure borders render within visible area
         let render_size = if self.inline_mode {
@@ -170,6 +180,22 @@ where
         };
         let chunk = Chunk::new(&mut self.buffer, render_size.into())?;
         self.thing.draw(chunk)?;
+
+        if self.inline_mode && !self.append_newline {
+            // Draw exactly once: Draw may advance application state. Decide from
+            // this frame's ownership, not capabilities or the previous frame.
+            let padding = self.raster.inline_padding_rows(&self.buffer)?;
+            let height = self.inline_height_limit().saturating_sub(padding);
+            if padding > 0 && height == 0 {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::Unsupported,
+                    "inline viewport is too short for raster content and Sixel padding",
+                ));
+            }
+            self.inline_clipped_height = self.used_height.saturating_sub(height);
+            self.used_height = self.used_height.min(height);
+            self.buffer.clip_inline_rows(self.used_height);
+        }
 
         // Inline tiles are anchored relative to the cursor after reserving rows,
         // not to the startup screen coordinates (which can move during scrolling).
@@ -362,14 +388,7 @@ where
     }
 
     fn inline_height_limit(&self) -> u16 {
-        let padding = if self.inline_mode && !self.append_newline {
-            self.raster.inline_padding_rows()
-        } else {
-            0
-        };
-        self.inline_viewport_height
-            .unwrap_or(u16::MAX)
-            .saturating_sub(padding)
+        self.inline_viewport_height.unwrap_or(u16::MAX)
     }
 
     pub(crate) fn inline_bottom_padding(&self) -> u16 {
@@ -689,6 +708,7 @@ where
             inline_raster_padding: 0,
             inline_raster_checkpoint: None,
             used_height: builder.size.height, // Initialize to buffer capacity
+            inline_clipped_height: 0,
             raster: super::raster::RasterPresenter::new(
                 builder.raster_output,
                 builder.enable_alt_screen,
@@ -730,9 +750,11 @@ where
     /// This changes the actual height rendered without reallocating the buffer.
     /// Used in inline mode to avoid frequent buffer reallocations.
     /// Heights are clamped to the buffer capacity and, when supplied, the
-    /// physical inline viewport height minus any Sixel band-padding rows.
+    /// physical inline viewport height. After drawing, native raster frames
+    /// are clipped further if Sixel band-padding rows need space.
     pub fn set_used_height(&mut self, height: u16) {
         let max_height = self.buffer.size().height.min(self.inline_height_limit());
+        self.inline_clipped_height = 0;
         self.used_height = height.min(max_height);
     }
 

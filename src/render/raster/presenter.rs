@@ -66,12 +66,15 @@ impl RasterPresenter {
         }
     }
 
-    pub fn inline_padding_rows(&self) -> u16 {
+    pub fn inline_padding_rows(&self, buffer: &Buffer) -> io::Result<u16> {
         self.config
-            .resolve(true, false, self.alternate_screen, true)
-            .ok()
-            .flatten()
-            .map_or(0, CellPixels::inline_padding_rows)
+            .resolve(
+                buffer.has_raster(),
+                buffer.has_unsupported_raster_composition(),
+                self.alternate_screen,
+                true,
+            )
+            .map(|metrics| metrics.map_or(0, CellPixels::inline_padding_rows))
     }
 
     pub fn prepare(

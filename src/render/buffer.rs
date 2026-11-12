@@ -353,6 +353,16 @@ impl Buffer {
         self.dirty = false;
     }
 
+    /// Clips a staged inline frame without discarding the last displayed diff.
+    /// Raster sampling retains its original target, just as with chunk clipping.
+    pub(crate) fn clip_inline_rows(&mut self, height: u16) {
+        let start = usize::from(height.min(self.size.height)) * usize::from(self.size.width);
+        self.content[start..].fill(Cell::space());
+        if let Some(raster) = &mut self.raster {
+            raster[start..].fill(None);
+        }
+    }
+
     /// Discards the previous frame without changing current content or dirtiness.
     pub fn reset_diff(&mut self) {
         self.previous = None;

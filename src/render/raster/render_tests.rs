@@ -12,6 +12,7 @@ struct Scene {
     visible: bool,
     underlay: char,
     text: Vec<(Position, char)>,
+    draws: usize,
 }
 
 impl Default for Scene {
@@ -25,12 +26,14 @@ impl Default for Scene {
             visible: true,
             underlay: '.',
             text: Vec::new(),
+            draws: 0,
         }
     }
 }
 
 impl Draw for Scene {
     fn draw(&mut self, mut chunk: Chunk) -> Result<Size, DrawErr> {
+        self.draws += 1;
         let size = chunk.area().size();
         // An explicit underlay makes erased/moved/hidden raster coverage observable.
         for y in 0..size.height {
@@ -1474,6 +1477,83 @@ mod native {
     }
 
     #[test]
+    fn inline_small_text_viewports_use_every_row_without_raster_padding() {
+        for height in [1, 2, 3] {
+            let config = band_config(10, 20);
+            let mut render = inline_renderer(config, Vec::new());
+            render.resize((4, height).into());
+            render.set_inline_viewport_height(height);
+            render.thing.visible = false;
+            let mut terminal =
+                BandTerminal::new(height, 4, config.capabilities.cell_pixels.unwrap());
+            terminal.read(&frame(&mut render));
+            assert_eq!(render.used_height, height);
+            assert_eq!(render.inline_bottom_padding(), 0);
+            // Early text rows can scroll after being painted; inspect the
+            // final screen rather than their pre-scroll event coordinates.
+            assert!(terminal.text.iter().all(|&character| character == '.'));
+            assert_eq!(render.thing.draws, 1);
+            let repeat = terminal.read(&frame(&mut render));
+            assert!(!repeat.iter().any(|e| matches!(e, Event::Print(..))));
+            assert_eq!(render.thing.draws, 2);
+            assert_eq!(render.raster_stats(), RasterStats::default());
+        }
+    }
+
+    #[test]
+    fn inline_raster_text_switch_restores_height_and_keeps_single_draw_diff() {
+        let config = band_config(10, 20);
+        let mut render = inline_renderer(config, Vec::new());
+        render.resize((4, 3).into());
+        render.set_inline_viewport_height(3);
+        render.thing.target = (4, 3).into();
+        let mut terminal = BandTerminal::new(3, 4, config.capabilities.cell_pixels.unwrap());
+        for visible in [false, true, false, true, false] {
+            render.thing.visible = visible;
+            let draws = render.thing.draws;
+            let trace = terminal.read(&frame(&mut render));
+            assert_eq!(render.thing.draws, draws + 1);
+            assert_eq!(render.used_height, if visible { 2 } else { 3 });
+            assert_eq!(render.inline_bottom_padding(), u16::from(visible));
+            assert_eq!(terminal.sixel_scrolls, 0);
+            if visible {
+                assert_band_tiles(&trace, 0, 4, 2, terminal.cell);
+                assert!(render.buffer.previous_raster_at((0, 2).into()).is_none());
+            } else {
+                assert_print(&trace, (0, 2), '.');
+                assert!(terminal.pixels.iter().all(|pixel| !pixel));
+            }
+            let stats = render.raster_stats();
+            let repeat = terminal.read(&frame(&mut render));
+            assert!(tiles(&repeat).is_empty());
+            assert!(!repeat
+                .iter()
+                .any(|e| matches!(e, Event::Print(..) | Event::Newline(_))));
+            assert_eq!(render.raster_stats(), stats);
+            assert_eq!(render.thing.draws, draws + 2);
+        }
+    }
+
+    #[test]
+    fn inline_one_row_rejects_raster_before_output_but_recovers_text() {
+        let mut render = inline_renderer(band_config(10, 20), Vec::new());
+        render.resize((4, 1).into());
+        render.set_inline_viewport_height(1);
+        assert_eq!(
+            render.render().unwrap_err().kind(),
+            io::ErrorKind::Unsupported
+        );
+        assert!(render.out.is_empty());
+        assert_eq!(render.thing.draws, 1);
+        render.thing.visible = false;
+        let trace = events(&frame(&mut render));
+        assert_print(&trace, (0, 0), '.');
+        assert_eq!(render.used_height, 1);
+        assert_eq!(render.inline_bottom_padding(), 0);
+        assert_eq!(render.thing.draws, 2);
+    }
+
+    #[test]
     fn band_bottom_reserves_before_paint_and_animation_reuses_guard_rows() {
         for (width, height, padding) in [(10, 20, 1), (8, 18, 0), (10, 1, 5), (10, 2, 2)] {
             for known_viewport in [false, true] {
@@ -1607,7 +1687,9 @@ mod native {
                 assert_eq!(render.inline_raster_checkpoint, failed.then_some(viewport));
                 assert!(render.previous_inline_height + render.inline_raster_padding <= viewport);
                 render.set_used_height(u16::MAX);
-                assert_eq!(render.used_height, 2);
+                // Before draw only the viewport/capacity limit is known;
+                // raster guard rows are decided from the staged frame.
+                assert_eq!(render.used_height, viewport.min(4));
                 render.resize((4, 2).into());
                 let scrolls = terminal.lf_scrolls;
                 let reserve_rows = (render.used_height + padding)
