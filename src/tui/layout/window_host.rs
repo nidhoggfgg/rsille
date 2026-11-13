@@ -12,6 +12,7 @@ use crate::tui::{
         FloatingWindow, FloatingWindowState, WindowProjection, WindowVisibility,
     },
 };
+use std::cell::Cell;
 /// Persistent active-window and stacking state stored under the host's widget identity.
 ///
 /// The default has no active window and an empty ordering.
@@ -22,6 +23,7 @@ pub struct WindowHostState {
     /// Back to front logical ids. Reordering preserves keyed child identities.
     pub order: Vec<String>,
     authoritative_active: Option<Option<String>>,
+    viewport: Cell<Option<Area>>,
 }
 struct WindowMeta {
     id: String,
@@ -189,6 +191,10 @@ impl<M: 'static> Widget<M> for WindowHost<M> {
             .order
             .retain(|id| self.windows.iter().any(|w| &w.id == id));
         for window in &self.windows {
+            // Rebuilt descriptions may reuse cached layout without calling layout().
+            if let Some(viewport) = state.viewport.get() {
+                window.projection.host.set(viewport);
+            }
             if !state.order.contains(&window.id) {
                 state.order.push(window.id.clone());
             }
@@ -204,6 +210,9 @@ impl<M: 'static> Widget<M> for WindowHost<M> {
             self.padding.left,
             self.padding.right,
         );
+        if let Some(state) = ctx.state::<WindowHostState>() {
+            state.viewport.set(Some(viewport));
+        }
         let mut allocations = vec![ChildLayout::new(0, area)];
         for i in self.ordered(ctx.state::<WindowHostState>()) {
             let window = &self.windows[i];

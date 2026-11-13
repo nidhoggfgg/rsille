@@ -390,6 +390,35 @@ fn uncontrolled_windows_keep_geometry_and_tiny_hosts_stay_reachable() {
     }
 }
 #[test]
+fn window_drag_survives_rebuild_but_terminal_resize_cancels_it() {
+    for controlled in [false, true] {
+        let mut rt = windows(initial(), ManualClock::default(), false, controlled);
+        rt.step(&[]).unwrap();
+        let t = rt.bounds(&title(&rt, 0)).unwrap();
+        let (x, y) = (t.x() + 3, t.y());
+        rt.step(&[down(x, y), drag(x + 2, y)]).unwrap();
+        assert_eq!(rect_state(&rt, 0).rect.x, 5);
+
+        send(&mut rt, Msg::Text("updated".into()));
+        rt.step(&[drag(x + 4, y)]).unwrap();
+        assert_eq!(rect_state(&rt, 0).rect.x, 7);
+
+        rt.step(&[Event::Resize(60, 22)]).unwrap();
+        let before = rect_state(&rt, 0).rect;
+        rt.step(&[drag(x + 8, y), up(x + 8, y)]).unwrap();
+        assert_eq!(rect_state(&rt, 0).rect, before);
+
+        let t = rt.bounds(&title(&rt, 0)).unwrap();
+        rt.step(&[
+            down(t.x() + 3, t.y()),
+            drag(t.x() + 5, t.y()),
+            up(t.x() + 5, t.y()),
+        ])
+        .unwrap();
+        assert_eq!(rect_state(&rt, 0).rect.x, before.x + 2);
+    }
+}
+#[test]
 fn animation_handoff_uses_display_and_modal_cancels_active_drag() {
     let clock = ManualClock::default();
     let mut rt = windows(initial(), clock.clone(), true, true);
