@@ -4,6 +4,27 @@
 
 一个直接在终端主屏幕运行的数学 REPL：用 `meval` 解析表达式，用 rsille 的 RGB 栅格和 Sixel 绘制函数。不实现符号代数或方程求解器；依赖只添加在本示例。
 
+![离线渲染的旋转函数图形预览](preview.gif)
+
+## 预览导出
+
+`src/export.rs` 复用现有公式和图形渲染器，导出波浪曲面、马鞍面、螺旋线和三叶结。
+不需要终端或 Sixel 支持，不改变正常交互模式，也不增加依赖。
+这是固定双列布局的 RGB 图形预览，不是终端录屏：不包含提示符、Sixel 量化或终端刷新行为。
+
+在仓库根目录执行（目标目录和快照文件必须尚不存在）：
+
+```sh
+cargo run --release --manifest-path examples/function-plotter/Cargo.toml -- --snapshot target/function-plotter-snapshot.ppm
+cargo run --release --manifest-path examples/function-plotter/Cargo.toml -- --frames target/function-plotter-preview-frames
+ffmpeg -n -framerate 15 -i target/function-plotter-preview-frames/%04d.ppm -filter_complex "[0:v]split[a][b];[a]palettegen[p];[b][p]paletteuse=dither=bayer:bayer_scale=3" -loop 0 -final_delay 7 examples/function-plotter/preview-new.gif
+```
+
+导出 90 张 996×716 的 PPM 图片，按 15 FPS 合成为 6 秒循环动画。
+一圈不重复末帧，旋转速度约为 1.05 弧度/秒，比正常实时预览更快。公式保持原生像素尺寸，无额外缩放。
+FFmpeg 仅用于合成 GIF；生成图片无需 FFmpeg。`--frames` 和 `--snapshot` 是独立命令，不能组合其他选项。
+中间图片约占 193 MB，合成完成后可删除帧目录。仓库自带的 `preview.gif` 使用上述设置。
+
 ## 运行
 
 在仓库根目录执行：

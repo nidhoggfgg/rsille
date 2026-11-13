@@ -4,6 +4,32 @@ English · [中文](README_cn.md)
 
 A small inline terminal math REPL: `meval` evaluates expressions and rsille renders RGB function graphs using Sixel. No symbolic algebra or equation solver; dependencies are local to this example.
 
+![Offline-rendered rotating function plots](preview.gif)
+
+## Preview export
+
+`src/export.rs` reuses the existing formula and graph renderers for a wave surface,
+a saddle, a helix, and a trefoil knot. No terminal, Sixel support, or new dependencies
+are required; normal interactive operation is unchanged. This is a fixed two-column
+RGB preview, not a terminal recording: prompts, Sixel quantization, and terminal
+refresh behavior are not included.
+
+Run from the repository root (the frame directory and snapshot file must not exist):
+
+```sh
+cargo run --release --manifest-path examples/function-plotter/Cargo.toml -- --snapshot target/function-plotter-snapshot.ppm
+cargo run --release --manifest-path examples/function-plotter/Cargo.toml -- --frames target/function-plotter-preview-frames
+ffmpeg -n -framerate 15 -i target/function-plotter-preview-frames/%04d.ppm -filter_complex "[0:v]split[a][b];[a]palettegen[p];[b][p]paletteuse=dither=bayer:bayer_scale=3" -loop 0 -final_delay 7 examples/function-plotter/preview-new.gif
+```
+
+The export produces 90 PPM images at 996×716 pixels: a 6-second loop at 15 FPS.
+One full turn excludes the repeated endpoint and rotates at approximately
+1.05 radians/second, faster than the live preview. Formulas retain native pixel sizes without extra scaling.
+FFmpeg is only needed to assemble the GIF. `--frames` and `--snapshot` are standalone
+commands and cannot be combined with other options. Intermediate frames occupy
+about 193 MB and can be deleted after conversion. The included `preview.gif` uses
+these settings.
+
 ## Run
 
 From the repository root:

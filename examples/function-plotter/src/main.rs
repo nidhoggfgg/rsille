@@ -1,3 +1,4 @@
+mod export;
 mod formula;
 mod grid;
 mod notebook;
@@ -24,6 +25,9 @@ Normal invocation uses native Sixel via rsille's default features.
                           Responsive 1–2 columns; no grid editor or history.
   --x-range MIN MAX      Finite increasing x domain (default -10 10)
   --cell-pixels WxH       Actual pixels per character cell, NOT terminal size
+  --frames DIRECTORY      Export 90 RGB preview frames (15 FPS); new directory
+  --snapshot FILE.ppm     Export a static RGB preview; new file
+                          Standalone options; no terminal required.
   --headless              Exercise inline REPL commits without a terminal
   --help                  Show help
 
@@ -135,7 +139,14 @@ impl Options {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let options = Options::parse(std::env::args().skip(1))?;
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if matches!(
+        args.first().map(String::as_str),
+        Some("--frames" | "--snapshot")
+    ) {
+        return export::command(&args);
+    }
+    let options = Options::parse(args)?;
     if options.help {
         println!("{HELP}");
         return Ok(());
