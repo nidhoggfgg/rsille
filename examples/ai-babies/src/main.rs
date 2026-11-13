@@ -224,9 +224,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     if !args.is_empty() {
         return export::command(args, options);
     }
-    if options.output == Output::Sixel && !cfg!(feature = "sixel") {
-        return Err("--sixel requires cargo --features sixel".into());
-    }
+
     let (width, height) = crossterm::terminal::size()?;
     // Resolve metrics before any input reader starts, and retain this snapshot.
     let output = options.native_config((width, height))?;

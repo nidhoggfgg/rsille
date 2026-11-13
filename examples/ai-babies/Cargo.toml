@@ -6,9 +6,6 @@ publish = false
 
 [workspace]
 
-[features]
-default = []
-sixel = ["rsille/sixel"]
 
 [dependencies]
 rsille = { path = "../.." }

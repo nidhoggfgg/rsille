@@ -38,11 +38,11 @@ cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --character
 以下可选动画模式不改变默认的透明 Quadrant 播放、静态模式及现有导出行为：
 
 ```bash
-cargo run --release --features sixel --manifest-path examples/ai-babies/Cargo.toml -- --sixel --character claude
-cargo run --release --features sixel --manifest-path examples/ai-babies/Cargo.toml -- --sixel --cell-pixels 8x16
+cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --sixel --character claude
+cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --sixel --cell-pixels 8x16
 ```
 
-- `--sixel` 需要 `--features sixel`，使用 inline 动画，不会静默回退。无需额外的 `--inline` 参数。
+- `--sixel` 使用 inline 动画，不会静默回退。无需额外的 `--inline` 参数。
   所有动画模式都不进入备用屏幕，也不捕获鼠标事件。渲染模式择一使用。
 - `--background RRGGBB` 可用于任一模式，默认黑色；允许前导 `#`（在 shell 命令中需加引号）。
   RGBA 会合成到此不透明背景上，两种模式均不保留终端透明背景。
@@ -87,12 +87,11 @@ Raster 不再提供字符预览；默认 Canvas 模式保持不变。
 
 ```bash
 cargo test --manifest-path examples/ai-babies/Cargo.toml
-cargo test --features sixel --manifest-path examples/ai-babies/Cargo.toml
 cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --headless
 cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --snapshot /tmp/ai-babies.ppm 0
 cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --character deepseek --height 24 --frames /tmp/deepseek-frames
 cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --character claude --action wave /tmp/claude-wave
-cargo run --release --features sixel --manifest-path examples/ai-babies/Cargo.toml -- --sixel --headless
+cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --sixel --headless
 ```
 
 `--character`、`--height` 及新的渲染参数必须放在导出选项之前，彼此顺序不限。

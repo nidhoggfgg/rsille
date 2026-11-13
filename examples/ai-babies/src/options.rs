@@ -116,9 +116,7 @@ impl Options {
         if self.output != Output::Sixel {
             return Ok(RasterOutput::default());
         }
-        if !cfg!(feature = "sixel") {
-            return Err("--sixel requires cargo --features sixel".into());
-        }
+
         let pixels = resolve(self.pixels)?;
         if self.pixels.is_some() && (pixels.width, pixels.height) == grid && !self.force_cell_pixels
         {

@@ -44,12 +44,12 @@ These opt-in animation modes leave default transparent Quadrant playback, static
 and existing exports unchanged:
 
 ```bash
-cargo run --release --features sixel --manifest-path examples/ai-babies/Cargo.toml -- --sixel
-cargo run --release --features sixel --manifest-path examples/ai-babies/Cargo.toml -- --sixel --character claude
-cargo run --release --features sixel --manifest-path examples/ai-babies/Cargo.toml -- --sixel --cell-pixels 8x16
+cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --sixel
+cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --sixel --character claude
+cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --sixel --cell-pixels 8x16
 ```
 
-- `--sixel` requires `--features sixel` and uses native inline output on the normal
+- `--sixel` uses native inline output on the normal
   screen, with no silent fallback. No additional `--inline` argument is needed.
   Choose one rendering mode.
 - `--background RRGGBB` (optional leading `#`, quoted in shell commands) applies to
@@ -106,12 +106,11 @@ restarts its first frame. Both operations preserve the paused state.
 
 ```bash
 cargo test --manifest-path examples/ai-babies/Cargo.toml
-cargo test --features sixel --manifest-path examples/ai-babies/Cargo.toml
 cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --headless
 cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --snapshot /tmp/ai-babies.ppm 0
 cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --character deepseek --height 24 --frames /tmp/deepseek-frames
 cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --character claude --action wave /tmp/claude-wave
-cargo run --release --features sixel --manifest-path examples/ai-babies/Cargo.toml -- --sixel --headless
+cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --sixel --headless
 ```
 
 Place `--character`, `--height` and any new rendering arguments before the export

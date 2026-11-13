@@ -42,7 +42,7 @@ Orbit Files 的完整文件操作需要 Linux；不传 `--path` 时使用一次�
 ## 函数绘图
 
 ```sh
-cargo run --release --features sixel --manifest-path examples/function-plotter/Cargo.toml
+cargo run --release --manifest-path examples/function-plotter/Cargo.toml
 cargo run --manifest-path examples/function-plotter/Cargo.toml -- --help
 ```
 
@@ -54,14 +54,14 @@ cargo run --manifest-path examples/function-plotter/Cargo.toml -- --help
 ## Sixel 与 Canvas 浮窗
 
 ```sh
-cargo run --release --features sixel --example sixel_windows
+cargo run --release --example sixel_windows
 cargo run --example sixel_windows -- --help
 ```
 
 在同一个 `window_host` 中用两个 `floating_window` 展示同一颗程序化带环行星，
 仅使用全屏，没有实时动画或 `--inline` 选项。inline Sixel 动画请使用
 [AI Babies](ai-babies/README.md#raster-and-sixel)：
-`cargo run --release --features sixel --manifest-path examples/ai-babies/Cargo.toml -- --sixel`，
+`cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --sixel`，
 无需额外 `--inline` 参数，不启用备用屏幕或鼠标捕获。
 
 拖动标题移动窗口，拖动底部手柄调整大小，点击置前。
@@ -86,7 +86,7 @@ stdin/stdout 均为连接到控制终端的 TTY，绝对超时为 500 ms。原�
 
 ```sh
 cargo run --example sixel_windows -- --headless
-cargo test --example sixel_windows --features sixel
+cargo test --example sixel_windows
 cargo test --example sixel_windows --no-default-features
 ```
 

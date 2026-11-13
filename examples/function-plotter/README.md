@@ -9,12 +9,12 @@ A small inline terminal math REPL: `meval` evaluates expressions and rsille rend
 From the repository root:
 
 ```sh
-cargo run --release --features sixel --manifest-path examples/function-plotter/Cargo.toml
+cargo run --release --manifest-path examples/function-plotter/Cargo.toml
 cargo run --manifest-path examples/function-plotter/Cargo.toml -- --help
-cargo run --release --features sixel --manifest-path examples/function-plotter/Cargo.toml -- --expr 'sin(x); cos(x); x^2/8'
+cargo run --release --manifest-path examples/function-plotter/Cargo.toml -- --expr 'sin(x); cos(x); x^2/8'
 ```
 
-Normal invocation starts the Sixel REPL and requires building with `--features sixel`; use `--help` to print help. Recommended terminal: 100×32 cells. Without `--expr`, startup opens a blank, borderless `In[1]:=` editor with no graph, history entry, or commit. An explicit `--expr` evaluates automatically and commits its graph or error, followed by a blank `In[2]:=` prompt. Each subsequent evaluation commits its `In[n]:=` input and `Out[n]=` graph (or error) to terminal history, then opens a new blank prompt. The editor uses the existing borderless `TextArea`, constrained to one row with no outline or bottom rule; editable and committed expressions both start immediately after `In[n]:=` on the same row. The editor and surrounding text use the terminal's default background, with an underlined caret/selection instead of background highlighting. The graph retains its own intentional background. `Out[n]=` (or the preview heading) is followed by a read-only formula area above the graph; the editable input remains linear. Pasted CRLF, CR, and LF line endings become spaces, preserving single-line input. There is no alternate screen, scrolling editable notebook, or saved session. Old results cannot be edited in place.
+Normal invocation starts the Sixel REPL using rsille's default Sixel support; no feature flags are needed; use `--help` to print help. Recommended terminal: 100×32 cells. Without `--expr`, startup opens a blank, borderless `In[1]:=` editor with no graph, history entry, or commit. An explicit `--expr` evaluates automatically and commits its graph or error, followed by a blank `In[2]:=` prompt. Each subsequent evaluation commits its `In[n]:=` input and `Out[n]=` graph (or error) to terminal history, then opens a new blank prompt. The editor uses the existing borderless `TextArea`, constrained to one row with no outline or bottom rule; editable and committed expressions both start immediately after `In[n]:=` on the same row. The editor and surrounding text use the terminal's default background, with an underlined caret/selection instead of background highlighting. The graph retains its own intentional background. `Out[n]=` (or the preview heading) is followed by a read-only formula area above the graph; the editable input remains linear. Pasted CRLF, CR, and LF line endings become spaces, preserving single-line input. There is no alternate screen, scrolling editable notebook, or saved session. Old results cannot be edited in place.
 
 For a single plot in native mode, the formula and graph share `min(available columns, max(70, formula content columns))`. Formula content width includes padding and is rounded up to whole character cells; available width excludes the one-column padding on each side. The graph stays 14 rows high. This replaces the deliberate formula-only width policy: short formulas such as `sin(x); cos(x)` now get a useful 70-column graph when space permits, rather than a narrow strip. Narrow viewports still shrink both areas to fit. Unused space to the right retains the terminal background. Layout determines the raster dimensions before functions are sampled: allocated columns/rows multiplied by actual physical cell pixels. A 70×14 allocation therefore draws directly at 560×224 for 8×16 cells. There is no intermediate image or downsampling. For Cartesian-only inputs, the plot intentionally fills the available rectangle: the sampled bounds stay fixed across resize, but pixel aspect and x/y scale proportions can change with terminal size and cell metrics; equal mathematical units need not have equal screen lengths. Margins and grid density adapt to the pixel budget. Numeric 3×5 pixel labels appear only at sizes of at least 160×80; smaller plots omit labels and margins to prioritize curves. Curves use an approximately 1.5-target-pixel antialiased round stroke, blended over the existing grid, axes, and earlier curves. Coverage is accumulated per function before blending, so adaptive subdivision joints do not become brighter. Stroke caps/fringes extend up to 1.25 pixels beyond accepted endpoints; gaps smaller than the stroke footprint cannot be represented. The AA stroke itself does not increase function sampling or supersample/rescale the image.
 
@@ -59,9 +59,9 @@ surface(x*y, -2, 2, -2, 2)
 
 ```sh
 # Four presets: shaded surface, helix, trefoil knot and polar rose
-cargo run --release --features sixel --manifest-path examples/function-plotter/Cargo.toml -- --grid
+cargo run --release --manifest-path examples/function-plotter/Cargo.toml -- --grid
 # Each repeated --expr is a separate panel; semicolons remain overlays
-cargo run --release --features sixel --manifest-path examples/function-plotter/Cargo.toml -- --grid --expr 'sin(x); cos(x)' --expr 'polar(2, 0, 2*pi)' --expr 'surface(x*y, -2, 2, -2, 2)'
+cargo run --release --manifest-path examples/function-plotter/Cargo.toml -- --grid --expr 'sin(x); cos(x)' --expr 'polar(2, 0, 2*pi)' --expr 'surface(x*y, -2, 2, -2, 2)'
 cargo run --manifest-path examples/function-plotter/Cargo.toml -- --headless --grid
 ```
 
@@ -141,7 +141,7 @@ sin(x); polar(2, 0, 2*pi); param(t, t^2, -2, 2)
 For example:
 
 ```sh
-cargo run --release --features sixel --manifest-path examples/function-plotter/Cargo.toml -- --expr 'polar(2*cos(5*theta), 0, 2*pi)'
+cargo run --release --manifest-path examples/function-plotter/Cargo.toml -- --expr 'polar(2*cos(5*theta), 0, 2*pi)'
 ```
 
 When any polar/parametric curve is present, both axes are surveyed using 1025 samples per curve, accepting only points with two finite coordinates and applying the outlier fences and padding described above. The visible bounds then expand to give equal pixel-unit axes at the final plot size. Resizing may change visible bounds, but never parameter intervals or the Cartesian sampling domain in mixed plots. Circles stay circular using measured physical cell metrics. The grid remains Cartesian, not polar.
@@ -153,7 +153,7 @@ Geometric curves use budgeted adaptive 2D subdivision and clipping against all f
 Use `surface(z_expr, xmin, xmax, ymin, ymax)` for a height field with variables `x,y`, or `param3(x_expr, y_expr, z_expr, tmin, tmax)` for a space curve with variable `t`. Bounds accept constant expressions and must be finite, increasing, with finite spans. Combine up to six 3D objects with `;`; mixing 2D and 3D is rejected. `--x-range` does not affect 3D sampling.
 
 ```sh
-cargo run --release --features sixel --manifest-path examples/function-plotter/Cargo.toml -- --expr 'surface(sin(x)*cos(y), -pi, pi, -pi, pi)'
+cargo run --release --manifest-path examples/function-plotter/Cargo.toml -- --expr 'surface(sin(x)*cos(y), -pi, pi, -pi, pi)'
 ```
 
 Try a saddle, Gaussian hill, helix, trefoil knot, or a curve passing through a plane:
@@ -174,18 +174,16 @@ Sampling is bounded: 65×65 vertices per surface and 2049 points per curve, eval
 
 A thin non-antialiased diagonal can look periodically dotted even when its pixels are 8-connected (touching at edges or corners). Before the stroke change, `y=x` passed source-raster and presentation-sampler connectivity tests at a 70×14-cell target, including 18×40 and 20×40 native cell metrics (1260×560 and 1400×560 pixels). The library line routine advances every dominant-axis pixel; equal-size raster presentation does not resample. Its semantics are unchanged.
 
-The Sixel-feature regression test reconstructs that original rounded-line path and also renders the new AA path through the actual renderer into memory. It decodes all 980 Sixel tiles, checks that every pixel is emitted exactly once and matches source RGB332 quantization, and verifies an 8-connected cyan curve at both metrics. AA connectivity uses substantial cyan coverage, not equality to the full-cyan color: partially covered pixels legitimately occupy other palette bins. Palette quantization can reduce fringe smoothness, but did not remove connectivity in these tests.
+The default-enabled Sixel regression test reconstructs that original rounded-line path and also renders the new AA path through the actual renderer into memory. It decodes all 980 Sixel tiles, checks that every pixel is emitted exactly once and matches source RGB332 quantization, and verifies an 8-connected cyan curve at both metrics. AA connectivity uses substantial cyan coverage, not equality to the full-cyan color: partially covered pixels legitimately occupy other palette bins. Palette quantization can reduce fringe smoothness, but did not remove connectivity in these tests.
 
 This evidence supports a one-pixel staircase/coverage explanation for the reported appearance, not missing source or encoded pixels at the tested dimensions. It is **not a reproduction of the screenshot**: its actual cell metrics and terminal behavior are unknown. Headless decoding cannot certify physical display behavior.
 
 ## Validate
 
 ```sh
-cargo test --manifest-path examples/function-plotter/Cargo.toml --features sixel
-cargo test --manifest-path examples/function-plotter/Cargo.toml --no-default-features
-cargo run --manifest-path examples/function-plotter/Cargo.toml --no-default-features -- --headless
-cargo run --manifest-path examples/function-plotter/Cargo.toml --no-default-features -- --headless --grid
-cargo run --manifest-path examples/function-plotter/Cargo.toml --features sixel -- --headless
+cargo test --manifest-path examples/function-plotter/Cargo.toml
+cargo run --manifest-path examples/function-plotter/Cargo.toml -- --headless
+cargo run --manifest-path examples/function-plotter/Cargo.toml -- --headless --grid
 ```
 
 Evaluation sets the final result state and calls `ctx.commit_frame(Msg::NextPrompt)`. Headless `Runtime::step` reports `committed` and retains the result frame, including raster metadata; only the next step resumes the continuation and opens the blank prompt. Terminal execution renders and commits historical output before continuing.

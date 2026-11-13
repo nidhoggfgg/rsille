@@ -14,7 +14,7 @@ const X_RANGE: [f64; 2] = [-10.0, 10.0];
 const BOUNDS: [f64; 4] = [-10.0, 10.0, -3.0, 3.0];
 const HELP: &str = "Function plotter — 2D curves and shaded 3D surfaces
 
-Normal invocation uses native Sixel (build with --features sixel).
+Normal invocation uses native Sixel via rsille's default features.
 
   --expr 'sin(x); x^2/8'   Initial functions (up to six)
   --grid                  Independent demo panels; no expr: four presets
@@ -148,19 +148,14 @@ fn main() -> Result<(), Box<dyn Error>> {
             notebook::smoke_test(State::new(options.expr, x_range)?)
         };
     }
-    let output = {
-        if !cfg!(feature = "sixel") {
-            return Err("Sixel output requires building with --features sixel".into());
-        }
-        RasterOutput {
-            capabilities: RasterCapabilities {
-                sixel: true,
-                reliable_erase: true,
-                reliable_inline_erase: true,
-                no_scroll: true,
-                cell_pixels: Some(CellPixels::resolve(options.pixels)?),
-            },
-        }
+    let output = RasterOutput {
+        capabilities: RasterCapabilities {
+            sixel: true,
+            reliable_erase: true,
+            reliable_inline_erase: true,
+            no_scroll: true,
+            cell_pixels: Some(CellPixels::resolve(options.pixels)?),
+        },
     };
     if options.grid {
         grid::application(grid::State::new(options.panels, x_range)?, output).run()?;
@@ -226,7 +221,8 @@ mod tests {
         }
         assert!(Options::parse(["--headless".to_owned()]).unwrap().headless);
         assert!(!HELP.contains("--sixel"));
-        assert!(HELP.contains("--features sixel"));
+        assert!(!HELP.contains("--features"));
+        assert!(HELP.contains("Sixel via rsille's default features"));
     }
 
     #[test]

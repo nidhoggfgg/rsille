@@ -1020,7 +1020,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "sixel")]
     mod sixel_tests {
         // Keep the external legacy-render fixture's two-field literal intact.
         struct Plot {

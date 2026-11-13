@@ -9,12 +9,12 @@
 在仓库根目录执行：
 
 ```sh
-cargo run --release --features sixel --manifest-path examples/function-plotter/Cargo.toml
+cargo run --release --manifest-path examples/function-plotter/Cargo.toml
 cargo run --manifest-path examples/function-plotter/Cargo.toml -- --help
-cargo run --release --features sixel --manifest-path examples/function-plotter/Cargo.toml -- --expr 'sin(x); cos(x); x^2/8'
+cargo run --release --manifest-path examples/function-plotter/Cargo.toml -- --expr 'sin(x); cos(x); x^2/8'
 ```
 
-正常启动默认运行 Sixel REPL，构建时需要 `--features sixel`；使用 `--help` 显示帮助。建议使用 100×32 字符格。未指定 `--expr` 时，直接打开空白、无边框的 `In[1]:=` 输入框，不绘图、不添加历史、不提交。只有显式指定 `--expr` 才在启动时执行并提交图像或错误，然后打开空白 `In[2]:=` 提示符。以后每次执行都会把 `In[n]:=` 输入及其 `Out[n]=` 图像或错误留在终端历史中，再打开下一个空白提示符。使用现有无边框 `TextArea` 控件，限制为一行，不绘制外围方框或底线；编辑中和提交后的表达式均紧接在同一行的 `In[n]:=` 后。输入框与周围文字使用终端默认背景，光标和选区以下划线表示，不再使用背景色高亮；图像保留自身的背景色。`Out[n]=` 或预览标题下方先显示只读公式区，再显示图像；编辑输入仍保持线性文本。粘贴的 CRLF、CR、LF 换行转换为空格，保持单行输入。不使用备用屏幕，不再维护可滚动编辑的笔记本，也不保存会话。不能原地修改历史输出。
+正常启动默认运行 Sixel REPL，直接使用 rsille 默认启用的 Sixel 支持，无需额外 feature 参数；使用 `--help` 显示帮助。建议使用 100×32 字符格。未指定 `--expr` 时，直接打开空白、无边框的 `In[1]:=` 输入框，不绘图、不添加历史、不提交。只有显式指定 `--expr` 才在启动时执行并提交图像或错误，然后打开空白 `In[2]:=` 提示符。以后每次执行都会把 `In[n]:=` 输入及其 `Out[n]=` 图像或错误留在终端历史中，再打开下一个空白提示符。使用现有无边框 `TextArea` 控件，限制为一行，不绘制外围方框或底线；编辑中和提交后的表达式均紧接在同一行的 `In[n]:=` 后。输入框与周围文字使用终端默认背景，光标和选区以下划线表示，不再使用背景色高亮；图像保留自身的背景色。`Out[n]=` 或预览标题下方先显示只读公式区，再显示图像；编辑输入仍保持线性文本。粘贴的 CRLF、CR、LF 换行转换为空格，保持单行输入。不使用备用屏幕，不再维护可滚动编辑的笔记本，也不保存会话。不能原地修改历史输出。
 
 原生单图模式下，公式与曲线图共用 `min(可用列数, max(70, 公式内容列数))` 的宽度。公式内容宽度含内边距并向上取整到完整字符格；可用宽度扣除左右各一列的留白。图像高度仍为 14 行。这替代了此前有意采用的仅按公式内容定宽策略：`sin(x); cos(x)` 等短公式在空间足够时也有 70 列宽的曲线图，不再成为窄条；窄窗口中两者仍缩小至可用宽度。右侧未使用的空间保留终端背景，不绘制 Sixel。先布局，再按分配的列数/行数乘以真实字符格像素尺寸确定栅格大小。因此 70×14 字符格在每格 8×16 像素时直接绘制 560×224 图像，没有中间图像或降采样。仅绘制普通函数时，图像有意填满可用矩形：采样得到的数学范围在调整尺寸时保持固定，但横纵比例随终端大小及字符格尺寸变化，两个轴的单位长度不保证相等。边距及网格密度按像素预算调整；仅在至少 160×80 时显示 3×5 像素数字刻度，更小时省略文字与边距以优先显示曲线。曲线使用约 1.5 个目标像素宽的抗锯齿圆头描边，与已有网格、坐标轴及先绘制的曲线混合。每条函数先累积覆盖率再混合，避免自适应细分接点重复叠加而变亮。端点圆头及边缘最多延伸 1.25 像素，小于描边覆盖范围的间隙无法保留；抗锯齿描边本身不增加函数采样，也不使用中间超采样图像或缩放。
 
@@ -52,9 +52,9 @@ surface(x*y, -2, 2, -2, 2)
 
 ```sh
 # 默认四图：曲面、螺旋线、三叶结、极坐标玫瑰线
-cargo run --release --features sixel --manifest-path examples/function-plotter/Cargo.toml -- --grid
+cargo run --release --manifest-path examples/function-plotter/Cargo.toml -- --grid
 # 每个 --expr 对应独立面板；分号仍表示同一面板内叠加
-cargo run --release --features sixel --manifest-path examples/function-plotter/Cargo.toml -- --grid --expr 'sin(x); cos(x)' --expr 'polar(2, 0, 2*pi)' --expr 'surface(x*y, -2, 2, -2, 2)'
+cargo run --release --manifest-path examples/function-plotter/Cargo.toml -- --grid --expr 'sin(x); cos(x)' --expr 'polar(2, 0, 2*pi)' --expr 'surface(x*y, -2, 2, -2, 2)'
 cargo run --manifest-path examples/function-plotter/Cargo.toml -- --headless --grid
 ```
 
@@ -115,7 +115,7 @@ sin(x); polar(2, 0, 2*pi); param(t, t^2, -2, 2)
 依次为玫瑰线、阿基米德螺线、心形线、利萨如曲线、爱心、波瓣闭合曲线及混合绘图。例如：
 
 ```sh
-cargo run --release --features sixel --manifest-path examples/function-plotter/Cargo.toml -- --expr 'polar(2*cos(5*theta), 0, 2*pi)'
+cargo run --release --manifest-path examples/function-plotter/Cargo.toml -- --expr 'polar(2*cos(5*theta), 0, 2*pi)'
 ```
 
 只要包含极坐标或参数曲线，就对两个坐标轴分别估算范围（每条曲线 1025 点，仅接受两个坐标都有限的样本，使用上述四分位距过滤及留白），再根据最终绘图区像素尺寸扩展可见范围，使横纵单位具有相同像素长度。调整尺寸可能改变可见范围，但不会改变参数区间或混合图中普通函数的采样区间。Sixel 下圆不会因宽屏绘图区被拉成椭圆。网格仍为直角坐标网格，不是极坐标网格。
@@ -134,7 +134,7 @@ cargo run --release --features sixel --manifest-path examples/function-plotter/C
 `surface(z, xmin, xmax, ymin, ymax)` 绘制 `z=f(x,y)`；`param3(x, y, z, tmin, tmax)` 绘制空间轨迹。所有区间必须有限、递增、跨度有限，端点支持常量表达式。三维对象可以用 `;` 叠加，总数最多六个，但不能与二维表达式混用。`--x-range` 不影响三维对象。公式区显示曲面的两个定义域，或带大括号的三行空间参数方程。
 
 ```sh
-cargo run --release --features sixel --manifest-path examples/function-plotter/Cargo.toml -- --expr 'surface(sin(x)*cos(y), -pi, pi, -pi, pi)'
+cargo run --release --manifest-path examples/function-plotter/Cargo.toml -- --expr 'surface(sin(x)*cos(y), -pi, pi, -pi, pi)'
 ```
 
 可直接输入：
@@ -154,11 +154,9 @@ surface(0, -2, 2, -2, 2); param3(cos(t), sin(t), t/4, -2*pi, 2*pi)
 ## 验证
 
 ```sh
-cargo test --manifest-path examples/function-plotter/Cargo.toml --features sixel
-cargo test --manifest-path examples/function-plotter/Cargo.toml --no-default-features
-cargo run --manifest-path examples/function-plotter/Cargo.toml --no-default-features -- --headless
-cargo run --manifest-path examples/function-plotter/Cargo.toml --no-default-features -- --headless --grid
-cargo run --manifest-path examples/function-plotter/Cargo.toml --features sixel -- --headless
+cargo test --manifest-path examples/function-plotter/Cargo.toml
+cargo run --manifest-path examples/function-plotter/Cargo.toml -- --headless
+cargo run --manifest-path examples/function-plotter/Cargo.toml -- --headless --grid
 ```
 
 执行时先设置最终结果状态，再调用 `ctx.commit_frame(Msg::NextPrompt)`。无终端的 `Runtime::step` 返回 `committed`，保留包含栅格元数据的结果快照；下一步才执行后续消息并打开空白提示符。真实终端运行时先渲染并提交历史输出，再继续。

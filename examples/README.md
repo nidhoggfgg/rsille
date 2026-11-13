@@ -45,7 +45,7 @@ require Linux; it starts in a disposable demo directory unless given `--path`.
 ## Function Plotter
 
 ```sh
-cargo run --release --features sixel --manifest-path examples/function-plotter/Cargo.toml
+cargo run --release --manifest-path examples/function-plotter/Cargo.toml
 cargo run --manifest-path examples/function-plotter/Cargo.toml -- --help
 ```
 
@@ -59,7 +59,7 @@ for controls, measured cell-pixel overrides and headless checks.
 ## Sixel vs Canvas windows
 
 ```sh
-cargo run --release --features sixel --example sixel_windows
+cargo run --release --example sixel_windows
 cargo run --example sixel_windows -- --help
 ```
 
@@ -67,7 +67,7 @@ Two `floating_window` widgets in a `window_host` show the same procedural ringed
 planet in fullscreen only, without live animation or an `--inline` option.
 For inline Sixel animation without an alternate screen or mouse capture, use
 [AI Babies](ai-babies/README.md#raster-and-sixel):
-`cargo run --release --features sixel --manifest-path examples/ai-babies/Cargo.toml -- --sixel`.
+`cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --sixel`.
 No extra `--inline` argument is needed there.
 
 Drag a title to move, drag a bottom grip to resize,
@@ -100,7 +100,7 @@ Finite, terminal-independent mouse-drag and occlusion checks and example tests:
 
 ```sh
 cargo run --example sixel_windows -- --headless
-cargo test --example sixel_windows --features sixel
+cargo test --example sixel_windows
 cargo test --example sixel_windows --no-default-features
 ```
 

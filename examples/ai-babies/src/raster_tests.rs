@@ -78,12 +78,7 @@ fn text_output_never_probes_and_native_output_never_silently_falls_back() {
         );
     }
     let options = parse(&["--sixel", "--cell-pixels", "10x20"]).unwrap();
-    if !cfg!(feature = "sixel") {
-        assert!(options
-            .native_config_with((80, 24), |_| panic!("feature check must precede probe"))
-            .is_err());
-        return;
-    }
+
     let config = options.native_config((80, 24)).unwrap();
     assert_eq!(config.capabilities.cell_pixels, options.pixels);
     assert!(
@@ -204,7 +199,6 @@ fn raster_image_exports_are_rejected() {
     }
 }
 
-#[cfg(feature = "sixel")]
 #[test]
 fn native_inline_playback_is_compact_and_reuses_unchanged_frames() {
     // Synthetic safety assertions apply to the memory writer, not a real terminal.
