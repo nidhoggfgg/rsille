@@ -6,25 +6,28 @@ English · [中文](README_cn.md)
 
 **Make your terminal come alive.**
 
-Draw a glowing ocean, bring a mechanical creature to life, or combine draggable
-windows and 3D scenes in one terminal. **rsille is a Rust framework for terminal applications and
-graphics**, bringing rendering, TUI, animation and interaction into one composable API.
+**rsille is a Rust framework for terminal applications and graphics**, combining
+widget layouts, colorful graphics, animated effects and keyboard/mouse interaction
+in one API. Draw character graphics with Unicode Canvas or pixel images with Sixel;
+compose canvases, editors, tables and floating windows into one application.
+Build anything from an inline tool to a fullscreen workspace without wiring up
+separate rendering and event loops.
 
 ## One terminal. Many possibilities.
 
-Click a preview for source code, run commands and controls.
-
-| Jellyfish · An ocean in your terminal | Lumen · A workspace you can move around |
+| Pixel-level graphics · Sixel | Desktop-style layouts · TUI |
 | --- | --- |
-| [![Glowing jellyfish, light shafts and drifting particles in a terminal](examples/jellyfish/preview.gif)](examples/jellyfish/README.md) | [![Lumen's 3D canvas, live curves and draggable floating windows](examples/lumen/preview-desk.png)](examples/lumen/README.md) |
-| **Rendering.** Full-color samples, half-block encoding and continuous redraw bring procedural jellyfish, soft light shafts and drifting particles to life. | **TUI.** Canvas graphics and native widgets share a layout. Drag, resize, collapse and restore windows, with focus management and a command palette. |
+| [![Offline RGB preview of function plots: surfaces, a helix and a trefoil knot](examples/function-plotter/preview.gif)](examples/function-plotter/README.md) | [![Lumen's 3D canvas, live curves and draggable floating windows](examples/lumen/preview-desk.png)](examples/lumen/README.md) |
+| **Graphics beyond character shapes.** RGB pixel canvases output through Sixel, with layout, clipping, scrolling and opaque coverage. Embed fine curves, images and custom visualizations in your UI on compatible terminals. | **More than fixed panels.** Compose editors, tables and canvases with Flex/Grid layouts. Draggable, resizable, collapsible windows, focus management and command palettes let you build multi-pane workspaces. |
 
-| Clockwork · Parts that assemble themselves | Pokémon Battle · Take your turn |
+| Continuous animation · Unicode Canvas | Graphics and widgets · Shared interaction |
 | --- | --- |
 | [![132 parts disassembling and rebuilding into mechanical creatures](examples/clockwork/preview.gif)](examples/clockwork/README.md) | [![Pikachu, Blastoise and native move buttons in a 3D arena](examples/pokemon-battle/preview.png)](examples/pokemon-battle/README.md) |
-| **Animation.** The example uses springs to drive 132 parts between three forms; rsille handles frame rendering and input. Orbit the camera while the machine rebuilds. | **Graphics × TUI × interaction.** A 3D scene with native move buttons, health bars and frosted backdrops. Click to attack, drag to orbit and watch the action unfold. |
+| **Character cells can carry moving scenes.** Braille, half-block and quadrant encodings support colorful sampled graphics. Frame updates and input handling let you present procedural animation and your own projected 3D scenes, not just static charts. | **A canvas is part of the interface.** Graphics, buttons and status bars share layout and event handling, with matching world coordinates and pointer transforms. Add gradients, light sweeps, frosted backdrops and transitions to make visualizations interactive as well as visual. |
 
-Previews are exported from rendered terminal cells; Clockwork's GIF is sped up.
+Function Plotter is an offline RGB preview, not a terminal recording; it excludes
+Sixel quantization and refresh behavior. Other previews are exported from rendered
+terminal cells; Clockwork's GIF is sped up.
 The examples supply scenes and simulation; rsille handles the canvas,
 encoding, widgets, rendering and event loop.
 
@@ -32,125 +35,47 @@ encoding, widgets, rendering and event loop.
 
 <img align="right" src="examples/ai-babies/preview-pet.gif" width="96" alt="">
 
-- **Put effects on your widgets.** Wrap a button, panel or canvas in `visual(...)`.
-  Chain gradients, light sweeps, dissolves and waves; add a frosted backdrop or an
-  enter/exit transition. The runtime drives the animation.
-- **Draw a world inside your UI.** Use Braille, half blocks or quadrants for colored
-  graphics. Embed a `canvas(...)` in a layout, with world coordinates and matching
-  pointer transforms, or use the renderer directly for a whole scene.
-- **Keep the application code simple.** Describe the UI in `view`, change state in
-  `update`. Compose Flex/Grid layouts, text editors, tables and draggable windows;
-  let the runtime handle focus, input, background tasks and cleanup.
+- **Describe the UI, not the event loop.** `view` describes widgets; `update` handles
+  messages and state. The runtime manages focus, input, background tasks and cleanup.
+- **Compose effects without rewriting widgets.** `visual(...)` adds gradients,
+  light sweeps, dissolves and waves to character-based widgets while preserving
+  interaction. The runtime drives built-in visual animations—no manual frame loop.
+- **Choose how your app lives in the terminal.** Use fullscreen for a complete
+  workspace or inline for the normal terminal screen. Use Canvas and the renderer
+  directly when you do not need a widget tree.
+- **Test interaction and async logic without a terminal.** Replay input and inspect
+  rendered frames in memory. Control timers and background tasks with a manual
+  clock and executor.
 
-Explore the **[example gallery](examples/README.md)**: a
+The **[example gallery](examples/README.md)** includes
+[glowing jellyfish](examples/jellyfish/README.md), a
 [voxel sandbox](examples/minecraft/README.md),
 [a file manager with drag and drop](examples/orbit-files/README.md) and
 [a seven-page widget showcase](examples/tui-showcase/README.md).
-For one API at a time, start with the [small TUI examples](packages/tui/examples/README.md).
 
-## Add rsille to an application
+## Develop with an AI coding agent
 
-Add rsille `3.1.0` to your application:
+The [rsille skill](https://github.com/nidhoggfgg/rsille.skills/blob/main/rsille/SKILL.md)
+teaches coding agents the v3 API: widgets, layouts, background tasks, input,
+Canvas graphics, animation and headless testing. It includes a
+[component catalog](https://github.com/nidhoggfgg/rsille.skills/blob/main/rsille/references/components.md)
+and a standalone application starter.
+
+```bash
+npx skills add nidhoggfgg/rsille.skills --skill rsille
+```
+
+## Installation
 
 ```toml
 [dependencies]
 rsille = "3.1.0"
 ```
 
-The public package is `rsille`. The repository's `tui`, `render` and `canvas` crates
-are private development targets, all with `publish = false`.
+The `sixel` feature is enabled by default; optional `syntax-highlighting` adds
+Syntect highlighting to code viewers.
 
-For Typst math → RGB raster rendering, see the independent
-[`rsille-typst` extension](packages/rsille-typst/README.md). It uses Typst math
-syntax directly and does not add Typst dependencies to the core crate. Display a
-block formula inline on the normal screen, without mouse capture, in a compatible
-terminal (`q` / `Esc` to quit). Original pixel size is preserved; narrow/short
-viewports clip rather than enlarge or reflow the formula:
-
-```sh
-cargo run -p rsille-typst --features sixel --example formula -- 'sqrt(x)'
-cargo run -p rsille-typst --example formula -- --help
-```
-
-No arguments starts the interactive default formula; `--help` shows help.
-The terminal and any multiplexer must support
-Sixel, local EL 2 graphics erasure, graphics following text scrolling, stable
-palettes, non-scrolling positioned output and transparent partial-band padding.
-These capabilities are not automatically detected, and output never silently
-falls back. See the extension README for measured cell-pixel overrides
-and no-TTY `--headless` checks.
-
-The `sixel` feature is enabled by default; use `default-features = false` to disable it.
-Enable `syntax-highlighting` for Syntect highlighting in code viewers:
-
-```toml
-[dependencies]
-rsille = { version = "3.1.0", features = ["syntax-highlighting"] }
-```
-
-Without that feature, code viewers still support plain text and navigation.
-
-For local development, replace the registry dependency with `rsille = { path = "../rsille" }`,
-adjusting the path to your checkout.
-
-## Opaque raster drawing
-
-`rsille::raster::RasterCanvas` provides fixed-resolution RGB pixels and drawing
-primitives. Embed it with `raster_canvas(...)` or use the revision-cached
-`RasterCanvasWidget::from_draw(...)`. Raster content supports layout, clipping,
-scrolling and opaque coverage independently of the sample-based `Canvas`.
-
-Terminal output requires the default-enabled `sixel` feature, explicit terminal
-capabilities and actual pixels per character cell. Capabilities are not detected
-automatically; unsupported configurations return an error without character
-fallback. Output uses RGB332 color quantization and does not support alpha.
-Fullscreen requires alternate-screen graphics erasure; inline requires reliable
-row-local graphics erasure and graphics that follow text scrolling.
-
-See the source API documentation for
-[`RasterCanvas`](src/render/raster/canvas.rs) and
-[`RasterOutput` / `CellPixels`](src/render/raster/output.rs).
-Call `CellPixels::probe` before starting any input reader; probing may consume
-input and does not establish Sixel support. Update stored metrics or restart
-after font/DPI changes.
-
-Try the fullscreen [Sixel vs Canvas demo](examples/sixel_windows.rs):
-
-```sh
-cargo run --release --features sixel --example sixel_windows
-```
-
-The demo assumes a compatible terminal/multiplexer. Use `--cell-pixels WxH`
-to supply actual cell dimensions if probing fails, and `--help` for controls
-and options. See [examples](examples/README.md) for inline animation and other uses.
-
-## Develop with an AI coding agent
-
-The [rsille skill](https://github.com/nidhoggfgg/rsille.skills/blob/main/rsille/SKILL.md) teaches coding agents the v3 API,
-including widgets and layouts, background tasks, input handling, Canvas graphics,
-animation, and headless testing. Its [component catalog](https://github.com/nidhoggfgg/rsille.skills/blob/main/rsille/references/components.md)
-maps UI requirements to built-in components and examples. It also includes a
-standalone application starter.
-
-Install it from your application directory using the
-[Skills CLI](https://github.com/vercel-labs/skills):
-
-```bash
-npx skills add nidhoggfgg/rsille.skills --skill rsille
-```
-
-Choose your coding agent when prompted; add `-g` to install across projects.
-For a local checkout, replace `nidhoggfgg/rsille.skills` with the skills repository's
-absolute path. This repository includes it as the `skills/` Git submodule; run
-`git submodule update --init skills` to fetch it. You can also copy the complete
-`skills/rsille` directory into your agent's skills directory.
-
-Then ask your agent, for example:
-
-> Use the rsille skill to build a terminal task manager with a filter input,
-> keyboard navigation, and headless tests.
-
-## Your first application, already animated
+## An animated application
 
 ```rust,no_run
 use std::time::Duration;
@@ -181,89 +106,19 @@ fn main() -> WidgetResult<()> {
 }
 ```
 
-<img src="imgs/readme-counter-en.gif" width="424" alt="Gradient counter button with a looping light sweep and Enter-driven count changes">
+<img src="imgs/readme-counter-en.gif" width="424" alt="Gradient counter button with a looping light sweep and count changes">
 
-Exported from the code above at 32 × 3 terminal cells, replaying Enter to count from 0 to 2.
+## Graphics: Unicode Canvas and Sixel
 
-<img align="right" src="examples/ai-babies/preview-claude.gif" width="96" alt="">
-
-A clickable counter with a cyan-to-magenta gradient and a looping light sweep.
-The three chained calls add the look and motion; no manual frame loop is needed.
-`visual(...)` wraps the interactive button, so it keeps its input behavior.
-
-Tab moves focus, Enter or Space activates the button, and Esc exits by default.
-`view` describes widgets from state; their messages reach `update`. The third update
-argument, `UpdateCtx`, schedules work, emits messages and requests exit with
-`ctx.exit()`.
-
-Configure themes, hotkeys, subscriptions and timing before `.update()`. Fullscreen is
-the default; `Mode::Inline` uses the normal terminal screen. `run()` returns an
-`AppExit` containing the final state and exit reason after cleanup. Inside an existing
-Tokio runtime with the time driver enabled, use `.run_async().await`.
-
-## Test without a terminal
-
-The same builder can produce an in-memory runtime:
-
-```rust
-use rsille::tui::prelude::*;
-
-let mut runtime = App::new(0_u32)
-    .update(|count, (), _ctx| *count += 1)
-    .view(|count| button(format!("Count: {count}")).on_click(|| ()))
-    .build()
-    .size(40, 3);
-
-runtime.handle().send(()).unwrap();
-runtime.step(&[]).unwrap();
-assert_eq!(*runtime.state(), 1);
-assert_eq!(runtime.frame().size().width, 40);
-```
-
-Use `step(&events)` to replay input and `frame()` to inspect rendered cells.
-`ManualClock` and `ManualExecutor`, imported from `rsille::tui::runtime`, make timers
-and queued jobs controllable. The [workflow example](packages/tui/examples/basics/workflow.rs)
-checks Unicode editing, debounce, background saving and exit using one application:
-
-```bash
-cargo run -p tui --example workflow -- --headless
-```
-
-## Draw with Canvas
-
-**More detail in every character cell.** `Encoding::Quadrant` divides each terminal
-cell into **2 × 2 sample positions**. Quadrant characters combine foreground and
-background colors to draw finer shapes within a small terminal area.
-120 × 20 cells give you a 240 × 40 sample grid.
+**More detail in every character cell.** Unicode Canvas supports colorful sampled
+graphics, either on its own or embedded in TUI layouts. Quadrant encoding divides
+each cell into **2 × 2 sample positions**, combining foreground and background
+colors for finer shapes: 120 × 20 cells provide a 240 × 40 sample grid.
 
 [![Pixel characters rendered with 2 × 2 quadrant encoding in 120 × 20 terminal cells](imgs/readme-canvas-quadrant.png)](examples/ai-babies/README.md)
 
 Actual Canvas output from [AI Babies' static mode](examples/ai-babies/README.md),
-using just **20 terminal rows**. The preview is enlarged with terminal cell proportions
-preserved so you can see the detail.
-
-```bash
-cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --static --height 20
-```
-
-Use the renderer directly when a widget tree is unnecessary:
-
-```rust,no_run
-use rsille::{canvas::Canvas, render};
-
-fn main() -> std::io::Result<()> {
-    let mut canvas = Canvas::new();
-    for x in 0..160 {
-        let x = x as f64;
-        canvas.set(x, 15.0 + (x / 10.0).sin() * 10.0);
-    }
-    render::Builder::new()
-        .size((80, 10))
-        .append_newline(true)
-        .build_render(canvas, std::io::stdout())
-        .render()
-}
-```
+using just **20 terminal rows**. The enlarged preview preserves terminal cell proportions.
 
 | Encoding | Samples per terminal cell | Use |
 | --- | --- | --- |
@@ -271,52 +126,27 @@ fn main() -> std::io::Result<()> {
 | `Encoding::HalfBlock` | 1 × 2 | Two independently colored vertical samples |
 | `Encoding::Quadrant` | 2 × 2 | Quadrant shapes, with samples fitted to terminal colors |
 
-Select an encoding with `Canvas::with_encoding(Encoding::Quadrant)`. Drawing coordinates are samples,
-with y increasing upward; bounds and output sizes are terminal cells. `set_color`
-colors samples and `set_background` fills uncovered areas. Terminal cells have at most
-one foreground and one background color, so Braille and quadrant encoding may combine
-sample colors.
+**Sixel support takes terminal graphics beyond character shapes.**
+Present fine curves, colorful images and rich visualizations in Sixel-capable
+terminals, alongside text, buttons and other widgets in one interface.
 
-The TUI `canvas(...)` widget embeds the same graphics in layouts. Its `.viewport(...)`
-and `ctx.world(surface)` support world coordinates and matching pointer transforms.
-Compare encodings with `cargo run -p tui --example canvas`.
+## Extension: Typst math
 
-## API and source map
+The independent [`rsille-typst` extension](packages/rsille-typst/README.md) renders
+Typst math syntax to a `RasterCanvas` for display in compatible Sixel terminals,
+without adding Typst dependencies to the core crate.
 
-This checkout contains the **v3 API** (`3.1.0` in `Cargo.toml`).
 
-| Public module | Responsibility | Shared implementation |
+## API and resources
+
+| Public module | Responsibility | Source |
 | --- | --- | --- |
 | `rsille::tui` | Applications, widgets, layout, input and effects | [src/tui](src/tui) |
 | `rsille::render` | Buffers, styled Unicode text, drawing and terminal loops | [src/render](src/render) |
 | `rsille::canvas` | Sample graphics and terminal encoding | [src/canvas](src/canvas) |
+| `rsille::raster` | RGB raster canvases, Sixel output and capability configuration | [src/render/raster](src/render/raster) |
 
-The private crates under `packages/` compile these same sources for separate tests and
-examples. There is no duplicated implementation. Generate API documentation locally:
-
-```bash
-cargo doc -p rsille --all-features --no-deps --open
-```
-
-Text editing uses grapheme clusters; glyph widths and appearance still depend on the
-terminal and font. Held-key applications can opt into `KeyboardMode::Auto` and inspect
-`InputEvent::Capabilities`; accurate key releases and independent simultaneous holds
-require terminal support. See [Minecraft's input notes](examples/minecraft/README.md).
-
-## Development
-
-```bash
-cargo test --workspace
-cargo test --workspace --all-features
-cargo check --workspace --all-targets --all-features
-```
-
-Standalone projects in `examples/` are excluded from the root workspace. Run their
-checks separately using `--manifest-path`; commands are in each example's README.
-
-`python3 scripts/check-release.py --offline` checks the self-contained package archive
-and an independent consumer without uploading anything. It requires Python 3.12+ and
-cached dependencies; omit `--offline` to allow dependency downloads.
-
-[Example gallery](examples/README.md) · [TUI examples](packages/tui/examples/README.md) ·
-[MIT license](LICENCE)
+- [Example gallery](examples/README.md)
+- [TUI examples](packages/tui/examples/README.md)
+- [Sixel vs Canvas demo](examples/sixel_windows.rs)
+- [MIT license](LICENCE)
