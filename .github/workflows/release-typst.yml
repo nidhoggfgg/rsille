@@ -47,6 +47,11 @@ jobs:
           rustup toolchain install stable --profile minimal --component rustfmt
           rustup default stable
 
+      # This library workspace does not track Cargo.lock. Resolve once, then
+      # keep the same dependency resolution throughout checks and publication.
+      - name: Generate workspace lockfile
+        run: cargo generate-lockfile
+
       - uses: Swatinem/rust-cache@v2
         with:
           key: release-typst
