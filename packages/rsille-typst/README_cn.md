@@ -177,3 +177,18 @@ cargo fmt -p rsille-typst -- --check
 ```sh
 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 cargo test -p rsille-typst -j 1
 ```
+
+### 发布（维护者）
+
+本 crate 独立于核心发布。在干净的工作区中，从仓库根目录运行
+`python3 scripts/check-release-typst.py`（需要 Python 3.12+）。脚本会打包，
+在 workspace 外使用 registry 依赖而非本地 rsille，运行归档中的测试和两种
+headless 示例。仅当所需 registry 依赖均已缓存时使用 `--offline`。
+
+发布前更新本 crate 的版本号和文档，新增 `releases/rsille-typst/<版本号>.md`，
+并将修改合入 `main`。确认所需核心版本已经发布后，创建并推送
+`rsille-typst-v<版本号>`（例如 `rsille-typst-v0.1.0`）。
+`Release rsille-typst` workflow 会校验 tag、执行检查，使用仓库的
+`CARGO_REGISTRY_TOKEN` secret 发布，并将 crate 和校验文件附加到 GitHub Release，
+不会替换核心的 Latest release。推送发布 tag 会真正发布到 crates.io；本地检查
+脚本不会上传任何内容。

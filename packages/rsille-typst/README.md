@@ -177,3 +177,21 @@ Tests cover real rendering, colors/alpha, fonts, diagnostics, denied resources, 
 ```sh
 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 cargo test -p rsille-typst -j 1
 ```
+
+### Publishing (maintainers)
+
+This crate is released independently of the core. From a clean checkout, run
+`python3 scripts/check-release-typst.py` at the repository root (Python 3.12+).
+It packages the crate and runs its tests and both headless demos outside the
+workspace, using registry dependencies rather than the local rsille checkout.
+Use `--offline` only when the required registry dependencies are cached.
+
+For a release, update this crate's version and documentation, add
+`releases/rsille-typst/<version>.md`, and merge the changes into `main`.
+Ensure the required core version is already published, then create and push
+`rsille-typst-v<version>` (for example, `rsille-typst-v0.1.0`).
+The `Release rsille-typst` workflow validates the tag, runs checks, publishes
+using the repository's `CARGO_REGISTRY_TOKEN` secret, and attaches the crate
+and checksum to a GitHub Release without replacing the core's Latest release.
+Pushing a release tag performs a real crates.io publication; the local check
+script never uploads anything.
