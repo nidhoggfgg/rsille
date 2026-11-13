@@ -22,7 +22,11 @@ def main():
         ["cargo", "metadata", "--no-deps", "--format-version", "1"], cwd=root))
     target = Path(metadata["target_directory"])
     packages = {package["name"]: package for package in metadata["packages"]}
-    assert {name for name, package in packages.items() if package["publish"] != []} == {"rsille"}
+    # Independent extensions may publish separately; this check targets only rsille.
+    registries = packages["rsille"]["publish"]
+    assert registries is None or "crates-io" in registries, "rsille must be publishable to crates.io"
+    for name in ("canvas", "render", "tui"):
+        assert packages[name]["publish"] == [], f"internal package {name} must set publish = false"
     version = packages["rsille"]["version"]
 
     def cargo(*arguments, cwd=root):
@@ -31,7 +35,7 @@ def main():
             command.append("--offline")
         subprocess.run(command, cwd=cwd, check=True)
 
-    # Cargo's verification builds the archive without any private workspace crates.
+    # Cargo's verification builds the archive without any other workspace crates.
     cargo("package", "-p", "rsille", "--allow-dirty", "--all-features", "--registry", "crates-io")
     archive = target / "package" / f"rsille-{version}.crate"
     with tempfile.TemporaryDirectory(prefix="rsille-release-check-") as folder:
@@ -41,11 +45,11 @@ def main():
         source = extracted / f"rsille-{version}"
         manifest = source / "Cargo.toml"
         data = tomllib.loads(manifest.read_text())
-        private_packages = set(packages) - {"rsille"}
+        other_workspace_packages = set(packages) - {"rsille"}
         for section in ("dependencies", "dev-dependencies", "build-dependencies"):
             for name, dependency in data.get(section, {}).items():
                 assert "path" not in dependency, (name, dependency)
-                assert dependency.get("package", name) not in private_packages, (name, dependency)
+                assert dependency.get("package", name) not in other_workspace_packages, (name, dependency)
         assert set(source.rglob("Cargo.toml")) == {manifest}, "only the rsille manifest belongs in the archive"
         assert not (source / "packages").exists(), "archive must not contain workspace crate manifests"
         assert not (source / ".dev").exists(), "archive must not contain development records"
