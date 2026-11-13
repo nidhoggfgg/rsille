@@ -2,17 +2,19 @@
 name = "rsille-typst"
 version = "0.1.0"
 edition = "2021"
+authors = ["nidhoggfgg <nidhoggfgg@gmail.com>"]
 license = "MIT"
 description = "Render Typst math into rsille raster canvases"
 repository = "https://github.com/nidhoggfgg/rsille.git"
 readme = "README.md"
+documentation = "https://docs.rs/rsille-typst"
+keywords = ["typst", "math", "terminal", "sixel", "graphics"]
+categories = ["command-line-interface", "graphics", "rendering"]
+include = ["src/**", "examples/**", "tests/**", "/README.md", "/README_cn.md", "/LICENCE", "/Cargo.toml"]
 
-[features]
-default = []
-sixel = ["rsille/sixel"]
 
 [dependencies]
-rsille = { version = "3.0.4", path = "../.." }
+rsille = { version = "3.1.0", path = "../.." }
 typst = "=0.13.1"
 typst-render = "=0.13.1"
 

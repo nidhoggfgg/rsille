@@ -242,7 +242,7 @@ def main():
         example = "sixel_windows" if args.formula is None else "formula"
         package = [] if args.formula is None else ["-p", "rsille-typst"]
         subprocess.run(
-            ["cargo", "build", *package, "--features", "sixel", "--example", example],
+            ["cargo", "build", *package, "--example", example],
             cwd=ROOT, check=True, timeout=120,
         )
         binary = ROOT / "target/debug/examples" / example

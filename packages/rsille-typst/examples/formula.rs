@@ -27,7 +27,7 @@ Running interactively assumes your terminal AND multiplexer support Sixel,
 local EL 2 graphics erasure, images following text scrolling, stable palettes,
 non-scrolling positioned output, and
 transparent padding in partial final six-pixel bands. No capability detection.
-Build with --features sixel. Unsupported raster output errors rather than degrading to text.
+Sixel support is built in. Unsupported raster output errors rather than degrading to text.
 
 Cell pixels are ONE character cell's physical width x height, NOT columns x rows,
 window pixels or font points. Dimensions: 1..=1024, area <=65536.
@@ -38,9 +38,9 @@ query fallback. If discovery fails, supply measured --cell-pixels WxH.
 Overrides skip probing. A grid-sized override requires --force-cell-pixels.
 Metrics are stored once; restart after font/DPI changes. Queries do not detect
 Sixel support and may consume unrelated input; late replies may reach the reader.
---headless alone checks metadata without the sixel feature or probing, using
-synthetic 10x20 layout metrics. Adding --cell-pixels selects in-memory Sixel
-encoding and requires --features sixel; it never probes. Synthetic metrics are
+--headless alone checks metadata without probing, using synthetic 10x20 layout
+metrics. Adding --cell-pixels selects in-memory Sixel encoding; it never probes.
+Synthetic metrics are
 suitable for checks only; headless does not certify a real terminal.";
 
 #[derive(Default, Debug)]
@@ -90,9 +90,6 @@ impl Options {
     fn config(&self, grid: (u16, u16)) -> Result<RasterOutput, String> {
         if self.headless && self.pixels.is_none() {
             return Ok(RasterOutput::default());
-        }
-        if !cfg!(feature = "sixel") {
-            return Err("native output needs --features sixel".into());
         }
 
         // resolve(None) probes before App::run starts its input reader. An explicit
@@ -329,7 +326,6 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "sixel")]
     #[test]
     fn default_and_custom_formula_reach_native_output() {
         let renderer =
@@ -356,7 +352,7 @@ mod tests {
         };
         assert!(config("0x18").is_err());
         assert!(config("100x30").is_err());
-        if cfg!(feature = "sixel") {
+        {
             let interactive = options(&["--cell-pixels", "10x20"])
                 .unwrap()
                 .config((100, 30))
@@ -382,12 +378,6 @@ mod tests {
             .unwrap()
             .config((100, 30))
             .is_ok());
-        } else {
-            assert!(config("10x20").is_err());
-            assert_eq!(
-                options(&[]).unwrap().config((100, 30)).unwrap_err(),
-                "native output needs --features sixel"
-            );
         }
     }
 }

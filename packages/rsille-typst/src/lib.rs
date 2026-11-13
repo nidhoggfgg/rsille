@@ -4,6 +4,12 @@
 //! are involved. Supply OpenType/TrueType font bytes to [`MathRenderer::new`].
 //! A font with an OpenType MATH table is required for the chosen family.
 //!
+//! # Quick start
+//!
+//! This example reads a font supplied by your application. Alternatively, add
+//! `typst-assets = { version = "=0.13.1", features = ["fonts"] }` and pass
+//! `typst_assets::fonts()` to the constructor. Respect the font's license.
+//!
 //! ```no_run
 //! use rsille_typst::{MathRenderer, RenderOptions};
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -14,9 +20,52 @@
 //! # Ok(()) }
 //! ```
 //!
-//! File access restrictions are **not a sandbox**: arbitrary Typst expressions
-//! can exhaust CPU or memory before raster size checks. Isolate untrusted input
-//! in a resource-limited worker process. See the package README for limitations.
+//! # Terminal integration
+//!
+//! Rendering produces an opaque [`RasterCanvas`] without terminal I/O. Pass it
+//! to [`rsille::tui::widgets::raster_canvas()`] or [`rsille::render::chunk::Chunk::raster`].
+//! Pixel dimensions are not character-cell dimensions: use measured
+//! [`rsille::render::raster_output::CellPixels`] to size the widget, and
+//! [`rsille::render::raster::RasterScale::Original`] to preserve its native resolution.
+//!
+//! Sixel support is enabled through rsille's default features; this crate has
+//! no optional feature switches. Terminal output uses Sixel and requires
+//! explicitly configured [`rsille::render::raster_output::RasterCapabilities`] and a compatible
+//! terminal/multiplexer. There is no character-based fallback or automatic
+//! Sixel capability detection.
+//!
+//! # Layout and diagnostics
+//!
+//! Input is Typst math-mode content, not LaTeX: use `frac(1, 2)` without outer
+//! `$` delimiters. The template creates one block equation on an automatically
+//! sized page with zero margins. Typst's math metrics are retained, rather than
+//! cropping to visible ink. The default scale is two pixels per point (144 dpi).
+//!
+//! [`MathRenderer::render`] discards nonfatal warnings; use
+//! [`MathRenderer::render_with_diagnostics`] to inspect those returned by Typst.
+//! Errors retain original diagnostics, but their spans refer to the template's
+//! `eval` call, not precise positions in the input formula. Typst 0.13.1 drops
+//! warnings from immediate `eval` calls; this crate cannot recover them.
+//!
+//! # Resource and security limits
+//!
+//! Files, imports, packages and the current date are unavailable to formulas.
+//! Valid Typst `#` expressions can still execute. File access restrictions are
+//! **not a sandbox**: expressions can exhaust CPU or memory before raster size
+//! checks. Compilation is synchronous, without cancellation or a time budget.
+//! Isolate untrusted input in a resource-limited worker process.
+//!
+//! [`RenderOptions::max_pixels`] bounds the output, not total process memory.
+//! RGBA and RGB buffers coexist, alongside compiler and font resources. Upstream
+//! allocation failures and panics are not guaranteed to become [`Error`] values.
+//! This crate has no formula-result cache, but Typst has process-global caches
+//! and interners that are not cleared by dropping a [`MathRenderer`]. Reuse the
+//! renderer and rendered canvases rather than compiling on every UI frame.
+//!
+//! Typst and typst-render are pinned to 0.13.1 to keep layout and raster rounding
+//! consistent; this is not a promise of compatibility with newer Typst syntax.
+
+#![warn(missing_docs)]
 
 use std::fmt;
 
@@ -178,6 +227,12 @@ impl MathRenderer {
     /// must contain at least one readable face, and the requested family must
     /// contain a face with a MATH table. Font licensing remains the caller's
     /// responsibility. Additional fonts can supply text/glyph fallbacks.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidFont`] with the zero-based input index if a byte
+    /// buffer has no readable faces, or [`Error::MissingMathFont`] if the chosen
+    /// family has no MATH face (including when the input iterator is empty).
     pub fn new<I, B>(font_bytes: I, math_family: impl Into<String>) -> Result<Self, Error>
     where
         I: IntoIterator<Item = B>,
@@ -211,6 +266,10 @@ impl MathRenderer {
     ///
     /// For example: `r"frac(1, 2) + sqrt(x)"`. This is Typst syntax, not LaTeX.
     /// Use [`Self::render_with_diagnostics`] to retain nonfatal warnings.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same errors as [`Self::render_with_diagnostics`].
     pub fn render(&self, formula: &str, options: &RenderOptions) -> Result<RasterCanvas, Error> {
         Ok(self.render_with_diagnostics(formula, options)?.canvas)
     }
@@ -221,6 +280,16 @@ impl MathRenderer {
     /// Formula text is passed as data and evaluated only in math mode. Hash
     /// expressions remain supported, but all external file/package requests
     /// are denied. Compilation is synchronous and has no time/memory budget.
+    ///
+    /// Transparent content is composited onto [`RenderOptions::background`]
+    /// using premultiplied alpha, producing opaque sRGB pixels.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidOptions`] before compilation for invalid settings,
+    /// [`Error::Compile`] for Typst errors, [`Error::PageCount`] unless exactly
+    /// one page is produced, [`Error::RasterLimit`] for oversized dimensions,
+    /// or [`Error::Raster`] for RGB allocation/canvas construction failures.
     pub fn render_with_diagnostics(
         &self,
         formula: &str,

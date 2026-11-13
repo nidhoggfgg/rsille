@@ -1,93 +1,21 @@
 # rsille-typst
 
-独立的 **Typst 数学公式 → `rsille::raster::RasterCanvas`** 扩展。
-直接输入 Typst 数学模式内部语法，不接受 LaTeX，也不做 LaTeX 转换。
-采用真正的 Typst 编译器和 `typst-render`，不是占位图或命令行子进程。
+[English](README.md) | [简体中文](README_cn.md)
 
-本 crate 在 rsille workspace 中维护，有独立 manifest 和公开 API；依赖方向为
-`rsille-typst → rsille`，核心没有 Typst 依赖。不实现完整文档、专用 Widget、
-异步任务或公式结果缓存。
+[API docs](https://docs.rs/rsille-typst) · [crates.io](https://crates.io/crates/rsille-typst) · [Repository](https://github.com/nidhoggfgg/rsille)
 
-## 直接在终端展示公式
+Render **Typst math into an opaque RGB `RasterCanvas`**, ready for rsille's raster widget. Uses the real Typst compiler and `typst-render` in-process, without a CLI subprocess or LaTeX conversion.
 
-在仓库根目录运行：
+Supply the **contents of math mode**: `x^2`, `frac(1, 2)`, `sqrt(x)`, or `sum_(k=1)^n k`. Do not wrap the input in `$ ... $`; LaTeX such as `\frac{1}{2}` is not supported.
 
-```sh
-cargo run -p rsille-typst --example formula -- --help
-cargo run -p rsille-typst --features sixel --example formula
-cargo run -p rsille-typst --features sixel --example formula -- 'sum_(k=1)^n k = frac(n(n+1), 2)'
-# 无需 TTY 的元数据检查，以及显式 Sixel 内存编码自检：
-cargo run -p rsille-typst --example formula -- --headless
-cargo run -p rsille-typst --features sixel --example formula -- --cell-pixels 10x20 --headless
-cargo test -p rsille-typst
-cargo test -p rsille-typst --features sixel --all-targets
-cargo build -p rsille-typst --features sixel --examples
-cargo fmt -p rsille-typst -- --check
-```
+## Quickstart
 
-示例将 `MathRenderer → RasterCanvas` 接到现有 `App` / `raster_canvas`，默认使用
-`Mode::Inline` 在普通屏幕展示单个块级公式，不需要 `--inline`，不进入备用屏幕、
-不捕获鼠标，`q` / `Esc` 退出。公式只在启动时编译一次。
-使用 `RasterScale::Original` 而非会放大的 `Fit`：按公式像素尺寸除以 cell pixels
-向上取整确定 widget 宽高，内容只占公式所需行数加一行标题（框架最多 50 行），
-原生模式另由现有 renderer 预留底部 guard。窄/矮终端或 resize 变小时裁剪，
-变大后重新显示，不重排、不缩放、不重新编译；超长公式可能无法完整显示。
-无参数直接使用 Sixel 展示默认求和公式；`--help` / `-h` 显示用法。
-公式参数为一个带引号的 Typst 数学字符串。以 `-` 开头的公式放在 `--` 之后。
-
-运行前须确认终端**及复用器**
-支持 Sixel、局部 EL 2 图形清除、
-图像随文本滚动、稳定调色板、不滚屏的定位输出，以及最后不足六像素带的透明补齐。
-配置使用 `reliable_inline_erase: true`，不使用全屏 `reliable_erase`。不会自动检测能力。
-Raster 仅支持 Sixel 输出，缺少 feature 或能力/指标错误时失败，绝不静默降级。
-新包 `sixel` feature 只转发 `rsille/sixel`，核心默认依赖与 feature 不变。
-不再提供 Raster 字符预览或 text-only 后端。
-
-原生模式默认在启动输入 reader **之前**通过 `CellPixels::resolve(None)` 调用
-`CellPixels::probe`：先读 OS 指标，再尝试 Unix（含 WSL）CSI 16 t 查询，超时 500ms。
-查询需要控制终端上的 stdin/stdout TTY；原生 Windows 没有查询 fallback。
-探测失败时必须手动提供 `--cell-pixels WxH`，它指**单个字符格的物理像素**，不是
-终端列数×行数、窗口像素或字体点数。例如文本区域 960×648 像素、120 列×36 行，
-对应 8×18 像素/格。请测量而非照抄示例值。显式 override 跳过所有 OS/终端查询；
-范围 1..=1024，面积不超过 65536。与终端列行数相同的 override 需额外
-`--force-cell-pixels` 确认。指标仅启动时保存，改变字体或 DPI 后需重启。
-查询不是 Sixel 能力检测，可能消耗同时输入的按键，超时后的迟到响应可能进入 reader。
-
-`--headless` 不启动终端或输入 reader，也不探测指标。未提供 `--cell-pixels` 时，
-仅检查保留 Raster 元数据的帧（使用合成 10×20 布局尺寸），无需 `sixel` feature。
-添加 `--cell-pixels WxH` 即选择 Sixel 内存编码自检，需要 `--features sixel`
-（此时允许合成测试指标）；无 feature 或指标无效时失败，不退回元数据检查。检查同一 Runtime 的 raster
-布局、resize 和两种退出键。仅显式 Sixel 自检将帧交给真实终端编码器写入内存，
-检查完整 DCS 输出、tile 数量、不变帧复用和不使用备用屏幕/鼠标/全屏清除；
-不证明真实终端兼容性。
-
-Inline 会为 Sixel 末尾填充预留空白保护行，相应减少可用内容高度：
-10×20 像素字符格需要 1 行，8×18 无需额外行。终端能力要求见
-[`RasterCapabilities`](../../src/render/raster/output.rs) 的 API 注释。
-内存自检不验证真实图形终端/复用器上的 inline 显示。
-可运行 `python3 scripts/check-sixel-query.py --formula` 检查 PTY 下的启动探测、
-输入和终端状态恢复；这同样不验证真实终端的视觉效果。
-
-示例显式使用 dev-dependency `typst-assets = 0.13.1` 的 `fonts` feature，其中包含
-New Computer Modern Math；不扫描系统目录，不在运行时联网。不要省略该 feature：
-未开启时字体迭代器为空。
-
-Typst 的编译依赖较重。内存紧张时可在 POSIX shell 使用：
-
-```sh
-CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 cargo test -p rsille-typst -j 1
-CARGO_PROFILE_DEV_DEBUG=0 cargo build -p rsille-typst --all-targets -j 1
-```
-
-## 在应用中使用
-
-本扩展尚未声称已发布到 crates.io。使用本地 checkout，例如在仓库根目录下的
-独立应用中配置（路径应相对于你的应用 manifest 调整）：
+Add these dependencies to your application's `Cargo.toml`:
 
 ```toml
 [dependencies]
-rsille-typst = { path = "../packages/rsille-typst" }
-# 仅在选用下面的可部署字体方案时需要：
+rsille-typst = "0.1.0"
+# Optional font source used by the example below; you can supply your own fonts.
 typst-assets = { version = "=0.13.1", features = ["fonts"] }
 ```
 
@@ -101,138 +29,151 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
     let options = RenderOptions {
         font_size: 20.0,
-        pixels_per_point: 2.0,
         foreground: Rgb(230, 230, 230),
         background: Rgb(24, 24, 24),
         max_pixels: 4 * 1024 * 1024,
+        ..RenderOptions::default()
     };
     let result = renderer.render_with_diagnostics(
         r"integral_0^1 x^2 dif x = frac(1, 3)",
         &options,
     )?;
     for warning in result.warnings {
-        eprintln!("{}", warning.message);
+        eprintln!("Typst warning: {}", warning.message);
     }
     let canvas = result.canvas;
-    println!("{} × {}", canvas.width(), canvas.height());
+    println!("{} × {} pixels", canvas.width(), canvas.height());
     Ok(())
 }
 ```
 
-### 字体部署
+This creates pixels, not terminal output. No TTY is needed. Reuse the renderer for its loaded fonts, and retain the resulting canvas rather than recompiling on every UI frame.
 
-公共库**不捆绑任何隐式字体**。`MathRenderer::new` 接受可迭代的字体字节
-（`AsRef<[u8]>`），复制并解析一次，支持 TTF、OTF、TTC，注册集合中的所有可读 face。
-选定 family 至少需要一个带 OpenType MATH 表的 face；字体损坏、空字体集合、
-不存在或不支持数学的 family 会返回错误。所需字形缺失等情况可能产生 Typst warning，
-请用 `render_with_diagnostics` 检查。可以额外传入文字字体作为 fallback。
+### Features and versions
 
-除 `typst-assets` 外，也可以由调用方自行部署字体并显式读取：
+The 0.1.0 release depends on `rsille` **3.1.0** with default features enabled. This extension defines no Cargo features; Sixel encoding is always available. The core does not depend on Typst.
 
-```rust,no_run
-use rsille_typst::MathRenderer;
-# fn main() -> Result<(), Box<dyn std::error::Error>> {
-let font = std::fs::read("/your/deployed/fonts/NewCMMath-Regular.otf")?;
-let renderer = MathRenderer::new([font], "New Computer Modern Math")?;
-# Ok(()) }
+`typst` and `typst-render` are pinned to **0.13.1**; use matching `typst-assets = "=0.13.1"` if choosing that font source. Keep your application's lockfile to pin transitive dependencies.
+
+## Integrate with rsille
+
+For terminal output, add a direct core dependency:
+
+```toml
+[dependencies]
+rsille-typst = "0.1.0"
+rsille = "3.1.0"
 ```
 
-这里文件读取发生在调用方，不是 Typst World 中。也可以用 `include_bytes!`
-把自己的字体编入应用。请保留所选字体的许可证/署名，遵循字体本身的分发条款；
-本 crate 的 MIT 许可证不会替代字体许可证。字体资产来源：
-[typst-assets v0.13.1](https://github.com/typst/typst-assets/tree/v0.13.1)。
+This helper accepts the rendered canvas and the actual backend's validated cell metrics:
 
-### 接入现有 rsille 展示路径
-
-无需另造 Widget。应用另行依赖同一份 `rsille` 后：
-
-```rust,ignore
+```rust
 use rsille::tui::prelude::*;
 
-// canvas 来自 renderer.render(...)；cell_pixels 应取自实际后端/终端配置。
-let size = cell_pixels.size_for_pixels(canvas.width(), canvas.height())
-    .ok_or("invalid cell metrics or terminal size overflow")?;
-let widget = raster_canvas::<()>(canvas)
-    .scale(RasterScale::Original)
-    .fixed(size.width, size.height);
+fn formula_widget(
+    canvas: RasterCanvas,
+    cell_pixels: CellPixels,
+) -> Result<impl Widget<()>, Box<dyn std::error::Error>> {
+    let size = cell_pixels
+        .size_for_pixels(canvas.width(), canvas.height())
+        .ok_or("invalid cell metrics or terminal size overflow")?;
+    Ok(raster_canvas::<()>(canvas)
+        .scale(RasterScale::Original)
+        .fixed(size.width, size.height))
+}
 ```
 
-也可以 `chunk.raster(&canvas, RasterOptions { scale: RasterScale::Original,
-..Default::default() })?`。原始像素尺寸不等于字符格尺寸；不要硬编码字体像素与
-终端格子的换算。`Original` 保留原始比例/尺寸并允许裁剪；需要缩放时选择 `Fit`。
-真实终端输出需启用可选 `sixel` feature 并显式配置有效 capabilities；不支持时会报错。
-生成 RGB 像素和 headless 元数据检查无需 Sixel feature。
+Attach the widget to your existing `App` and explicitly configure its `RasterOutput` capabilities; see the [complete demo](examples/formula.rs). Lower-level drawing is also available through `Chunk::raster` with `RasterOptions`.
 
-## 公开接口
+Pixel dimensions are not terminal columns and rows. `Original` preserves the image's pixel size and permits clipping; use `Fit` when scaling is desired. Generating RGB pixels and inspecting headless raster metadata do not perform Sixel encoding. Real terminal raster output supports **Sixel only**: missing capabilities or invalid metrics produce errors, not a text/character fallback.
 
-- `MathRenderer::new(font_bytes, math_family) -> Result<MathRenderer, Error>`：复用字体、
-  FontBook 和模板源码；不依赖系统资源。
-- `render(&self, formula: &str, &RenderOptions) -> Result<RasterCanvas, Error>`：简便接口，
-  忽略非致命 warning。
-- `render_with_diagnostics(...) -> Result<RenderedMath, Error>`：返回 `canvas` 和原始
-  `warnings: Vec<SourceDiagnostic>`。
-- `RenderOptions`：字号、像素比例、RGB 前景/背景、最大像素数，支持 `Default`。
-- `Error`：字体/配置错误、`Compile(Vec<SourceDiagnostic>)`、页数错误、尺寸限制、
-  `Raster(RasterError)`；实现 `Display` 和 `std::error::Error`。
-- 重新导出 `RasterCanvas`、`RasterError`、`Rgb` 和 `SourceDiagnostic`，便于调用。
+## Run the demo
 
-公式示例：`x^2`、`frac(1, 2)`、`sqrt(x)`、`sum_(k=1)^n k`。
-**不要添加外围 `$ ... $`**；`\frac{1}{2}` 不是本 API 的语法。
+From the repository root:
 
-模板自动页面宽高、零页边距、块级 equation。字号单位为 pt，1pt = 1/72 英寸；
-像素比例为 pixels/pt，默认 2（144dpi）。Typst 自身的数学布局/行度量仍会保留，
-这里不做逐像素 ink 裁剪。空公式按 Typst 的布局结果处理，渲染轴至少为 1 像素。
+```sh
+cargo run -p rsille-typst --example formula -- --help
+cargo run -p rsille-typst --example formula
+cargo run -p rsille-typst --example formula -- 'sum_(k=1)^n k = frac(n(n+1), 2)'
+# No TTY: layout/metadata checks, without Sixel encoding.
+cargo run -p rsille-typst --example formula -- --headless
+# No TTY: additionally exercise Sixel encoding into memory.
+cargo run -p rsille-typst --example formula -- --headless --cell-pixels 10x20
+```
 
-## 颜色、错误与资源边界
+The interactive demo compiles once and displays a block equation inline on the normal screen. It does not use an alternate screen or capture the mouse; **q / Esc** exits. Pass one quoted formula; put formulas beginning with `-` after `--`.
 
-- 前景/背景是 8-bit 不透明 sRGB。公式内部的 Typst 样式可以覆盖默认前景。
-- 页面初始透明；`typst-render` 返回 tiny-skia 的**预乘 alpha** RGBA。
-  输出按 `premultiplied_rgb + background * (1-alpha)` 舍入合成，不重复乘 alpha，
-  不先反预乘。结果是无 alpha 的 RGB，背景同时用作 `RasterCanvas` 元数据。
-- 字号必须有限且在 `0.1..=4096`，比例必须有限且在 `0.01..=16`；非法配置在
-  编译前返回 `InvalidOptions`，不进入上游 renderer。
-- 编译结果必须恰好一页。渲染前按照固定版本上游的 f32 乘法和 `round().max(1)`
-  检查两轴，每轴最多 16384 像素，总像素数不超过 `max_pixels` 和核心
-  `MAX_RASTER_PIXELS`（16 × 1024 × 1024）。可降低 `max_pixels`，不可提高核心上限。
-- 预检后才调用真实 raster renderer。输出 RGB 分配使用 `try_reserve_exact`，
-  再交给 `RasterCanvas::from_pixels` 做最终长度/尺寸检查。
-- 总像素上限不是整个进程内存上限：RGBA 和 RGB 输出缓冲区会同时存在，还需要
-  字体、编译树和布局资源。上游的分配失败/内部 panic 不保证能转换为 `Error`。
-- Typst 编译错误保留原始消息、hint、span、trace，不替换为泛化的“渲染失败”。
-  因为公式通过 `eval(..., mode: "math")` 传入，错误 span 指向模板调用，
-  **不提供原始公式的精确行列映射**。`Display` 展示消息和 hints，完整信息在诊断中。
-- `warnings` 保留编译器实际返回的 warning。但 Typst 0.13.1 的立即 `eval`
-  使用独立 sink，不向外传播其中的 warning（例如直接调用 `text` 时的未知字体提示）；
-  布局/延迟 context 阶段返回的 warning 可正常保留。本接口不能恢复上游丢弃的 warning。
+It uses `RasterScale::Original`, reserving the formula's rows plus a title, with the framework's 50-row inline content cap and additional bottom guards. Small terminals clip rather than scale or reflow; enlarging the terminal reveals the image without recompilation. Very large formulas may not fit.
 
-## 安全与缓存限制
+### Terminal compatibility and cell size
 
-World 只接受自身内存主源码和构造时的字体。任意其它 source 请求（包括包）以及
-所有 file 请求均返回 `AccessDenied`；无路径解析、文件读取、包下载或系统字体搜索。
-当前日期不可用。公式作为 `sys.inputs` 字符串传入数学模式 evaluator，不能通过
-闭合 `$` 把字符串拼接进页面模板；不过合法的 Typst `#` 表达式仍可执行。
+The demo assumes that **both the terminal and any multiplexer** support Sixel, local EL 2 graphics erasure, images scrolling with text, stable palettes, non-scrolling positioned output, and transparent padding in partial final six-pixel bands. It sets `reliable_inline_erase: true`, not full-screen `reliable_erase`. **Capabilities are not automatically detected.** See [`RasterCapabilities`](https://docs.rs/rsille/3.1.0/rsille/render/raster_output/struct.RasterCapabilities.html) for the contract.
 
-**禁用文件访问不等于强沙箱。** 循环、递归、大型表达式、内嵌数据/图像或复杂布局
-仍可能在页面尺寸检查前或渲染期间消耗大量 CPU/内存。没有超时、取消、执行步数上限，
-也没有进程隔离。不要在 UI 帧循环中重复编译；对不可信输入使用独立 worker 进程，
-由宿主实施时间/内存限制，必要时终止进程。
+Without an override, `CellPixels::resolve(None)` probes before the input reader starts: OS metrics first, then a Unix (including WSL) CSI 16 t query with a 500 ms timeout. Queries require controlling-terminal stdin/stdout TTYs; native Windows has no query fallback. If discovery fails, supply `--cell-pixels WxH` using **measured physical pixels per character cell**, not columns × rows, window pixels, or font points. For example, a 960×648 text area with 120 columns and 36 rows has 8×18 pixels per cell.
 
-此 crate 不缓存公式结果。Typst/comemo 和内部 interner 自身存在进程级缓存/存储，
-本库不改变全局缓存策略，也不承诺长时间处理无限不同公式时内存有固定上界。
-丢弃 renderer 不等于清空所有上游缓存；有严格上限的服务应轮换 worker 进程。
+- An explicit override skips all probing. Each dimension must be `1..=1024`, with area at most 65536. An override matching the terminal grid additionally requires `--force-cell-pixels`.
+- Metrics are captured at startup; restart after changing font or DPI. Queries do not detect Sixel support, may consume concurrent keystrokes, and late responses may reach the input reader.
+- Inline Sixel padding can reserve blank guard rows, reducing usable height: 10×20 cells need one extra row; 8×18 cells need none.
 
-## 版本与验证
+`--headless` never starts terminal I/O or an input reader and never probes. Alone, it checks raster metadata using synthetic 10×20 layout metrics. Adding `--cell-pixels` selects real Sixel encoding into memory, which is always available without feature flags; invalid metrics fail rather than falling back to metadata checks. Synthetic metrics are suitable for this check only.
 
-`typst`、`typst-render` 和测试/示例字体资产固定为匹配的 **0.13.1**，使用该版本
-已核对的 World、数学模式 eval 和像素舍入 API，不自动跨 Typst 版本升级。
-这不是“最新 Typst”声明。上游 Typst 声明 Rust 1.80，但 workspace 及当前传递依赖
-可能要求更高版本；本包未承诺 1.80 MSRV，实际验证工具链为 Rust/Cargo **1.97.1**。
+Both headless modes exercise the same Runtime's layout, resizing, and exit keys. The Sixel mode also checks DCS output, tile counts, unchanged-frame reuse, and absence of alternate-screen, mouse, or full-screen-clear sequences. **Neither mode verifies visual compatibility with a real terminal/multiplexer.** The repository's `python3 scripts/check-sixel-query.py --formula` checks PTY startup probing, input, and terminal-state restoration, not visual output either.
 
-依赖的本地 rsille 包版本为 3.0.4，需要提交 `57c9ad5` 中的公开 raster 集成 API；
-不要假定同版本旧的已发布核心具有这些接口。发布扩展前应先确认核心的已发布版本。
-workspace 按现有惯例忽略 `Cargo.lock`；本次验证使用本地解析后的共享 lock，
-生产应用应提交自己的 lockfile 来固定传递依赖。
+## Fonts and licensing
 
-测试包含真实编译/渲染、重复性、字号与比例、背景与抗锯齿、半透明内容、编译错误、
-文件/包/日期拒绝、模板逃逸拒绝、字体校验、非法配置、渲染前资源限制，以及已有
-rsille Widget 对接；另外有预乘 alpha/尺寸舍入单元测试及公开 API doctest。
+The public library bundles **no implicit fonts**, searches no system directories, and downloads nothing at runtime. `MathRenderer::new` accepts an iterator of font bytes (`AsRef<[u8]>`), copies and parses them once, and registers all readable faces in TTF/OTF/TTC collections. The selected family must contain a face with an OpenType **MATH** table.
+
+Empty font sets, unreadable inputs, and missing or non-math families return errors. Additional text fonts can provide fallback glyphs; missing glyphs may produce warnings, so prefer `render_with_diagnostics`.
+
+The quickstart and demo explicitly use `typst-assets` with its `fonts` feature, including New Computer Modern Math. Without that feature, its font iterator is empty. Alternatively, read your deployed fonts in application code or embed them with `include_bytes!`; this does not grant Typst filesystem access.
+
+**rsille-typst is [MIT-licensed](LICENCE). Fonts have their own licenses.** Preserve the selected fonts' required license notices and attribution and follow their redistribution terms; this crate's MIT license does not replace them. See the [typst-assets 0.13.1 sources](https://github.com/typst/typst-assets/tree/v0.13.1).
+
+## API and rendering behavior
+
+| API | Purpose |
+| --- | --- |
+| `MathRenderer::new(font_bytes, math_family)` | Load reusable fonts, font book, and template source. |
+| `render(formula, &options)` | Return `RasterCanvas`, discarding nonfatal warnings. |
+| `render_with_diagnostics(formula, &options)` | Return `RenderedMath { canvas, warnings }`. |
+| `RenderOptions` | Font size, pixel scale, RGB colors, and pixel budget; implements `Default`. |
+| `Error` | Font/options errors, `Compile(Vec<SourceDiagnostic>)`, page count, raster limits, or `Raster(RasterError)`; implements `Display` and `std::error::Error`. |
+
+`RasterCanvas`, `RasterError`, `Rgb`, and `SourceDiagnostic` are re-exported. This is a synchronous single-formula renderer, not a full-document API, dedicated widget, async task system, or formula-result cache.
+
+The template uses automatic page dimensions, zero margins, and a block equation. Typst's math layout/line metrics remain; there is no pixel-level ink cropping. Empty formulas follow Typst layout, with each output axis at least one pixel.
+
+Defaults are 18 pt, 2 pixels/pt (144 dpi), black foreground, white background, and a `16 × 1024 × 1024` pixel budget. One point is 1/72 inch. Colors are opaque 8-bit sRGB; formula styles may override the foreground. The transparent page's premultiplied RGBA is composited as `premultiplied_rgb + background * (1 - alpha)`, rounded without multiplying alpha twice or unpremultiplying. The output has no alpha; the background is also canvas metadata.
+
+### Diagnostics
+
+Compilation errors preserve Typst's messages, hints, spans, and traces. `Display` includes messages and hints; inspect `Error::Compile` for full diagnostics. Because input is passed through `eval(..., mode: "math")`, spans point to the template call: **there is no exact original-formula line/column mapping**.
+
+`warnings` preserves what Typst returns, but Typst 0.13.1's immediate `eval` uses a separate sink and discards its warnings (for example, an unknown font in a direct `text` call). Layout/deferred-context warnings can be retained. This API cannot recover warnings discarded upstream.
+
+## Resource and security limits
+
+- Font size must be finite and in `0.1..=4096`; pixels/pt must be finite and in `0.01..=16`. `max_pixels` must be in `1..=16 * 1024 * 1024`. Invalid options fail before compilation.
+- Compilation must produce exactly one page. Before rasterization, both axes are checked using the pinned renderer's f32 multiplication and `round().max(1)` rules: each at most 16384 pixels, with total pixels within both `max_pixels` and the core limit. You may lower the budget, not raise the core limit.
+- RGB allocation uses `try_reserve_exact`, followed by `RasterCanvas::from_pixels` validation. The pixel budget is **not a process memory limit**: RGBA and RGB buffers coexist, alongside fonts, compilation, and layout data. Upstream allocation failures or internal panics are not guaranteed to become `Error` values.
+
+The Typst World exposes only its in-memory main source and supplied fonts. All other source requests (including packages) and all file requests return `AccessDenied`. There is no path resolution, file reading, package download, system-font search, or current date. Input is passed as a `sys.inputs` string, not concatenated into the template, so closing `$` delimiters cannot escape it. Valid Typst `#` expressions can still execute.
+
+**File-access restrictions are not a strong sandbox.** Loops, recursion, large expressions, embedded data/images, and complex layouts can exhaust CPU or memory before size checks or during rendering. There is no timeout, cancellation, execution-step budget, or process isolation. For untrusted formulas, use a separate worker process with host-enforced time/memory limits and termination. Do not repeatedly compile in a UI frame loop.
+
+This crate does not cache formula results, but Typst/comemo and interners use process-global caches/storage. Dropping a renderer does not clear all upstream caches, and processing indefinitely many distinct formulas has no promised fixed memory bound. Rotate worker processes when strict bounds matter.
+
+## Development checks
+
+```sh
+cargo test -p rsille-typst
+cargo test -p rsille-typst --all-targets
+cargo build -p rsille-typst --examples
+cargo fmt -p rsille-typst -- --check
+```
+
+Tests cover real rendering, colors/alpha, fonts, diagnostics, denied resources, size limits, and rsille widget integration. Typst is a substantial build dependency; on memory-constrained machines, try a single build job and disable debug information (POSIX shell):
+
+```sh
+CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 cargo test -p rsille-typst -j 1
+```
