@@ -1,0 +1,18 @@
+version: 1
+title: 部署服务
+mode: fullscreen
+layout:
+  column:
+    - text: 选择一个服务，再切换到部署按钮；未选择时不会执行部署。
+    - table:
+        id: services
+        source: data.services
+        selectable: true
+        columns: [name, version, status]
+    - row:
+        - button:
+            label: 部署
+            action: submit
+        - button:
+            label: 取消
+            action: cancel
