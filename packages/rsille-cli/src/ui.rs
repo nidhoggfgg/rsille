@@ -60,6 +60,27 @@ impl Ui {
         Self { runtime, quick }
     }
 
+    /// Reserve the layout's preferred rows, bounded later by the host terminal.
+    pub fn inline_height(&self) -> u16 {
+        fn height(node: &Node, state: &State) -> u16 {
+            match node {
+                Node::Column(nodes) => nodes
+                    .iter()
+                    .fold(0u16, |sum, node| sum.saturating_add(height(node, state))),
+                Node::Row(nodes) => nodes
+                    .iter()
+                    .map(|node| height(node, state))
+                    .max()
+                    .unwrap_or(0),
+                _ => view(node, state, false).constraints().min_height,
+            }
+        }
+        let state = self.runtime.state();
+        height(&state.config.layout, state)
+            .saturating_add(u16::from(!state.config.title.is_empty()))
+            .max(1)
+    }
+
     pub fn resize(&mut self, width: u16, height: u16) {
         self.runtime.resize((width.max(1), height.max(1)).into());
     }

@@ -27,7 +27,7 @@ EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 
 
 class CliPtyTests(unittest.TestCase):
-    def session(self, args, keys=b"\r", data=b"", expected=0, resize=False):
+    def session(self, args, keys=b"\r", data=b"", expected=0, resize=False, inline=False):
         master, slave = pty.openpty()
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
         before = termios.tcgetattr(slave)
@@ -52,7 +52,8 @@ class CliPtyTests(unittest.TestCase):
                 process.stdin.write(data)
                 process.stdin.close()
                 deadline = time.monotonic() + 5
-                while b"\x1b[?1049h" not in screen or termios.tcgetattr(slave)[3] & termios.ICANON:
+                ready = b"\x1b[2K" if inline else b"\x1b[?1049h"
+                while ready not in screen or termios.tcgetattr(slave)[3] & termios.ICANON:
                     drain()
                     self.assertIsNone(process.poll(), "exited before entering fullscreen")
                     self.assertLess(time.monotonic(), deadline, "no fullscreen/raw mode")
@@ -65,7 +66,8 @@ class CliPtyTests(unittest.TestCase):
                     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 30, 100, 0, 0))
                     os.kill(process.pid, signal.SIGWINCH)
                     deadline = time.monotonic() + 3
-                    while b"\x1b[30;100H" not in screen:
+                    resized = b"\x1b[100G" if inline else b"\x1b[30;100H"
+                    while resized not in screen:
                         drain()
                         self.assertLess(time.monotonic(), deadline, "resize did not redraw new bounds")
                 os.write(master, keys)
@@ -80,7 +82,12 @@ class CliPtyTests(unittest.TestCase):
                 stdout, stderr = out.read(), err.read()
                 self.assertEqual(process.returncode, expected, stderr.decode(errors="replace"))
                 self.assertEqual(termios.tcgetattr(slave), before, "termios not restored exactly")
-                for sequence in (b"\x1b[?1049l", b"\x1b[?25h", b"\x1b[?2004l", b"\x1b[?7h"):
+                if inline:
+                    for sequence in (b"\x1b[?1049h", b"\x1b[?1049l", b"\x1b[2J"):
+                        self.assertNotIn(sequence, screen)
+                else:
+                    self.assertIn(b"\x1b[?1049l", screen)
+                for sequence in (b"\x1b[?25h", b"\x1b[?2004l", b"\x1b[?7h"):
                     self.assertIn(sequence, screen, "missing terminal cleanup")
                 self.assertEqual(stderr, b"")
                 if expected == 130:
@@ -139,6 +146,27 @@ class CliPtyTests(unittest.TestCase):
         args = ["run", str(EXAMPLES / "deploy.yaml"), "--data", "-"]
         data = (EXAMPLES / "services.json").read_bytes()
         self.assertEqual(self.result(args, b"\t\r", data), {"services": []})
+
+    def test_inline_prompts_and_cleanup(self):
+        for args, keys, expected in [
+            (["input", "--inline"], b"hello\r", {"value": "hello"}),
+            (["--inline", "select", "dev", "prod"], b"\x1b[B\r", {"value": "prod"}),
+            (["confirm", "--inline"], b"\r", {"value": True}),
+            (["table", "--inline", "--selectable"], b"\r", {"value": [{"name": "api"}]}),
+        ]:
+            with self.subTest(args=args):
+                output = self.session(args, keys, data=b'[{"name":"api"}]', inline=True)
+                self.assertEqual(json.loads(output)["values"], expected)
+        for keys in (b"\x1b", b"\x03"):
+            self.session(["input", "--inline"], keys, expected=130, inline=True)
+        self.assertEqual(self.session(["input", "--inline", "--output", "plain"], b"ok\r", inline=True, resize=True), b"ok\n")
+
+    def test_inline_yaml(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "inline.yaml"
+            path.write_text("version: 1\nmode: inline\nlayout: {input: {id: name, label: Name}}\n")
+            output = self.session(["run", str(path)], b"ok\r", inline=True)
+            self.assertEqual(json.loads(output)["values"], {"name": "ok"})
 
     def test_no_controlling_terminal_fails_fast(self):
         result = subprocess.run([BINARY, "input"], input=b"", capture_output=True, start_new_session=True, timeout=3)

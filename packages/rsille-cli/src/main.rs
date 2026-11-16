@@ -14,7 +14,7 @@ const MAX_BYTES: u64 = 4 * 1024 * 1024;
 #[command(
     name = "rsille",
     version,
-    about = "Terminal interfaces for scripts (Unix and Windows, fullscreen)"
+    about = "Terminal interfaces for scripts (Unix and Windows, fullscreen or inline)"
 )]
 struct Args {
     #[arg(
@@ -25,6 +25,9 @@ struct Args {
         help = "Plain output is only available for select, input and confirm"
     )]
     output: Output,
+    /// Render below the current cursor without switching to the alternate screen
+    #[arg(long, global = true)]
+    inline: bool,
     #[command(subcommand)]
     command: Command,
 }
@@ -207,11 +210,9 @@ fn prepare(args: Args) -> Result<(Config, Output, bool), Failure> {
             if let Some(path) = path {
                 data = json(&read_path(&path)?)?;
             }
-            let config = config::parse(&read_path(&file)?, &data).map_err(invalid)?;
-            if config.mode != "fullscreen" {
-                return Err(invalid(
-                    "only mode: fullscreen is supported in this release",
-                ));
+            let mut config = config::parse(&read_path(&file)?, &data).map_err(invalid)?;
+            if args.inline {
+                config.mode = "inline".into();
             }
             return Ok((config, args.output, false));
         }
@@ -219,7 +220,7 @@ fn prepare(args: Args) -> Result<(Config, Output, bool), Failure> {
     let mut config = Config {
         version: 1,
         title,
-        mode: "fullscreen".into(),
+        mode: if args.inline { "inline" } else { "fullscreen" }.into(),
         layout,
     };
     config::validate(&mut config, &data).map_err(invalid)?;

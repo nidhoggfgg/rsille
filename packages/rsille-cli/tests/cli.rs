@@ -97,6 +97,13 @@ fn help_and_version_need_no_terminal() {
 #[test]
 fn valid_prompt_without_terminal_fails_quickly() {
     failure(&["input"], 1);
+    failure(&["input", "--inline"], 1);
+    let fixture = Fixture::new();
+    let path = fixture.file(
+        "inline.yaml",
+        "version: 1\nmode: inline\nlayout: {text: hi}",
+    );
+    failure(&["run", &path], 1);
 }
 #[test]
 fn argument_and_plain_errors_precede_terminal_setup() {
@@ -131,7 +138,7 @@ fn invalid_configuration_is_rejected_before_terminal_setup() {
     }
     for text in [
         "version: 2\nlayout: {text: hi}",
-        "version: 1\nmode: inline\nlayout: {text: hi}",
+        "version: 1\nmode: other\nlayout: {text: hi}",
         "version: 1\ntypo: true\nlayout: {text: hi}",
         "version: [",
     ] {

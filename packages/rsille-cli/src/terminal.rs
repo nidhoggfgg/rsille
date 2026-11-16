@@ -1,5 +1,4 @@
-//! Fullscreen host for Unix and VT-capable Windows consoles.
-//! The entry point must reject inline mode first.
+//! Fullscreen and inline host for Unix and VT-capable Windows consoles.
 //!
 //! Call once, after consuming input data, with exclusive ownership of console
 //! input and terminal modes. No interface bytes are written to stdout.
@@ -13,6 +12,149 @@ pub fn run(config: crate::config::Config) -> Result<Option<serde_json::Value>, S
     {
         let _ = config;
         Err("the interactive CLI requires Unix or Windows".into())
+    }
+}
+
+#[cfg(any(unix, windows))]
+#[derive(Default)]
+struct Inline {
+    // Between frames the cursor stays on the last owned row, in column one.
+    rows: u16,
+}
+
+#[cfg(any(unix, windows))]
+impl Inline {
+    fn height(requested: u16, available: u16) -> u16 {
+        requested.max(1).min(available.saturating_sub(1).max(1))
+    }
+
+    fn clear(&mut self, available: u16) -> String {
+        // A shrink may have scrolled the top of our region off-screen. Never
+        // move up by the old, potentially larger-than-screen height.
+        let rows = self.rows.min(available.max(1));
+        let mut text = String::from("\x1b[0m\r");
+        for row in 0..rows {
+            text.push_str("\x1b[2K");
+            if row + 1 < rows {
+                text.push_str("\x1b[1A");
+            }
+        }
+        self.rows = 0;
+        text
+    }
+
+    fn present(
+        &mut self,
+        buffer: &rsille::render::buffer::Buffer,
+        dimensions: (u16, u16),
+    ) -> std::io::Result<String> {
+        use crossterm::{
+            style::{SetAttributes, SetColors},
+            Command,
+        };
+        use std::fmt::Write;
+        let size = buffer.size();
+        let (width, available) = dimensions;
+        let width = size.width.min(width);
+        let rows = size.height.min(available.max(1));
+        let previous = self.rows.min(available.max(1));
+        let mut text = self.clear(available);
+        // clear leaves us on the first surviving owned row. On first entry,
+        // leave the caller's current line untouched and start below it.
+        if previous == 0 {
+            text.push_str("\r\n");
+        }
+        for row in 1..rows {
+            if row < previous {
+                text.push_str("\r\x1b[1B");
+            } else {
+                text.push_str("\r\n");
+            }
+        }
+        self.rows = rows;
+        if rows > 1 {
+            write!(text, "\x1b[{}A", rows - 1).unwrap();
+        }
+        for y in 0..rows {
+            text.push_str("\r\x1b[0m\x1b[2K");
+            for x in 0..width {
+                if let Some(cell) = buffer.get((x, y).into()) {
+                    if cell.is_empty()
+                        || cell.width() == 0
+                        || usize::from(x) + cell.width() > usize::from(width)
+                    {
+                        continue;
+                    }
+                    write!(text, "\x1b[{}G\x1b[0m", x + 1).unwrap();
+                    if let Some(colors) = cell.style.colors {
+                        SetColors(colors)
+                            .write_ansi(&mut text)
+                            .map_err(|_| std::io::Error::other("encode terminal colors"))?;
+                    }
+                    if let Some(attr) = cell.style.attr {
+                        SetAttributes(attr)
+                            .write_ansi(&mut text)
+                            .map_err(|_| std::io::Error::other("encode terminal attributes"))?;
+                    }
+                    if cell.as_char() == Some('\t') {
+                        text.push_str(&" ".repeat(cell.width()));
+                    } else {
+                        text.push_str(&cell.symbol());
+                    }
+                }
+            }
+            if y + 1 < rows {
+                text.push_str("\r\x1b[1B");
+            }
+        }
+        text.push_str("\x1b[0m\r");
+        Ok(text)
+    }
+}
+
+#[cfg(all(test, any(unix, windows)))]
+mod inline_tests {
+    use super::Inline;
+    use rsille::render::buffer::Buffer;
+
+    #[test]
+    fn height_is_bounded_and_nonzero() {
+        assert_eq!(Inline::height(8, 24), 8);
+        assert_eq!(Inline::height(30, 24), 23);
+        assert_eq!(Inline::height(0, 24), 1);
+        assert_eq!(Inline::height(8, 1), 1);
+    }
+
+    #[test]
+    fn reservation_redraw_and_cleanup_are_relative() {
+        let mut inline = Inline::default();
+        let buffer = Buffer::new((10, 3).into());
+        let first = inline.present(&buffer, (80, 24)).unwrap();
+        assert_eq!(first.matches("\r\n").count(), 3);
+        let redraw = inline.present(&buffer, (80, 24)).unwrap();
+        assert_eq!(redraw.matches("\r\n").count(), 0);
+        for text in [&first, &redraw] {
+            assert!(!text.contains("1049"));
+            assert!(!text.contains("\x1b[2J"));
+            assert!(!text.contains("\x1b[6n"));
+            assert!(text.ends_with("\x1b[0m\r"));
+        }
+        let cleanup = inline.clear(24);
+        assert_eq!(cleanup.matches("\x1b[2K").count(), 3);
+        assert_eq!(cleanup.matches("\x1b[1A").count(), 2);
+        assert!(!inline.clear(24).contains("\x1b[2K"));
+    }
+
+    #[test]
+    fn shrink_bounds_cleanup_and_rendering() {
+        let mut inline = Inline { rows: 12 };
+        let cleanup = inline.clear(3);
+        assert_eq!(cleanup.matches("\x1b[2K").count(), 3);
+        assert_eq!(cleanup.matches("\x1b[1A").count(), 2);
+        let buffer = Buffer::new((10, 8).into());
+        let text = inline.present(&buffer, (4, 2)).unwrap();
+        assert_eq!(inline.rows, 2);
+        assert!(!text.contains("\x1b[5G"));
     }
 }
 
@@ -66,6 +208,7 @@ mod windows {
         raw: bool,
         vt: bool,
         screen: bool,
+        inline: Option<super::Inline>,
     }
     impl Terminal {
         pub(super) fn open() -> io::Result<Self> {
@@ -86,11 +229,13 @@ mod windows {
                 raw: false,
                 vt: false,
                 screen: false,
+                inline: None,
             };
             terminal.size()?;
             Ok(terminal)
         }
-        pub(super) fn enter(&mut self) -> io::Result<()> {
+        pub(super) fn enter(&mut self, inline: bool) -> io::Result<()> {
+            self.inline = inline.then(super::Inline::default);
             // Crossterm 0.28.1 opens CONIN$ for raw mode and event polling,
             // but disable_raw_mode does not restore the exact original mode.
             // Keep mode ownership and input on our own handles instead.
@@ -113,7 +258,11 @@ mod windows {
             )?;
             self.vt = true;
             self.screen = true;
-            self.write("\x1b[?1049h\x1b[?7l\x1b[?25l\x1b[0m\x1b[2J\x1b[H")
+            if inline {
+                self.write("\x1b[?7l\x1b[?25l\x1b[0m")
+            } else {
+                self.write("\x1b[?1049h\x1b[?7l\x1b[?25l\x1b[0m\x1b[2J\x1b[H")
+            }
         }
         pub(super) fn check_connection(&self) -> io::Result<()> {
             mode(&self.input)?;
@@ -162,6 +311,11 @@ mod windows {
             Ok(())
         }
         pub(super) fn present(&mut self, buffer: &Buffer) -> io::Result<()> {
+            if self.inline.is_some() {
+                let dimensions = self.size()?;
+                let text = self.inline.as_mut().unwrap().present(buffer, dimensions)?;
+                return self.write(&text);
+            }
             let mut text = String::new();
             let size = buffer.size();
             for y in 0..size.height {
@@ -204,7 +358,13 @@ mod windows {
                     first.get_or_insert(e);
                 } else {
                     self.vt = true;
-                    for text in ["\x1b[0m", "\x1b[?7h", "\x1b[?25h", "\x1b[?1049l"] {
+                    let cleanup = if self.inline.is_some() {
+                        let height = self.size().map(|s| s.1).unwrap_or(1);
+                        self.inline.as_mut().unwrap().clear(height)
+                    } else {
+                        String::from("\x1b[?1049l")
+                    };
+                    for text in ["\x1b[0m", "\x1b[?7h", "\x1b[?25h", &cleanup] {
                         if let Err(e) = self.write(text) {
                             first.get_or_insert(e);
                         }
@@ -508,6 +668,7 @@ mod unix {
         tty: File,
         screen: bool,
         raw: bool,
+        inline: Option<super::Inline>,
     }
 
     impl Terminal {
@@ -517,6 +678,7 @@ mod unix {
                 tty,
                 screen: false,
                 raw: false,
+                inline: None,
             };
             terminal.check_connection()?;
             terminal.size()?;
@@ -534,11 +696,21 @@ mod unix {
             Ok(terminal)
         }
 
-        pub(super) fn enter(&mut self) -> io::Result<()> {
+        pub(super) fn enter(&mut self, inline: bool) -> io::Result<()> {
+            self.inline = inline.then(super::Inline::default);
             terminal::enable_raw_mode()?;
             self.raw = true;
             // Mark before writing: a failed write may still have changed modes.
             self.screen = true;
+            if inline {
+                return execute!(
+                    self.tty,
+                    DisableLineWrap,
+                    Hide,
+                    EnableBracketedPaste,
+                    ResetColor
+                );
+            }
             execute!(
                 self.tty,
                 EnterAlternateScreen,
@@ -584,6 +756,12 @@ mod unix {
         }
 
         pub(super) fn present(&mut self, buffer: &Buffer) -> io::Result<()> {
+            if self.inline.is_some() {
+                let dimensions = self.size()?;
+                let text = self.inline.as_mut().unwrap().present(buffer, dimensions)?;
+                self.tty.write_all(text.as_bytes())?;
+                return self.tty.flush();
+            }
             let mut bytes = Vec::new();
             let size = buffer.size();
             for y in 0..size.height {
@@ -604,6 +782,12 @@ mod unix {
         pub(super) fn restore(&mut self) -> io::Result<()> {
             let mut first = None;
             if self.screen {
+                let cleanup = if self.inline.is_some() {
+                    let height = self.size().map(|s| s.1).unwrap_or(1);
+                    self.inline.as_mut().unwrap().clear(height)
+                } else {
+                    String::from("\x1b[?1049l")
+                };
                 // Separate writes ensure one failed operation does not prevent
                 // attempts to undo the remaining modes.
                 for bytes in [
@@ -611,7 +795,7 @@ mod unix {
                     b"\x1b[?2004l",
                     b"\x1b[?7h",
                     b"\x1b[?25h",
-                    b"\x1b[?1049l",
+                    cleanup.as_bytes(),
                 ] {
                     if let Err(error) = self.tty.write_all(bytes) {
                         first.get_or_insert(error);
@@ -722,14 +906,20 @@ mod host {
     use std::time::Duration;
     const INTERVAL: Duration = Duration::from_millis(50);
     pub(super) fn run(config: crate::config::Config) -> Result<Option<serde_json::Value>, String> {
+        let inline = config.mode == "inline";
         let mut terminal = Terminal::open().map_err(|e| format!("open terminal: {e}"))?;
         let result = (|| {
             terminal
-                .enter()
+                .enter(inline)
                 .map_err(|e| format!("set up terminal: {e}"))?;
             let mut ui = crate::ui::build(config);
             let mut size = terminal.size().map_err(|e| format!("terminal size: {e}"))?;
-            ui.resize(size.0, size.1);
+            let height = if inline {
+                super::Inline::height(ui.inline_height(), size.1)
+            } else {
+                size.1
+            };
+            ui.resize(size.0, height);
             terminal
                 .present(ui.draw()?)
                 .map_err(|e| format!("draw terminal: {e}"))?;
@@ -747,7 +937,12 @@ mod host {
                 let mut dirty = current != size;
                 if dirty {
                     size = current;
-                    ui.resize(size.0, size.1);
+                    let height = if inline {
+                        super::Inline::height(ui.inline_height(), size.1)
+                    } else {
+                        size.1
+                    };
+                    ui.resize(size.0, height);
                 }
                 match input.read_event(INTERVAL) {
                     Ok(Some(Event::Resize(_, _))) => {
@@ -764,6 +959,9 @@ mod host {
                     return Ok(outcome.ok());
                 }
                 if dirty {
+                    if inline {
+                        ui.resize(size.0, super::Inline::height(ui.inline_height(), size.1));
+                    }
                     terminal
                         .present(ui.draw()?)
                         .map_err(|e| format!("draw terminal: {e}"))?;

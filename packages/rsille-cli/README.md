@@ -2,7 +2,7 @@
 
 在 Shell 脚本中使用交互式选择器、文本输入、确认提示和表格，也可以通过 YAML 组合表单。无需编写 Rust，交互结果可直接交给脚本处理。
 
-支持 Unix 和 Windows 全屏终端，暂不支持 inline 模式。
+支持 Unix 和 Windows 的全屏与 inline 模式，默认使用全屏。
 
 - Unix：需要前台交互终端（`/dev/tty`）。
 - Windows：需要已连接且支持 VT 控制序列的控制台，推荐 Windows Terminal。不支持没有交互控制台的后台任务。
@@ -22,6 +22,20 @@ cargo install --path packages/rsille-cli
 ```sh
 rsille --help
 ```
+
+## Inline 模式
+
+使用全局参数 `--inline` 在当前光标下方显示界面，不切换到备用屏幕，保留之前的终端输出：
+
+```sh
+rsille input --inline --label '项目名称'
+rsille --inline select --output plain dev staging production
+rsille run form.yaml --inline > result.json
+```
+
+所有子命令都支持此参数，也可以在 YAML 顶层设置 `mode: inline`。`--inline` 优先于 YAML 的 `mode`；不指定时仍保持原来的全屏行为。
+
+界面按布局高度预留行数，并限制在终端可用高度内；提交或取消后清除交互区域并恢复终端。stdout 仍然只输出结果，管道和重定向用法不变。较大的表单建议使用全屏；缩小终端或终端自动重排时，旧界面可能留在滚动历史中。交互期间请避免其他进程同时向该终端写入内容。
 
 ## 快速开始
 
@@ -151,7 +165,7 @@ rsille run form.yaml > result.json
 | `table` | `rows` 或 `source`；可选 `columns`、`selectable`、`id` |
 | `button` | `label`、`action`（`submit` 或 `cancel`） |
 
-配置必须指定 `version: 1`。`title` 可省略，`mode` 默认为 `fullscreen`，也是目前唯一支持的模式。需要返回值的组件必须有非空且唯一的 `id`；未知字段、无效选项索引和重复 ID 会报错。
+配置必须指定 `version: 1`。`title` 可省略，`mode` 默认为 `fullscreen`，也支持 `inline`。需要返回值的组件必须有非空且唯一的 `id`；未知字段、无效选项索引和重复 ID 会报错。
 
 ### 引用外部数据
 
