@@ -53,6 +53,12 @@ fn run(args: &[&str]) -> Output {
             });
         }
     }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        // Redirection alone does not detach the inherited interactive console.
+        command.creation_flags(windows_sys::Win32::System::Threading::DETACHED_PROCESS);
+    }
     let mut child = command.spawn().unwrap();
     let deadline = Instant::now() + Duration::from_secs(5);
     while child.try_wait().unwrap().is_none() {

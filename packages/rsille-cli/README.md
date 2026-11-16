@@ -2,7 +2,12 @@
 
 在 Shell 脚本中使用交互式选择器、文本输入、确认提示和表格，也可以通过 YAML 组合表单。无需编写 Rust，交互结果可直接交给脚本处理。
 
-目前支持 Unix 全屏终端，需要前台交互终端（`/dev/tty`）。暂不支持 Windows 和 inline 模式。
+支持 Unix 和 Windows 全屏终端，暂不支持 inline 模式。
+
+- Unix：需要前台交互终端（`/dev/tty`）。
+- Windows：需要已连接且支持 VT 控制序列的控制台，推荐 Windows Terminal。不支持没有交互控制台的后台任务。
+
+两种平台都支持 stdin 输入数据、stdout 重定向结果，界面单独使用交互终端。
 
 ## 安装
 
@@ -66,6 +71,12 @@ fi
 ```sh
 printf '[{"name":"api","status":"ready"},{"name":"worker","status":"ready"}]' \
     | rsille table --selectable --columns name,status > selected.json
+```
+
+Windows PowerShell 中也可以同时使用输入管道和结果重定向（数据须为 UTF-8）：
+
+```powershell
+Get-Content -Raw -Encoding utf8 services.json | rsille table --selectable > selected.json
 ```
 
 也可以直接查看文件：
@@ -240,6 +251,8 @@ fi
 | 空格 | 切换复选框或激活按钮 |
 
 表单中的选择器使用 Enter 或空格展开，再用上下键移动、Enter 确定。文本输入支持方向键、Backspace 和 Delete。
+
+Windows 粘贴按控制台键盘事件处理，并非原子的 bracketed-paste 事件；粘贴中的换行可能触发 Enter 操作。
 
 ## 输入限制
 

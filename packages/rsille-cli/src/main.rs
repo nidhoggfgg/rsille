@@ -14,7 +14,7 @@ const MAX_BYTES: u64 = 4 * 1024 * 1024;
 #[command(
     name = "rsille",
     version,
-    about = "Terminal interfaces for scripts (Unix, fullscreen)"
+    about = "Terminal interfaces for scripts (Unix and Windows, fullscreen)"
 )]
 struct Args {
     #[arg(

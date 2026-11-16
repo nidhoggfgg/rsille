@@ -17,7 +17,7 @@ import time
 import unittest
 
 if os.name != "posix":
-    raise SystemExit("PTY tests require Unix; Windows is unsupported")
+    raise SystemExit("These PTY tests require Unix")
 import fcntl
 import pty
 import termios
