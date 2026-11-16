@@ -185,6 +185,11 @@ impl Style {
 
 /// Named terminal colors, true-color RGB values, or 256-color palette entries.
 ///
+/// This is rsille's own color type, not `crossterm::style::Color`. Its variants
+/// are `Black`, `Red`, `Green`, `Yellow`, `Blue`, `Magenta`, `Cyan`, `White`,
+/// `Rgb(u8, u8, u8)`, and `Indexed(u8)`. There is no `DarkGrey` or `Grey` variant;
+/// use e.g. `Color::Rgb(128, 128, 128)` for an explicit gray.
+///
 /// Named and indexed colors depend on the terminal's palette. Red, green,
 /// yellow, blue, magenta, and cyan map to crossterm's `Dark*` variants.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
