@@ -39,7 +39,9 @@ rsille run form.yaml --fullscreen > result.json
 
 inline 布局中若没有交互控件（仅含公式、文本、只读表格，或它们通过 `row` / `column` 递归组合），只绘制一次，保留已绘制内容并自动以退出码 `0` 退出，不等待按键，也不输出 stdout JSON。只要包含输入框、选择器、复选框、可选择表格或按钮，仍按交互界面运行。全屏模式即使只有静态内容也仍然交互，不会自动退出。
 
-较大的表单建议使用全屏；缩小终端或终端自动重排时，旧界面可能留在滚动历史中。交互期间请避免其他进程同时向该终端写入内容。
+文本与 Sixel、inline 与全屏统一复用一个持久 `Render`，保留帧间差分及图形缓存，而不是每次清屏重画。inline 首帧前只换行一次，后续行预留、窗口缩放、图形 guard 行和区域清理由核心 renderer 管理。静态输出通过 `commit_frame()` 保留；交互结束通过 `clear_inline()` 清理仍可寻址的区域。
+
+较大的表单建议使用全屏；缩小终端或终端自动重排时，旧界面可能留在滚动历史中。写入失败后若光标位置不再可信，程序不会猜测区域并向上擦除，可能留下部分界面，但仍会尽力恢复终端模式。交互期间请避免其他进程同时向该终端写入内容。
 
 ## 样式预设
 
@@ -354,6 +356,22 @@ fi
 表单中的选择器使用 Enter 或空格展开，再用上下键移动、Enter 确定。文本输入支持方向键、Backspace 和 Delete。
 
 Windows 粘贴按控制台键盘事件处理，并非原子的 bracketed-paste 事件；粘贴中的换行可能触发 Enter 操作。
+
+## 开发与验证
+
+CLI host 保留 `/dev/tty` 或 `CONIN$` / `CONOUT$` 的所有权、尺寸查询、输入及模式恢复；不使用核心的 stdout event loop。`src/presentation.rs` 持有 `Render<W, Buffer>`，每次将 headless UI 的 `Buffer` clone 交给库的 `Draw for Buffer`，保留文本度量、宽字符、raster ownership 和 composition 元数据。
+
+writer 先收集命令字节，在 renderer 调用 `flush()` 时真正发送到终端；发送失败会向 renderer 返回错误，并丢弃本次待发送内容，避免恢复操作重放半帧。Unix 发送到 owned tty 并 flush；Windows 在完整字节批次上解码 UTF-8，使用 `WriteConsoleW`，不修改全局代码页。renderer 的成功历史只在真实发送成功后提交。退出时先清理 renderer 区域，再恢复终端模式；Drop 兜底处理异常退出。
+
+在仓库根目录运行：
+
+```sh
+cargo test -p rsille-cli
+cargo build -p rsille-cli
+python3 packages/rsille-cli/tests/pty_test.py --binary target/debug/rsille
+```
+
+单元测试覆盖持久文本/raster 差分、图形移除、inline guard 的保留/清理、窗口缩小及 transport 部分失败。Unix PTY 测试使用管道 stdin 和独立 stdout/stderr 文件，验证界面不混入结果、终端模式恢复、resize 和静态内容保留。Windows 控制台仍需在真实 VT 控制台上验证输入与 Unicode 输出。
 
 ## 输入限制
 

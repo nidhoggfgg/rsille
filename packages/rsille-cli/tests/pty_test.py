@@ -54,7 +54,8 @@ class CliPtyTests(unittest.TestCase):
                 process.stdin.close()
                 if static_content is None:
                     deadline = time.monotonic() + 5
-                    ready = b"\x1b[2K" if inline else b"\x1b[?1049h"
+                    # Persistent Render need not erase a line on a text-only first frame.
+                    ready = b"\r\n" if inline else b"\x1b[?1049h"
                     while ready not in screen or termios.tcgetattr(slave)[3] & termios.ICANON:
                         drain()
                         self.assertIsNone(process.poll(), "exited before entering interactive mode")
@@ -69,13 +70,20 @@ class CliPtyTests(unittest.TestCase):
                     self.assertFalse(resize)
                 if resize:
                     screen.clear()
-                    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 30, 100, 0, 0))
+                    rows, columns = resize if isinstance(resize, tuple) else (30, 100)
+                    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", rows, columns, 0, 0))
                     os.kill(process.pid, signal.SIGWINCH)
                     deadline = time.monotonic() + 3
-                    resized = b"\x1b[100G" if inline else b"\x1b[30;100H"
-                    while resized not in screen:
+                    # Core may group adjacent cells or whole lines: do not require
+                    # the old CLI's per-cell CUP/CHA transport. Unit tests verify
+                    # exact renderer bounds; here require a live resize repaint.
+                    while not screen:
                         drain()
-                        self.assertLess(time.monotonic(), deadline, "resize did not redraw new bounds")
+                        self.assertIsNone(process.poll(), "exited during resize")
+                        self.assertLess(time.monotonic(), deadline, "resize did not redraw")
+                    settle = time.monotonic() + 0.15
+                    while time.monotonic() < settle:
+                        drain()
                 if keys is not None:
                     os.write(master, keys)
                 deadline = time.monotonic() + 5
@@ -222,9 +230,26 @@ class CliPtyTests(unittest.TestCase):
         self.assertEqual(self.session(["input", "--output", "plain"], b"ok\r", inline=True, resize=True), b"ok\n")
 
     def test_static_formula_exits_and_preserves_graphics(self):
-        # The PTY has no pixel metrics or terminal query responder.
-        self.session(["formula", "x^2", "--cell-pixels", "8x18"],
-                     keys=None, inline=True, static_content=b"\x1bP")
+        # Exercise no padding, one guard, and five guards. The PTY has no
+        # pixel metrics or terminal query responder.
+        for pixels in ("8x18", "10x20", "8x1"):
+            with self.subTest(pixels=pixels):
+                self.session(["formula", "x^2", "--cell-pixels", pixels],
+                             keys=None, inline=True, static_content=b"\x1bP")
+
+    def test_inline_shrink_then_cancel_restores_modes(self):
+        self.session(["input"], b"\x03", expected=130, inline=True, resize=(2, 12))
+
+    def test_interactive_inline_formula_resize_and_cleanup(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "formula.yaml"
+            path.write_text(json.dumps({"version": 1, "layout": {"column": [
+                {"formula": {"source": "x^2"}},
+                {"button": {"label": "Done", "action": "submit"}},
+            ]}}))
+            output = self.session(["run", str(path), "--cell-pixels", "10x20"],
+                                  inline=True, resize=(6, 40))
+            self.assertEqual(json.loads(output), {"action": "submit", "values": {}})
 
     def test_fullscreen_formula_remains_interactive(self):
         self.assertEqual(self.result(["formula", "x^2", "--cell-pixels", "8x18"]), {})

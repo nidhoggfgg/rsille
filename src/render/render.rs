@@ -93,6 +93,9 @@ pub struct Render<W, T> {
     // Saved bottom-row anchor while a native inline frame is being written.
     // Retained after I/O failure so recovery never needs an absolute position.
     inline_raster_checkpoint: Option<u16>,
+    // Output may have stopped between cursor commands; cleanup must not erase
+    // relative to an unknown anchor after a failed write or flush.
+    output_uncertain: bool,
     used_height: u16,
     inline_clipped_height: u16, // Restored before the next draw, which may be text-only.
     raster: super::raster::RasterPresenter,
@@ -211,6 +214,7 @@ where
             self.append_newline,
             self.inline_mode && self.previous_inline_height > self.used_height,
         )?;
+        self.output_uncertain = true;
         if self.raster.needs_protocol_recovery() {
             // A prior writer failure may have prevented even the best-effort
             // terminator from reaching the terminal. Cancel an incomplete DCS
@@ -289,6 +293,7 @@ where
             self.inline_raster_checkpoint = None;
         }
         self.raster.commit(raster_plan);
+        self.output_uncertain = false;
 
         // Save current buffer for next frame's diff
         self.buffer.clear();
@@ -308,20 +313,19 @@ where
     ///
     /// Does not draw. Call after a successful `render`; failures propagate without
     /// forgetting display history. A partially written newline is not retry-safe.
-    pub(crate) fn commit_frame(&mut self) -> std::io::Result<()> {
+    pub fn commit_frame(&mut self) -> std::io::Result<()> {
         if !self.inline_mode || self.append_newline {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::Unsupported,
                 "frame commits require inline mode without appended newlines",
             ));
         }
-        if self.raster.needs_protocol_recovery() {
-            return Err(std::io::Error::other(
-                "cannot commit an uncertain raster frame",
-            ));
+        if self.output_uncertain || self.raster.needs_protocol_recovery() {
+            return Err(std::io::Error::other("cannot commit an uncertain frame"));
         }
         // The cursor is on the last content row, not the last padding row.
         // Real LF (rather than CNL) scrolls correctly at the viewport bottom.
+        self.output_uncertain = true;
         for _ in 0..=self.inline_raster_padding {
             crossterm::queue!(self.out, Print("\r\n"))?;
         }
@@ -340,6 +344,54 @@ where
         self.inline_raster_checkpoint = None;
         self.buffer.reset_diff();
         self.raster.forget_region();
+        self.output_uncertain = false;
+        Ok(())
+    }
+
+    /// Erases the addressable inline region, including native raster guard rows.
+    ///
+    /// Call after updating the physical viewport height. Leaves the cursor at
+    /// the first owned row. This does not restore terminal modes. After failed
+    /// output, only resets protocol/style state: an unknown cursor must never
+    /// be used to erase the caller's history. Repeated successful calls are safe.
+    pub fn clear_inline(&mut self) -> std::io::Result<()> {
+        if !self.inline_mode || self.append_newline {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "inline cleanup requires inline mode without appended newlines",
+            ));
+        }
+        let uncertain = self.output_uncertain;
+        self.output_uncertain = true;
+        if uncertain {
+            self.out.write_all(b"\x18\x1b\\")?;
+            crossterm::queue!(self.out, EndSynchronizedUpdate, ResetColor)?;
+        } else {
+            let rows = self
+                .previous_inline_height
+                .saturating_add(self.inline_raster_padding)
+                .min(self.inline_height_limit());
+            crossterm::queue!(self.out, ResetColor)?;
+            if rows > 0 {
+                if self.inline_raster_padding > 0 {
+                    crossterm::queue!(self.out, MoveToNextLine(self.inline_raster_padding))?;
+                }
+                crossterm::queue!(self.out, MoveToColumn(0))?;
+                for row in 0..rows {
+                    crossterm::queue!(self.out, Clear(ClearType::CurrentLine))?;
+                    if row + 1 < rows {
+                        crossterm::queue!(self.out, MoveToPreviousLine(1))?;
+                    }
+                }
+            }
+        }
+        self.out.flush()?;
+        self.previous_inline_height = 0;
+        self.inline_raster_padding = 0;
+        self.inline_raster_checkpoint = None;
+        self.buffer.reset_diff();
+        self.raster.forget_region();
+        self.output_uncertain = false;
         Ok(())
     }
 
@@ -707,6 +759,7 @@ where
             inline_viewport_height: None,
             inline_raster_padding: 0,
             inline_raster_checkpoint: None,
+            output_uncertain: false,
             used_height: builder.size.height, // Initialize to buffer capacity
             inline_clipped_height: 0,
             raster: super::raster::RasterPresenter::new(
@@ -736,7 +789,9 @@ where
     pub fn on_events(&mut self, events: &[crossterm::event::Event]) -> Result<(), DrawErr> {
         self.thing.on_events(events)
     }
+}
 
+impl<W: std::io::Write, T: Draw> Render<W, T> {
     /// Resizes the buffer and resets the used height to the new height.
     ///
     /// If dimensions change, current and previous frame contents are discarded.

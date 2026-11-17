@@ -9,9 +9,10 @@ use log::info;
 
 use crate::render::{
     area::{Position, Size},
+    chunk::Chunk,
     raster::RasterCell,
     style::Stylized,
-    DrawErr,
+    Draw, DrawErr,
 };
 
 /// A row-major drawing buffer with optional previous-frame storage.
@@ -447,6 +448,39 @@ impl Buffer {
     }
 }
 
+impl Draw for Buffer {
+    /// Copies the current frame at the chunk's local origin, without consuming it.
+    ///
+    /// Returns the source size even when clipped. Wide graphemes crossing the
+    /// right edge are skipped in full; raster owners retain their original
+    /// sampling target and offsets. Frame history and dirtiness are not copied.
+    /// The source text policy applies to the entire destination buffer, with
+    /// the clearing behavior documented by [`Chunk::set_text_metrics`].
+    fn draw(&mut self, mut chunk: Chunk) -> Result<Size, DrawErr> {
+        chunk.set_text_metrics(self.text_metrics());
+        if self.has_unsupported_raster_composition() {
+            chunk.mark_unsupported_raster_composition();
+        }
+        let width = self.size.width.min(chunk.area().width());
+        let height = self.size.height.min(chunk.area().height());
+        for y in 0..height {
+            for x in 0..width {
+                let index = y as usize * self.size.width as usize + x as usize;
+                let cell = &self.content[index];
+                if cell.is_occupied || x as usize + cell.width() > width as usize {
+                    continue;
+                }
+                if let Some(raster) = self.raster_at((x, y).into()) {
+                    chunk.set_raster_cell(x, y, raster.clone())?;
+                } else {
+                    chunk.set(x, y, cell.content.clone())?;
+                }
+            }
+        }
+        Ok(self.size)
+    }
+}
+
 fn raster_cell_at(cells: Option<&[Option<RasterCell>]>, index: usize) -> Option<&RasterCell> {
     cells?.get(index)?.as_ref()
 }
@@ -753,6 +787,193 @@ mod tests {
             y: 0,
             options: Default::default(),
         }
+    }
+
+    #[test]
+    fn draw_copies_current_text_styles_and_metrics_without_consuming_source() {
+        use crate::render::text::{AmbiguousWidth, TextMetrics};
+
+        let mut source = Buffer::new((8, 2).into());
+        source.set_text_metrics(TextMetrics {
+            ambiguous_width: AmbiguousWidth::Wide,
+            tab_width: 3,
+        });
+        source.set((0, 0).into(), Stylized::plain('z')).unwrap();
+        source.clear();
+        let style = Style {
+            colors: Some(Colors::new(Color::Red, Color::Blue)),
+            attr: Some(crossterm::style::Attribute::Bold.into()),
+        };
+        source
+            .set((0, 0).into(), Stylized::new('·', style))
+            .unwrap();
+        source
+            .set(
+                (2, 0).into(),
+                Stylized::grapheme("e\u{301}", Style::default()),
+            )
+            .unwrap();
+        source
+            .set((3, 0).into(), Stylized::new('\t', style))
+            .unwrap();
+        source
+            .set((0, 1).into(), Stylized::grapheme("👩‍💻", Style::default()))
+            .unwrap();
+        let snapshot = source.clone();
+        let mut destination = Buffer::new(source.size());
+        let area = destination.size().into();
+        assert_eq!(
+            source
+                .draw(Chunk::new(&mut destination, area).unwrap())
+                .unwrap(),
+            source.size()
+        );
+        assert_eq!(destination.content(), source.content());
+        assert_eq!(destination.text_metrics(), source.text_metrics());
+        assert!(destination.previous().is_none());
+        assert!(destination.raster.is_none());
+        assert_eq!(source.content(), snapshot.content());
+        assert_eq!(source.previous(), snapshot.previous());
+        assert_eq!(source.has_pending_changes(), snapshot.has_pending_changes());
+    }
+
+    #[test]
+    fn draw_clips_at_chunk_origin_without_half_wide_graphemes_or_style_inheritance() {
+        use crate::render::area::Area;
+
+        let mut source = Buffer::new((5, 2).into());
+        source.set((0, 0).into(), Stylized::plain('界')).unwrap();
+        source.set((3, 0).into(), Stylized::plain('界')).unwrap();
+        source.set((0, 1).into(), Stylized::plain('x')).unwrap();
+        let mut destination = Buffer::new((7, 3).into());
+        let underlay = Stylized::new(
+            'q',
+            Style::with_colors(Colors::new(Color::Red, Color::Blue)),
+        );
+        for y in 0..3 {
+            for x in 0..7 {
+                destination.set((x, y).into(), underlay.clone()).unwrap();
+            }
+        }
+        let area = Area::new((1, 1).into(), (4, 1).into());
+        assert_eq!(
+            source
+                .draw(Chunk::new(&mut destination, area).unwrap())
+                .unwrap(),
+            source.size()
+        );
+        assert_eq!(destination.get((1, 1).into()), Some(&Stylized::plain('界')));
+        assert!(destination.is_occupied((2, 1).into()));
+        assert_eq!(destination.content()[9].owner, Some(8));
+        assert_eq!(destination.get((3, 1).into()), Some(&Stylized::space()));
+        for y in 0..3 {
+            for x in 0..7 {
+                if y != 1 || !(1..4).contains(&x) {
+                    assert_eq!(destination.get((x, y).into()), Some(&underlay));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn draw_preserves_cropped_raster_ownership_and_current_composition_metadata() {
+        use crate::render::area::Area;
+
+        let mut source = Buffer::new((3, 2).into());
+        source.mark_unsupported_raster_composition();
+        source.set_raster((0, 0).into(), raster_cell()).unwrap();
+        source.clear();
+        let mut owner = raster_cell();
+        owner.target = (10, 8).into();
+        owner.x = 6;
+        owner.y = 5;
+        source.set_raster((1, 0).into(), owner.clone()).unwrap();
+        source.set_raster((2, 1).into(), owner.clone()).unwrap();
+        let mut destination = Buffer::new((5, 3).into());
+        let area = Area::new((2, 1).into(), (2, 1).into());
+        source
+            .draw(Chunk::new(&mut destination, area).unwrap())
+            .unwrap();
+        assert_eq!(destination.raster_cells().count(), 1);
+        assert_eq!(destination.raster_at((3, 1).into()), Some(&owner));
+        assert_eq!(destination.get((3, 1).into()), source.get((1, 0).into()));
+        assert!(!destination.has_unsupported_raster_composition());
+        assert!(destination.previous_raster.is_none());
+        source.mark_unsupported_raster_composition();
+        source
+            .draw(Chunk::new(&mut destination, area).unwrap())
+            .unwrap();
+        assert!(destination.has_unsupported_raster_composition());
+        assert!(source.has_raster());
+        assert_eq!(source.raster_cells().count(), 2);
+        assert!(source.previous_raster_at((0, 0).into()).is_some());
+    }
+
+    #[test]
+    fn draw_handles_empty_dimensions_and_conservative_composition_marker() {
+        for size in [(0, 0), (0, 2), (2, 0)] {
+            let mut source = Buffer::new(size.into());
+            source.mark_unsupported_raster_composition();
+            let mut destination = Buffer::new((2, 2).into());
+            source
+                .draw(Chunk::new(&mut destination, Size::from((2, 2)).into()).unwrap())
+                .unwrap();
+            assert!(destination.has_unsupported_raster_composition());
+            assert!(destination
+                .content()
+                .iter()
+                .all(|cell| cell == &Cell::space()));
+        }
+        let mut source = Buffer::new((2, 2).into());
+        for size in [(0, 0), (0, 2), (2, 0)] {
+            let mut destination = Buffer::new(size.into());
+            assert_eq!(
+                source
+                    .draw(Chunk::new(&mut destination, Size::from(size).into()).unwrap())
+                    .unwrap(),
+                source.size()
+            );
+        }
+    }
+
+    #[test]
+    fn draw_propagates_chunk_write_errors() {
+        use crate::render::area::Area;
+
+        let mut source = Buffer::new((1, 1).into());
+        let mut destination = Buffer::new((2, 1).into());
+        destination
+            .set((0, 0).into(), Stylized::plain('界'))
+            .unwrap();
+        let area = Area::new((1, 0).into(), (1, 1).into());
+        assert!(matches!(
+            source.draw(Chunk::new(&mut destination, area).unwrap()),
+            Err(DrawErr::PositionOccupied { .. })
+        ));
+    }
+
+    #[test]
+    fn draw_supports_persistent_render_and_frame_updates() {
+        use crate::render::Builder;
+
+        let mut source = Buffer::new((4, 1).into());
+        source.set((0, 0).into(), Stylized::plain('界')).unwrap();
+        let mut render = Builder::new()
+            .size((4, 1))
+            .clear(false)
+            .build_render(source, Vec::new());
+        render.render().unwrap();
+        assert_eq!(render.buffer.previous(), Some(render.thing.content()));
+        render.render().unwrap();
+        assert_eq!(render.buffer.previous(), Some(render.thing.content()));
+        render
+            .thing
+            .overwrite((0, 0).into(), Stylized::plain('x'))
+            .unwrap();
+        render.render().unwrap();
+        assert_eq!(render.buffer.previous(), Some(render.thing.content()));
+        assert_eq!(render.buffer.previous().unwrap()[1], Cell::space());
+        assert!(render.thing.previous().is_none());
     }
 
     #[test]

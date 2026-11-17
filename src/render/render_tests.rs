@@ -1,4 +1,4 @@
-//! Check terminal SGR state at each printed cell, not just the frame buffer.
+//! Check terminal output, style state, and inline region ownership.
 use super::*;
 use crate::render::style::{Style, Stylized};
 use crossterm::style::{force_color_output, Attributes, Color, Colors};
@@ -80,6 +80,37 @@ impl Draw for Scene {
     }
 }
 
+#[derive(Default)]
+struct FailingWriter {
+    bytes: Vec<u8>,
+    remaining: Option<usize>,
+    fail_flush: bool,
+}
+
+impl std::io::Write for FailingWriter {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        let len = match self.remaining.as_mut() {
+            Some(0) => return Err(std::io::Error::other("injected write failure")),
+            Some(remaining) => {
+                let len = bytes.len().min(*remaining);
+                *remaining -= len;
+                len
+            }
+            None => bytes.len(),
+        };
+        self.bytes.extend_from_slice(&bytes[..len]);
+        Ok(len)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        if self.fail_flush {
+            Err(std::io::Error::other("injected flush failure"))
+        } else {
+            Ok(())
+        }
+    }
+}
+
 fn colors(fg: Option<Color>, bg: Option<Color>) -> Style {
     Style::with_colors(Colors {
         foreground: fg,
@@ -98,6 +129,161 @@ fn expected(style: Style) -> TerminalStyle {
             .and_then(|c| c.background)
             .filter(|c| *c != Color::Reset),
         attrs: style.attr.unwrap_or_default(),
+    }
+}
+
+#[test]
+fn clear_inline_erases_only_the_known_text_region_and_resets_diff() {
+    let mut render = Builder::new()
+        .size((1, 3))
+        .inline_mode(true)
+        .build_render(Scene(vec![Stylized::plain('a'); 3]), Vec::new());
+    render.render().unwrap();
+    assert_eq!(render.previous_inline_height, 3);
+    render.out.clear();
+
+    render.clear_inline().unwrap();
+    assert_eq!(
+        render.out,
+        b"\x1b[0m\x1b[1G\x1b[2K\x1b[1F\x1b[2K\x1b[1F\x1b[2K"
+    );
+    assert_eq!(render.previous_inline_height, 0);
+    assert!(render.buffer.previous().is_none());
+    assert!(!render.output_uncertain);
+
+    render.out.clear();
+    render.clear_inline().unwrap();
+    assert_eq!(render.out, b"\x1b[0m");
+    render.out.clear();
+    render.render().unwrap();
+    assert_eq!(
+        printed_styles(&render.out),
+        vec![('a', TerminalStyle::default()); 3]
+    );
+}
+
+#[test]
+fn clear_inline_after_commit_preserves_history_and_next_region_is_fresh() {
+    let mut render = Builder::new()
+        .size((1, 2))
+        .inline_mode(true)
+        .build_render(Scene(vec![Stylized::plain('a'); 2]), Vec::new());
+    render.render().unwrap();
+    render.out.clear();
+    render.commit_frame().unwrap();
+    assert_eq!(render.out, b"\r\n");
+    assert_eq!(render.previous_inline_height, 0);
+    assert!(render.buffer.previous().is_none());
+    assert!(!render.output_uncertain);
+
+    for _ in 0..2 {
+        render.out.clear();
+        render.clear_inline().unwrap();
+        assert_eq!(render.out, b"\x1b[0m");
+    }
+    render.out.clear();
+    render.render().unwrap();
+    assert_eq!(
+        printed_styles(&render.out),
+        vec![('a', TerminalStyle::default()); 2]
+    );
+    render.out.clear();
+    render.clear_inline().unwrap();
+    assert_eq!(render.out, b"\x1b[0m\x1b[1G\x1b[2K\x1b[1F\x1b[2K");
+}
+
+#[test]
+fn inline_output_failures_cleanup_without_relative_moves_or_erasure() {
+    for operation in ["render", "commit", "clear"] {
+        for fail_flush in [false, true] {
+            let mut render = Builder::new().size((1, 2)).inline_mode(true).build_render(
+                Scene(vec![Stylized::plain('a'); 2]),
+                FailingWriter::default(),
+            );
+            render.render().unwrap();
+            render.out.bytes.clear();
+            // Allow a partial command through before failing the next write.
+            render.out.remaining = (!fail_flush).then_some(1);
+            render.out.fail_flush = fail_flush;
+            let result = match operation {
+                "render" => render.render(),
+                "commit" => render.commit_frame(),
+                "clear" => render.clear_inline(),
+                _ => unreachable!(),
+            };
+            assert!(result.is_err(), "{operation}, flush={fail_flush}");
+            assert!(render.output_uncertain, "{operation}, flush={fail_flush}");
+            assert!(!render.out.bytes.is_empty());
+
+            render.out.remaining = None;
+            render.out.fail_flush = false;
+            render.out.bytes.clear();
+            assert!(render.commit_frame().is_err());
+            assert!(render.out.bytes.is_empty());
+            assert!(render.output_uncertain);
+
+            render.clear_inline().unwrap();
+            // Only cancel protocol state, end synchronization, and reset style.
+            // In particular, never move/erase relative to the unknown cursor.
+            assert_eq!(render.out.bytes, b"\x18\x1b\\\x1b[?2026l\x1b[0m");
+            assert!(!render.output_uncertain);
+            assert_eq!(render.previous_inline_height, 0);
+            assert!(render.buffer.previous().is_none());
+            render.out.bytes.clear();
+            render.clear_inline().unwrap();
+            assert_eq!(render.out.bytes, b"\x1b[0m");
+
+            render.out.bytes.clear();
+            render.render().unwrap();
+            assert_eq!(
+                printed_styles(&render.out.bytes),
+                vec![('a', TerminalStyle::default()); 2]
+            );
+        }
+    }
+}
+
+#[test]
+fn inline_draw_error_keeps_prior_owned_region_available_for_cleanup() {
+    let mut render = Builder::new()
+        .size((1, 2))
+        .inline_mode(true)
+        .build_render(Scene(vec![Stylized::plain('a'); 2]), Vec::new());
+    render.render().unwrap();
+    render.out.clear();
+    // Scene propagates the out-of-bounds error before terminal output begins.
+    render.thing.0.push(Stylized::plain('b'));
+    assert!(render.render().is_err());
+    assert!(render.out.is_empty());
+    assert!(!render.output_uncertain);
+    assert_eq!(render.previous_inline_height, 2);
+
+    render.clear_inline().unwrap();
+    assert_eq!(render.out, b"\x1b[0m\x1b[1G\x1b[2K\x1b[1F\x1b[2K");
+    assert_eq!(render.previous_inline_height, 0);
+    assert!(render.buffer.previous().is_none());
+}
+
+#[test]
+fn inline_cleanup_and_commit_reject_fullscreen_without_output_or_state_changes() {
+    let mut render = Builder::new()
+        .size((1, 1))
+        .inline_mode(false)
+        .build_render(Scene(vec![Stylized::plain('a')]), Vec::new());
+    render.render().unwrap();
+    render.out.clear();
+    let pos = render.pos;
+    for commit in [false, true] {
+        let result = if commit {
+            render.commit_frame()
+        } else {
+            render.clear_inline()
+        };
+        assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::Unsupported);
+        assert!(render.out.is_empty());
+        assert!(!render.output_uncertain);
+        assert_eq!(render.pos, pos);
+        assert!(render.buffer.previous().is_some());
     }
 }
 
