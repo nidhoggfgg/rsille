@@ -142,7 +142,7 @@ fn prepare(args: Args) -> Result<(Config, Output, bool), Failure> {
     }
     let (title, layout) = match args.command {
         Command::Select { title, options } => (
-            title.clone(),
+            String::new(),
             Node::Select(SelectSpec {
                 id: "value".into(),
                 label: title,
@@ -151,7 +151,7 @@ fn prepare(args: Args) -> Result<(Config, Output, bool), Failure> {
             }),
         ),
         Command::Input { label, value } => (
-            label.clone(),
+            String::new(),
             Node::Input(InputSpec {
                 id: "value".into(),
                 label,
@@ -159,7 +159,7 @@ fn prepare(args: Args) -> Result<(Config, Output, bool), Failure> {
             }),
         ),
         Command::Confirm { title } => (
-            title.clone(),
+            String::new(),
             Node::Column(vec![
                 Node::Text(title),
                 Node::Row(vec![
@@ -247,6 +247,42 @@ fn execute(args: Args) -> Result<u8, Failure> {
     writeln!(io::stdout().lock(), "{text}")
         .map_err(|e| runtime(format!("cannot write result: {e}")))?;
     Ok(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn quick_prompts_do_not_duplicate_their_heading() {
+        for inline in [false, true] {
+            for command in [
+                vec!["select", "--title", "Choose environment", "dev", "prod"],
+                vec!["input", "--label", "Project name"],
+                vec!["confirm", "--title", "Continue deployment?"],
+            ] {
+                let mut argv = vec!["rsille"];
+                if inline {
+                    argv.push("--inline");
+                }
+                argv.extend(command);
+                let args = Args::try_parse_from(argv).unwrap();
+                let (config, _, _) =
+                    prepare(args).unwrap_or_else(|error| panic!("{}", error.message));
+                assert!(config.title.is_empty());
+                match config.layout {
+                    Node::Select(spec) => assert_eq!(spec.label, "Choose environment"),
+                    Node::Input(spec) => assert_eq!(spec.label, "Project name"),
+                    Node::Column(nodes) => {
+                        assert!(
+                            matches!(&nodes[0], Node::Text(text) if text == "Continue deployment?")
+                        );
+                    }
+                    _ => panic!("unexpected prompt layout"),
+                }
+            }
+        }
+    }
 }
 
 fn main() -> std::process::ExitCode {
