@@ -38,12 +38,16 @@ impl Ui {
         );
         let mut values = Map::new();
         initial_values(&config.layout, &mut values);
+        let mut theme = Theme::dark();
+        // CLI prompts share one background across labels, layouts and controls.
+        theme.styles.surface.bg_color = theme.styles.surface_elevated.bg_color;
         let runtime = App::new(State {
             config,
             values,
             outcome: None,
         })
         .disable_quit_key()
+        .with_theme(theme)
         .with_motion_policy(MotionPolicy::disabled())
         .build(update, move |state| {
             let content = view(&state.config.layout, state, quick);
@@ -342,6 +346,50 @@ mod tests {
     fn key(ui: &mut Ui, code: KeyCode) {
         ui.event(Event::Key(KeyEvent::new(code, KeyModifiers::NONE)))
             .unwrap();
+    }
+
+    #[test]
+    fn heading_and_select_share_background_without_losing_highlight() {
+        let config = parse(
+            "version: 1\ntitle: Heading\nlayout: {select: {id: env, label: Environment, options: [dev, prod]}}",
+            &Value::Null,
+        )
+        .unwrap();
+        let mut prompt = Ui::new(config);
+        prompt.resize(40, 12);
+        let frame = prompt.draw().unwrap();
+        let background = Theme::dark()
+            .styles
+            .surface_elevated
+            .to_render_style()
+            .colors
+            .unwrap()
+            .background;
+        let selected = Theme::dark()
+            .styles
+            .selected_focused
+            .to_render_style()
+            .colors
+            .unwrap()
+            .background;
+        for row in [0, 1, 2] {
+            assert_eq!(
+                frame.content()[row * 40]
+                    .content
+                    .style
+                    .colors
+                    .unwrap()
+                    .background,
+                background
+            );
+        }
+        assert_ne!(background, selected);
+        assert!(frame.content().iter().any(|cell| {
+            cell.content
+                .style
+                .colors
+                .is_some_and(|colors| colors.background == selected)
+        }));
     }
 
     #[test]
