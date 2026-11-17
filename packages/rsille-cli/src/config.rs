@@ -20,6 +20,12 @@ pub struct Config {
     pub title: String,
     #[serde(default = "default_mode")]
     pub mode: String,
+    #[serde(default)]
+    pub sixel: bool,
+    #[serde(default)]
+    pub cell_pixels: Option<String>,
+    #[serde(default)]
+    pub force_cell_pixels: bool,
     pub layout: Node,
 }
 
@@ -33,11 +39,29 @@ pub enum Node {
     Row(Vec<Node>),
     Column(Vec<Node>),
     Text(String),
+    Formula(FormulaSpec),
     Input(InputSpec),
     Select(SelectSpec),
     Checkbox(CheckboxSpec),
     Table(TableSpec),
     Button(ButtonSpec),
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FormulaSpec {
+    pub source: String,
+    #[serde(default = "default_font_size")]
+    pub font_size: f64,
+    #[serde(default = "default_pixels_per_point")]
+    pub pixels_per_point: f32,
+}
+
+fn default_font_size() -> f64 {
+    18.0
+}
+fn default_pixels_per_point() -> f32 {
+    2.0
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -215,6 +239,15 @@ fn validate_node(
                 spec.columns = keys.into_iter().collect();
             }
             limit(spec.columns.len(), &format!("{path}.columns"))?;
+        }
+        Node::Formula(spec) => {
+            if !spec.font_size.is_finite() || !(0.1..=4096.0).contains(&spec.font_size) {
+                return Err(format!("{path}.font_size must be in 0.1..=4096"));
+            }
+            if !spec.pixels_per_point.is_finite() || !(0.01..=16.0).contains(&spec.pixels_per_point)
+            {
+                return Err(format!("{path}.pixels_per_point must be in 0.01..=16"));
+            }
         }
         Node::Text(_) | Node::Button(_) => {}
     }
@@ -402,6 +435,9 @@ mod tests {
             mode: default_mode(),
             theme: Default::default(),
             style: Default::default(),
+            sixel: false,
+            cell_pixels: None,
+            force_cell_pixels: false,
             layout: Node::Text("x".into()),
         };
         for _ in 1..MAX_DEPTH {

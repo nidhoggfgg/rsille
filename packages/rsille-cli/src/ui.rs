@@ -1,7 +1,10 @@
 //! Terminal-independent CLI adapter. The host owns terminal setup and presentation.
+use std::{collections::HashMap, sync::Arc};
+
 use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
 use rsille::render::{buffer::Buffer, chunk::Chunk};
 use rsille::tui::prelude::*;
+use rsille_typst::{MathRenderer, RenderOptions};
 use serde_json::{json, Map, Value};
 
 use crate::config::{display_text, Action, Config, Node};
@@ -11,6 +14,80 @@ struct State {
     config: Config,
     values: Map<String, Value>,
     outcome: Option<Result<Value, ()>>,
+    formulas: HashMap<FormulaKey, FormulaImage>,
+}
+
+type FormulaKey = (String, u64, u32);
+
+struct FormulaImage {
+    canvas: Arc<RasterCanvas>,
+    width: u16,
+    height: u16,
+}
+
+fn formula_key(spec: &crate::config::FormulaSpec) -> FormulaKey {
+    (
+        spec.source.clone(),
+        spec.font_size.to_bits(),
+        spec.pixels_per_point.to_bits(),
+    )
+}
+
+fn cache_formulas(
+    node: &Node,
+    pixels: CellPixels,
+    theme: &Theme,
+    renderer: &mut Option<MathRenderer>,
+    images: &mut HashMap<FormulaKey, FormulaImage>,
+) -> Result<(), String> {
+    match node {
+        Node::Row(nodes) | Node::Column(nodes) => {
+            for node in nodes {
+                cache_formulas(node, pixels, theme, renderer, images)?;
+            }
+        }
+        Node::Formula(spec) => {
+            let key = formula_key(spec);
+            if images.contains_key(&key) {
+                return Ok(());
+            }
+            if renderer.is_none() {
+                *renderer = Some(
+                    MathRenderer::new(typst_assets::fonts(), "New Computer Modern Math")
+                        .map_err(|e| format!("initialize formula fonts: {e}"))?,
+                );
+            }
+            let mut options = RenderOptions {
+                font_size: spec.font_size,
+                pixels_per_point: spec.pixels_per_point,
+                ..RenderOptions::default()
+            };
+            if let Some(Color::Rgb(r, g, b)) = theme.styles.text.fg_color {
+                options.foreground = Rgb(r, g, b);
+            }
+            if let Some(Color::Rgb(r, g, b)) = theme.styles.surface.bg_color {
+                options.background = Rgb(r, g, b);
+            }
+            let canvas = renderer
+                .as_ref()
+                .unwrap()
+                .render(&spec.source, &options)
+                .map_err(|e| format!("render formula: {e}"))?;
+            let size = pixels
+                .size_for_pixels(canvas.width(), canvas.height())
+                .ok_or_else(|| "formula dimensions exceed terminal cell limits".to_owned())?;
+            images.insert(
+                key,
+                FormulaImage {
+                    canvas: Arc::new(canvas),
+                    width: size.width.max(1),
+                    height: size.height.max(1),
+                },
+            );
+        }
+        _ => {}
+    }
+    Ok(())
 }
 
 enum Message {
@@ -32,10 +109,53 @@ pub fn build(config: Config) -> Ui {
 }
 
 impl Ui {
+    /// Text-only compatibility constructor; formula hosts use `new_with_cell_pixels`.
     pub fn new(config: Config) -> Self {
+        Self::with_images(config, HashMap::new(), RasterOutput::default())
+    }
+
+    /// Compile formulas once using host-resolved physical cell metrics; never probe here.
+    pub fn new_with_cell_pixels(
+        config: Config,
+        size: (u16, u16),
+        pixels: CellPixels,
+    ) -> Result<Self, String> {
+        let pixels = CellPixels::resolve(Some(pixels)).map_err(|e| format!("cell pixels: {e}"))?;
+        let mut images = HashMap::new();
+        cache_formulas(
+            &config.layout,
+            pixels,
+            &config.theme.build(),
+            &mut None,
+            &mut images,
+        )?;
+        let inline = config.mode == "inline";
+        let output = RasterOutput {
+            capabilities: RasterCapabilities {
+                sixel: true,
+                reliable_erase: !inline,
+                reliable_inline_erase: inline,
+                no_scroll: true,
+                cell_pixels: Some(pixels),
+            },
+        };
+        let mut ui = Self::with_images(config, images, output);
+        ui.resize(size.0, size.1);
+        Ok(ui)
+    }
+
+    fn with_images(
+        config: Config,
+        formulas: HashMap<FormulaKey, FormulaImage>,
+        output: RasterOutput,
+    ) -> Self {
         let quick = matches!(
             config.layout,
-            Node::Input(_) | Node::Select(_) | Node::Checkbox(_) | Node::Table(_)
+            Node::Input(_)
+                | Node::Select(_)
+                | Node::Checkbox(_)
+                | Node::Table(_)
+                | Node::Formula(_)
         );
         let mut values = Map::new();
         initial_values(&config.layout, &mut values);
@@ -44,7 +164,9 @@ impl Ui {
             config,
             values,
             outcome: None,
+            formulas,
         })
+        .raster_output(output)
         .disable_quit_key()
         .with_theme(theme)
         .with_motion_policy(MotionPolicy::disabled())
@@ -203,6 +325,18 @@ fn view(node: &Node, state: &State, quick: bool) -> Box<dyn Widget<Message>> {
             })
         }
         Node::Text(text) => Box::new(label(display_text(text))),
+        Node::Formula(spec) => match state.formulas.get(&formula_key(spec)) {
+            Some(image) => Box::new(
+                raster_canvas(image.canvas.clone())
+                    .background(image.canvas.background())
+                    .scale(RasterScale::Original)
+                    .align_x(RasterAlign::Start)
+                    .align_y(RasterAlign::Start)
+                    .fixed(image.width, image.height),
+            ),
+            // `new` remains infallible and text-only; do not compile during view rebuilds.
+            None => Box::new(label(display_text(&spec.source))),
+        },
         Node::Input(spec) => {
             let id = spec.id.clone();
             let value = state.values.get(&id).and_then(Value::as_str).unwrap_or("");
@@ -373,6 +507,157 @@ mod tests {
     fn key(ui: &mut Ui, code: KeyCode) {
         ui.event(Event::Key(KeyEvent::new(code, KeyModifiers::NONE)))
             .unwrap();
+    }
+
+    fn formula_config(source: &str) -> Config {
+        let mut config = parse("version: 1\nlayout: {text: placeholder}", &Value::Null).unwrap();
+        config.sixel = true;
+        config.layout = Node::Formula(crate::config::FormulaSpec {
+            source: source.to_owned(),
+            font_size: 18.0,
+            pixels_per_point: 2.0,
+        });
+        config
+    }
+
+    fn formula_ui(config: Config) -> Result<Ui, String> {
+        Ui::new_with_cell_pixels(
+            config,
+            (80, 24),
+            CellPixels {
+                width: 8,
+                height: 16,
+            },
+        )
+    }
+
+    #[test]
+    fn formula_raster_has_natural_layout_and_theme_colors() {
+        let config = formula_config("frac(1, 2)");
+        let theme = config.theme.build();
+        let mut prompt = formula_ui(config).unwrap();
+        let image = prompt.runtime.state().formulas.values().next().unwrap();
+        let canvas = image.canvas.clone();
+        let (width, height) = (image.width, image.height);
+        assert_eq!(u32::from(width), canvas.width().div_ceil(8));
+        assert_eq!(u32::from(height), canvas.height().div_ceil(16));
+        assert_eq!(prompt.inline_height(), height);
+        if let Some(Color::Rgb(r, g, b)) = theme.styles.surface.bg_color {
+            assert_eq!(canvas.background(), Rgb(r, g, b));
+        }
+        if let Some(Color::Rgb(r, g, b)) = theme.styles.text.fg_color {
+            assert!(canvas.pixels().contains(&Rgb(r, g, b)));
+        }
+        prompt.resize(80, height);
+        let frame = prompt.draw().unwrap();
+        assert!(frame.has_raster());
+        let raster = frame.raster_at((0, 0).into()).unwrap();
+        assert_eq!(raster.target, (width, height).into());
+        assert_eq!(raster.options.scale, RasterScale::Original);
+        assert_eq!(raster.options.background, canvas.background());
+    }
+
+    #[test]
+    fn formula_resize_and_redraw_reuse_cached_source() {
+        let mut prompt = formula_ui(formula_config("x^2 + y^2")).unwrap();
+        let canvas = prompt
+            .runtime
+            .state()
+            .formulas
+            .values()
+            .next()
+            .unwrap()
+            .canvas
+            .clone();
+        let natural_height = prompt.inline_height();
+        for (width, height) in [(80, 24), (3, 2), (120, 40)] {
+            prompt.event(Event::Resize(width, height)).unwrap();
+            let frame = prompt.draw().unwrap();
+            assert_eq!(frame.size(), (width, height).into());
+            assert!(frame.has_raster());
+            assert_eq!(prompt.inline_height(), natural_height);
+            assert!(Arc::ptr_eq(
+                &canvas,
+                &prompt
+                    .runtime
+                    .state()
+                    .formulas
+                    .values()
+                    .next()
+                    .unwrap()
+                    .canvas
+            ));
+        }
+    }
+
+    #[test]
+    fn formula_errors_are_returned_before_drawing() {
+        let error = formula_ui(formula_config("frac(")).err().unwrap();
+        assert!(error.contains("render formula"), "{error}");
+        assert!(Ui::new_with_cell_pixels(
+            formula_config("x"),
+            (80, 24),
+            CellPixels {
+                width: 0,
+                height: 16
+            },
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn root_formula_enter_submits_empty_values_without_initial_draw() {
+        let mut prompt = formula_ui(formula_config("x")).unwrap();
+        key(&mut prompt, KeyCode::Enter);
+        assert_eq!(
+            prompt.outcome(),
+            Some(Ok(json!({"action": "submit", "values": {}})))
+        );
+    }
+
+    #[test]
+    fn yaml_formula_is_a_non_value_component() {
+        let config = parse(
+            "version: 1\nsixel: true\nlayout:\n  column:\n    - formula: {source: 'x^2', font_size: 18, pixels_per_point: 2}\n    - button: {label: Submit, action: submit}",
+            &Value::Null,
+        )
+        .unwrap();
+        let mut prompt = formula_ui(config).unwrap();
+        assert!(prompt.draw().unwrap().has_raster());
+        key(&mut prompt, KeyCode::Enter);
+        assert_eq!(
+            prompt.outcome(),
+            Some(Ok(json!({"action": "submit", "values": {}})))
+        );
+    }
+
+    #[test]
+    fn compound_formulas_are_non_values_and_share_cached_images() {
+        let mut config = formula_config("x");
+        let formula = config.layout.clone();
+        config.layout = Node::Column(vec![
+            formula.clone(),
+            formula,
+            Node::Input(crate::config::InputSpec {
+                id: "name".into(),
+                label: "Name".into(),
+                value: "Ada".into(),
+            }),
+            Node::Button(crate::config::ButtonSpec {
+                label: "Submit".into(),
+                action: Action::Submit,
+            }),
+        ]);
+        let mut prompt = formula_ui(config).unwrap();
+        assert_eq!(prompt.runtime.state().formulas.len(), 1);
+        key(&mut prompt, KeyCode::Enter);
+        assert_eq!(prompt.outcome(), None);
+        key(&mut prompt, KeyCode::Tab);
+        key(&mut prompt, KeyCode::Enter);
+        assert_eq!(
+            prompt.outcome(),
+            Some(Ok(json!({"action": "submit", "values": {"name": "Ada"}})))
+        );
     }
 
     #[test]

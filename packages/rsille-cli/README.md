@@ -152,6 +152,43 @@ rsille table services.json
 {"action":"submit","values":{"value":[{"name":"api","status":"ready"}]}}
 ```
 
+## Sixel 与 Typst 公式
+
+使用 `formula` 显示 Typst 数学公式（不是 LaTeX，也不要包含 `$` 分隔符）：
+
+```sh
+rsille formula --sixel 'integral_0^1 x^2 dif x = frac(1, 3)'
+rsille formula --inline --sixel --font-size 24 'sqrt(x)'
+```
+
+Enter 完成查看并返回 `{"action":"submit","values":{}}`，Esc / Ctrl-C 取消。不支持 `--output plain`。可通过 `--font-size` 设置字号（默认 18 pt），`--pixels-per-point` 设置栅格分辨率（默认 2）。公式在启动时通过 `rsille-typst` 编译并缓存，重绘与窗口调整不会重复编译。颜色跟随主题，按原始像素大小显示，空间不足时裁剪。
+
+**`--sixel` 是对终端能力的显式确认，不是自动检测。** 终端及中间的 multiplexer 必须支持 Sixel、图形随文本滚动、可靠的图形擦除及透明尾部填充；inline 模式还要求局部行擦除能清除图形。不提供字符画降级。不含公式的文本界面不需要启用此参数。
+
+**通常不需要设置字符单元的像素尺寸，交给 rsille 自动获取即可。** 启动时优先读取终端 OS 指标，条件允许时再通过底层终端查询探测。尺寸取决于字体、缩放和 DPI，请不要猜测或照抄其他终端的值；错误的尺寸会导致图形布局和裁剪异常。改变字体或 DPI 后应重启。
+
+`--cell-pixels WxH` 仅作为自动获取失败或指标不准确时的高级覆盖选项，只有确认实际测量值后才使用。它表示每个字符单元的物理像素尺寸，不是终端列数×行数。常见尺寸示例包括 8×18、10×20 像素，对应参数写法为 `8x18`、`10x20`；这些值仅帮助理解尺寸含义，不是默认值或推荐配置，请以自动探测或实际测量结果为准。每轴须为 1..=1024，面积不超过 65536；恰好等于终端网格尺寸的值需要额外传入 `--force-cell-pixels`。重定向输入/输出可能限制终端查询；若自动获取失败，请先尝试在交互终端中直接运行，而不是随意填写尺寸。
+
+YAML 也支持公式：
+
+```yaml
+version: 1
+sixel: true
+mode: inline
+layout:
+  column:
+    - formula:
+        source: 'sum_(k=1)^n k = frac(n(n+1), 2)'
+        font_size: 20
+    - button: {label: 完成, action: submit}
+```
+
+顶层 `sixel`、`cell_pixels`、`force_cell_pixels` 与对应 CLI 参数一致，显式 CLI 参数优先。公式组件不添加输出字段；在组合表单中通过按钮提交。Sixel 数据仍只写入交互终端，不会混入 stdout JSON。
+
+构建会引入 Typst 编译器及 `typst-assets` 字体，构建时间和体积有所增加；运行时不下载字体。使用随包提供的 New Computer Modern Math，分发二进制时须保留字体各自要求的许可证及署名，参见 [rsille-typst 字体说明](../rsille-typst/README_cn.md)。
+
+**只处理可信公式。** Typst 禁止访问文件和网络包，但不是资源隔离沙箱；复杂表达式可以耗尽 CPU 或内存，像素上限不限制编译资源。处理不可信输入时应使用外部进程资源限制。
+
 ## 用 YAML 组合界面
 
 将以下内容保存为 `form.yaml`：
@@ -203,6 +240,7 @@ rsille run form.yaml > result.json
 | --- | --- |
 | `row` / `column` | 子节点数组，水平 / 垂直排列 |
 | `text` | 显示的字符串 |
+| `formula` | `source`（Typst 数学内容）；可选 `font_size`（默认 18）、`pixels_per_point`（默认 2），需要启用 Sixel |
 | `input` | `id`、`label`；可选 `value`，默认空字符串 |
 | `select` | `id`、`label`、非空 `options` 字符串数组；可选 `selected`，默认索引 `0` |
 | `checkbox` | `id`、`label`；可选 `checked`，默认 `false` |

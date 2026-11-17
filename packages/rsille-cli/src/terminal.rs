@@ -16,6 +16,139 @@ pub fn run(config: crate::config::Config) -> Result<Option<serde_json::Value>, S
 }
 
 #[cfg(any(unix, windows))]
+use rsille::render::raster_output::{CellPixels, RasterCapabilities, RasterOutput};
+
+#[cfg(any(unix, windows))]
+fn explicit_pixels(value: &str, grid: (u16, u16), force: bool) -> Result<CellPixels, String> {
+    let (width, height) = value.split_once('x').ok_or("--cell-pixels requires WxH")?;
+    let pixels = CellPixels {
+        width: width.parse().map_err(|_| "invalid cell pixel width")?,
+        height: height.parse().map_err(|_| "invalid cell pixel height")?,
+    };
+    let pixels = CellPixels::resolve(Some(pixels)).map_err(|e| e.to_string())?;
+    if (pixels.width, pixels.height) == grid && !force {
+        return Err("--cell-pixels matches columns x rows; provide measured physical cell pixels or confirm with --force-cell-pixels".into());
+    }
+    Ok(pixels)
+}
+
+// Use the core encoder rather than flattening raster ownership into placeholder
+// text. Each frame is staged before touching the terminal; the host repaints its
+// owned region, so no renderer history can outlive a failed terminal write.
+#[cfg(any(unix, windows))]
+fn raster_frame(
+    buffer: &rsille::render::buffer::Buffer,
+    pixels: CellPixels,
+    inline: &mut Option<Inline>,
+    dimensions: (u16, u16),
+) -> std::io::Result<String> {
+    use rsille::render::{area::Size, buffer::Buffer, chunk::Chunk, Builder, Draw, DrawErr};
+    if buffer.has_unsupported_raster_composition() {
+        return Err(std::io::Error::other("unsupported raster composition"));
+    }
+    let pixels = CellPixels::resolve(Some(pixels))?;
+    let is_inline = inline.is_some();
+    let padding = if is_inline && buffer.has_raster() {
+        ((6 - pixels.height % 6) % 6).div_ceil(pixels.height)
+    } else {
+        0
+    };
+    let available = dimensions.1.saturating_sub(padding);
+    if available == 0 || dimensions.0 == 0 {
+        return Err(std::io::Error::other(
+            "viewport is too short for raster content and Sixel padding",
+        ));
+    }
+    // Clip before encoding, preserving each tile's original target and crop.
+    // In particular, if clipping removes the final raster cell, use our local
+    // text transport rather than the core's text-only first-frame clear path.
+    let size = buffer.size();
+    let mut clipped =
+        Buffer::new((size.width.min(dimensions.0), size.height.min(available)).into());
+    for (x, y, cell) in buffer.all_cells() {
+        if x >= clipped.size().width || y >= clipped.size().height {
+            continue;
+        }
+        if let Some(raster) = buffer.raster_at((x, y).into()) {
+            clipped
+                .set_raster((x, y).into(), raster.clone())
+                .map_err(std::io::Error::other)?;
+        } else if cell.width() > 0
+            && usize::from(x) + cell.width() <= usize::from(clipped.size().width)
+        {
+            clipped
+                .set((x, y).into(), cell.content.clone())
+                .map_err(std::io::Error::other)?;
+        }
+    }
+    let buffer = &clipped;
+    struct Snapshot<'a>(&'a Buffer);
+    impl Draw for Snapshot<'_> {
+        fn draw(&mut self, mut target: Chunk) -> Result<Size, DrawErr> {
+            for (x, y, cell) in self.0.all_cells() {
+                if let Some(raster) = self.0.raster_at((x, y).into()) {
+                    target.set_raster_cell(x, y, raster.clone())?;
+                } else {
+                    target.set_forced(x, y, cell.content.clone())?;
+                }
+            }
+            Ok(self.0.size())
+        }
+    }
+    let mut bytes = Vec::new();
+    let mut builder = Builder::new();
+    builder
+        .size(buffer.size().into())
+        .inline_mode(is_inline)
+        .clear(!is_inline)
+        .inline_max_height(buffer.size().height)
+        .raster_output(RasterOutput {
+            capabilities: RasterCapabilities {
+                sixel: true,
+                reliable_erase: !is_inline,
+                reliable_inline_erase: is_inline,
+                no_scroll: true,
+                cell_pixels: Some(pixels),
+            },
+        });
+    if !is_inline {
+        builder.enable_alt_screen();
+    }
+    // Inline text frames retain the existing relative transport (and erase any
+    // preceding graphics). The core's text-only first-frame clear is global.
+    if is_inline && !buffer.has_raster() {
+        return inline.as_mut().unwrap().present(buffer, dimensions);
+    }
+    let mut renderer = builder.build_render(Snapshot(buffer), &mut bytes);
+    renderer.set_inline_viewport_height(dimensions.1);
+    renderer.render()?;
+    drop(renderer);
+    let encoded = String::from_utf8(bytes).map_err(std::io::Error::other)?;
+    let mut text = String::new();
+    if let Some(region) = inline {
+        let previous = region.rows;
+        text.push_str(&region.clear(dimensions.1));
+        if previous == 0 {
+            text.push_str("\r\n");
+        }
+        let content = buffer
+            .size()
+            .height
+            .min(dimensions.1.saturating_sub(padding));
+        region.rows = content.saturating_add(padding);
+        text.push_str(&encoded);
+        if padding > 0 {
+            use std::fmt::Write;
+            write!(text, "\x1b[{padding}E").unwrap();
+        }
+        text.push_str("\x1b[0m\r");
+    } else {
+        text.push_str(&encoded);
+    }
+    Ok(text)
+}
+
+#[cfg(any(unix, windows))]
 #[derive(Default)]
 struct Inline {
     // Between frames the cursor stays on the last owned row, in column one.
@@ -26,6 +159,13 @@ struct Inline {
 impl Inline {
     fn height(requested: u16, available: u16) -> u16 {
         requested.max(1).min(available.saturating_sub(1).max(1))
+    }
+
+    fn write_failed(&mut self) {
+        // A partial write may stop anywhere in reservation, text, or DCS data.
+        // Without a known bottom anchor, moving up could erase the caller's
+        // output. Restore modes/protocol state, but leave uncertain rows alone.
+        self.rows = 0;
     }
 
     fn clear(&mut self, available: u16) -> String {
@@ -116,6 +256,147 @@ impl Inline {
 mod inline_tests {
     use super::Inline;
     use rsille::render::buffer::Buffer;
+
+    fn raster_buffer() -> Buffer {
+        use rsille::render::raster::{RasterCanvas, RasterCell};
+        let mut buffer = Buffer::new((2, 2).into());
+        buffer
+            .set_raster(
+                (0, 0).into(),
+                RasterCell {
+                    canvas: RasterCanvas::new(2, 2, Default::default()).unwrap(),
+                    target: (1, 1).into(),
+                    x: 0,
+                    y: 0,
+                    options: Default::default(),
+                },
+            )
+            .unwrap();
+        buffer
+    }
+
+    #[test]
+    fn explicit_metrics_are_validated_without_probing() {
+        for value in ["0x20", "10x0", "1025x1", "256x257", "8", "axb"] {
+            assert!(super::explicit_pixels(value, (80, 24), true).is_err());
+        }
+        assert!(super::explicit_pixels("80x24", (80, 24), false).is_err());
+        assert!(super::explicit_pixels("80x24", (80, 24), true).is_ok());
+        assert_eq!(
+            super::explicit_pixels("8x18", (80, 24), false).unwrap(),
+            super::CellPixels {
+                width: 8,
+                height: 18
+            }
+        );
+    }
+
+    #[test]
+    fn raster_transport_preserves_metadata_and_owns_guards() {
+        for height in [1, 2, 18, 20] {
+            let pixels = super::CellPixels { width: 8, height };
+            let padding = ((6 - height % 6) % 6).div_ceil(height);
+            let mut inline = Some(Inline::default());
+            let buffer = raster_buffer();
+            for _ in 0..2 {
+                let text = super::raster_frame(&buffer, pixels, &mut inline, (80, 24)).unwrap();
+                assert!(text.contains("\x1bP"));
+                assert!(text.contains("\x1b\\"));
+                assert!(!text.contains("\x1b[2J"));
+                assert!(!text.contains("1049"));
+                assert_eq!(inline.as_ref().unwrap().rows, 2 + padding);
+            }
+            let cleanup = inline.as_mut().unwrap().clear(24);
+            assert_eq!(cleanup.matches("\x1b[2K").count(), usize::from(2 + padding));
+            let mut fullscreen = Buffer::new((2, 8).into());
+            fullscreen
+                .set_raster(
+                    (0, 0).into(),
+                    buffer.raster_at((0, 0).into()).unwrap().clone(),
+                )
+                .unwrap();
+            let text = super::raster_frame(&fullscreen, pixels, &mut None, (80, 24)).unwrap();
+            assert!(text.contains("\x1bP"));
+            assert!(text.contains("\x1b[2J"));
+        }
+    }
+
+    #[test]
+    fn invalid_raster_frame_does_not_change_owned_rows() {
+        let pixels = super::CellPixels {
+            width: 8,
+            height: 1,
+        };
+        let mut inline = Some(Inline { rows: 2 });
+        let mut buffer = raster_buffer();
+        assert!(super::raster_frame(&buffer, pixels, &mut inline, (80, 2)).is_err());
+        assert_eq!(inline.as_ref().unwrap().rows, 2);
+        buffer.mark_unsupported_raster_composition();
+        assert!(super::raster_frame(&buffer, pixels, &mut inline, (80, 24)).is_err());
+        assert_eq!(inline.as_ref().unwrap().rows, 2);
+    }
+
+    #[test]
+    fn clipping_the_last_raster_cell_never_clears_the_screen() {
+        let mut buffer = Buffer::new((2, 4).into());
+        buffer
+            .set_raster(
+                (0, 3).into(),
+                raster_buffer().raster_at((0, 0).into()).unwrap().clone(),
+            )
+            .unwrap();
+        let mut inline = Some(Inline { rows: 6 });
+        let text = super::raster_frame(
+            &buffer,
+            super::CellPixels {
+                width: 8,
+                height: 2,
+            },
+            &mut inline,
+            (2, 4),
+        )
+        .unwrap();
+        assert!(!text.contains("\x1b[2J"));
+        assert!(!text.contains("\x1bP"));
+        assert_eq!(inline.as_ref().unwrap().rows, 2);
+        assert_eq!(text.matches("\x1b[2K").count(), 6);
+    }
+
+    #[test]
+    fn raster_resize_clips_before_drawing_and_reserves_only_visible_rows() {
+        let mut inline = Some(Inline { rows: 8 });
+        let buffer = raster_buffer();
+        let text = super::raster_frame(
+            &buffer,
+            super::CellPixels {
+                width: 8,
+                height: 2,
+            },
+            &mut inline,
+            (1, 3),
+        )
+        .unwrap();
+        assert!(text.contains("\x1bP"));
+        assert!(!text.contains("\x1b[2J"));
+        assert_eq!(inline.as_ref().unwrap().rows, 3);
+        // One surviving content row plus two blank band guards. Reservation
+        // precedes DCS and cleanup includes the guards, not the old eight rows.
+        assert_eq!(text.matches("\r\n").count(), 2);
+        assert!(text.find("\r\n").unwrap() < text.find("\x1bP").unwrap());
+        assert_eq!(
+            inline.as_mut().unwrap().clear(3).matches("\x1b[2K").count(),
+            3
+        );
+    }
+
+    #[test]
+    fn partial_write_does_not_erase_from_an_unknown_cursor() {
+        let mut inline = Inline { rows: 8 };
+        inline.write_failed();
+        let cleanup = inline.clear(24);
+        assert!(!cleanup.contains("\x1b[1A"));
+        assert!(!cleanup.contains("\x1b[2K"));
+    }
 
     #[test]
     fn height_is_bounded_and_nonzero() {
@@ -257,6 +538,14 @@ mod windows {
                 self.output_mode | ENABLE_PROCESSED_OUTPUT | ENABLE_VIRTUAL_TERMINAL_PROCESSING,
             )?;
             self.vt = true;
+            // Core queue! must encode ANSI into the staging buffer, never use
+            // WinAPI fallbacks. Crossterm 0.28 checks CONOUT$, whose VT mode we
+            // have enabled and will restore, not the redirected result handle.
+            if !crossterm::ansi_support::supports_ansi() {
+                return Err(io::Error::other(
+                    "ANSI encoding unavailable for console transport",
+                ));
+            }
             self.screen = true;
             if inline {
                 self.write("\x1b[?7l\x1b[?25l\x1b[0m")
@@ -310,11 +599,32 @@ mod windows {
             }
             Ok(())
         }
-        pub(super) fn present(&mut self, buffer: &Buffer) -> io::Result<()> {
+        pub(super) fn cell_pixels(&self) -> Option<super::CellPixels> {
+            let mut info: CONSOLE_FONT_INFO = unsafe { std::mem::zeroed() };
+            // SAFETY: the owned console handle and output pointer are valid.
+            checked(unsafe { GetCurrentConsoleFont(handle(&self.output), 0, &mut info) }).ok()?;
+            Some(super::CellPixels {
+                width: u16::try_from(info.dwFontSize.X).ok()?,
+                height: u16::try_from(info.dwFontSize.Y).ok()?,
+            })
+        }
+        pub(super) fn present(
+            &mut self,
+            buffer: &Buffer,
+            pixels: Option<super::CellPixels>,
+        ) -> io::Result<()> {
+            if let Some(pixels) = pixels {
+                let dimensions = self.size()?;
+                let text = super::raster_frame(buffer, pixels, &mut self.inline, dimensions)?;
+                return self.write_frame(&text);
+            }
+            if buffer.has_raster() || buffer.has_unsupported_raster_composition() {
+                return Err(io::Error::other("raster output requires --sixel"));
+            }
             if self.inline.is_some() {
                 let dimensions = self.size()?;
                 let text = self.inline.as_mut().unwrap().present(buffer, dimensions)?;
-                return self.write(&text);
+                return self.write_frame(&text);
             }
             let mut text = String::new();
             let size = buffer.size();
@@ -345,7 +655,16 @@ mod windows {
                 }
             }
             ansi(&mut text, ResetColor)?;
-            self.write(&text)
+            self.write_frame(&text)
+        }
+        fn write_frame(&mut self, text: &str) -> io::Result<()> {
+            let result = self.write(text);
+            if result.is_err() {
+                if let Some(region) = &mut self.inline {
+                    region.write_failed();
+                }
+            }
+            result
         }
         pub(super) fn restore(&mut self) -> io::Result<()> {
             let mut first = None;
@@ -364,7 +683,13 @@ mod windows {
                     } else {
                         String::from("\x1b[?1049l")
                     };
-                    for text in ["\x1b[0m", "\x1b[?7h", "\x1b[?25h", &cleanup] {
+                    for text in [
+                        "\x18\x1b\\\x1b[?2026l",
+                        "\x1b[0m",
+                        "\x1b[?7h",
+                        "\x1b[?25h",
+                        &cleanup,
+                    ] {
                         if let Err(e) = self.write(text) {
                             first.get_or_insert(e);
                         }
@@ -755,12 +1080,41 @@ mod unix {
             Ok((size.ws_col, size.ws_row))
         }
 
-        pub(super) fn present(&mut self, buffer: &Buffer) -> io::Result<()> {
+        pub(super) fn cell_pixels(&self) -> Option<super::CellPixels> {
+            // SAFETY: ioctl fills a valid winsize using our controlling tty.
+            let mut size: libc::winsize = unsafe { std::mem::zeroed() };
+            if unsafe { libc::ioctl(self.tty.as_raw_fd(), libc::TIOCGWINSZ, &mut size) } < 0
+                || size.ws_col == 0
+                || size.ws_row == 0
+                || size.ws_xpixel == 0
+                || size.ws_ypixel == 0
+                || size.ws_xpixel % size.ws_col != 0
+                || size.ws_ypixel % size.ws_row != 0
+            {
+                return None;
+            }
+            Some(super::CellPixels {
+                width: size.ws_xpixel / size.ws_col,
+                height: size.ws_ypixel / size.ws_row,
+            })
+        }
+        pub(super) fn present(
+            &mut self,
+            buffer: &Buffer,
+            pixels: Option<super::CellPixels>,
+        ) -> io::Result<()> {
+            if let Some(pixels) = pixels {
+                let dimensions = self.size()?;
+                let text = super::raster_frame(buffer, pixels, &mut self.inline, dimensions)?;
+                return self.write_frame(text.as_bytes());
+            }
+            if buffer.has_raster() || buffer.has_unsupported_raster_composition() {
+                return Err(io::Error::other("raster output requires --sixel"));
+            }
             if self.inline.is_some() {
                 let dimensions = self.size()?;
                 let text = self.inline.as_mut().unwrap().present(buffer, dimensions)?;
-                self.tty.write_all(text.as_bytes())?;
-                return self.tty.flush();
+                return self.write_frame(text.as_bytes());
             }
             let mut bytes = Vec::new();
             let size = buffer.size();
@@ -775,8 +1129,17 @@ mod unix {
                 }
             }
             queue!(bytes, ResetColor)?;
-            self.tty.write_all(&bytes)?;
-            self.tty.flush()
+            self.write_frame(&bytes)
+        }
+
+        fn write_frame(&mut self, bytes: &[u8]) -> io::Result<()> {
+            let result = self.tty.write_all(bytes).and_then(|()| self.tty.flush());
+            if result.is_err() {
+                if let Some(region) = &mut self.inline {
+                    region.write_failed();
+                }
+            }
+            result
         }
 
         pub(super) fn restore(&mut self) -> io::Result<()> {
@@ -791,6 +1154,7 @@ mod unix {
                 // Separate writes ensure one failed operation does not prevent
                 // attempts to undo the remaining modes.
                 for bytes in [
+                    b"\x18\x1b\\\x1b[?2026l".as_slice(),
                     b"\x1b[0m".as_slice(),
                     b"\x1b[?2004l",
                     b"\x1b[?7h",
@@ -909,11 +1273,37 @@ mod host {
         let inline = config.mode == "inline";
         let mut terminal = Terminal::open().map_err(|e| format!("open terminal: {e}"))?;
         let result = (|| {
+            let mut size = terminal.size().map_err(|e| format!("terminal size: {e}"))?;
+            // Resolve before Ui construction or any input reader. Never issue a
+            // query on redirected standard streams (JSON input/result output).
+            let pixels = if config.sixel {
+                Some(if let Some(value) = &config.cell_pixels {
+                    super::explicit_pixels(value, size, config.force_cell_pixels)?
+                } else {
+                    use std::io::IsTerminal;
+                    terminal.cell_pixels()
+                        .and_then(|p| super::CellPixels::resolve(Some(p)).ok())
+                        .map(Ok)
+                        .unwrap_or_else(|| {
+                            if std::io::stdin().is_terminal() && std::io::stdout().is_terminal() {
+                                super::CellPixels::resolve(None)
+                            } else {
+                                Err(std::io::Error::other("automatic probing requires controlling-terminal stdin/stdout"))
+                            }
+                        })
+                        .map_err(|e| format!("cannot resolve cell pixels: {e}; use --cell-pixels WxH with measured physical pixels per character cell (not columns x rows)"))?
+                })
+            } else {
+                None
+            };
+            let mut ui = if let Some(pixels) = pixels {
+                crate::ui::Ui::new_with_cell_pixels(config, size, pixels)?
+            } else {
+                crate::ui::build(config)
+            };
             terminal
                 .enter(inline)
                 .map_err(|e| format!("set up terminal: {e}"))?;
-            let mut ui = crate::ui::build(config);
-            let mut size = terminal.size().map_err(|e| format!("terminal size: {e}"))?;
             let height = if inline {
                 super::Inline::height(ui.inline_height(), size.1)
             } else {
@@ -921,7 +1311,7 @@ mod host {
             };
             ui.resize(size.0, height);
             terminal
-                .present(ui.draw()?)
+                .present(ui.draw()?, pixels)
                 .map_err(|e| format!("draw terminal: {e}"))?;
             let mut input =
                 Input::start(&terminal).map_err(|e| format!("start terminal input: {e}"))?;
@@ -963,7 +1353,7 @@ mod host {
                         ui.resize(size.0, super::Inline::height(ui.inline_height(), size.1));
                     }
                     terminal
-                        .present(ui.draw()?)
+                        .present(ui.draw()?, pixels)
                         .map_err(|e| format!("draw terminal: {e}"))?;
                 }
             }

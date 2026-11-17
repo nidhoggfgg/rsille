@@ -36,6 +36,15 @@ struct Args {
     /// Structural style preset; overrides YAML style (default: classic)
     #[arg(long, global = true, value_enum)]
     style: Option<style::StylePreset>,
+    /// Assert terminal/multiplexer support for Sixel and reliable graphics erasure
+    #[arg(long, global = true)]
+    sixel: bool,
+    /// Physical pixels per character cell, e.g. 8x18
+    #[arg(long, global = true)]
+    cell_pixels: Option<String>,
+    /// Allow cell metrics that equal the terminal grid dimensions
+    #[arg(long, global = true)]
+    force_cell_pixels: bool,
     #[command(subcommand)]
     command: Command,
 }
@@ -76,6 +85,14 @@ enum Command {
         selectable: bool,
         #[arg(long, value_delimiter = ',')]
         columns: Vec<String>,
+    },
+    /// Display Typst math (without dollar delimiters); Enter completes viewing
+    Formula {
+        source: String,
+        #[arg(long, default_value_t = 18.0)]
+        font_size: f64,
+        #[arg(long, default_value_t = 2.0)]
+        pixels_per_point: f32,
     },
     /// Run a version 1 YAML interface
     Run {
@@ -142,13 +159,28 @@ fn prepare(args: Args) -> Result<(Config, Output, bool), Failure> {
     let mut data = Value::Null;
     let confirm = matches!(&args.command, Command::Confirm { .. });
     if args.output == Output::Plain
-        && matches!(&args.command, Command::Table { .. } | Command::Run { .. })
+        && matches!(
+            &args.command,
+            Command::Table { .. } | Command::Run { .. } | Command::Formula { .. }
+        )
     {
         return Err(invalid(
             "--output plain only supports select, input and confirm",
         ));
     }
     let (title, layout) = match args.command {
+        Command::Formula {
+            source,
+            font_size,
+            pixels_per_point,
+        } => (
+            String::new(),
+            Node::Formula(config::FormulaSpec {
+                source,
+                font_size,
+                pixels_per_point,
+            }),
+        ),
         Command::Select { title, options } => (
             String::new(),
             Node::Select(SelectSpec {
@@ -228,11 +260,20 @@ fn prepare(args: Args) -> Result<(Config, Output, bool), Failure> {
             if let Some(theme) = args.theme {
                 config.theme = theme;
             }
+            config.sixel |= args.sixel;
+            if args.cell_pixels.is_some() {
+                config.cell_pixels = args.cell_pixels;
+            }
+            config.force_cell_pixels |= args.force_cell_pixels;
+            validate_graphics(&config)?;
             return Ok((config, args.output, false));
         }
     };
     let mut config = Config {
         version: 1,
+        sixel: args.sixel,
+        cell_pixels: args.cell_pixels,
+        force_cell_pixels: args.force_cell_pixels,
         theme: args.theme.unwrap_or_default(),
         style: args.style.unwrap_or_default(),
         title,
@@ -240,7 +281,42 @@ fn prepare(args: Args) -> Result<(Config, Output, bool), Failure> {
         layout,
     };
     config::validate(&mut config, &data).map_err(invalid)?;
+    validate_graphics(&config)?;
     Ok((config, args.output, confirm))
+}
+
+fn validate_graphics(config: &Config) -> Result<(), Failure> {
+    fn has_formula(node: &Node) -> bool {
+        match node {
+            Node::Formula(_) => true,
+            Node::Row(nodes) | Node::Column(nodes) => nodes.iter().any(has_formula),
+            _ => false,
+        }
+    }
+    if !config.sixel
+        && (has_formula(&config.layout) || config.cell_pixels.is_some() || config.force_cell_pixels)
+    {
+        return Err(invalid("graphics require --sixel (or sixel: true); terminal and multiplexer must support Sixel"));
+    }
+    if config.force_cell_pixels && config.cell_pixels.is_none() {
+        return Err(invalid("--force-cell-pixels requires --cell-pixels"));
+    }
+    if let Some(value) = &config.cell_pixels {
+        let (width, height) = value
+            .split_once('x')
+            .ok_or_else(|| invalid("--cell-pixels requires WxH"))?;
+        let pixels = rsille::render::raster_output::CellPixels {
+            width: width
+                .parse()
+                .map_err(|_| invalid("invalid cell pixel width"))?,
+            height: height
+                .parse()
+                .map_err(|_| invalid("invalid cell pixel height"))?,
+        };
+        rsille::render::raster_output::CellPixels::resolve(Some(pixels))
+            .map_err(|e| invalid(e.to_string()))?;
+    }
+    Ok(())
 }
 
 fn execute(args: Args) -> Result<u8, Failure> {
@@ -268,6 +344,43 @@ fn execute(args: Args) -> Result<u8, Failure> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn formula_arguments_and_graphics_opt_in_are_validated() {
+        for argv in [
+            vec!["rsille", "formula", "x^2"],
+            vec!["rsille", "formula", "x", "--sixel", "--output", "plain"],
+            vec!["rsille", "formula", "x", "--sixel", "--font-size", "0"],
+            vec![
+                "rsille",
+                "formula",
+                "x",
+                "--sixel",
+                "--pixels-per-point",
+                "17",
+            ],
+            vec!["rsille", "input", "--cell-pixels", "8x18"],
+            vec!["rsille", "input", "--sixel", "--cell-pixels", "0x18"],
+            vec!["rsille", "input", "--sixel", "--force-cell-pixels"],
+        ] {
+            let result = prepare(Args::try_parse_from(argv).unwrap());
+            assert!(matches!(result, Err(Failure { code: 2, .. })));
+        }
+        let args = Args::try_parse_from([
+            "rsille",
+            "formula",
+            "x^2",
+            "--sixel",
+            "--cell-pixels",
+            "8x18",
+            "--inline",
+        ])
+        .unwrap();
+        let (config, _, _) = prepare(args).unwrap_or_else(|e| panic!("{}", e.message));
+        assert!(config.sixel);
+        assert_eq!(config.mode, "inline");
+        assert!(matches!(config.layout, Node::Formula(_)));
+    }
 
     #[test]
     fn style_names_match_cli_and_yaml() {
