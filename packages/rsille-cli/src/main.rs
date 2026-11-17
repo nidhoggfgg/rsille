@@ -28,17 +28,18 @@ struct Args {
     )]
     output: Output,
     /// Render below the current cursor without switching to the alternate screen
-    #[arg(long, global = true)]
+    #[arg(long, global = true, conflicts_with = "fullscreen")]
     inline: bool,
+    /// Render on the alternate screen; overrides the YAML mode
+    #[arg(long, global = true, conflicts_with = "inline")]
+    fullscreen: bool,
     /// Color preset; overrides the YAML theme (default: dark)
     #[arg(long, global = true, value_enum)]
     theme: Option<theme::ThemePreset>,
     /// Structural style preset; overrides YAML style (default: classic)
     #[arg(long, global = true, value_enum)]
     style: Option<style::StylePreset>,
-    /// Assert terminal/multiplexer support for Sixel and reliable graphics erasure
-    #[arg(long, global = true)]
-    sixel: bool,
+
     /// Physical pixels per character cell, e.g. 8x18
     #[arg(long, global = true)]
     cell_pixels: Option<String>,
@@ -156,6 +157,10 @@ fn json(text: &str) -> Result<Value, Failure> {
 }
 
 fn prepare(args: Args) -> Result<(Config, Output, bool), Failure> {
+    // Clap may not detect global conflicts across the subcommand boundary.
+    if args.inline && args.fullscreen {
+        return Err(invalid("--fullscreen cannot be used with --inline"));
+    }
     let mut data = Value::Null;
     let confirm = matches!(&args.command, Command::Confirm { .. });
     if args.output == Output::Plain
@@ -251,7 +256,9 @@ fn prepare(args: Args) -> Result<(Config, Output, bool), Failure> {
                 data = json(&read_path(&path)?)?;
             }
             let mut config = config::parse(&read_path(&file)?, &data).map_err(invalid)?;
-            if args.inline {
+            if args.fullscreen {
+                config.mode = "fullscreen".into();
+            } else if args.inline {
                 config.mode = "inline".into();
             }
             if let Some(style) = args.style {
@@ -260,7 +267,7 @@ fn prepare(args: Args) -> Result<(Config, Output, bool), Failure> {
             if let Some(theme) = args.theme {
                 config.theme = theme;
             }
-            config.sixel |= args.sixel;
+
             if args.cell_pixels.is_some() {
                 config.cell_pixels = args.cell_pixels;
             }
@@ -271,13 +278,18 @@ fn prepare(args: Args) -> Result<(Config, Output, bool), Failure> {
     };
     let mut config = Config {
         version: 1,
-        sixel: args.sixel,
+        sixel: false,
         cell_pixels: args.cell_pixels,
         force_cell_pixels: args.force_cell_pixels,
         theme: args.theme.unwrap_or_default(),
         style: args.style.unwrap_or_default(),
         title,
-        mode: if args.inline { "inline" } else { "fullscreen" }.into(),
+        mode: if args.fullscreen {
+            "fullscreen"
+        } else {
+            "inline"
+        }
+        .into(),
         layout,
     };
     config::validate(&mut config, &data).map_err(invalid)?;
@@ -286,18 +298,6 @@ fn prepare(args: Args) -> Result<(Config, Output, bool), Failure> {
 }
 
 fn validate_graphics(config: &Config) -> Result<(), Failure> {
-    fn has_formula(node: &Node) -> bool {
-        match node {
-            Node::Formula(_) => true,
-            Node::Row(nodes) | Node::Column(nodes) => nodes.iter().any(has_formula),
-            _ => false,
-        }
-    }
-    if !config.sixel
-        && (has_formula(&config.layout) || config.cell_pixels.is_some() || config.force_cell_pixels)
-    {
-        return Err(invalid("graphics require --sixel (or sixel: true); terminal and multiplexer must support Sixel"));
-    }
     if config.force_cell_pixels && config.cell_pixels.is_none() {
         return Err(invalid("--force-cell-pixels requires --cell-pixels"));
     }
@@ -321,9 +321,13 @@ fn validate_graphics(config: &Config) -> Result<(), Failure> {
 
 fn execute(args: Args) -> Result<u8, Failure> {
     let (config, output, confirm) = prepare(args)?;
+    let is_static = config.is_static();
     let Some(mut result) = terminal::run(config).map_err(runtime)? else {
         return Ok(130);
     };
+    if is_static {
+        return Ok(0);
+    }
     if confirm {
         result["values"]["value"] = Value::Bool(true);
     }
@@ -346,22 +350,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn formula_arguments_and_graphics_opt_in_are_validated() {
+    fn formula_arguments_and_cell_metrics_are_validated() {
         for argv in [
-            vec!["rsille", "formula", "x^2"],
-            vec!["rsille", "formula", "x", "--sixel", "--output", "plain"],
-            vec!["rsille", "formula", "x", "--sixel", "--font-size", "0"],
-            vec![
-                "rsille",
-                "formula",
-                "x",
-                "--sixel",
-                "--pixels-per-point",
-                "17",
-            ],
-            vec!["rsille", "input", "--cell-pixels", "8x18"],
-            vec!["rsille", "input", "--sixel", "--cell-pixels", "0x18"],
-            vec!["rsille", "input", "--sixel", "--force-cell-pixels"],
+            vec!["rsille", "formula", "x", "--output", "plain"],
+            vec!["rsille", "formula", "x", "--font-size", "0"],
+            vec!["rsille", "formula", "x", "--pixels-per-point", "17"],
+            vec!["rsille", "input", "--cell-pixels", "8"],
+            vec!["rsille", "input", "--cell-pixels", "0x18"],
+            vec!["rsille", "input", "--cell-pixels", "8xno"],
+            vec!["rsille", "input", "--force-cell-pixels"],
         ] {
             let result = prepare(Args::try_parse_from(argv).unwrap());
             assert!(matches!(result, Err(Failure { code: 2, .. })));
@@ -370,7 +367,6 @@ mod tests {
             "rsille",
             "formula",
             "x^2",
-            "--sixel",
             "--cell-pixels",
             "8x18",
             "--inline",
@@ -380,6 +376,76 @@ mod tests {
         assert!(config.sixel);
         assert_eq!(config.mode, "inline");
         assert!(matches!(config.layout, Node::Formula(_)));
+    }
+
+    #[test]
+    fn defaults_to_inline_and_infers_formula_graphics() {
+        for argv in [
+            vec!["rsille", "formula", "x^2"],
+            vec!["rsille", "formula", "x^2", "--fullscreen"],
+            vec![
+                "rsille",
+                "input",
+                "--cell-pixels",
+                "8x18",
+                "--force-cell-pixels",
+            ],
+        ] {
+            let fullscreen = argv.contains(&"--fullscreen");
+            let formula = argv.contains(&"formula");
+            let (config, _, _) = prepare(Args::try_parse_from(argv).unwrap())
+                .unwrap_or_else(|e| panic!("{}", e.message));
+            assert_eq!(
+                config.mode,
+                if fullscreen { "fullscreen" } else { "inline" }
+            );
+            assert_eq!(config.sixel, formula);
+            assert_eq!(config.is_static(), formula && !fullscreen);
+        }
+        assert!(Args::try_parse_from(["rsille", "formula", "x", "--sixel"]).is_err());
+        for argv in [
+            vec!["rsille", "--inline", "input", "--fullscreen"],
+            vec!["rsille", "--fullscreen", "input", "--inline"],
+        ] {
+            if let Ok(args) = Args::try_parse_from(argv) {
+                assert!(matches!(prepare(args), Err(Failure { code: 2, .. })));
+            }
+        }
+        assert!(Args::try_parse_from(["rsille", "input", "--inline", "--fullscreen"]).is_err());
+    }
+
+    #[test]
+    fn cli_mode_overrides_yaml_only_when_explicit() {
+        let path = std::env::temp_dir().join(format!("rsille-mode-{}.yaml", std::process::id()));
+        for mode in ["inline", "fullscreen"] {
+            std::fs::write(
+                &path,
+                format!("version: 1\nmode: {mode}\nlayout: {{formula: {{source: x}}}}"),
+            )
+            .unwrap();
+            for (flag, expected) in [
+                (None, mode),
+                (Some("--inline"), "inline"),
+                (Some("--fullscreen"), "fullscreen"),
+            ] {
+                for before in [false, true] {
+                    let mut argv = vec!["rsille"];
+                    if before {
+                        argv.extend(flag);
+                    }
+                    argv.extend(["run", path.to_str().unwrap()]);
+                    if !before {
+                        argv.extend(flag);
+                    }
+                    let (config, _, _) = prepare(Args::try_parse_from(argv).unwrap())
+                        .unwrap_or_else(|e| panic!("{}", e.message));
+                    assert_eq!(config.mode, expected);
+                    assert!(config.sixel);
+                    assert_eq!(config.is_static(), expected == "inline");
+                }
+            }
+        }
+        std::fs::remove_file(path).unwrap();
     }
 
     #[test]

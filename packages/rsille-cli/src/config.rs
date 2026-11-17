@@ -20,7 +20,7 @@ pub struct Config {
     pub title: String,
     #[serde(default = "default_mode")]
     pub mode: String,
-    #[serde(default)]
+    #[serde(skip)]
     pub sixel: bool,
     #[serde(default)]
     pub cell_pixels: Option<String>,
@@ -29,8 +29,14 @@ pub struct Config {
     pub layout: Node,
 }
 
+impl Config {
+    pub fn is_static(&self) -> bool {
+        self.mode == "inline" && !self.layout.is_interactive()
+    }
+}
+
 fn default_mode() -> String {
-    "fullscreen".into()
+    "inline".into()
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -45,6 +51,25 @@ pub enum Node {
     Checkbox(CheckboxSpec),
     Table(TableSpec),
     Button(ButtonSpec),
+}
+
+impl Node {
+    pub fn has_formula(&self) -> bool {
+        match self {
+            Self::Formula(_) => true,
+            Self::Row(nodes) | Self::Column(nodes) => nodes.iter().any(Self::has_formula),
+            _ => false,
+        }
+    }
+
+    pub fn is_interactive(&self) -> bool {
+        match self {
+            Self::Input(_) | Self::Select(_) | Self::Checkbox(_) | Self::Button(_) => true,
+            Self::Table(spec) => spec.selectable,
+            Self::Row(nodes) | Self::Column(nodes) => nodes.iter().any(Self::is_interactive),
+            Self::Text(_) | Self::Formula(_) => false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -149,7 +174,9 @@ pub fn validate(config: &mut Config, data: &Value) -> Result<(), String> {
     validate_data(data, "data")?;
     let mut ids = HashSet::new();
     let mut count = 0;
-    validate_node(&mut config.layout, data, "layout", 1, &mut count, &mut ids)
+    validate_node(&mut config.layout, data, "layout", 1, &mut count, &mut ids)?;
+    config.sixel = config.layout.has_formula();
+    Ok(())
 }
 
 fn register_id(id: &str, path: &str, ids: &mut HashSet<String>) -> Result<(), String> {
@@ -338,7 +365,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(config.title, "");
-        assert_eq!(config.mode, "fullscreen");
+        assert_eq!(config.mode, "inline");
         let Node::Column(nodes) = config.layout else {
             panic!()
         };
@@ -349,10 +376,44 @@ mod tests {
     }
 
     #[test]
+    fn classifies_layouts_and_derives_graphics() {
+        for (layout, interactive, formula) in [
+            ("text: Hello", false, false),
+            ("formula: {source: x^2}", false, true),
+            ("input: {id: x, label: X}", true, false),
+            ("select: {id: x, label: X, options: [a]}", true, false),
+            ("checkbox: {id: x, label: X}", true, false),
+            ("button: {label: OK, action: submit}", true, false),
+            ("table: {rows: []}", false, false),
+            ("table: {id: x, selectable: true}", true, false),
+            ("row: []", false, false),
+            ("column: []", false, false),
+            ("column: [{row: [{formula: {source: x}}]}]", false, true),
+            (
+                "row: [{column: [{input: {id: x, label: X}}, {formula: {source: x}}]}]",
+                true,
+                true,
+            ),
+        ] {
+            let mut config = parse(&document(&format!("  {layout}")), &Value::Null).unwrap();
+            assert_eq!(config.layout.is_interactive(), interactive, "{layout}");
+            assert_eq!(config.layout.has_formula(), formula, "{layout}");
+            assert_eq!(config.sixel, formula, "{layout}");
+            assert_eq!(config.is_static(), !interactive, "{layout}");
+            config.mode = "fullscreen".into();
+            assert!(!config.is_static(), "{layout}");
+            config.sixel = !formula;
+            validate(&mut config, &Value::Null).unwrap();
+            assert_eq!(config.sixel, formula);
+        }
+    }
+
+    #[test]
     fn rejects_unknown_fields_components_actions_and_versions() {
         for text in [
             "version: 2\nlayout: {text: hello}",
             "version: 1\nextra: true\nlayout: {text: hello}",
+            "version: 1\nsixel: true\nlayout: {formula: {source: x}}",
             "version: 1\nmode: other\nlayout: {text: hello}",
             "version: 1\nlayout: {unknown: hello}",
             "version: 1\nlayout: {button: {label: OK, action: shell}}",

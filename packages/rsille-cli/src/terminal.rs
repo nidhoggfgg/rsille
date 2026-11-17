@@ -619,7 +619,9 @@ mod windows {
                 return self.write_frame(&text);
             }
             if buffer.has_raster() || buffer.has_unsupported_raster_composition() {
-                return Err(io::Error::other("raster output requires --sixel"));
+                return Err(io::Error::other(
+                    "raster output requires resolved cell pixels",
+                ));
             }
             if self.inline.is_some() {
                 let dimensions = self.size()?;
@@ -666,6 +668,13 @@ mod windows {
             }
             result
         }
+        pub(super) fn preserve_inline(&mut self) -> io::Result<()> {
+            if let Some(region) = &mut self.inline {
+                region.rows = 0;
+            }
+            self.write_frame("\x1b[0m\r\n")
+        }
+
         pub(super) fn restore(&mut self) -> io::Result<()> {
             let mut first = None;
             if self.screen {
@@ -1109,7 +1118,9 @@ mod unix {
                 return self.write_frame(text.as_bytes());
             }
             if buffer.has_raster() || buffer.has_unsupported_raster_composition() {
-                return Err(io::Error::other("raster output requires --sixel"));
+                return Err(io::Error::other(
+                    "raster output requires resolved cell pixels",
+                ));
             }
             if self.inline.is_some() {
                 let dimensions = self.size()?;
@@ -1140,6 +1151,13 @@ mod unix {
                 }
             }
             result
+        }
+
+        pub(super) fn preserve_inline(&mut self) -> io::Result<()> {
+            if let Some(region) = &mut self.inline {
+                region.rows = 0;
+            }
+            self.write_frame(b"\x1b[0m\r\n")
         }
 
         pub(super) fn restore(&mut self) -> io::Result<()> {
@@ -1271,6 +1289,7 @@ mod host {
     const INTERVAL: Duration = Duration::from_millis(50);
     pub(super) fn run(config: crate::config::Config) -> Result<Option<serde_json::Value>, String> {
         let inline = config.mode == "inline";
+        let is_static = config.is_static();
         let mut terminal = Terminal::open().map_err(|e| format!("open terminal: {e}"))?;
         let result = (|| {
             let mut size = terminal.size().map_err(|e| format!("terminal size: {e}"))?;
@@ -1313,6 +1332,12 @@ mod host {
             terminal
                 .present(ui.draw()?, pixels)
                 .map_err(|e| format!("draw terminal: {e}"))?;
+            if is_static {
+                terminal
+                    .preserve_inline()
+                    .map_err(|e| format!("finish terminal output: {e}"))?;
+                return Ok(Some(serde_json::json!({"action": "submit", "values": {}})));
+            }
             let mut input =
                 Input::start(&terminal).map_err(|e| format!("start terminal input: {e}"))?;
             loop {

@@ -2,12 +2,12 @@
 
 在 Shell 脚本中使用交互式选择器、文本输入、确认提示和表格，也可以通过 YAML 组合表单。无需编写 Rust，交互结果可直接交给脚本处理。
 
-支持 Unix 和 Windows 的全屏与 inline 模式，默认使用全屏。
+支持 Unix 和 Windows 的全屏与 inline 模式，默认使用 inline；通过 `--fullscreen` 显式启用全屏。
 
 - Unix：需要前台交互终端（`/dev/tty`）。
 - Windows：需要已连接且支持 VT 控制序列的控制台，推荐 Windows Terminal。不支持没有交互控制台的后台任务。
 
-两种平台都支持 stdin 输入数据、stdout 重定向结果，界面单独使用交互终端。
+两种平台都支持 stdin 输入数据、stdout 重定向交互结果，界面单独使用交互终端。静态显示同样需要 tty，不支持在无 tty 环境中将图像重定向到文件；图像不会写入 stdout。
 
 ## 安装
 
@@ -25,17 +25,21 @@ rsille --help
 
 ## Inline 模式
 
-使用全局参数 `--inline` 在当前光标下方显示界面，不切换到备用屏幕，保留之前的终端输出：
+默认在当前光标下方显示界面，不切换到备用屏幕，保留之前的终端输出。全局参数 `--inline` 保留兼容，也可用于覆盖 YAML 中的全屏设置：
 
 ```sh
-rsille input --inline --label '项目名称'
+rsille input --label '项目名称'
 rsille --inline select --output plain dev staging production
-rsille run form.yaml --inline > result.json
+rsille run form.yaml --fullscreen > result.json
 ```
 
-所有子命令都支持此参数，也可以在 YAML 顶层设置 `mode: inline`。`--inline` 优先于 YAML 的 `mode`；不指定时仍保持原来的全屏行为。
+所有子命令都支持 `--fullscreen` 和 `--inline`，两者不能同时使用。YAML 顶层仍支持 `mode: inline` 或 `mode: fullscreen`；显式 CLI 参数优先于 YAML 的 `mode`，两者都未指定时使用 inline。
 
-界面按布局高度预留行数，并限制在终端可用高度内；提交或取消后清除交互区域并恢复终端。stdout 仍然只输出结果，管道和重定向用法不变。较大的表单建议使用全屏；缩小终端或终端自动重排时，旧界面可能留在滚动历史中。交互期间请避免其他进程同时向该终端写入内容。
+界面按布局高度预留行数，并限制在终端可用高度内。有交互控件时，提交或取消后清除交互区域并恢复终端，stdout 只输出交互结果，管道和重定向用法不变。
+
+inline 布局中若没有交互控件（仅含公式、文本、只读表格，或它们通过 `row` / `column` 递归组合），只绘制一次，保留已绘制内容并自动以退出码 `0` 退出，不等待按键，也不输出 stdout JSON。只要包含输入框、选择器、复选框、可选择表格或按钮，仍按交互界面运行。全屏模式即使只有静态内容也仍然交互，不会自动退出。
+
+较大的表单建议使用全屏；缩小终端或终端自动重排时，旧界面可能留在滚动历史中。交互期间请避免其他进程同时向该终端写入内容。
 
 ## 样式预设
 
@@ -141,8 +145,8 @@ Get-Content -Raw -Encoding utf8 services.json | rsille table --selectable > sele
 rsille table services.json
 ```
 
-- 默认只读；添加 `--selectable` 启用单选。
-- 上下键移动，Enter 提交当前行或完成查看。
+- 默认只读：inline 中绘制后保留内容并自动退出，无 stdout 输出；添加 `--selectable` 启用交互单选。
+- 可选择表格通过上下键移动、Enter 提交当前行；全屏只读表格通过 Enter 完成查看。
 - `--columns` 指定显示的字段；省略时按字段名排序显示所有字段。
 - 选择结果保留原始对象，包括未显示的字段。结果始终为数组，空表返回 `[]`。
 
@@ -157,13 +161,13 @@ rsille table services.json
 使用 `formula` 显示 Typst 数学公式（不是 LaTeX，也不要包含 `$` 分隔符）：
 
 ```sh
-rsille formula --sixel 'integral_0^1 x^2 dif x = frac(1, 3)'
-rsille formula --inline --sixel --font-size 24 'sqrt(x)'
+rsille formula 'integral_0^1 x^2 dif x = frac(1, 3)'
+rsille formula --fullscreen --font-size 24 'sqrt(x)'
 ```
 
-Enter 完成查看并返回 `{"action":"submit","values":{}}`，Esc / Ctrl-C 取消。不支持 `--output plain`。可通过 `--font-size` 设置字号（默认 18 pt），`--pixels-per-point` 设置栅格分辨率（默认 2）。公式在启动时通过 `rsille-typst` 编译并缓存，重绘与窗口调整不会重复编译。颜色跟随主题，按原始像素大小显示，空间不足时裁剪。
+默认 inline 绘制一次后保留公式并自动退出，stdout 为空。使用 `--fullscreen` 时，Enter 完成查看并返回 `{"action":"submit","values":{}}`，Esc / Ctrl-C 取消。不支持 `--output plain`。可通过 `--font-size` 设置字号（默认 18 pt），`--pixels-per-point` 设置栅格分辨率（默认 2）。公式在启动时通过 `rsille-typst` 编译并缓存，重绘与窗口调整不会重复编译。颜色跟随主题，按原始像素大小显示，空间不足时裁剪。
 
-**`--sixel` 是对终端能力的显式确认，不是自动检测。** 终端及中间的 multiplexer 必须支持 Sixel、图形随文本滚动、可靠的图形擦除及透明尾部填充；inline 模式还要求局部行擦除能清除图形。不提供字符画降级。不含公式的文本界面不需要启用此参数。
+**公式自动使用 Sixel，已移除 CLI `--sixel` 和 YAML 顶层 `sixel` 字段。** 这不代表自动检测终端的 Sixel 支持。终端及中间的 multiplexer 必须支持 Sixel、图形随文本滚动、可靠的图形擦除及透明尾部填充；inline 交互模式还要求局部行擦除能清除图形。不提供字符画降级。
 
 **通常不需要设置字符单元的像素尺寸，交给 rsille 自动获取即可。** 启动时优先读取终端 OS 指标，条件允许时再通过底层终端查询探测。尺寸取决于字体、缩放和 DPI，请不要猜测或照抄其他终端的值；错误的尺寸会导致图形布局和裁剪异常。改变字体或 DPI 后应重启。
 
@@ -173,7 +177,6 @@ YAML 也支持公式：
 
 ```yaml
 version: 1
-sixel: true
 mode: inline
 layout:
   column:
@@ -183,7 +186,7 @@ layout:
     - button: {label: 完成, action: submit}
 ```
 
-顶层 `sixel`、`cell_pixels`、`force_cell_pixels` 与对应 CLI 参数一致，显式 CLI 参数优先。公式组件不添加输出字段；在组合表单中通过按钮提交。Sixel 数据仍只写入交互终端，不会混入 stdout JSON。
+顶层 `cell_pixels`、`force_cell_pixels` 与对应 CLI 参数一致，显式 CLI 参数优先。公式组件不添加输出字段；上例包含按钮，因此等待交互提交。移除按钮后，纯静态 inline 布局绘制一次并自动退出，stdout 为空。Sixel 数据只写入交互终端，不会混入 stdout JSON，也不能通过 stdout 重定向导出图像。
 
 构建会引入 Typst 编译器及 `typst-assets` 字体，构建时间和体积有所增加；运行时不下载字体。使用随包提供的 New Computer Modern Math，分发二进制时须保留字体各自要求的许可证及署名，参见 [rsille-typst 字体说明](../rsille-typst/README_cn.md)。
 
@@ -240,14 +243,14 @@ rsille run form.yaml > result.json
 | --- | --- |
 | `row` / `column` | 子节点数组，水平 / 垂直排列 |
 | `text` | 显示的字符串 |
-| `formula` | `source`（Typst 数学内容）；可选 `font_size`（默认 18）、`pixels_per_point`（默认 2），需要启用 Sixel |
+| `formula` | `source`（Typst 数学内容）；可选 `font_size`（默认 18）、`pixels_per_point`（默认 2），自动使用 Sixel |
 | `input` | `id`、`label`；可选 `value`，默认空字符串 |
 | `select` | `id`、`label`、非空 `options` 字符串数组；可选 `selected`，默认索引 `0` |
 | `checkbox` | `id`、`label`；可选 `checked`，默认 `false` |
 | `table` | `rows` 或 `source`；可选 `columns`、`selectable`、`id` |
 | `button` | `label`、`action`（`submit` 或 `cancel`） |
 
-配置必须指定 `version: 1`。`title` 可省略，`mode` 默认为 `fullscreen`，也支持 `inline`。需要返回值的组件必须有非空且唯一的 `id`；未知字段、无效选项索引和重复 ID 会报错。
+配置必须指定 `version: 1`。`title` 可省略，`mode` 默认为 `inline`，也支持 `fullscreen`，显式 `--inline` / `--fullscreen` 优先。需要返回值的组件必须有非空且唯一的 `id`；未知字段、无效选项索引和重复 ID 会报错。
 
 ### 引用外部数据
 
@@ -304,7 +307,7 @@ layout:
 
 界面使用交互终端，stdout 只输出结果，stderr 输出错误信息。因此输入管道与结果重定向可以同时使用，不会将界面的控制序列写入结果文件。
 
-默认输出单个 JSON 对象，以换行结束：
+交互提交默认输出单个 JSON 对象，以换行结束；纯静态 inline 显示自动退出时 stdout 为空：
 
 ```json
 {"action":"submit","values":{}}
@@ -337,6 +340,8 @@ fi
 ```
 
 ## 键盘操作
+
+以下适用于交互界面；纯静态 inline 显示不等待按键。
 
 | 按键 | 操作 |
 | --- | --- |

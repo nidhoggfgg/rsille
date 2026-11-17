@@ -618,7 +618,7 @@ mod tests {
     #[test]
     fn yaml_formula_is_a_non_value_component() {
         let config = parse(
-            "version: 1\nsixel: true\nlayout:\n  column:\n    - formula: {source: 'x^2', font_size: 18, pixels_per_point: 2}\n    - button: {label: Submit, action: submit}",
+            "version: 1\nlayout:\n  column:\n    - formula: {source: 'x^2', font_size: 18, pixels_per_point: 2}\n    - button: {label: Submit, action: submit}",
             &Value::Null,
         )
         .unwrap();
