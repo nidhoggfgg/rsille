@@ -13,6 +13,10 @@ const MAX_CONFIG_BYTES: usize = 4 * 1024 * 1024;
 pub struct Config {
     pub version: u32,
     #[serde(default)]
+    pub theme: crate::theme::ThemePreset,
+    #[serde(default)]
+    pub style: crate::style::StylePreset,
+    #[serde(default)]
     pub title: String,
     #[serde(default = "default_mode")]
     pub mode: String,
@@ -396,6 +400,8 @@ mod tests {
             version: 1,
             title: String::new(),
             mode: default_mode(),
+            theme: Default::default(),
+            style: Default::default(),
             layout: Node::Text("x".into()),
         };
         for _ in 1..MAX_DEPTH {

@@ -5,6 +5,7 @@ use rsille::tui::prelude::*;
 use serde_json::{json, Map, Value};
 
 use crate::config::{display_text, Action, Config, Node};
+use crate::style::StylePreset;
 
 struct State {
     config: Config,
@@ -38,9 +39,7 @@ impl Ui {
         );
         let mut values = Map::new();
         initial_values(&config.layout, &mut values);
-        let mut theme = Theme::dark();
-        // CLI prompts share one background across labels, layouts and controls.
-        theme.styles.surface.bg_color = theme.styles.surface_elevated.bg_color;
+        let theme = config.theme.build();
         let runtime = App::new(State {
             config,
             values,
@@ -51,7 +50,7 @@ impl Ui {
         .with_motion_policy(MotionPolicy::disabled())
         .build(update, move |state| {
             let content = view(&state.config.layout, state, quick);
-            if state.config.title.is_empty() {
+            let content = if state.config.title.is_empty() {
                 content
             } else {
                 Box::new(
@@ -59,7 +58,9 @@ impl Ui {
                         .child(label(display_text(&state.config.title)))
                         .child(content),
                 ) as Box<dyn Widget<Message>>
-            }
+            };
+            Box::new(Flex::vertical(vec![content]).padding(state.config.style.padding()))
+                as Box<dyn Widget<Message>>
         });
         Self { runtime, quick }
     }
@@ -70,7 +71,11 @@ impl Ui {
             match node {
                 Node::Column(nodes) => nodes
                     .iter()
-                    .fold(0u16, |sum, node| sum.saturating_add(height(node, state))),
+                    .fold(0u16, |sum, node| sum.saturating_add(height(node, state)))
+                    .saturating_add(
+                        (nodes.len().saturating_sub(1) as u16)
+                            .saturating_mul(state.config.style.gap()),
+                    ),
                 Node::Row(nodes) => nodes
                     .iter()
                     .map(|node| height(node, state))
@@ -82,6 +87,7 @@ impl Ui {
         let state = self.runtime.state();
         height(&state.config.layout, state)
             .saturating_add(u16::from(!state.config.title.is_empty()))
+            .saturating_add(state.config.style.padding().vertical_total())
             .max(1)
     }
 
@@ -186,13 +192,14 @@ fn initial_values(node: &Node, values: &mut Map<String, Value>) {
 }
 
 fn view(node: &Node, state: &State, quick: bool) -> Box<dyn Widget<Message>> {
+    let style = state.config.style;
     match node {
         Node::Row(nodes) | Node::Column(nodes) => {
             let children = nodes.iter().map(|n| view(n, state, false)).collect();
             Box::new(if matches!(node, Node::Row(_)) {
                 Flex::horizontal(children).gap(1)
             } else {
-                Flex::vertical(children)
+                Flex::vertical(children).gap(style.gap())
             })
         }
         Node::Text(text) => Box::new(label(display_text(text))),
@@ -202,6 +209,12 @@ fn view(node: &Node, state: &State, quick: bool) -> Box<dyn Widget<Message>> {
             Box::new(
                 col().child(label(display_text(&spec.label))).child(
                     text_input()
+                        .border(style.border())
+                        .variant(if style == StylePreset::Minimal {
+                            TextInputVariant::Borderless
+                        } else {
+                            TextInputVariant::Default
+                        })
                         .key(&id)
                         .value(display_text(value))
                         .on_change(move |text| {
@@ -229,6 +242,11 @@ fn view(node: &Node, state: &State, quick: bool) -> Box<dyn Widget<Message>> {
                         .cloned();
                     Message::Value(id.clone(), json!(value))
                 });
+            let widget = if style == StylePreset::Minimal {
+                widget.borderless()
+            } else {
+                widget.border(style.border())
+            };
             Box::new(
                 col()
                     .child(label(display_text(&spec.label)))
@@ -271,6 +289,11 @@ fn view(node: &Node, state: &State, quick: bool) -> Box<dyn Widget<Message>> {
                             }),
                         )
                     }));
+            table = if style == StylePreset::Minimal {
+                table.borderless()
+            } else {
+                table.border(style.border())
+            };
             if let Some(id) = &spec.id {
                 table = table.key(id);
             }
@@ -292,7 +315,11 @@ fn view(node: &Node, state: &State, quick: bool) -> Box<dyn Widget<Message>> {
         }
         Node::Button(spec) => {
             let action = spec.action;
-            Box::new(button(display_text(&spec.label)).on_click(move || Message::Finish(action)))
+            Box::new(
+                button(display_text(&spec.label))
+                    .variant(style.button())
+                    .on_click(move || Message::Finish(action)),
+            )
         }
     }
 }
@@ -349,47 +376,101 @@ mod tests {
     }
 
     #[test]
+    fn presets_change_geometry_and_keep_input_submission() {
+        for (style, corner) in [
+            (StylePreset::Classic, Some('┌')),
+            (StylePreset::Minimal, None),
+            (StylePreset::Rounded, Some('╭')),
+            (StylePreset::Retro, Some('╔')),
+            (StylePreset::Bold, Some('┏')),
+        ] {
+            for layout in [
+                "{input: {id: value, label: Name, value: hello}}",
+                "{select: {id: value, label: Name, options: [hello, world]}}",
+                "{table: {columns: [name], rows: [{name: hello}]}}",
+            ] {
+                let mut config =
+                    parse(&format!("version: 1\nlayout: {layout}"), &Value::Null).unwrap();
+                config.style = style;
+                let mut prompt = Ui::new(config);
+                prompt.resize(50, prompt.inline_height());
+                let frame = prompt.draw().unwrap();
+                let chars: String = frame
+                    .content()
+                    .iter()
+                    .filter_map(|cell| cell.content.as_char())
+                    .collect();
+                if let Some(corner) = corner {
+                    assert!(chars.contains(corner), "{style:?}: {chars}");
+                } else {
+                    assert!(!chars.contains('┌'), "{chars}");
+                }
+                key(&mut prompt, KeyCode::Enter);
+                assert!(prompt.outcome().is_some(), "{style:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn styled_inline_height_counts_nested_gaps_and_padding() {
+        let mut config = parse(
+            "version: 1\nlayout: {column: [{text: A}, {row: [{text: B}, {text: C}]}, {text: D}]}",
+            &Value::Null,
+        )
+        .unwrap();
+        assert_eq!(Ui::new(config.clone()).inline_height(), 3);
+        config.style = StylePreset::Rounded;
+        assert_eq!(Ui::new(config).inline_height(), 7);
+    }
+
+    #[test]
     fn heading_and_select_share_background_without_losing_highlight() {
-        let config = parse(
+        use clap::ValueEnum;
+        for preset in crate::theme::ThemePreset::value_variants() {
+            let mut config = parse(
             "version: 1\ntitle: Heading\nlayout: {select: {id: env, label: Environment, options: [dev, prod]}}",
             &Value::Null,
         )
         .unwrap();
-        let mut prompt = Ui::new(config);
-        prompt.resize(40, 12);
-        let frame = prompt.draw().unwrap();
-        let background = Theme::dark()
-            .styles
-            .surface_elevated
-            .to_render_style()
-            .colors
-            .unwrap()
-            .background;
-        let selected = Theme::dark()
-            .styles
-            .selected_focused
-            .to_render_style()
-            .colors
-            .unwrap()
-            .background;
-        for row in [0, 1, 2] {
-            assert_eq!(
-                frame.content()[row * 40]
-                    .content
+            config.theme = *preset;
+            let mut prompt = Ui::new(config);
+            prompt.resize(40, 12);
+            let frame = prompt.draw().unwrap();
+            let background = preset
+                .build()
+                .styles
+                .surface_elevated
+                .to_render_style()
+                .colors
+                .unwrap()
+                .background;
+            let selected = preset
+                .build()
+                .styles
+                .selected_focused
+                .to_render_style()
+                .colors
+                .unwrap()
+                .background;
+            for row in [0, 1, 2] {
+                assert_eq!(
+                    frame.content()[row * 40]
+                        .content
+                        .style
+                        .colors
+                        .unwrap()
+                        .background,
+                    background
+                );
+            }
+            assert_ne!(background, selected);
+            assert!(frame.content().iter().any(|cell| {
+                cell.content
                     .style
                     .colors
-                    .unwrap()
-                    .background,
-                background
-            );
+                    .is_some_and(|colors| colors.background == selected)
+            }));
         }
-        assert_ne!(background, selected);
-        assert!(frame.content().iter().any(|cell| {
-            cell.content
-                .style
-                .colors
-                .is_some_and(|colors| colors.background == selected)
-        }));
     }
 
     #[test]

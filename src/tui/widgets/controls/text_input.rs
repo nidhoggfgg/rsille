@@ -57,6 +57,7 @@ pub struct TextInput<M = ()> {
     value: String,
     placeholder: Option<String>,
     variant: TextInputVariant,
+    border: BorderStyle,
     disabled: bool,
     custom_style: Option<Style>,
     custom_focus_style: Option<Style>,
@@ -71,6 +72,7 @@ impl<M> std::fmt::Debug for TextInput<M> {
             .field("value", &self.value)
             .field("placeholder", &self.placeholder)
             .field("variant", &self.variant)
+            .field("border", &self.border)
             .field("disabled", &self.disabled)
             .field("on_change", &self.on_change.is_some())
             .field("on_submit", &self.on_submit.is_some())
@@ -85,6 +87,7 @@ impl<M> TextInput<M> {
             value: String::new(),
             placeholder: None,
             variant: TextInputVariant::default(),
+            border: BorderStyle::Single,
             disabled: false,
             custom_style: None,
             custom_focus_style: None,
@@ -117,6 +120,15 @@ impl<M> TextInput<M> {
     /// Sets whether this widget ignores input and is excluded from keyboard focus.
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
+        self
+    }
+
+    /// Sets the border character style (defaults to [`BorderStyle::Single`]).
+    ///
+    /// For [`TextInputVariant::Borderless`], this styles the underline only.
+    /// This does not change the variant, padding, or sizing.
+    pub fn border(mut self, border: BorderStyle) -> Self {
+        self.border = border;
         self
     }
 
@@ -253,10 +265,10 @@ impl<M: 'static> Widget<M> for TextInput<M> {
 
         match self.variant {
             TextInputVariant::Default | TextInputVariant::Password => {
-                border_renderer::render_border(chunk, BorderStyle::Single, border_style);
+                border_renderer::render_border(chunk, self.border, border_style);
             }
             TextInputVariant::Borderless => {
-                border_renderer::render_border_bottom(chunk, BorderStyle::Single, border_style);
+                border_renderer::render_border_bottom(chunk, self.border, border_style);
             }
         }
 
@@ -502,4 +514,91 @@ fn input_scroll(
         metrics.byte_to_column(value, cursor)
     };
     cursor_scroll(column, offset, width)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::render::{area::Area, buffer::Buffer, chunk::Chunk};
+    use crate::tui::animation::AnimationStore;
+    use crate::tui::widget::WidgetStore;
+    use std::{cell::RefCell, collections::HashMap};
+
+    fn render_rows(input: TextInput<()>) -> Vec<String> {
+        let mut buffer = Buffer::new((8, 3).into());
+        let area = Area::new((0, 0).into(), (8, 3).into());
+        let store = WidgetStore::new();
+        let animations = AnimationStore::new();
+        let theme = Theme::dark();
+        let geometry = RefCell::new(HashMap::new());
+        let ctx = RenderCtx::new(&store, &animations, &theme, None, &geometry);
+        input.render(&mut Chunk::new(&mut buffer, area).unwrap(), &ctx);
+        buffer
+            .content()
+            .chunks(8)
+            .map(|row| {
+                row.iter()
+                    .map(|cell| cell.content.as_char().unwrap_or(' '))
+                    .collect()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn default_border_remains_single() {
+        let input = text_input::<()>().value("Hi");
+        assert_eq!(input.border, BorderStyle::Single);
+        assert_eq!(render_rows(input), ["┌──────┐", "│ Hi   │", "└──────┘"]);
+    }
+
+    #[test]
+    fn configured_borders_preserve_variants_and_sizing() {
+        for (border, top, bottom, side) in [
+            (BorderStyle::Rounded, "╭──────╮", "╰──────╯", '│'),
+            (BorderStyle::Double, "╔══════╗", "╚══════╝", '║'),
+            (BorderStyle::Thick, "┏━━━━━━┓", "┗━━━━━━┛", '┃'),
+            (BorderStyle::None, "        ", "        ", ' '),
+        ] {
+            for (variant, text) in [
+                (TextInputVariant::Default, "Hi"),
+                (TextInputVariant::Password, "••"),
+            ] {
+                let input = text_input::<()>()
+                    .value("Hi")
+                    .variant(variant)
+                    .border(border);
+                assert_eq!(input.variant, variant);
+                let constraints = input.constraints();
+                assert_eq!(constraints.min_width, 20);
+                assert_eq!(constraints.max_width, None);
+                assert_eq!(constraints.min_height, 3);
+                assert_eq!(constraints.max_height, Some(3));
+                assert_eq!(
+                    render_rows(input),
+                    [
+                        top.to_string(),
+                        format!("{side} {text}   {side}"),
+                        bottom.to_string()
+                    ]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn borderless_underline_uses_configured_border() {
+        for (border, underline) in [
+            (BorderStyle::Single, "────────"),
+            (BorderStyle::Rounded, "────────"),
+            (BorderStyle::Double, "════════"),
+            (BorderStyle::Thick, "━━━━━━━━"),
+            (BorderStyle::None, "        "),
+        ] {
+            let input = text_input::<()>()
+                .border(border)
+                .variant(TextInputVariant::Borderless)
+                .value("Hi");
+            assert_eq!(render_rows(input), ["        ", " Hi     ", underline]);
+        }
+    }
 }

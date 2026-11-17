@@ -1,5 +1,7 @@
 mod config;
+mod style;
 mod terminal;
+mod theme;
 mod ui;
 
 use clap::{Parser, Subcommand, ValueEnum};
@@ -28,6 +30,12 @@ struct Args {
     /// Render below the current cursor without switching to the alternate screen
     #[arg(long, global = true)]
     inline: bool,
+    /// Color preset; overrides the YAML theme (default: dark)
+    #[arg(long, global = true, value_enum)]
+    theme: Option<theme::ThemePreset>,
+    /// Structural style preset; overrides YAML style (default: classic)
+    #[arg(long, global = true, value_enum)]
+    style: Option<style::StylePreset>,
     #[command(subcommand)]
     command: Command,
 }
@@ -214,11 +222,19 @@ fn prepare(args: Args) -> Result<(Config, Output, bool), Failure> {
             if args.inline {
                 config.mode = "inline".into();
             }
+            if let Some(style) = args.style {
+                config.style = style;
+            }
+            if let Some(theme) = args.theme {
+                config.theme = theme;
+            }
             return Ok((config, args.output, false));
         }
     };
     let mut config = Config {
         version: 1,
+        theme: args.theme.unwrap_or_default(),
+        style: args.style.unwrap_or_default(),
         title,
         mode: if args.inline { "inline" } else { "fullscreen" }.into(),
         layout,
@@ -252,6 +268,114 @@ fn execute(args: Args) -> Result<u8, Failure> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn style_names_match_cli_and_yaml() {
+        use style::StylePreset;
+        for preset in StylePreset::value_variants() {
+            let value = preset.to_possible_value().unwrap();
+            let name = value.get_name();
+            for argv in [
+                vec!["rsille", "--style", name, "input"],
+                vec!["rsille", "input", "--style", name],
+            ] {
+                let args = Args::try_parse_from(argv).unwrap();
+                let (config, _, _) = prepare(args).unwrap_or_else(|e| panic!("{}", e.message));
+                assert_eq!(config.style, *preset);
+            }
+            let config = config::parse(
+                &format!("version: 1\nstyle: {name}\nlayout: {{text: Hello}}"),
+                &Value::Null,
+            )
+            .unwrap();
+            assert_eq!(config.style, *preset);
+        }
+        assert!(Args::try_parse_from(["rsille", "input", "--style", "unknown"]).is_err());
+        assert!(config::parse(
+            "version: 1\nstyle: unknown\nlayout: {text: Hello}",
+            &Value::Null
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn style_override_preserves_color_selection() {
+        let path = std::env::temp_dir().join(format!("rsille-style-{}.yaml", std::process::id()));
+        std::fs::write(
+            &path,
+            "version: 1\nstyle: retro\ntheme: light\nlayout: {text: Hello}",
+        )
+        .unwrap();
+        for (extra, expected) in [
+            (vec![], style::StylePreset::Retro),
+            (vec!["--style", "classic"], style::StylePreset::Classic),
+        ] {
+            let mut argv = vec!["rsille", "run", path.to_str().unwrap()];
+            argv.extend(extra);
+            let (config, _, _) = prepare(Args::try_parse_from(argv).unwrap())
+                .unwrap_or_else(|e| panic!("{}", e.message));
+            assert_eq!(config.style, expected);
+            assert_eq!(config.theme, theme::ThemePreset::Light);
+        }
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn theme_names_match_cli_and_yaml() {
+        use theme::ThemePreset;
+        for preset in ThemePreset::value_variants() {
+            let value = preset.to_possible_value().unwrap();
+            let name = value.get_name();
+            for argv in [
+                vec!["rsille", "--theme", name, "input"],
+                vec!["rsille", "input", "--theme", name],
+            ] {
+                let args = Args::try_parse_from(argv).unwrap();
+                let (config, _, _) = prepare(args).unwrap_or_else(|e| panic!("{}", e.message));
+                assert_eq!(config.theme, *preset);
+            }
+            let config = config::parse(
+                &format!("version: 1\ntheme: {name}\nlayout: {{text: Hello}}"),
+                &Value::Null,
+            )
+            .unwrap();
+            assert_eq!(config.theme, *preset);
+            assert_eq!(preset.build().name, name);
+        }
+        let args = Args::try_parse_from(["rsille", "input"]).unwrap();
+        assert_eq!(
+            prepare(args)
+                .unwrap_or_else(|e| panic!("{}", e.message))
+                .0
+                .theme,
+            ThemePreset::Dark
+        );
+        assert!(Args::try_parse_from(["rsille", "input", "--theme", "unknown"]).is_err());
+        assert!(config::parse(
+            "version: 1\ntheme: unknown\nlayout: {text: Hello}",
+            &Value::Null
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn cli_theme_overrides_yaml_only_when_explicit() {
+        use theme::ThemePreset;
+        let path = std::env::temp_dir().join(format!("rsille-theme-{}.yaml", std::process::id()));
+        std::fs::write(&path, "version: 1\ntheme: dracula\nlayout: {text: Hello}").unwrap();
+        for (extra, expected) in [
+            (vec![], ThemePreset::Dracula),
+            (vec!["--theme", "light"], ThemePreset::Light),
+            (vec!["--theme", "dark"], ThemePreset::Dark),
+        ] {
+            let mut argv = vec!["rsille", "run", path.to_str().unwrap()];
+            argv.extend(extra);
+            let args = Args::try_parse_from(argv).unwrap();
+            let (config, _, _) = prepare(args).unwrap_or_else(|e| panic!("{}", e.message));
+            assert_eq!(config.theme, expected);
+        }
+        std::fs::remove_file(path).unwrap();
+    }
 
     #[test]
     fn quick_prompts_do_not_duplicate_their_heading() {

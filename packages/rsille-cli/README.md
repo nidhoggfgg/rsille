@@ -37,6 +37,48 @@ rsille run form.yaml --inline > result.json
 
 界面按布局高度预留行数，并限制在终端可用高度内；提交或取消后清除交互区域并恢复终端。stdout 仍然只输出结果，管道和重定向用法不变。较大的表单建议使用全屏；缩小终端或终端自动重排时，旧界面可能留在滚动历史中。交互期间请避免其他进程同时向该终端写入内容。
 
+## 样式预设
+
+`--style` 控制边框、控件外观、间距和留白，与 `--theme` 配色独立，可以自由组合：
+
+```sh
+rsille select --style rounded --theme dracula dev staging production
+rsille input --inline --style minimal --label '项目名称'
+rsille run form.yaml --style retro --theme light
+```
+
+| 样式 | 边框和控件 | 布局 |
+| --- | --- | --- |
+| `classic`（默认） | 单线边框、填充按钮，保持原有外观 | 紧凑，无额外留白 |
+| `minimal` | 无框选择器和表格、下划线输入框、文字链接按钮 | 紧凑，无额外留白 |
+| `rounded` | 圆角边框 `╭─╮`、填充按钮 | 纵向组件间隔一行，上下留一行、左右留两列 |
+| `retro` | 双线边框 `╔═╗`、描边按钮 | 纵向组件间隔一行、左右留一列 |
+| `bold` | 粗线边框 `┏━┓`、填充按钮 | 纵向组件间隔一行、左右留一列 |
+
+边框样式应用于输入框、选择器和表格；按钮使用各自的控件变体，复选框保持原有标记。样式不改变键盘操作或输出数据。所有子命令、全屏和 inline 模式均支持，inline 高度会计入新增间距和留白。
+
+YAML 顶层可设置 `style: rounded`。优先级为 `--style` > YAML `style` > `classic`；未知名称会报错。
+
+## 配色预设
+
+使用全局参数 `--theme` 选择配色，所有子命令、全屏和 inline 模式均支持：
+
+```sh
+rsille --theme dracula select dev staging production
+rsille input --inline --theme light --label '项目名称'
+rsille run form.yaml --theme tokyo-night
+```
+
+| 名称 | 风格 |
+| --- | --- |
+| `dark` | 默认，中性深灰底色、蓝色强调，保持原有外观 |
+| `light` | 明亮浅色底色、靛蓝强调 |
+| `one-dark` | 柔和炭灰底色、蓝青色强调 |
+| `dracula` | 紫灰底色、鲜明紫色与青色强调 |
+| `tokyo-night` | 深海军蓝底色、冷蓝色强调 |
+
+也可以在 YAML 顶层设置 `theme: dracula`。优先级为 `--theme` > YAML `theme` > `dark`；未知主题名称会报错。`rsille --help` 可查看可用名称。预设使用 RGB 配色，建议在支持真彩色的终端中使用。
+
 ## 快速开始
 
 ### 选择
@@ -117,6 +159,8 @@ rsille table services.json
 ```yaml
 version: 1
 title: 创建项目
+theme: one-dark
+style: rounded
 layout:
   column:
     - input:
