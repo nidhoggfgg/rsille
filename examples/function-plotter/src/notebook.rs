@@ -628,7 +628,7 @@ fn application_builder(mut state: State, output: RasterOutput) -> App<State, Msg
         .mode(Mode::Inline)
         .disable_mouse_capture()
         .with_motion_policy(MotionPolicy::disabled())
-        .keyboard_mode(KeyboardMode::Auto)
+        .keyboard_mode(KeyboardMode::Legacy)
         .raster_output(output)
         .with_quit_key(KeyCode::Esc)
 }
