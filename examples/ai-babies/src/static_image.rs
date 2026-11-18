@@ -78,6 +78,23 @@ fn snapshot(buffer: &Buffer) -> Vec<u8> {
     bytes
 }
 
+pub(super) fn render(rows: u16) -> Result<(), Box<dyn Error>> {
+    let buffer = frame(rows)?;
+    let mut output = io::BufWriter::new(io::stdout().lock());
+    for row in buffer
+        .content()
+        .chunks_exact(usize::from(buffer.size().width))
+    {
+        for cell in row {
+            cell.queue(&mut output)?;
+        }
+        crossterm::queue!(output, ResetColor)?;
+        writeln!(output)?;
+    }
+    output.flush()?;
+    Ok(())
+}
+
 pub fn command(args: &[String]) -> Result<(), Box<dyn Error>> {
     let (rows, args) = if args.first().is_some_and(|arg| arg == "--height") {
         let rows: u16 = args.get(1).ok_or("Missing height")?.parse()?;
@@ -89,21 +106,7 @@ pub fn command(args: &[String]) -> Result<(), Box<dyn Error>> {
         (24, args)
     };
     match args {
-        [] => {
-            let buffer = frame(rows)?;
-            let mut output = io::BufWriter::new(io::stdout().lock());
-            for row in buffer
-                .content()
-                .chunks_exact(usize::from(buffer.size().width))
-            {
-                for cell in row {
-                    cell.queue(&mut output)?;
-                }
-                crossterm::queue!(output, ResetColor)?;
-                writeln!(output)?;
-            }
-            output.flush()?;
-        }
+        [] => render(rows)?,
         [flag, path] if flag == "--snapshot" => {
             fs::write(path, snapshot(&frame(rows)?))?;
             println!(

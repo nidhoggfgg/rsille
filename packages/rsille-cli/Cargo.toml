@@ -12,6 +12,9 @@ name = "rsille"
 path = "src/main.rs"
 
 [dependencies]
+ai-babies = { path = "../../examples/ai-babies", version = "0.1.0" }
+rsille-function-plotter = { path = "../../examples/function-plotter", version = "0.1.0" }
+rsille-jellyfish = { path = "../../examples/jellyfish", version = "0.1.0" }
 rsille = { path = "../..", version = "3.1.0", default-features = false, features = ["sixel"] }
 rsille-typst = { path = "../rsille-typst", version = "0.1.0" }
 typst-assets = { version = "=0.13.1", features = ["fonts"] }

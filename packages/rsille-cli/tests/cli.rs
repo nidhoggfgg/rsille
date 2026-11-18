@@ -179,6 +179,25 @@ fn invalid_data_and_resource_limits() {
     }
 }
 #[test]
+fn demo_help_lists_bundled_examples() {
+    let output = run(&["demo", "--help"]);
+    assert!(output.status.success());
+    let help = String::from_utf8(output.stdout).unwrap();
+    failure(&["demo", "form"], 2);
+    for demo in ["jellyfish", "function-plotter", "ai-babies"] {
+        assert!(help.contains(demo));
+    }
+}
+
+#[test]
+fn demos_require_a_terminal_and_reject_plain_output() {
+    for demo in ["jellyfish", "function-plotter", "ai-babies"] {
+        failure(&["demo", demo], 1);
+        failure(&["demo", demo, "--output", "plain"], 2);
+    }
+}
+
+#[test]
 fn bundled_deployment_example_passes_validation() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples");
     failure(

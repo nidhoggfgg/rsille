@@ -34,7 +34,7 @@ cargo run --release --manifest-path examples/jellyfish/Cargo.toml -- --frames /t
 预览循环播放 12 秒片段，实际运行时持续推进。
 
 [sea.rs](src/sea.rs) 直接根据时间生成运动与光照，无需外部素材。
-[main.rs](src/main.rs) 对场景超采样，使用 Canvas Half-block 编码和 render 事件循环。
+[lib.rs](src/lib.rs) 对场景超采样，使用 Canvas Half-block 编码和 render 事件循环。
 [export.rs](src/export.rs) 还原实际终端字符格。这是观赏动画，不是流体或生物物理模拟。
 
 [全部示例](../README_cn.md)

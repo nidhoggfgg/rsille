@@ -42,7 +42,7 @@ fn ppm(buffer: &Buffer) -> Vec<u8> {
 }
 
 pub fn command(args: &[String]) -> Result<(), Box<dyn Error>> {
-    match args[0].as_str() {
+    match args.first().map_or("", String::as_str) {
         "--snapshot" if (2..=3).contains(&args.len()) => {
             let time: f64 = args.get(2).map_or(Ok(8.0), |s| s.parse())?;
             if !time.is_finite() || !(0.0..=86400.0).contains(&time) {

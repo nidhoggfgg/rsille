@@ -3,7 +3,6 @@ mod export;
 mod options;
 mod raster;
 mod scene;
-mod static_image;
 
 use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
 use options::{animation_args, Options, Output};
@@ -218,7 +217,7 @@ fn playback_builder(options: Options, grid: (u16, u16), output: RasterOutput) ->
 fn main() -> Result<(), Box<dyn Error>> {
     let args: Vec<_> = std::env::args().skip(1).collect();
     if args.first().is_some_and(|arg| arg == "--static") {
-        return static_image::command(&args[1..]);
+        return ai_babies::static_command(&args[1..]);
     }
     let (mut options, args) = animation_args(&args)?;
     if !args.is_empty() {

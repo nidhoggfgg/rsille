@@ -23,6 +23,14 @@ cargo install --path packages/rsille-cli
 rsille --help
 ```
 
+## 内置演示
+
+安装后可在任意目录运行 `rsille demo --help` 查看演示：
+
+- `rsille demo function-plotter`：在支持 Sixel 的交互终端中输入 `sin(x); cos(x)`，按 Enter 绘图，按 Esc 退出。
+- `rsille demo ai-babies`：根据终端尺寸绘制三个像素角色的合影，画完即退出。图像直接显示在终端中，不支持重定向。
+- `rsille demo jellyfish`：在当前终端播放 Rust 绘制的水母动画，按 `q` 退出。播放需要 stdin 和 stdout 都连接到终端，不支持重定向。
+
 ## Inline 模式
 
 默认在当前光标下方显示界面，不切换到备用屏幕，保留之前的终端输出。全局参数 `--inline` 保留兼容，也可用于覆盖 YAML 中的全屏设置：

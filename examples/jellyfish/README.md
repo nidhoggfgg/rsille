@@ -35,7 +35,7 @@ starting at time zero. `--headless` checks 90 time samples and reports drawing/e
 time without terminal I/O. The preview loops a 12-second excerpt; live playback continues.
 
 [sea.rs](src/sea.rs) generates motion and lighting directly from time, with no external
-assets. [main.rs](src/main.rs) supersamples the scene and uses Canvas Half-block encoding
+assets. [lib.rs](src/lib.rs) supersamples the scene and uses Canvas Half-block encoding
 with the render event loop. [export.rs](src/export.rs) reconstructs actual terminal cells.
 The animation is an artistic effect rather than a fluid or biological simulation.
 

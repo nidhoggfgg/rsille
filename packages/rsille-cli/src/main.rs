@@ -1,4 +1,5 @@
 mod config;
+mod jellyfish;
 mod style;
 mod terminal;
 mod theme;
@@ -95,12 +96,25 @@ enum Command {
         #[arg(long, default_value_t = 2.0)]
         pixels_per_point: f32,
     },
+    /// Explore the bundled demos
+    #[command(subcommand)]
+    Demo(Demo),
     /// Run a version 1 YAML interface
     Run {
         file: PathBuf,
         #[arg(long, help = "JSON file, or - to explicitly read stdin")]
         data: Option<PathBuf>,
     },
+}
+
+#[derive(Subcommand)]
+enum Demo {
+    /// Plot functions interactively in a Sixel terminal
+    FunctionPlotter,
+    /// Draw the three AI Babies characters and exit
+    AiBabies,
+    /// Watch the jellyfish animation
+    Jellyfish,
 }
 
 struct Failure {
@@ -166,7 +180,10 @@ fn prepare(args: Args) -> Result<(Config, Output, bool), Failure> {
     if args.output == Output::Plain
         && matches!(
             &args.command,
-            Command::Table { .. } | Command::Run { .. } | Command::Formula { .. }
+            Command::Table { .. }
+                | Command::Run { .. }
+                | Command::Formula { .. }
+                | Command::Demo(_)
         )
     {
         return Err(invalid(
@@ -246,6 +263,7 @@ fn prepare(args: Args) -> Result<(Config, Output, bool), Failure> {
                 }),
             )
         }
+        Command::Demo(_) => return Err(invalid("demos are not forms")),
         Command::Run { file, data: path } => {
             if file == std::path::Path::new("-") {
                 return Err(invalid(
@@ -320,6 +338,25 @@ fn validate_graphics(config: &Config) -> Result<(), Failure> {
 }
 
 fn execute(args: Args) -> Result<u8, Failure> {
+    if let Command::Demo(demo) = args.command {
+        if args.output == Output::Plain {
+            return Err(invalid(
+                "--output plain only supports select, input and confirm",
+            ));
+        }
+        match demo {
+            Demo::Jellyfish => jellyfish::run(),
+            Demo::FunctionPlotter => rsille_function_plotter::run(),
+            Demo::AiBabies => {
+                if !io::stdout().is_terminal() {
+                    return Err(runtime("ai-babies requires terminal stdout"));
+                }
+                ai_babies::run()
+            }
+        }
+        .map_err(|e| runtime(e.to_string()))?;
+        return Ok(0);
+    }
     let (config, output, confirm) = prepare(args)?;
     let is_static = config.is_static();
     let Some(mut result) = terminal::run(config).map_err(runtime)? else {
