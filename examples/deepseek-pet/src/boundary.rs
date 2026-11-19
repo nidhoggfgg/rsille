@@ -7,7 +7,10 @@ enum State {
     Escape,
     Intermediate,
     Csi,
-    String { osc: bool, esc: bool },
+    String {
+        osc: bool,
+        esc: bool,
+    },
 }
 
 #[derive(Default)]
@@ -39,13 +42,20 @@ impl Boundary {
             self.state = match (self.state, b) {
                 (_, 0x18 | 0x1a | 0x9c) => Ground, // CAN, SUB, ST
                 (String { osc: true, .. }, 7) | (String { esc: true, .. }, b'\\') => Ground,
-                (String { osc, .. }, _) => String { osc, esc: b == 0x1b },
+                (String { osc, .. }, _) => String {
+                    osc,
+                    esc: b == 0x1b,
+                },
                 (_, 0x1b) => Escape,
                 (Escape, b'[') | (_, 0x9b) => Csi,
-                (Escape, b']') | (_, 0x9d) => String { osc: true, esc: false },
-                (Escape, b'P' | b'X' | b'^' | b'_') | (_, 0x90 | 0x98 | 0x9e | 0x9f) => {
-                    String { osc: false, esc: false }
-                }
+                (Escape, b']') | (_, 0x9d) => String {
+                    osc: true,
+                    esc: false,
+                },
+                (Escape, b'P' | b'X' | b'^' | b'_') | (_, 0x90 | 0x98 | 0x9e | 0x9f) => String {
+                    osc: false,
+                    esc: false,
+                },
                 (Escape | Intermediate, 0x20..=0x2f) => Intermediate,
                 (Escape | Intermediate, 0x30..=0x7e) | (Csi, 0x40..=0x7e) => Ground,
                 (s, _) => s,
@@ -61,10 +71,20 @@ mod tests {
     #[test]
     fn only_ready_after_final_byte() {
         for seq in [
-            &b"\x1b[?25l"[..], b"\x1b[1;2 q", b"\x1b(B", b"\x1b#8", b"\x1b7",
-            b"\x1b]0;title\x07", b"\x1b]0;t\x1b\\", b"\x1bPq\x07abc\x1b\\",
-            b"\x9b31m", b"\x9fabc\x9c", b"\x9d\xc3\x9c\x07",
-            "¢".as_bytes(), "界".as_bytes(), "🦀".as_bytes(),
+            &b"\x1b[?25l"[..],
+            b"\x1b[1;2 q",
+            b"\x1b(B",
+            b"\x1b#8",
+            b"\x1b7",
+            b"\x1b]0;title\x07",
+            b"\x1b]0;t\x1b\\",
+            b"\x1bPq\x07abc\x1b\\",
+            b"\x9b31m",
+            b"\x9fabc\x9c",
+            b"\x9d\xc3\x9c\x07",
+            "¢".as_bytes(),
+            "界".as_bytes(),
+            "🦀".as_bytes(),
         ] {
             let mut boundary = Boundary::default();
             assert!(boundary.ready());
