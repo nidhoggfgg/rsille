@@ -92,7 +92,8 @@ struct Terminal {
 }
 impl Drop for Terminal {
     fn drop(&mut self) {
-        let _ = io::stdout().write_all(b"\x18\x1b[?1003l\x1b[?1006l");
+        // Ctrl+] can also interrupt a child application that enabled mouse tracking.
+        let _ = io::stdout().write_all(b"\x18\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l");
         let _ = io::stdout().write_all(b"\x1b[0m\x1b[?1049l");
         let _ = io::stdout().flush();
         unsafe {
@@ -115,7 +116,7 @@ impl Drop for Child {
 }
 
 /// Requires exclusive use of stdin, stdout and the spawned child's wait status.
-pub fn run(mut pet: crate::pet::Pet) -> io::Result<()> {
+pub fn run(mut pet: crate::pet::Pet, capture_mouse: bool) -> io::Result<()> {
     let shell = std::env::var_os("SHELL")
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "/bin/sh".into());
@@ -161,7 +162,9 @@ pub fn run(mut pet: crate::pet::Pet) -> io::Result<()> {
     let mut food_deadline = None;
     let mut out = io::stdout().lock();
     out.write_all(b"\x1b[?1049h\x1b[2J\x1b[H")?;
-    out.write_all(b"\x1b[?1006h\x1b[?1003h")?;
+    if capture_mouse {
+        out.write_all(b"\x1b[?1006h\x1b[?1003h")?;
+    }
     let mut pending = std::collections::VecDeque::<u8>::new();
     let mut input = [0u8; 4096];
     let mut output = [0u8; 8192];
@@ -306,19 +309,23 @@ pub fn run(mut pet: crate::pet::Pet) -> io::Result<()> {
             if bytes.contains(&0x1d) {
                 break;
             }
-            decoder.feed(bytes, &mut pending, |kind, col, row| {
-                use crate::mouse::MouseKind;
-                if col <= s.ws_col && row <= s.ws_row {
-                    match kind {
-                        MouseKind::Motion => pet.notice_mouse(col, row),
-                        MouseKind::LeftPress => pet.notice_touch(col, row),
-                        MouseKind::Other => {}
+            if capture_mouse {
+                decoder.feed(bytes, &mut pending, |kind, col, row| {
+                    use crate::mouse::MouseKind;
+                    if col <= s.ws_col && row <= s.ws_row {
+                        match kind {
+                            MouseKind::Motion => pet.notice_mouse(col, row),
+                            MouseKind::LeftPress => pet.notice_touch(col, row),
+                            MouseKind::Other => {}
+                        }
                     }
-                }
-            });
-            input_deadline = decoder
-                .has_partial_report()
-                .then(|| Instant::now() + Duration::from_millis(100));
+                });
+                input_deadline = decoder
+                    .has_partial_report()
+                    .then(|| Instant::now() + Duration::from_millis(100));
+            } else {
+                pending.extend(bytes);
+            }
             if !pending.is_empty() {
                 pet.notice_input();
             }
