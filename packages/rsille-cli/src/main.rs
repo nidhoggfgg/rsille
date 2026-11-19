@@ -1,5 +1,8 @@
 mod config;
 mod jellyfish;
+mod multiline;
+mod multiselect;
+mod progress;
 mod style;
 mod terminal;
 mod theme;
@@ -25,7 +28,7 @@ struct Args {
         global = true,
         value_enum,
         default_value = "json",
-        help = "Plain output is only available for select, input and confirm"
+        help = "Result format for interactive prompts (progress always prints a bar)"
     )]
     output: Output,
     /// Render below the current cursor without switching to the alternate screen
@@ -59,6 +62,13 @@ enum Output {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Select zero or more options
+    #[command(alias = "multiselect")]
+    MultiSelect(multiselect::MultiSelectArgs),
+    /// Read multiline text from stdin until EOF
+    Multiline(multiline::MultilineArgs),
+    /// Print a progress bar for a percentage
+    Progress(progress::ProgressArgs),
     /// Select one value; arrows navigate, Enter submits
     Select {
         #[arg(long, default_value = "Select")]
@@ -263,7 +273,10 @@ fn prepare(args: Args) -> Result<(Config, Output, bool), Failure> {
                 }),
             )
         }
-        Command::Demo(_) => return Err(invalid("demos are not forms")),
+        Command::Demo(_)
+        | Command::MultiSelect(_)
+        | Command::Multiline(_)
+        | Command::Progress(_) => return Err(invalid("expected a form command")),
         Command::Run { file, data: path } => {
             if file == std::path::Path::new("-") {
                 return Err(invalid(
@@ -338,6 +351,32 @@ fn validate_graphics(config: &Config) -> Result<(), Failure> {
 }
 
 fn execute(args: Args) -> Result<u8, Failure> {
+    if args.inline && args.fullscreen {
+        return Err(invalid("--fullscreen cannot be used with --inline"));
+    }
+    match args.command {
+        Command::MultiSelect(ref prompt) => return multiselect::run(prompt, &args),
+        Command::Progress(prompt) => {
+            return progress::run(prompt)
+                .map(|_| 0)
+                .map_err(|e| runtime(e.to_string()))
+        }
+        Command::Multiline(prompt) => {
+            let value = multiline::run(prompt).map_err(|e| runtime(e.to_string()))?;
+            let mut stdout = io::stdout().lock();
+            match args.output {
+                Output::Plain => write!(stdout, "{value}"),
+                Output::Json => writeln!(
+                    stdout,
+                    "{}",
+                    serde_json::json!({"action":"submit","values":{"value":value}})
+                ),
+            }
+            .map_err(|e| runtime(e.to_string()))?;
+            return Ok(0);
+        }
+        _ => (),
+    }
     if let Command::Demo(demo) = args.command {
         if args.output == Output::Plain {
             return Err(invalid(

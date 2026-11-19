@@ -23,6 +23,18 @@ cargo install --path packages/rsille-cli
 rsille --help
 ```
 
+## 多选、多行输入和进度条
+
+```sh
+rsille multi-select --title '选择服务' api web worker
+rsille multiline --label '发布说明' --output plain
+rsille progress 65 --width 30
+```
+
+多选使用复选框，选择后聚焦 Submit 提交。JSON 的 `values.value` 按参数顺序列出选中的值，允许空数组。
+
+`multiline` 从 stdin 读取 UTF-8 文本并保留换行，也可接收管道输入。交互时 Enter 换行，在空行按 Ctrl-D 提交（Windows 按 Ctrl-Z 再按 Enter）。`progress` 不需要交互终端，每次向 stdout 打印一行指定百分比（0–100）的进度条。
+
 ## 内置演示
 
 安装后可在任意目录运行 `rsille demo --help` 查看演示：
@@ -326,7 +338,7 @@ layout:
 - `input`、`select`、`confirm` 和可选择的快捷表格使用 `values.value`。
 - `run` 使用组件的 `id` 作为键。
 - 只读表格不向 `values` 添加值。
-- `--output plain` 仅适用于 `input`、`select`、`confirm`，输出字符串或 `true`，末尾加换行。
+- `--output plain` 对 `input`、`select`、`confirm` 输出一行结果；`multi-select` 每个选中值输出一行；`multiline` 原样输出文本，不追加换行。
 
 | 退出码 | 含义 |
 | --- | --- |
