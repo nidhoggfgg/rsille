@@ -157,14 +157,23 @@ impl Draw for Nursery {
                 .min(raster::SIDE.div_ceil(u32::from(pixels.height)) as u16);
             let dx = size.width - width;
             let dy = size.height - height;
-            chunk.shrink(dy / 2, dy - dy / 2, 0, dx)?.raster(
-                frames[character].frame(index),
-                RasterOptions {
-                    background: self.options.background,
-                    align_x: RasterAlign::Start,
-                    ..RasterOptions::default()
-                },
-            )?;
+            let mut target = chunk.shrink(dy / 2, dy - dy / 2, 0, dx)?;
+            let frame = frames[character].frame(index);
+            let options = RasterOptions {
+                align_x: RasterAlign::Start,
+                ..RasterOptions::default()
+            };
+            if let Some(background) = self.options.background {
+                target.raster(
+                    frame,
+                    RasterOptions {
+                        background,
+                        ..options
+                    },
+                )?;
+            } else {
+                target.raster_overlay(frame, options)?;
+            }
             return Ok(size);
         }
         let w = size.width as usize * 2;

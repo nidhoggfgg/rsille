@@ -82,8 +82,7 @@ pub(super) struct SixelCache {
 impl SixelCache {
     /// Encodes the original cell crop at the supplied physical pixel metrics.
     ///
-    /// Every actual pixel is opaque after RGB332 quantization, including black
-    /// and letterboxing. Dimensions must be 1..=1024, their product at most
+    /// Visible pixels use RGB332, including black and letterboxing. Dimensions must be 1..=1024, their product at most
     /// 65,536, and encoded output at most 1 MiB. Limit violations return
     /// `InvalidInput`, without changing cache entries or counters.
     #[cfg(test)]
@@ -243,21 +242,28 @@ fn encode_tile_padded(
 ) -> io::Result<Vec<u8>> {
     let width = usize::from(cell_width);
     let height = usize::from(cell_height);
-    let mut pixels = zeroed(width * height)?;
+    let mut pixels = Vec::new();
+    pixels
+        .try_reserve_exact(width * height)
+        .map_err(allocation_error)?;
     let mut used = [false; 256];
-    for (offset, pixel) in pixels.iter_mut().enumerate() {
-        *pixel = palette_index(cell.sample(
-            (offset % width) as u32,
-            (offset / width) as u32,
-            cell_width,
-            cell_height,
-        ));
-        used[usize::from(*pixel)] = true;
+    for offset in 0..width * height {
+        let pixel = cell
+            .sample_visible(
+                (offset % width) as u32,
+                (offset / width) as u32,
+                cell_width,
+                cell_height,
+            )
+            .map(palette_index);
+        if let Some(index) = pixel {
+            used[usize::from(index)] = true;
+        }
+        pixels.push(pixel);
     }
 
     let mut output = TileBytes::default();
-    // Transparent *unset bits* avoid filling the final band's padding. All real
-    // pixels, including the presentation background, are explicitly set below.
+    // P2=1 preserves the destination under source holes and band padding.
     // This does not prevent full-band scroll checks; inline needs a bottom margin.
     let padding = usize::from(top_padding);
     let encoded_height = padding + height;
@@ -273,12 +279,18 @@ fn encode_tile_padded(
 
     // Only one band's color planes are held at a time (at most 256 KiB).
     let mut planes = zeroed(256 * width)?;
-    for top in (0..encoded_height).step_by(6) {
+    let painted_height = pixels
+        .iter()
+        .rposition(Option::is_some)
+        .map_or(0, |last| padding + last / width + 1);
+    for top in (0..painted_height).step_by(6) {
         planes.fill(0);
         for y in top.max(padding)..(top + 6).min(encoded_height) {
             for x in 0..width {
-                let index = usize::from(pixels[(y - padding) * width + x]);
-                planes[index * width + x] |= 1 << (y - top);
+                let Some(index) = pixels[(y - padding) * width + x] else {
+                    continue;
+                };
+                planes[usize::from(index) * width + x] |= 1 << (y - top);
             }
         }
         let mut first_color = true;
@@ -295,7 +307,7 @@ fn encode_tile_padded(
         }
         // Avoid an extra advance past the final band. The band itself may still
         // trigger bottom scrolling without the parent's inline guard rows.
-        if top + 6 < encoded_height {
+        if top + 6 < painted_height {
             output.write_all(b"-")?;
         }
     }
@@ -341,6 +353,21 @@ mod tests {
                 ..RasterOptions::default()
             },
         }
+    }
+
+    #[test]
+    fn transparent_pixels_are_absent_from_every_color_plane() {
+        let mut tile = cell(2, 13);
+        tile.canvas = RasterCanvas::new_transparent(2, 13).unwrap();
+        let mut cache = SixelCache::default();
+        let empty = decode(&cache.encode(&tile, 2, 13).unwrap());
+        assert_eq!(empty.definitions, 0);
+        assert!(empty.pixels.iter().all(Option::is_none));
+        tile.canvas.set_pixel(1, 7, Rgb(0, 0, 0));
+        let mixed = decode(&cache.encode(&tile, 2, 13).unwrap());
+        assert_eq!(mixed.definitions, 1);
+        assert_eq!(mixed.pixels[15], Some([0; 3]));
+        assert_eq!(mixed.pixels.iter().flatten().count(), 1);
     }
 
     struct Decoded {

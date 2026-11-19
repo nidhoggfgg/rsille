@@ -19,7 +19,7 @@ pub struct Options {
     pub character: Character,
     pub height: u16,
     pub output: Output,
-    pub background: Rgb,
+    pub background: Option<Rgb>,
     pub pixels: Option<CellPixels>,
     pub force_cell_pixels: bool,
 }
@@ -30,7 +30,7 @@ impl Default for Options {
             character: Character::default(),
             height: INLINE_HEIGHT,
             output: Output::Quadrant,
-            background: Rgb(0, 0, 0),
+            background: None,
             pixels: None,
             force_cell_pixels: false,
         }
@@ -39,7 +39,7 @@ impl Default for Options {
 
 pub fn animation_args(mut args: &[String]) -> Result<(Options, &[String]), Box<dyn Error>> {
     let mut options = Options::default();
-    let mut background_set = false;
+
     while let Some(arg) = args.first() {
         let mut consumed = 2;
         match arg.as_str() {
@@ -72,8 +72,7 @@ pub fn animation_args(mut args: &[String]) -> Result<(Options, &[String]), Box<d
                     return Err("--background requires six hexadecimal digits (RRGGBB)".into());
                 }
                 let rgb = u32::from_str_radix(value, 16)?;
-                options.background = Rgb((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8);
-                background_set = true;
+                options.background = Some(Rgb((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8));
             }
             "--cell-pixels" => {
                 let (width, height) = args.get(1).and_then(|s| s.split_once('x'))
@@ -91,7 +90,7 @@ pub fn animation_args(mut args: &[String]) -> Result<(Options, &[String]), Box<d
         }
         args = &args[consumed..];
     }
-    if background_set && options.output == Output::Quadrant {
+    if options.background.is_some() && options.output == Output::Quadrant {
         return Err("--background requires --sixel".into());
     }
     if options.pixels.is_some() && options.output != Output::Sixel {

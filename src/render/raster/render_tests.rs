@@ -13,6 +13,8 @@ struct Scene {
     underlay: char,
     text: Vec<(Position, char)>,
     draws: usize,
+    styled: Option<Stylized>,
+    overlays: Vec<(Position, RasterCell)>,
 }
 
 impl Default for Scene {
@@ -27,6 +29,8 @@ impl Default for Scene {
             underlay: '.',
             text: Vec::new(),
             draws: 0,
+            styled: None,
+            overlays: Vec::new(),
         }
     }
 }
@@ -66,6 +70,12 @@ impl Draw for Scene {
         }
         for &(position, character) in &self.text {
             chunk.set(position.x, position.y, Stylized::plain(character))?;
+        }
+        if let Some(glyph) = &self.styled {
+            chunk.set(0, 0, glyph.clone())?;
+        }
+        for (pos, tile) in &self.overlays {
+            chunk.overlay_raster_cell(pos.x, pos.y, tile.clone())?;
         }
         Ok(size)
     }
@@ -507,6 +517,100 @@ mod native {
                 _ => None,
             })
             .collect()
+    }
+
+    fn overlay_tile(color: Rgb) -> RasterCell {
+        let mut canvas = RasterCanvas::new_transparent(2, 1).unwrap();
+        canvas.set_pixel(0, 0, color);
+        RasterCell {
+            canvas,
+            target: (1, 1).into(),
+            x: 0,
+            y: 0,
+            options: RasterOptions {
+                scale: RasterScale::Stretch,
+                ..Default::default()
+            },
+        }
+    }
+
+    #[test]
+    fn removing_overlay_on_wide_tail_restores_latest_style_and_lower_layer() {
+        use crossterm::style::{Color, Colors};
+        let mut render = renderer(verified(), Vec::new());
+        render.thing.visible = false;
+        render.thing.styled = Some(Stylized::plain('好'));
+        let lower = overlay_tile(Rgb(0, 255, 0));
+        let mut upper = overlay_tile(Rgb(255, 0, 0));
+        upper.canvas.set_pixel(1, 0, Rgb(255, 0, 0));
+        upper.canvas.clear_pixel(0, 0);
+        render.thing.overlays = vec![((1, 0).into(), lower), ((1, 0).into(), upper)];
+        let first = events(&frame(&mut render));
+        let layers = tiles(&first);
+        assert_eq!(layers.len(), 2);
+        render.thing.styled = Some(Stylized::new(
+            '界',
+            crate::render::style::Style::with_colors(Colors {
+                foreground: None,
+                background: Some(Color::Rgb {
+                    r: 21,
+                    g: 42,
+                    b: 63,
+                }),
+            }),
+        ));
+        assert_eq!(tiles(&events(&frame(&mut render))), layers);
+        render.thing.overlays.pop();
+        let bytes = frame(&mut render);
+        assert!(contains(&bytes, b"48;2;21;42;63"));
+        let trace = events(&bytes);
+        assert!(!trace.contains(&Event::Clear));
+        assert_eq!(
+            trace
+                .iter()
+                .filter(|e| matches!(e, Event::Print(..)))
+                .collect::<Vec<_>>(),
+            [&Event::Print((0, 0).into(), '界')]
+        );
+        assert_eq!(tiles(&trace), &layers[..1]);
+        assert!(
+            trace
+                .iter()
+                .position(|e| matches!(e, Event::Print(..)))
+                .unwrap()
+                < trace
+                    .iter()
+                    .position(|e| matches!(e, Event::Tile(..)))
+                    .unwrap()
+        );
+        assert!(frame(&mut render).is_empty());
+        render.thing.overlays.clear();
+        let trace = events(&frame(&mut render));
+        assert!(tiles(&trace).is_empty());
+        assert!(trace.contains(&Event::Print((0, 0).into(), '界')));
+        assert!(!trace.contains(&Event::Clear));
+    }
+
+    #[test]
+    fn source_edit_only_damages_changed_sampled_tile() {
+        let mut render = renderer(verified(), Vec::new());
+        render.thing.visible = false;
+        let mut tile = overlay_tile(Rgb(0, 255, 0));
+        tile.target = (2, 1).into();
+        render.thing.overlays.push(((0, 0).into(), tile.clone()));
+        tile.x = 1;
+        render.thing.overlays.push(((1, 0).into(), tile.clone()));
+        frame(&mut render);
+        tile.canvas.set_pixel(1, 0, Rgb(255, 0, 0));
+        for (_, layer) in &mut render.thing.overlays {
+            layer.canvas = tile.canvas.clone();
+        }
+        let trace = events(&frame(&mut render));
+        assert_eq!(
+            tiles(&trace).iter().map(|(p, _)| *p).collect::<Vec<_>>(),
+            [(1, 0).into()]
+        );
+        assert!(!trace.contains(&Event::Print((0, 0).into(), '.')));
     }
 
     fn assert_clear_before_paint(events: &[Event]) {

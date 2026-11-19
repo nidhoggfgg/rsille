@@ -1,4 +1,4 @@
-//! Explicit terminal capabilities for opaque Sixel raster frames.
+//! Explicit terminal capabilities for Sixel raster frames.
 //!
 //! Unknown graphics capabilities reject raster presentation. Native output
 //! requires explicit cell metrics, optionally obtained with a startup probe.
@@ -216,7 +216,9 @@ pub struct RasterCapabilities {
     /// final six-pixel band must not erase adjacent cells.
     /// Inline reserves trailing rows for band padding. Fullscreen moves bottom
     /// tile anchors upward with transparent prefixes so complete bands fit.
-    /// Transparent prefix pixels must preserve existing text and graphics.
+    /// Unset pixels must preserve existing text and graphics. When using retained
+    /// overlays, printing a glyph (including a styled space) must replace graphics
+    /// across its cell span without affecting neighboring cells.
     pub no_scroll: bool,
     /// Physical pixels per character cell, required for native Sixel output.
     /// Set `Some(pixels)` explicitly or store the result of [`CellPixels::probe`]

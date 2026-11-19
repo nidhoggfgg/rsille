@@ -214,6 +214,23 @@ where
             self.append_newline,
             self.inline_mode && self.previous_inline_height > self.used_height,
         )?;
+        if raster_plan.overlay_frame
+            && !raster_plan.clear
+            && raster_plan.encoded.is_empty()
+            && !self.output_uncertain
+            && !self.append_newline
+            && (!self.inline_mode
+                || (self.previous_inline_height == self.used_height
+                    && self.inline_raster_padding == raster_plan.inline_padding))
+            && self
+                .buffer
+                .native_diff(raster_plan.damage_pixels)
+                .is_some_and(|mut diff| diff.next().is_none())
+        {
+            self.raster.commit(raster_plan);
+            self.buffer.clear();
+            return Ok(());
+        }
         self.output_uncertain = true;
         if self.raster.needs_protocol_recovery() {
             // A prior writer failure may have prevented even the best-effort
@@ -232,7 +249,7 @@ where
         // A flush is not an atomic terminal repaint. Hide the intermediate
         // clear/text/tile passes on terminals supporting DEC mode 2026, including
         // cleanup when raster content is removed from the frame.
-        let synchronized = raster_plan.native || raster_plan.clear;
+        let synchronized = raster_plan.native || raster_plan.clear || raster_plan.overlay_frame;
         if synchronized {
             crossterm::queue!(self.out, BeginSynchronizedUpdate)?;
         }
@@ -241,7 +258,8 @@ where
         // drawing or erasing. Cursor movement and clearing do not reset SGR.
         crossterm::queue!(self.out, ResetColor)?;
 
-        let inline_raster = self.inline_mode && (raster_plan.native || raster_plan.clear);
+        let inline_raster = self.inline_mode
+            && (raster_plan.native || raster_plan.clear || raster_plan.overlay_frame);
         if !inline_raster && (raster_plan.clear || (self.clear && self.buffer.previous().is_none()))
         {
             // Native output is enabled only for hosts that verified ED 2 erases
@@ -257,8 +275,8 @@ where
             self.render_inline_raster(&raster_plan)?;
         } else if self.inline_mode {
             self.render_inline()?;
-        } else if raster_plan.native {
-            self.render_raster_characters()?;
+        } else if raster_plan.native || raster_plan.overlay_frame {
+            self.render_raster_characters(&raster_plan)?;
         } else {
             self.render_fullscreen()?;
         }
@@ -406,9 +424,12 @@ where
 
     // Ownership was resolved during drawing/blitting, so these cells cannot
     // overlap any native tile. This is not a fixed text-before-images z-order.
-    fn render_raster_characters(&mut self) -> std::io::Result<()> {
+    fn render_raster_characters(
+        &mut self,
+        plan: &super::raster::RasterPlan,
+    ) -> std::io::Result<()> {
         let mut style = TerminalStyleState::default();
-        if let Some(diff) = self.buffer.diff() {
+        if let Some(diff) = self.buffer.native_diff(plan.damage_pixels) {
             for (x, y, cell) in diff {
                 if self.buffer.raster_at((x, y).into()).is_none() {
                     crossterm::queue!(self.out, MoveTo(self.pos.x + x, self.pos.y + y))?;
@@ -593,7 +614,7 @@ where
             }
             Ok(())
         };
-        if let Some(diff) = self.buffer.diff() {
+        if let Some(diff) = self.buffer.native_diff(plan.damage_pixels) {
             for (x, y, cell) in diff {
                 if y < displayed_height {
                     paint(x, y, cell)?;

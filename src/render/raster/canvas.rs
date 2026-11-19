@@ -1,4 +1,4 @@
-//! Opaque RGB drawing resources and protocol-independent presentation sampling.
+//! RGB drawing resources and protocol-independent presentation sampling.
 //!
 //! Canvas coordinates are signed integer pixel coordinates, with `(0, 0)` at
 //! the top left and positive y pointing down. All drawing is clipped to the
@@ -68,7 +68,7 @@ fn next_token() -> u64 {
         .expect("raster identity/version space exhausted")
 }
 
-/// A fixed-size, opaque RGB canvas with cheap copy-on-write snapshots.
+/// A fixed-size, optionally transparent RGB canvas with cheap copy-on-write snapshots.
 ///
 /// Cloning is O(1). The first content-changing write while pixels are shared
 /// copies the source buffer; later writes to uniquely owned storage do not.
@@ -106,6 +106,7 @@ pub struct RasterCanvas {
     height: u32,
     background: Rgb,
     pixels: Arc<Vec<Rgb>>,
+    visible: Option<Arc<Vec<bool>>>,
     id: u64,
     version: u64,
 }
@@ -138,6 +139,41 @@ impl RasterCanvas {
             .map_err(|_| RasterError::AllocationFailed)?;
         pixels.resize(len, background);
         Self::from_pixels(width, height, background, pixels)
+    }
+
+    /// Allocates a canvas with no visible pixels. RGB drawing makes pixels visible.
+    pub fn new_transparent(width: u32, height: u32) -> Result<Self, RasterError> {
+        let mut canvas = Self::new(width, height, Rgb::default())?;
+        let mut mask = Vec::new();
+        mask.try_reserve_exact(canvas.pixels.len())
+            .map_err(|_| RasterError::AllocationFailed)?;
+        mask.resize(canvas.pixels.len(), false);
+        canvas.visible = Some(Arc::new(mask));
+        Ok(canvas)
+    }
+
+    /// Returns the visible color, or `None` for transparent or out-of-bounds pixels.
+    pub fn visible_pixel(&self, x: u32, y: u32) -> Option<Rgb> {
+        if x >= self.width || y >= self.height {
+            return None;
+        }
+        let index = y as usize * self.width as usize + x as usize;
+        self.visible
+            .as_ref()
+            .is_none_or(|mask| mask[index])
+            .then(|| self.pixels[index])
+    }
+
+    /// Makes one pixel transparent without changing its stored RGB color.
+    pub fn clear_pixel(&mut self, x: i32, y: i32) {
+        if self.visible_pixel(x as u32, y as u32).is_none() {
+            return;
+        }
+        let mask = self
+            .visible
+            .get_or_insert_with(|| Arc::new(vec![true; self.pixels.len()]));
+        Arc::make_mut(mask)[y as usize * self.width as usize + x as usize] = false;
+        self.version = next_token();
     }
 
     fn checked_len(width: u32, height: u32) -> Result<usize, RasterError> {
@@ -182,6 +218,7 @@ impl RasterCanvas {
             height,
             background,
             pixels: Arc::new(pixels),
+            visible: None,
             id: next_token(),
             version: 0,
         })
@@ -434,20 +471,27 @@ struct Painter<'a> {
 
 impl Painter<'_> {
     fn span(&mut self, start: usize, end: usize, color: Rgb) {
-        if self.canvas.pixels[start..end]
+        let recolor = self.canvas.pixels[start..end]
             .iter()
-            .all(|&old| old == color)
-        {
+            .any(|&old| old != color);
+        let reveal = self
+            .canvas
+            .visible
+            .as_ref()
+            .is_some_and(|mask| mask[start..end].contains(&false));
+        if !recolor && !reveal {
             return;
         }
-        let pixels = if self.changed {
-            Arc::get_mut(&mut self.canvas.pixels).expect("painter owns detached pixels")
-        } else {
+        if !self.changed {
             self.canvas.version = next_token();
             self.changed = true;
-            Arc::make_mut(&mut self.canvas.pixels)
-        };
-        pixels[start..end].fill(color);
+        }
+        if recolor {
+            Arc::make_mut(&mut self.canvas.pixels)[start..end].fill(color);
+        }
+        if reveal {
+            Arc::make_mut(self.canvas.visible.as_mut().unwrap())[start..end].fill(true);
+        }
     }
 
     fn pixel(&mut self, x: i64, y: i64, color: Rgb) {
@@ -553,7 +597,20 @@ impl RasterCell {
     /// metrics, empty targets, invalid cell offsets, and local coordinates beyond
     /// the cell all return `options.background`. No allocations are performed.
     pub fn sample(&self, pixel_x: u32, pixel_y: u32, cell_width: u16, cell_height: u16) -> Rgb {
-        let background = self.options.background;
+        self.sample_visible(pixel_x, pixel_y, cell_width, cell_height)
+            .unwrap_or(self.options.background)
+    }
+
+    /// Like [`Self::sample`], but returns `None` for transparent source pixels.
+    /// Letterboxing and invalid samples retain the opaque presentation background.
+    pub fn sample_visible(
+        &self,
+        pixel_x: u32,
+        pixel_y: u32,
+        cell_width: u16,
+        cell_height: u16,
+    ) -> Option<Rgb> {
+        let background = Some(self.options.background);
         if cell_width == 0
             || cell_height == 0
             || self.x >= self.target.width
@@ -609,7 +666,7 @@ impl RasterCell {
         }
         let source_x = ((2 * (x - left) + 1) * source_width) / (2 * width);
         let source_y = ((2 * (y - top) + 1) * source_height) / (2 * height);
-        self.canvas.pixels[(source_y * source_width + source_x) as usize]
+        self.canvas.visible_pixel(source_x as u32, source_y as u32)
     }
 
     /// Returns an opaque background placeholder, never an image preview.
@@ -664,6 +721,25 @@ mod tests {
 
     fn count(canvas: &RasterCanvas, color: Rgb) -> usize {
         canvas.pixels().iter().filter(|&&p| p == color).count()
+    }
+
+    #[test]
+    fn visibility_only_changes_are_versioned_and_copy_on_write() {
+        let mut image = RasterCanvas::new_transparent(2, 1).unwrap();
+        let snapshot = image.clone();
+        image.clear_pixel(0, 0);
+        assert_eq!(image, snapshot);
+        image.line(0, 0, 1, 0, BLACK);
+        assert_ne!(image, snapshot);
+        assert_eq!(snapshot.visible_pixel(0, 0), None);
+        assert_eq!(image.visible_pixel(0, 0), Some(BLACK));
+        let painted = image.clone();
+        image.clear_pixel(1, 0);
+        assert_ne!(image, painted);
+        assert_eq!(image.visible_pixel(1, 0), None);
+        assert_eq!(painted.visible_pixel(1, 0), Some(BLACK));
+        image.clear(BLACK);
+        assert_eq!(image.visible_pixel(1, 0), Some(BLACK));
     }
 
     #[test]

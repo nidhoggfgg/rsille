@@ -52,9 +52,9 @@ cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --sixel --c
 - `--sixel` uses native inline output on the normal
   screen, with no silent fallback. No additional `--inline` argument is needed.
   Choose one rendering mode.
-- `--background RRGGBB` (optional leading `#`, quoted in shell commands) applies to
-  either mode and defaults to black. RGBA is composited onto this opaque background;
-  neither mode preserves terminal transparency.
+- Sixel leaves the background transparent by default. Pass `--background RRGGBB`
+  to composite the sprite onto that opaque color instead. If you include a leading
+  `#`, quote the color in shell commands.
 - `--cell-pixels WxH` is Sixel-only: supply the **actual physical character-cell size
   in pixels**, not the terminal's column/row grid. Omit it to use `CellPixels::resolve`
   startup discovery. Probing happens before input handling; metric resolution failures

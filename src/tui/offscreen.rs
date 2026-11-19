@@ -885,6 +885,40 @@ mod tests {
     }
 
     #[test]
+    fn floating_raster_over_text_preserves_source_and_target_offsets() {
+        use crate::render::raster::{RasterCanvas, Rgb};
+        use crate::tui::{
+            layout::{overlay, OverlayAnchor, OverlayLayer},
+            widget::WidgetStore,
+            widgets::{label, raster_canvas},
+        };
+        let mut canvas = RasterCanvas::new_transparent(2, 2).unwrap();
+        canvas.set_pixel(1, 0, Rgb(20, 40, 60));
+        let view = overlay(label::<()>("abcd")).layer(
+            OverlayLayer::new(raster_canvas(canvas.clone()).overlay())
+                .floating(OverlayAnchor::TopLeft)
+                .size(2, 1)
+                .offset(1, 0),
+        );
+        let area = Area::new((0, 0).into(), (4, 1).into());
+        let mut buffer = Buffer::new(area.size());
+        render_widget_into(&view, &mut buffer, area, &WidgetStore::new());
+        for (x, ch) in "abcd".chars().enumerate() {
+            assert_eq!(cell_char(&buffer, x as u16, 0), Some(ch));
+        }
+        let mut layers = buffer.overlay_cells().collect::<Vec<_>>();
+        layers.sort_by_key(|(x, _, _)| *x);
+        assert_eq!(layers.len(), 2);
+        for (offset, (screen_x, screen_y, owner)) in layers.into_iter().enumerate() {
+            let x = offset as u16;
+            assert_eq!((screen_x, screen_y), (1 + x, 0));
+            assert_eq!(owner.canvas, canvas);
+            assert_eq!(owner.target, (2, 1).into());
+            assert_eq!((owner.x, owner.y), (x, 0));
+        }
+    }
+
+    #[test]
     fn raster_overlay_popup_moves_and_closes_without_stale_ownership() {
         use crate::render::raster::{RasterCanvas, Rgb};
         use crate::tui::{

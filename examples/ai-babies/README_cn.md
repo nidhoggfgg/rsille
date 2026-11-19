@@ -44,8 +44,8 @@ cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --sixel --c
 
 - `--sixel` 使用 inline 动画，不会静默回退。无需额外的 `--inline` 参数。
   所有动画模式都不进入备用屏幕，也不捕获鼠标事件。渲染模式择一使用。
-- `--background RRGGBB` 可用于任一模式，默认黑色；允许前导 `#`（在 shell 命令中需加引号）。
-  RGBA 会合成到此不透明背景上，两种模式均不保留终端透明背景。
+- Sixel 默认保留透明背景。显式传入 `--background RRGGBB` 时，角色图像会合成到指定的
+  不透明底色上。颜色值可带前导 `#`，此时请在 shell 命令中用引号括起颜色值。
 - `--cell-pixels WxH` 仅用于 Sixel，指定**实际物理字符格的像素尺寸**，不是终端的列数和行数。
   省略时通过 `CellPixels::resolve` 在启动时探测。探测先于输入处理，尺寸解析失败会报错。
   `--force-cell-pixels` 只能与 `--sixel --cell-pixels` 同用，允许使用与终端网格一致的实测尺寸覆盖。

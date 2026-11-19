@@ -7,6 +7,7 @@ fn parse(args: &[&str]) -> Result<Options, Box<dyn Error>> {
 
 #[test]
 fn rendering_options_validate_modes_colors_and_physical_metrics() {
+    assert_eq!(parse(&["--sixel"]).unwrap().background, None);
     for args in [
         vec![
             "--sixel",
@@ -29,7 +30,7 @@ fn rendering_options_validate_modes_colors_and_physical_metrics() {
     ] {
         let options = parse(&args).unwrap();
         assert_eq!(options.output, Output::Sixel);
-        assert_eq!(options.background, Rgb(24, 32, 58));
+        assert_eq!(options.background, Some(Rgb(24, 32, 58)));
         assert_eq!(options.character, scene::Character::Claude);
         assert_eq!(options.height, 32);
     }
@@ -135,8 +136,9 @@ fn raster_playback_preserves_sources_across_holds_switches_and_resize() {
     assert!(first.raster_at((32, 4).into()).is_none());
     assert_eq!(cell.target, (32, 16).into());
     assert_eq!((cell.canvas.width(), cell.canvas.height()), (320, 320));
-    assert_eq!(cell.options.background, options.background);
+    assert_eq!(Some(cell.options.background), options.background);
     assert_eq!(first.raster_cells().count(), 32 * 16);
+        assert_eq!(first.overlay_cells().count(), 0);
     let identity = (cell.canvas.id(), cell.canvas.version());
     nursery.time = 0.5;
     let held = export::frame(&mut nursery, size).unwrap();
@@ -168,7 +170,7 @@ fn raster_playback_preserves_sources_across_holds_switches_and_resize() {
                 assert_eq!(cell.options.align_x, RasterAlign::Start);
                 assert_eq!((cell.canvas.width(), cell.canvas.height()), (320, 320));
                 assert!(cell.x < cell.target.width && cell.y < cell.target.height);
-                assert_eq!(cell.options.background, options.background);
+                assert_eq!(Some(cell.options.background), options.background);
             }
         }
     }
@@ -178,6 +180,14 @@ fn raster_playback_preserves_sources_across_holds_switches_and_resize() {
         returned.raster_at((0, 4).into()).unwrap().canvas.id(),
         identity.0
     );
+}
+
+#[test]
+fn default_sixel_frame_uses_overlay_cells() {
+    let mut nursery = Nursery::new(parse(&["--sixel"]).unwrap()).unwrap();
+    let frame = export::frame(&mut nursery, (80, 24).into()).unwrap();
+    assert_eq!(frame.overlay_cells().count(), 32 * 16);
+    assert_eq!(frame.raster_cells().count(), 0);
 }
 
 #[test]
@@ -212,7 +222,7 @@ fn native_inline_playback_is_compact_and_reuses_unchanged_frames() {
         assert_eq!(renderer.size(), (80, 16).into());
         renderer.render().unwrap();
         let stats = renderer.raster_stats();
-        assert_eq!(stats.tiles_sent, 32 * 16);
+        assert!(stats.tiles_sent > 0 && stats.tiles_sent <= 32 * 16);
         renderer.render().unwrap();
         assert_eq!(renderer.raster_stats(), stats);
         renderer.thing_mut().time = 1.6;

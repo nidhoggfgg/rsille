@@ -50,7 +50,7 @@ enum Source<F> {
 struct SourceKey {
     width: u32,
     height: u32,
-    background: Rgb,
+    background: Option<Rgb>,
     revision: u64,
 }
 
@@ -76,7 +76,7 @@ struct RasterState {
 ///
 /// Source dimensions and background also invalidate the callback cache. Layout,
 /// alignment and scale changes only affect presentation. Each callback
-/// starts with a fresh, opaque canvas, not the previous revision's pixels.
+/// starts with a fresh canvas: background-filled by default, transparent with [`Self::overlay`].
 ///
 /// Borders and padding belong to the surrounding container. The widget uses its
 /// allocated content area and crops an already scaled image when partially
@@ -100,6 +100,7 @@ struct RasterState {
 pub struct RasterCanvasWidget<M = (), F = fn(&mut RasterCanvas, RasterCanvasContext)> {
     source: Source<F>,
     options: RasterOptions,
+    overlay: bool,
     revision: u64,
     constraints: Constraints,
     widget_key: Option<String>,
@@ -134,6 +135,7 @@ impl<M, F> RasterCanvasWidget<M, F> {
         Self {
             source,
             options: RasterOptions::default(),
+            overlay: false,
             revision: 0,
             constraints: Constraints {
                 min_width: 1,
@@ -148,9 +150,16 @@ impl<M, F> RasterCanvasWidget<M, F> {
         }
     }
 
+    /// Layers this canvas over existing text and raster cells instead of replacing them.
+    /// Procedural drawing starts on a transparent canvas in this mode.
+    pub fn overlay(mut self) -> Self {
+        self.overlay = true;
+        self
+    }
+
     /// Replaces all raster presentation options.
     ///
-    /// Background also initializes callback canvases and invalidates their cache.
+    /// Outside overlay mode, background also initializes callback canvases and invalidates their cache.
     pub fn options(mut self, options: RasterOptions) -> Self {
         self.options = options;
         self
@@ -158,7 +167,7 @@ impl<M, F> RasterCanvasWidget<M, F> {
 
     /// Sets the opaque letterbox color and callback canvas's initial background.
     ///
-    /// Changing this color invalidates a procedural source, so its next visible
+    /// Outside overlay mode, changing this color invalidates a procedural source, so its next visible
     /// render draws on a fresh canvas filled with this color. This does not
     /// recolor an existing shared canvas.
     pub fn background(mut self, background: Rgb) -> Self {
@@ -308,17 +317,18 @@ impl<M, F> RasterCanvasWidget<M, F> {
             let source_y = area.y() - allocation.y();
             for y in 0..area.height() {
                 for x in 0..area.width() {
-                    let _ = visible.set_raster_cell(
-                        x,
-                        y,
-                        RasterCell {
-                            canvas: canvas.clone(),
-                            target: allocation.size(),
-                            x: source_x + x,
-                            y: source_y + y,
-                            options: self.options,
-                        },
-                    );
+                    let cell = RasterCell {
+                        canvas: canvas.clone(),
+                        target: allocation.size(),
+                        x: source_x + x,
+                        y: source_y + y,
+                        options: self.options,
+                    };
+                    let _ = if self.overlay {
+                        visible.overlay_raster_cell(x, y, cell)
+                    } else {
+                        visible.set_raster_cell(x, y, cell)
+                    };
                 }
             }
         });
@@ -336,7 +346,7 @@ where
     /// view rebuilds neither allocate source pixels nor rerun the callback.
     ///
     /// `draw` is an [`Fn`] callback, not a per-frame update hook. It receives a
-    /// fresh canvas initialized with [`Self::background`] and the fixed source
+    /// fresh canvas (transparent in overlay mode, otherwise filled with [`Self::background`]) and the fixed source
     /// dimensions in [`RasterCanvasContext`]. Keep animation or other changing
     /// inputs in application state and update [`Self::revision`] when those
     /// inputs change. A fully clipped or empty allocation defers drawing until
@@ -429,22 +439,25 @@ where
                 let key = SourceKey {
                     width: *width,
                     height: *height,
-                    background: self.options.background,
+                    background: (!self.overlay).then_some(self.options.background),
                     revision: self.revision,
                 };
                 let mut cached = state.source.borrow_mut();
                 if cached.as_ref().map(|cached| cached.key) != Some(key) {
-                    let result =
-                        RasterCanvas::new(*width, *height, key.background).map(|mut canvas| {
-                            draw(
-                                &mut canvas,
-                                RasterCanvasContext {
-                                    pixel_width: *width,
-                                    pixel_height: *height,
-                                },
-                            );
-                            canvas
-                        });
+                    let result = match key.background {
+                        Some(color) => RasterCanvas::new(*width, *height, color),
+                        None => RasterCanvas::new_transparent(*width, *height),
+                    }
+                    .map(|mut canvas| {
+                        draw(
+                            &mut canvas,
+                            RasterCanvasContext {
+                                pixel_width: *width,
+                                pixel_height: *height,
+                            },
+                        );
+                        canvas
+                    });
                     *cached = Some(CachedSource { key, result });
                 }
                 if let Some(cached) = cached.as_ref() {
@@ -693,7 +706,7 @@ mod tests {
                 key: SourceKey {
                     width: 8,
                     height: 6,
-                    background: BLUE,
+                    background: Some(BLUE),
                     revision: 0,
                 },
                 result: Err(RasterError::AllocationFailed),
@@ -788,6 +801,27 @@ mod tests {
             reconcile(&widget, &mut store, Lifecycle::Sync);
             render(&widget, &store, bounds, bounds, false);
             assert_eq!(calls.get(), expected_calls);
+        }
+    }
+
+    #[test]
+    fn overlay_changes_callback_initialization_and_cache_identity() {
+        let calls = Cell::new(0);
+        let make = || {
+            RasterCanvasWidget::<(), _>::from_draw(1, 1, |_, _| calls.set(calls.get() + 1)).unwrap()
+        };
+        let mut store = WidgetStore::new();
+        let bounds = area(0, 0, 1, 1);
+        let base = make().background(RED);
+        reconcile(&base, &mut store, Lifecycle::Mount);
+        render(&base, &store, bounds, bounds, true);
+        for background in [RED, BLUE] {
+            let widget = make().background(background).overlay();
+            reconcile(&widget, &mut store, Lifecycle::Sync);
+            let frame = render(&widget, &store, bounds, bounds, false);
+            let (_, _, layer) = frame.overlay_cells().next().unwrap();
+            assert_eq!(layer.canvas.visible_pixel(0, 0), None);
+            assert_eq!(calls.get(), 2);
         }
     }
 

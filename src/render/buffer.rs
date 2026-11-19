@@ -6,6 +6,8 @@
 //! and prepare a blank working frame.
 
 use log::info;
+use std::collections::BTreeMap;
+type Overlays = BTreeMap<usize, Vec<RasterCell>>;
 
 use crate::render::{
     area::{Position, Size},
@@ -42,6 +44,8 @@ pub struct Buffer {
     size: Size,
     content: Vec<Cell>,
     previous: Option<Vec<Cell>>,
+    overlays: Overlays,
+    previous_overlays: Overlays,
     raster: Option<Vec<Option<RasterCell>>>,
     previous_raster: Option<Vec<Option<RasterCell>>>,
     unsupported_raster_composition: bool,
@@ -57,6 +61,8 @@ impl Buffer {
             size,
             content: vec![Cell::space(); size.width as usize * size.height as usize],
             previous: None,
+            overlays: Overlays::new(),
+            previous_overlays: Overlays::new(),
             raster: None,
             previous_raster: None,
             unsupported_raster_composition: false,
@@ -116,7 +122,7 @@ impl Buffer {
 
     /// Whether the current frame contains any visible native raster cells.
     pub fn has_raster(&self) -> bool {
-        self.raster_cells().next().is_some()
+        !self.overlays.is_empty() || self.raster_cells().next().is_some()
     }
 
     /// Iterates current raster owners in row-major order, in buffer coordinates.
@@ -172,6 +178,27 @@ impl Buffer {
         self.raster
             .get_or_insert_with(|| vec![None; self.content.len()])[index] = Some(cell);
         Ok(())
+    }
+
+    /// Appends a tile above the current text and earlier raster layers.
+    pub fn overlay_raster(&mut self, pos: Position, cell: RasterCell) -> Result<(), DrawErr> {
+        self.validate_raster(pos, &cell)?;
+        self.overlays
+            .entry(self.index(pos).unwrap())
+            .or_default()
+            .push(cell);
+        self.dirty = true;
+        Ok(())
+    }
+
+    /// Iterates overlay tiles in row-major order, bottom-to-top within each cell.
+    pub fn overlay_cells(&self) -> impl Iterator<Item = (u16, u16, &RasterCell)> {
+        let width = usize::from(self.size.width);
+        self.overlays.iter().flat_map(move |(&i, stack)| {
+            stack
+                .iter()
+                .map(move |c| ((i % width) as u16, (i / width) as u16, c))
+        })
     }
 
     fn validate_raster(&self, pos: Position, cell: &RasterCell) -> Result<(), DrawErr> {
@@ -232,6 +259,11 @@ impl Buffer {
     fn erase_owner(&mut self, index: usize) {
         let owner = self.content[index].owner.unwrap_or(index);
         let end = (owner + self.content[owner].width().max(1)).min(self.content.len());
+        if !self.overlays.is_empty() {
+            for i in owner..end {
+                self.overlays.remove(&i);
+            }
+        }
         for cell in &mut self.content[owner..end] {
             *cell = Cell::space();
         }
@@ -330,6 +362,8 @@ impl Buffer {
         std::mem::swap(&mut self.content, self.previous.as_mut().unwrap());
         // Reset all cells in the now-current buffer to empty
         self.content.fill(Cell::space());
+        std::mem::swap(&mut self.overlays, &mut self.previous_overlays);
+        self.overlays.clear();
         std::mem::swap(&mut self.raster, &mut self.previous_raster);
         if let Some(raster) = &mut self.raster {
             raster.fill(None);
@@ -345,6 +379,7 @@ impl Buffer {
     /// This is useful for transient offscreen buffers where callers want to
     /// reuse allocation but do not need frame-to-frame diffing.
     pub fn clear_content(&mut self) {
+        self.overlays.clear();
         self.content.fill(Cell::space());
         if let Some(raster) = &mut self.raster {
             raster.fill(None);
@@ -358,6 +393,7 @@ impl Buffer {
     /// Raster sampling retains its original target, just as with chunk clipping.
     pub(crate) fn clip_inline_rows(&mut self, height: u16) {
         let start = usize::from(height.min(self.size.height)) * usize::from(self.size.width);
+        self.overlays.split_off(&start);
         self.content[start..].fill(Cell::space());
         if let Some(raster) = &mut self.raster {
             raster[start..].fill(None);
@@ -366,6 +402,7 @@ impl Buffer {
 
     /// Discards the previous frame without changing current content or dirtiness.
     pub fn reset_diff(&mut self) {
+        self.previous_overlays.clear();
         self.previous = None;
         self.previous_raster = None;
         self.previous_unsupported_raster_composition = false;
@@ -400,6 +437,7 @@ impl Buffer {
             new_size.width, new_size.height
         );
 
+        self.overlays.clear();
         self.size = new_size;
         self.content = vec![Cell::space(); new_size.width as usize * new_size.height as usize];
         self.raster = None;
@@ -414,11 +452,21 @@ impl Buffer {
     /// Returns `None` when no previous frame exists. Items are `(x, y, cell)`
     /// in row-major order, excluding occupied continuation cells.
     pub fn diff(&self) -> Option<DiffIterator<'_>> {
+        self.native_diff(None)
+    }
+
+    pub(crate) fn native_diff(
+        &self,
+        pixels: Option<crate::render::raster_output::CellPixels>,
+    ) -> Option<DiffIterator<'_>> {
         self.previous.as_ref().map(|prev| DiffIterator {
+            pixels,
             current: &self.content,
             previous: prev,
             raster: self.raster.as_deref(),
             previous_raster: self.previous_raster.as_deref(),
+            overlays: &self.overlays,
+            previous_overlays: &self.previous_overlays,
             index: 0,
             width: self.size.width,
         })
@@ -437,6 +485,8 @@ impl Buffer {
     /// Suitable for inline mode rendering with relative positioning
     pub fn diff_lines(&self) -> LineDiffIterator<'_> {
         LineDiffIterator {
+            overlays: &self.overlays,
+            previous_overlays: &self.previous_overlays,
             current: &self.content,
             previous: self.previous.as_deref(),
             raster: self.raster.as_deref(),
@@ -477,6 +527,11 @@ impl Draw for Buffer {
                 }
             }
         }
+        for (x, y, cell) in self.overlay_cells() {
+            if x < width && y < height {
+                chunk.overlay_raster_cell(x, y, cell.clone())?;
+            }
+        }
         Ok(self.size)
     }
 }
@@ -489,6 +544,9 @@ fn raster_cell_at(cells: Option<&[Option<RasterCell>]>, index: usize) -> Option<
 ///
 /// Created by [`Buffer::diff`]; occupied continuation cells are skipped.
 pub struct DiffIterator<'a> {
+    pixels: Option<crate::render::raster_output::CellPixels>,
+    overlays: &'a Overlays,
+    previous_overlays: &'a Overlays,
     current: &'a [Cell],
     previous: &'a [Cell],
     raster: Option<&'a [Option<RasterCell>]>,
@@ -497,12 +555,42 @@ pub struct DiffIterator<'a> {
     width: u16,
 }
 
+impl DiffIterator<'_> {
+    fn overlay_changed(&self, index: usize) -> bool {
+        let stack = self.overlays.get(&index).map_or(&[][..], Vec::as_slice);
+        let old = self
+            .previous_overlays
+            .get(&index)
+            .map_or(&[][..], Vec::as_slice);
+        if stack == old {
+            return false;
+        }
+        let Some(pixels) = self.pixels else {
+            return true;
+        };
+        // A new canvas version can affect just one tile. Compare visible samples,
+        // not the source identity, before invalidating the underlying glyph.
+        let sample = |layers: &[RasterCell], x, y| {
+            layers
+                .iter()
+                .rev()
+                .find_map(|c| c.sample_visible(x, y, pixels.width, pixels.height))
+        };
+        (0..u32::from(pixels.height))
+            .any(|y| (0..u32::from(pixels.width)).any(|x| sample(stack, x, y) != sample(old, x, y)))
+    }
+}
+
 impl<'a> Iterator for DiffIterator<'a> {
     type Item = (u16, u16, &'a Cell);
 
     fn next(&mut self) -> Option<Self::Item> {
         // Keep raster lookups out of the scan for buffers that only paint text.
-        if self.raster.is_none() && self.previous_raster.is_none() {
+        if self.overlays.is_empty()
+            && self.previous_overlays.is_empty()
+            && self.raster.is_none()
+            && self.previous_raster.is_none()
+        {
             while self.index < self.current.len() {
                 let i = self.index;
                 self.index += 1;
@@ -529,7 +617,11 @@ impl<'a> Iterator for DiffIterator<'a> {
             // Only yield cells that changed and are not occupied by wide characters
             let raster_changed =
                 raster_cell_at(self.raster, i) != raster_cell_at(self.previous_raster, i);
-            if (curr != prev || raster_changed) && !curr.is_occupied {
+            if !curr.is_occupied
+                && (curr != prev
+                    || raster_changed
+                    || (i..i + curr.width()).any(|j| self.overlay_changed(j)))
+            {
                 let x = (i % self.width as usize) as u16;
                 let y = (i / self.width as usize) as u16;
                 return Some((x, y, curr));
@@ -620,6 +712,8 @@ pub struct LineDiff<'a> {
 
 /// Iterator over lines, comparing current with previous frame
 pub struct LineDiffIterator<'a> {
+    overlays: &'a Overlays,
+    previous_overlays: &'a Overlays,
     current: &'a [Cell],
     previous: Option<&'a [Cell]>,
     raster: Option<&'a [Option<RasterCell>]>,
@@ -654,7 +748,13 @@ impl<'a> Iterator for LineDiffIterator<'a> {
                 || (start..end).all(|i| {
                     raster_cell_at(self.raster, i) == raster_cell_at(self.previous_raster, i)
                 });
-            if current_line == prev_line && raster_unchanged {
+            if current_line == prev_line
+                && raster_unchanged
+                && self
+                    .overlays
+                    .range(start..end)
+                    .eq(self.previous_overlays.range(start..end))
+            {
                 LineState::Unchanged
             } else {
                 // Calculate actual render width (sum of cell widths)

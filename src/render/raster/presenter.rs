@@ -39,6 +39,7 @@ pub(in crate::render) struct RasterPresenter {
     pub config: RasterOutput,
     pub alternate_screen: bool,
     visible: Vec<VisibleCell>,
+    overlays: bool,
     metrics: Option<CellPixels>,
     origin: Position,
     size: Size,
@@ -53,10 +54,13 @@ pub(in crate::render) struct RasterPresenter {
 
 pub(in crate::render) struct RasterPlan {
     pub native: bool,
+    pub overlay_frame: bool,
+    pub damage_pixels: Option<CellPixels>,
     pub clear: bool,
     pub inline_padding: u16,
     pub encoded: Vec<EncodedCell>,
     visible: Vec<VisibleCell>,
+    overlays: bool,
     metrics: Option<CellPixels>,
     origin: Position,
     size: Size,
@@ -103,7 +107,7 @@ impl RasterPresenter {
             ));
         }
         if let Some(pixels) = metrics {
-            let count = buffer.raster_cells().count();
+            let count = buffer.raster_cells().count() + buffer.overlay_cells().count();
             let pixel_count = count as u64 * u64::from(pixels.width) * u64::from(pixels.height);
             let coordinates_valid = origin.x.checked_add(buffer.size().width).is_some()
                 && origin.y.checked_add(buffer.size().height).is_some();
@@ -126,6 +130,7 @@ impl RasterPresenter {
             if !inline
                 && buffer
                     .raster_cells()
+                    .chain(buffer.overlay_cells())
                     .any(|(_, y, _)| anchor_shift(y, buffer.size().height, pixels.height).is_none())
             {
                 return Err(io::Error::new(
@@ -156,8 +161,14 @@ impl RasterPresenter {
         });
         // Shrinking can abandon text-only rows while all raster cells stay
         // unchanged. Erase those rows and repaint surviving tiles as well.
+        let overlays = buffer.overlay_cells().next().is_some();
         let clear = self.uncertain
-            || (inline_shrank && metrics.is_some())
+            || (self.overlays
+                && (buffer.previous().is_none()
+                    || origin != self.origin
+                    || buffer.size() != self.size
+                    || (metrics.is_some() && metrics != self.metrics)))
+            || (inline_shrank && (metrics.is_some() || self.overlays))
             || (!self.visible.is_empty()
                 && (old_changed
                     || metrics != self.metrics
@@ -166,6 +177,9 @@ impl RasterPresenter {
                     || buffer.previous().is_none()));
         let mut plan = RasterPlan {
             native: metrics.is_some(),
+            overlays,
+            overlay_frame: overlays || self.overlays,
+            damage_pixels: metrics.or(self.metrics),
             clear,
             inline_padding: if inline {
                 metrics.map_or(0, CellPixels::inline_padding_rows)
@@ -181,17 +195,36 @@ impl RasterPresenter {
         #[cfg(feature = "sixel")]
         if let Some(pixels) = metrics {
             let mut bytes = 0usize;
-            for (x, y, cell) in &plan.visible {
+            // Every glyph we repaint can cover all tiles across its column span.
+            // Replay those tiles bottom-to-top, even if their samples are unchanged.
+            let mut damaged = std::collections::BTreeSet::new();
+            if plan.overlay_frame && !clear {
+                if let Some(diff) = buffer.native_diff(plan.damage_pixels) {
+                    for (x, y, base) in diff {
+                        for dx in 0..base.width() {
+                            damaged.insert((x + dx as u16, y));
+                        }
+                    }
+                }
+            }
+            for (x, y, cell, overlay) in plan
+                .visible
+                .iter()
+                .map(|(x, y, c)| (*x, *y, c, false))
+                .chain(buffer.overlay_cells().map(|(x, y, c)| (x, y, c, true)))
+            {
                 if !clear
                     && self.metrics == metrics
-                    && buffer.previous_raster_at((*x, *y).into()) == Some(cell)
+                    && buffer.previous().is_some()
+                    && !damaged.contains(&(x, y))
+                    && (overlay || buffer.previous_raster_at((x, y).into()) == Some(cell))
                 {
                     continue;
                 }
                 let shift = if inline {
                     0 // Inline already reserves trailing guard rows.
                 } else {
-                    anchor_shift(*y, buffer.size().height, pixels.height)
+                    anchor_shift(y, buffer.size().height, pixels.height)
                         .expect("anchors validated before encoding")
                 };
                 let data = self.cache.encode_padded(
@@ -207,7 +240,7 @@ impl RasterPresenter {
                         "encoded raster frame exceeds 32 MiB",
                     ));
                 }
-                plan.encoded.push((*x, *y - shift, data));
+                plan.encoded.push((x, y - shift, data));
             }
         }
         // Frames without raster cells do not allocate source or encoded data.
@@ -217,7 +250,7 @@ impl RasterPresenter {
     }
 
     pub fn begin(&mut self, plan: &RasterPlan) {
-        self.uncertain |= plan.native || plan.clear;
+        self.uncertain |= plan.native || plan.clear || plan.overlay_frame;
     }
 
     pub fn commit(&mut self, plan: RasterPlan) {
@@ -228,6 +261,7 @@ impl RasterPresenter {
                 .map(|(_, _, bytes)| bytes.len() as u64)
                 .sum::<u64>(),
         );
+        self.overlays = plan.overlays;
         self.visible = plan.visible;
         self.metrics = plan.metrics;
         self.origin = plan.origin;
@@ -238,6 +272,7 @@ impl RasterPresenter {
     // Transfer ownership of a successfully displayed region to terminal history.
     // Keep the bounded encoding cache and counters, but never erase old coverage.
     pub fn forget_region(&mut self) {
+        self.overlays = false;
         self.visible.clear();
         self.metrics = None;
         self.origin = Position::default();

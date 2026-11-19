@@ -1,4 +1,4 @@
-//! Cached opaque snapshots for raster playback, decoded from embedded PNGs.
+//! Cached snapshots for raster playback, decoded from embedded PNGs.
 //!
 //! The 320px frames are upscaled directly from native 256px source cells using
 //! the packers' stable motion/palette rules, not newly authored 320px detail.
@@ -17,8 +17,12 @@ pub struct Frames {
 }
 
 impl Frames {
-    /// Decode once and composite all 24 source snapshots onto `background`.
-    pub fn new(character: scene::Character, background: Rgb) -> Result<Self, Box<dyn Error>> {
+    /// Decode all 24 snapshots, compositing onto a supplied background.
+    /// Without one, Sixel coverage is binary: alpha below 128 is transparent.
+    pub fn new(
+        character: scene::Character,
+        background: Option<Rgb>,
+    ) -> Result<Self, Box<dyn Error>> {
         let atlas: &[u8] = match character {
             scene::Character::ChatGpt => {
                 include_bytes!("../assets/chatgpt-actions-v2-320x320.png")
@@ -31,7 +35,7 @@ impl Frames {
         Self::from_png(atlas, background)
     }
 
-    fn from_png(atlas: &[u8], background: Rgb) -> Result<Self, Box<dyn Error>> {
+    fn from_png(atlas: &[u8], background: Option<Rgb>) -> Result<Self, Box<dyn Error>> {
         let mut decoder = png::Decoder::new(Cursor::new(atlas));
         decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
         let mut reader = decoder.read_info()?;
@@ -63,13 +67,21 @@ impl Frames {
         for index in 0..COUNT {
             let left = index % COLUMNS as usize * SIDE as usize;
             let top = index / COLUMNS as usize * SIDE as usize;
-            let mut canvas = RasterCanvas::new(SIDE, SIDE, background)?;
+            let mut canvas = match background {
+                Some(color) => RasterCanvas::new(SIDE, SIDE, color),
+                None => RasterCanvas::new_transparent(SIDE, SIDE),
+            }?;
             for y in 0..SIDE as usize {
                 for x in 0..SIDE as usize {
                     let offset = (top + y) * stride + (left + x) * channels;
                     let pixel = &pixels[offset..offset + channels];
                     let alpha = if channels == 4 { pixel[3] } else { 255 };
-                    canvas.set_pixel(x as i32, y as i32, composite(pixel, alpha, background));
+                    let color = match background {
+                        Some(bg) => composite(pixel, alpha, bg),
+                        None if alpha >= 128 => Rgb(pixel[0], pixel[1], pixel[2]),
+                        None => continue,
+                    };
+                    canvas.set_pixel(x as i32, y as i32, color);
                 }
             }
             frames.push(canvas);
@@ -105,7 +117,7 @@ mod tests {
     fn all_characters_have_24_square_opaque_frames_with_background() {
         for character in scene::Character::ALL {
             for background in [Rgb(0, 0, 0), Rgb(17, 43, 89)] {
-                let frames = Frames::new(character, background).unwrap();
+                let frames = Frames::new(character, Some(background)).unwrap();
                 assert_eq!(frames.frames.len(), COUNT);
                 for index in 0..COUNT {
                     let frame = frames.frame(index);
@@ -129,7 +141,7 @@ mod tests {
     #[test]
     fn authored_poses_are_distinct_and_snapshot_ids_remain_stable() {
         for character in scene::Character::ALL {
-            let frames = Frames::new(character, Rgb(17, 43, 89)).unwrap();
+            let frames = Frames::new(character, Some(Rgb(17, 43, 89))).unwrap();
             let identities: Vec<_> = (0..COUNT)
                 .map(|i| (frames.frame(i).id(), frames.frame(i).version()))
                 .collect();
@@ -188,7 +200,7 @@ mod tests {
         pixels[8..12].copy_from_slice(&[200, 100, 50, 128]);
         let bytes = encode(width, ROWS * SIDE, png::ColorType::Rgba, &pixels);
         let background = Rgb(10, 20, 30);
-        let frames = Frames::from_png(&bytes, background).unwrap();
+        let frames = Frames::from_png(&bytes, Some(background)).unwrap();
         assert_eq!(frames.frame(0).pixels()[0], background);
         assert_eq!(frames.frame(0).pixels()[1], Rgb(200, 100, 50));
         assert_eq!(frames.frame(0).pixels()[2], Rgb(105, 60, 40));
@@ -214,19 +226,36 @@ mod tests {
         pixels[1] = 1;
         let bytes = encode(width, height, png::ColorType::Indexed, &pixels);
         let background = Rgb(10, 20, 30);
-        let frames = Frames::from_png(&bytes, background).unwrap();
+        let frames = Frames::from_png(&bytes, Some(background)).unwrap();
         assert_eq!(frames.frame(0).pixels()[0], background);
         assert_eq!(frames.frame(0).pixels()[1], Rgb(15, 120, 135));
 
         let bytes = encode(width, height, png::ColorType::Rgb, &pixels.repeat(3));
-        let frames = Frames::from_png(&bytes, background).unwrap();
+        let frames = Frames::from_png(&bytes, Some(background)).unwrap();
         assert_eq!(frames.frame(0).pixels()[0], Rgb(0, 1, 0));
         assert_eq!(frames.frame(0).pixels()[1], Rgb(0, 0, 0));
     }
 
     #[test]
+    fn transparent_frames_threshold_alpha_without_blending() {
+        let width = COLUMNS * SIDE;
+        let height = ROWS * SIDE;
+        let mut pixels = vec![0; (width * height * 4) as usize];
+        for (pixel, alpha) in pixels.chunks_exact_mut(4).zip([0, 127, 128, 255]) {
+            pixel.copy_from_slice(&[200, 100, 50, alpha]);
+        }
+        let bytes = encode(width, height, png::ColorType::Rgba, &pixels);
+        let frames = Frames::from_png(&bytes, None).unwrap();
+        let frame = frames.frame(0);
+        assert_eq!(frame.visible_pixel(0, 0), None);
+        assert_eq!(frame.visible_pixel(1, 0), None);
+        assert_eq!(frame.visible_pixel(2, 0), Some(Rgb(200, 100, 50)));
+        assert_eq!(frame.visible_pixel(3, 0), Some(Rgb(200, 100, 50)));
+    }
+
+    #[test]
     fn invalid_dimensions_format_and_png_are_rejected() {
-        let background = Rgb(0, 0, 0);
+        let background = Some(Rgb(0, 0, 0));
         let bytes = encode(1, 1, png::ColorType::Rgba, &[0, 0, 0, 0]);
         assert!(Frames::from_png(&bytes, background).is_err());
         let bytes = encode(

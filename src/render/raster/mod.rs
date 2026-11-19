@@ -1,4 +1,4 @@
-//! Opaque RGB drawing and terminal presentation.
+//! RGB drawing with optional pixel transparency and terminal presentation.
 //!
 //! Pixel storage and sampling are independent of the output protocol.
 //! Terminal raster presentation is Sixel-only; [`output`] configures the required
@@ -25,7 +25,8 @@
 //! Native output uses one positioned tile per visible terminal cell, favoring
 //! precise clipping and ownership over transport throughput; tiles are not merged.
 //! Colors use a fixed RGB332 palette (3 red, 3 green, 2 blue bits), not lossless
-//! 24-bit output or adaptive quantization. Source pixels remain unchanged.
+//! 24-bit output or adaptive quantization. Transparent pixels leave existing
+//! terminal content untouched; they do not erase previously drawn graphics. Source pixels remain unchanged.
 //!
 //! # Example
 //!

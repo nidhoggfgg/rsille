@@ -174,6 +174,40 @@ impl<'a> Chunk<'a> {
         self.buffer.set_raster(pos, cell)
     }
 
+    /// Adds a raster layer without replacing underlying glyphs or raster tiles.
+    pub fn overlay_raster_cell(&mut self, x: u16, y: u16, cell: RasterCell) -> Result<(), DrawErr> {
+        let pos = self
+            .area
+            .to_absolute(x, y)
+            .ok_or_else(|| DrawErr::out_of_bounds((x, y).into(), self.area.size()))?;
+        self.buffer.overlay_raster(pos, cell)
+    }
+
+    /// Draws an image over the current text and earlier images in this chunk.
+    pub fn raster_overlay(
+        &mut self,
+        canvas: &RasterCanvas,
+        options: RasterOptions,
+    ) -> Result<(), DrawErr> {
+        let target = self.area.size();
+        for y in 0..target.height {
+            for x in 0..target.width {
+                self.overlay_raster_cell(
+                    x,
+                    y,
+                    RasterCell {
+                        canvas: canvas.clone(),
+                        target,
+                        x,
+                        y,
+                        options,
+                    },
+                )?;
+            }
+        }
+        Ok(())
+    }
+
     /// Fills this chunk with an opaque raster and its background placeholder.
     ///
     /// Each cell retains the full chunk size as its target and its original
