@@ -1,16 +1,42 @@
-use std::fmt::Write;
+use std::{fmt::Write, io::Cursor, sync::OnceLock};
 
-const W: usize = 96;
-const H: usize = 48;
-const ATLAS: &[u8; 24 * W * H * 4] =
-    include_bytes!("../../ai-babies/assets/deepseek-actions-96x48.rgba");
+const TILE: usize = 320;
+const ATLAS_WIDTH: usize = 4 * TILE;
+const MAX_SIDE: usize = 192;
+
+// The 4-by-6 sheet is decoded once. Rows within a tile retain the atlas stride.
+fn atlas_tile(action: usize, pose: usize) -> &'static [u8] {
+    static PIXELS: OnceLock<Vec<u8>> = OnceLock::new();
+    let pixels = PIXELS.get_or_init(|| {
+        let png = include_bytes!("../../ai-babies/assets/deepseek-actions-320x320.png");
+        let mut reader = png::Decoder::new(Cursor::new(png))
+            .read_info()
+            .expect("embedded DeepSeek atlas");
+        let mut rgba = vec![0; ATLAS_WIDTH * 6 * TILE * 4];
+        let info = reader
+            .next_frame(&mut rgba)
+            .expect("embedded DeepSeek pixels");
+        assert_eq!(
+            (info.width, info.height),
+            (ATLAS_WIDTH as u32, (6 * TILE) as u32)
+        );
+        assert_eq!(
+            (info.color_type, info.bit_depth),
+            (png::ColorType::Rgba, png::BitDepth::Eight)
+        );
+        rgba
+    });
+    &pixels[(action * TILE * ATLAS_WIDTH + pose * TILE) * 4..]
+}
 
 /// Return (column, row, SGR-colored text) runs for a cleared viewport.
 /// Transparent cells and the rightmost column are never painted.
 pub fn frame(tick: u64, cols: u16, rows: u16) -> Vec<(u16, u16, String)> {
     let usable = usize::from(cols.saturating_sub(1));
     let rows = usize::from(rows);
-    let h = H.min(rows.saturating_sub(rows / 6)).min(usable.div_ceil(2));
+    let h = 64
+        .min(rows.saturating_sub(rows / 6))
+        .min(usable.div_ceil(2));
     let w = (2 * h).min(usable);
     let (action, t, pose) = animation(tick);
     let margin = usable - w;
@@ -49,16 +75,17 @@ fn spans(
         let flight = t % 32 - 8;
         top -= top.min(5) * (flight * (15 - flight)) / 56;
     }
+    let tile = atlas_tile(action, pose);
     for y in 0..h {
         let mut run = String::new();
         let mut start = 0;
         let mut color = None;
         for x in 0..w {
-            let sx = (2 * x + 1) * W / (2 * w);
-            let sx = if returning { W - 1 - sx } else { sx };
-            let sy = (2 * y + 1) * H / (2 * h);
-            let i = (((action * 4 + pose) * H + sy) * W + sx) * 4;
-            if ATLAS[i + 3] < 128 {
+            let sx = (2 * x + 1) * TILE / (2 * w);
+            let sx = if returning { TILE - 1 - sx } else { sx };
+            let sy = (2 * y + 1) * TILE / (2 * h);
+            let i = (sy * ATLAS_WIDTH + sx) * 4;
+            if tile[i + 3] < 128 {
                 if !run.is_empty() {
                     run.push_str("\x1b[0m");
                     spans.push((
@@ -73,7 +100,7 @@ fn spans(
             if run.is_empty() {
                 start = x;
             }
-            let rgb = (ATLAS[i], ATLAS[i + 1], ATLAS[i + 2]);
+            let rgb = (tile[i], tile[i + 1], tile[i + 2]);
             if color != Some(rgb) {
                 write!(run, "\x1b[38;2;{};{};{}m", rgb.0, rgb.1, rgb.2).unwrap();
                 color = Some(rgb);
@@ -98,13 +125,363 @@ struct Image {
     pixels: Vec<u16>,
 }
 
+impl Image {
+    fn covers_cell(&self, col: u16, row: u16) -> bool {
+        let (Some(dx), Some(dy)) = (col.checked_sub(self.col), row.checked_sub(self.row)) else {
+            return false;
+        };
+        let x = usize::from(dx) * usize::from(self.cell_w);
+        let y = usize::from(dy) * usize::from(self.cell_h);
+        x < self.w
+            && self
+                .pixels
+                .chunks_exact(self.w)
+                .skip(y)
+                .take(usize::from(self.cell_h))
+                .any(|line| {
+                    line[x..]
+                        .iter()
+                        .take(usize::from(self.cell_w))
+                        .any(|&c| c != 256)
+                })
+    }
+}
+
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
+enum Mood {
+    Swim,
+    Watch,
+    Hop,
+    Swoop,
+    Bubbles,
+    Wave,
+    Startled,
+    Snack,
+    Nap,
+    #[default]
+    Idle,
+}
+
 #[derive(Default)]
+struct Life {
+    mood: Mood,
+    age: u16,
+    fatigue: u16,
+    hunger: u16,
+    cooldown: u16,
+    bell_cooldown: u16,
+    choice: u32,
+    leftward: bool,
+    x: u16,
+    altitude: u16,
+    curiosity: u32,
+    pursuit: u16,
+    mouse: Option<(u16, u16)>,
+    food: Option<(u16, u16)>,
+    full: u16,
+    last: Option<u64>,
+}
+
+impl Life {
+    fn react(&mut self, mood: Mood) {
+        self.altitude = self.altitude.saturating_add(self.pose().2);
+        self.mood = mood;
+        self.age = 0;
+        self.mouse = None;
+        self.pursuit = 0;
+    }
+
+    fn update(
+        &mut self,
+        tick: u64,
+        travel: u16,
+        rise: u16,
+        width: u16,
+        height: u16,
+    ) -> Option<(u16, u16)> {
+        let mut eaten = None;
+        self.altitude = self.altitude.min(rise);
+        let visible =
+            |&(c, r): &(u16, u16)| c > 0 && r > 0 && c <= travel + width && r <= rise + height;
+        self.food = self.food.filter(visible);
+        self.mouse = self.mouse.filter(visible);
+        if self.last.is_none() {
+            self.x = travel;
+        }
+        self.x = self.x.min(travel);
+        // A suspended session resumes near its last pose, without unbounded catch-up.
+        let elapsed = tick
+            .saturating_sub(self.last.replace(tick).unwrap_or(tick))
+            .min(128);
+        for _ in 0..elapsed {
+            self.age += 1;
+            self.cooldown = self.cooldown.saturating_sub(1);
+            self.bell_cooldown = self.bell_cooldown.saturating_sub(1);
+            self.hunger = self.hunger.saturating_add(1);
+            self.full = self.full.saturating_sub(1);
+            if self.pursuit == 0 {
+                self.mouse = None;
+            }
+            self.pursuit = self.pursuit.saturating_sub(1);
+            let meal = self.food.filter(|_| self.full == 0 && self.hunger >= 30);
+            let reacting = matches!(self.mood, Mood::Wave | Mood::Startled);
+            if let Some((c, r)) = meal.or(self.mouse).filter(|_| !reacting) {
+                let x = (c - 1).saturating_sub(width / 2).min(travel);
+                let altitude = rise - (r - 1).saturating_sub(height / 2).min(rise);
+                if self.x != x {
+                    self.leftward = x < self.x;
+                }
+                self.x = approach(self.x, x);
+                self.altitude = approach(self.altitude, altitude);
+                self.mood = Mood::Swim;
+                self.age %= 16;
+                if (self.x, self.altitude) == (x, altitude) {
+                    self.age = 0;
+                    self.mouse = None;
+                    if meal.is_some() {
+                        eaten = self.food.take();
+                        self.full = 120;
+                        self.hunger = 0;
+                        self.mood = Mood::Snack;
+                    } else {
+                        self.mood = Mood::Watch;
+                    }
+                }
+                continue;
+            }
+            if !reacting && !matches!(self.mood, Mood::Snack | Mood::Idle) {
+                self.altitude = self.altitude.saturating_sub(1);
+            }
+            if matches!(self.mood, Mood::Swim | Mood::Swoop) {
+                self.fatigue = self.fatigue.saturating_add(1);
+                if self.mood == Mood::Swoop || self.age % 2 == 0 {
+                    if self.x == 0 || self.x == travel {
+                        self.leftward = self.x != 0;
+                    }
+                    self.x = if self.leftward {
+                        self.x.saturating_sub(1)
+                    } else {
+                        self.x.saturating_add(1).min(travel)
+                    };
+                }
+            }
+            let duration = match self.mood {
+                Mood::Swim => 48 + (self.choice % 49) as u16,
+                Mood::Nap => 48,
+                Mood::Watch | Mood::Hop => 16,
+                Mood::Wave | Mood::Bubbles => 20,
+                Mood::Startled => 12,
+                Mood::Swoop => 40,
+                Mood::Idle => 70 + (self.choice % 81) as u16,
+                Mood::Snack => 24,
+            };
+            if self.age == duration {
+                if self.mood == Mood::Nap {
+                    self.fatigue = 0;
+                }
+                if self.mood == Mood::Snack {
+                    self.hunger = 0;
+                }
+                self.choice = self.choice.wrapping_mul(1664525).wrapping_add(1013904223);
+                self.mood = if self.fatigue >= 160 {
+                    Mood::Nap
+                } else if self.mood == Mood::Idle {
+                    let actions = [
+                        Mood::Swim,
+                        Mood::Watch,
+                        Mood::Swoop,
+                        Mood::Hop,
+                        Mood::Bubbles,
+                    ];
+                    actions[(self.choice >> 16) as usize % actions.len()]
+                } else {
+                    Mood::Idle
+                };
+                self.age = 0;
+            }
+        }
+        eaten
+    }
+
+    fn pose(&self) -> (usize, usize, u16) {
+        let t = usize::from(self.age);
+        match self.mood {
+            Mood::Swim => (2, t / 4 % 4, (t / 6 % 2) as u16),
+            Mood::Bubbles => (0, usize::from(t < 3) * 2, 0),
+            Mood::Wave => (1, [0, 1, 2, 3, 2, 3, 2, 1, 0, 0][t / 2], 0),
+            Mood::Startled => (3, [1, 2, 2, 2, 3, 0][t / 2], [0, 3, 5, 4, 2, 0][t / 2]),
+            Mood::Swoop => {
+                let phase = t as f32 / 39.0;
+                let amplitude = 5 + self.choice % 9;
+                (
+                    2,
+                    t / 4 % 4,
+                    ((phase * std::f32::consts::PI).sin() * amplitude as f32).round() as u16,
+                )
+            }
+            Mood::Hop => (
+                3,
+                [0, 1, 2, 2, 2, 2, 3, 0][t / 2],
+                [0, 0, 1, 3, 3, 1, 0, 0][t / 2],
+            ),
+            Mood::Watch => (4, [0, 1, 2, 3, 2, 1, 0, 0][t / 2], 0),
+            Mood::Snack => (1, [0, 1, 3, 2, 3, 0][t / 4], 0),
+            Mood::Nap => (5, [0, 1, 2, 3, 2, 1][t / 8], 0),
+            Mood::Idle => match (t + (self.choice % 21) as usize) % 79 {
+                32 | 33 => (0, 2, 0),
+                60..=62 if self.choice & 1 != 0 => (1, 1, 0),
+                _ => (0, 0, 0),
+            },
+        }
+    }
+
+    // Effects are authored on a 96-by-48 logical grid, independent of tile resolution.
+    fn effect_color(&self, x: usize, y: usize) -> Option<u8> {
+        let t = usize::from(self.age);
+        match self.mood {
+            Mood::Wave => {
+                let top = 13 - t / 2;
+                let heart = [
+                    0b0110110u8,
+                    0b1111111,
+                    0b1111111,
+                    0b0111110,
+                    0b0011100,
+                    0b0001000,
+                ];
+                let bit = x.checked_sub(70)? / 2;
+                let row = heart.get(y.checked_sub(top)?)?;
+                (bit < 7 && row & (1 << bit) != 0).then_some(0b111_011_10)
+            }
+            Mood::Startled
+                if t < 9 && (74..=76).contains(&x) && ((6..=10).contains(&y) || y == 13) =>
+            {
+                Some(0b111_110_01)
+            }
+            Mood::Bubbles => {
+                for delay in [0, 4, 8] {
+                    if let Some(age @ 0..=13) = t.checked_sub(delay) {
+                        let cx = 78 + age / 2 + delay / 2;
+                        let cy = 25 - age * 3 / 2;
+                        let d = x.abs_diff(cx).pow(2) + (2 * y.abs_diff(cy)).pow(2);
+                        if (7..=17).contains(&d) {
+                            return Some(0b100_111_11);
+                        }
+                    }
+                }
+                None
+            }
+            Mood::Snack if t >= 16 => {
+                let d = x.abs_diff(80).pow(2) + y.abs_diff(24 - (t - 16) * 2).pow(2);
+                (9..=16).contains(&d).then_some(255)
+            }
+            _ => None,
+        }
+    }
+}
+
+fn approach(value: u16, goal: u16) -> u16 {
+    if value < goal {
+        value + 1
+    } else if value > goal {
+        value - 1
+    } else {
+        value
+    }
+}
+
+#[derive(PartialEq)]
+struct FrameKey {
+    origin: (u16, u16),
+    cell_pixels: (u16, u16),
+    side: usize,
+    action: usize,
+    pose: usize,
+    leftward: bool,
+    effect: Option<(Mood, u16)>,
+}
+
 pub struct Pet {
+    life: Life,
     previous: Option<Image>,
+    last_frame: Option<FrameKey>,
     dirty: bool,
 }
 
+impl Default for Pet {
+    fn default() -> Self {
+        use std::hash::BuildHasher;
+        let choice = std::collections::hash_map::RandomState::new().hash_one(()) as u32;
+        Self {
+            life: Life {
+                choice,
+                curiosity: choice,
+                ..Life::default()
+            },
+            previous: None,
+            last_frame: None,
+            dirty: false,
+        }
+    }
+}
+
 impl Pet {
+    pub fn notice_touch(&mut self, col: u16, row: u16) {
+        if self.life.mood != Mood::Wave
+            && self
+                .previous
+                .as_ref()
+                .is_some_and(|image| image.covers_cell(col, row))
+        {
+            self.life.react(Mood::Wave);
+        }
+    }
+
+    pub fn notice_bell(&mut self) {
+        if self.life.bell_cooldown == 0 && self.life.mood != Mood::Wave {
+            self.life.react(Mood::Startled);
+            self.life.bell_cooldown = 60;
+        }
+    }
+
+    /// Notice a mouse position in one-based terminal cells.
+    pub fn notice_mouse(&mut self, col: u16, row: u16) {
+        if self.life.mouse.is_some() {
+            self.life.mouse = Some((col, row));
+        } else if self.life.cooldown == 0
+            && matches!(self.life.mood, Mood::Swim | Mood::Idle | Mood::Watch)
+        {
+            self.life.curiosity = self
+                .life
+                .curiosity
+                .wrapping_mul(1664525)
+                .wrapping_add(1013904223);
+            self.life.cooldown = 5;
+            if self.life.curiosity >> 31 == 0 {
+                self.life.pursuit = 32;
+                self.life.cooldown = 48;
+                self.life.mouse = Some((col, row));
+            }
+        }
+    }
+
+    /// Replace the latest edible output cell (one-based terminal coordinates).
+    pub fn notice_food(&mut self, col: u16, row: u16) {
+        self.life.food = Some((col, row));
+    }
+
+    pub fn forget_food(&mut self) {
+        self.life.food = None;
+    }
+    /// Occasionally look up. Key repeats cannot restart the gesture.
+    pub fn notice_input(&mut self) {
+        if self.life.cooldown == 0 && matches!(self.life.mood, Mood::Idle | Mood::Swim) {
+            self.life.mood = Mood::Watch;
+            self.life.age = 0;
+            self.life.cooldown = 120;
+        }
+    }
+
     pub fn invalidate(&mut self) {
         self.dirty = true;
     }
@@ -115,6 +492,7 @@ impl Pet {
         let Some(old) = self.previous.take() else {
             return;
         };
+        self.last_frame = None;
         let cw = usize::from(old.cell_w);
         let ch = usize::from(old.cell_h);
         let mut cells = vec![false; old.w.div_ceil(cw)];
@@ -161,9 +539,10 @@ impl Pet {
         let width = usize::from(cols.saturating_sub(1)) * usize::from(cell_w);
         let height = usize::from(rows) * usize::from(cell_h);
         // Even a partial final Sixel band must fit without scrolling.
-        // The atlas compresses square source tiles for text cells, not Sixel pixels.
-        const SIDE: usize = 128;
-        let h = SIDE.min(width).min(height / 6 * 6);
+        let h = (height / 3)
+            .clamp(48, MAX_SIDE)
+            .min(width)
+            .min(height / 6 * 6);
         if h == 0 {
             self.invalidate();
             return;
@@ -176,63 +555,56 @@ impl Pet {
         let size = metrics
             .size_for_pixels(w as u32, h.next_multiple_of(6) as u32)
             .unwrap();
-        // Every few swimming strokes, hover and take a bite. A triangular
-        // path turns at the viewport edges without teleporting on wide screens.
-        let phase = tick % 40;
-        let outing = tick / 40;
-        // Each outing covers twelve cells, but alternate gliding with a dash.
-        let stride = if outing % 3 == 1 { 1 } else { 2 };
-        let strokes = 12 * stride;
-        let steps = outing * 12 + phase.min(strokes) / stride;
-        let travel = u64::from(cols - size.width);
-        let path = (travel / 2 + steps) % (2 * travel).max(1);
-        let leftward = path >= travel;
-        let col = 1 + path.min(2 * travel - path) as u16;
+        let travel = cols - 1 - size.width;
         let rise = rows - size.height;
-        let depth = (steps / 3) % (2 * u64::from(rise)).max(1);
-        let mut row = 1 + rise - depth.min(2 * u64::from(rise) - depth) as u16;
-        let rest = phase.saturating_sub(strokes);
-        let activity = outing % 6;
-        let (action, pose) = if phase < strokes {
-            (2, (phase / (2 * stride) % 4) as usize)
-        } else {
-            match activity {
-                0 => (1, [0, 1, 3, 2][(rest / 4) as usize]), // reach for a snack
-                1 => {
-                    // crouch, spring up, hang in the air, then land
-                    let key = (rest / 2) as usize;
-                    row -= (row - 1).min([0, 0, 0, 1, 2, 3, 3, 3, 2, 1, 0, 0, 0, 0][key]);
-                    (3, [0, 1, 1, 2, 2, 2, 2, 2, 2, 2, 3, 3, 1, 0][key])
-                }
-                2 => (4, [0, 1, 2, 2, 3, 3, 2, 0][(rest / 2) as usize]), // look around
-                3 => (1, [0, 1, 2, 3, 2, 3, 1, 0][(rest / 2) as usize]), // wave
-                4 => (5, [0, 1, 2, 3, 2, 1, 0][(rest / 4) as usize]),    // nap and wake
-                _ => (0, usize::from(matches!(rest, 5 | 6 | 12)) * 2),   // double blink
-            }
-        };
-        if activity == 0 && rest == 8 {
-            let mouth = if leftward {
-                col.checked_sub(1)
-            } else {
-                col.checked_add(size.width)
-            };
-            if let Some(x) = mouth.filter(|x| (1..=cols).contains(x)) {
-                let y = row + size.height / 2;
-                write!(out, "\x1b[{y};{x}H\x1b[X").unwrap();
-            }
+        if let Some((c, r)) = self
+            .life
+            .update(tick, travel, rise, size.width, size.height)
+        {
+            write!(out, "\x1b[49m\x1b[{r};{c}H\x1b[X").unwrap();
+            self.dirty = true;
         }
+        let (action, pose, lift) = self.life.pose();
+        let col = 1 + self.life.x;
+        let row = 1 + (rise - self.life.altitude).saturating_sub(lift);
+        let leftward = self.life.leftward;
+        let key = FrameKey {
+            origin: (col, row),
+            cell_pixels: (cell_w, cell_h),
+            side: w,
+            action,
+            pose,
+            leftward,
+            effect: match self.life.mood {
+                Mood::Snack | Mood::Wave | Mood::Startled | Mood::Bubbles => {
+                    Some((self.life.mood, self.life.age))
+                }
+                _ => None,
+            },
+        };
+        if !self.dirty && self.last_frame.as_ref() == Some(&key) {
+            return;
+        }
+        self.last_frame = Some(key);
         let mut pixels = Vec::with_capacity(w * h);
         let mut palette = [false; 256];
+        let tile = atlas_tile(action, pose);
         for y in 0..h {
+            let sy = (2 * y + 1) * TILE / (2 * h);
+            let effect_y = (2 * y + 1) * 48 / (2 * h);
             for x in 0..w {
-                let sx = (2 * x + 1) * W / (2 * w);
-                let sx = if leftward { W - 1 - sx } else { sx };
-                let sy = (2 * y + 1) * H / (2 * h);
-                let i = (((action * 4 + pose) * H + sy) * W + sx) * 4;
-                let c = if ATLAS[i + 3] < 128 {
+                let x = if leftward { w - 1 - x } else { x };
+                let sx = (2 * x + 1) * TILE / (2 * w);
+                let i = (sy * ATLAS_WIDTH + sx) * 4;
+                let c = if let Some(color) =
+                    self.life.effect_color((2 * x + 1) * 96 / (2 * w), effect_y)
+                {
+                    palette[usize::from(color)] = true;
+                    u16::from(color)
+                } else if tile[i + 3] < 128 {
                     256
                 } else {
-                    let c = (ATLAS[i] & 224) | ((ATLAS[i + 1] >> 3) & 28) | (ATLAS[i + 2] >> 6);
+                    let c = (tile[i] & 224) | ((tile[i + 1] >> 3) & 28) | (tile[i + 2] >> 6);
                     palette[c as usize] = true;
                     u16::from(c)
                 };
@@ -297,7 +669,7 @@ impl Pet {
                 out.push(b'-');
             }
             for (c, _) in palette.iter().enumerate().filter(|(_, used)| **used) {
-                let mut band = [0u8; SIDE];
+                let mut band = [0u8; MAX_SIDE];
                 for dy in 0..6.min(h - y) {
                     for (x, mask) in band[..w].iter_mut().enumerate() {
                         if image.pixels[(y + dy) * w + x] == c as u16 {
@@ -337,10 +709,11 @@ fn unknown_cell_size_emits_nothing() {
 #[test]
 fn sixel_redraw_contract() {
     let mut pet = Pet::default();
+    pet.life.choice = 0;
     let mut out = Vec::new();
     pet.draw(0, 80, 24, 10, 20, &mut out);
     let first = std::mem::take(&mut out);
-    assert!(first.starts_with(b"\x1b[18;34H\x1bP0;1q\"1;1;128;128"));
+    assert!(first.starts_with(b"\x1b[16;64H\x1bP0;1q\"1;1;160;160"));
     assert!(first.ends_with(b"\x1b\\"));
     pet.draw(1, 80, 24, 10, 20, &mut out);
     assert!(out.is_empty());
@@ -348,16 +721,13 @@ fn sixel_redraw_contract() {
     pet.draw(1, 80, 24, 10, 20, &mut out);
     assert_eq!(out, first);
     out.clear();
-    pet.draw(48, 80, 24, 10, 20, &mut out);
+    pet.draw(32, 80, 24, 10, 20, &mut out);
     assert!(!out.is_empty());
     assert_ne!(out, first);
     out.clear();
     pet.draw(128, 80, 24, 10, 20, &mut out);
     let erased = out.windows(3).filter(|s| *s == b"\x1b[X").count();
-    assert!((1..=91).contains(&erased));
-    out.clear();
-    pet.draw(32, 80, 24, 10, 20, &mut out);
-    assert!(out.starts_with(b"\x1b[17;59H\x1b[X"));
+    assert!((1..=16 * 9).contains(&erased));
 }
 
 #[cfg(test)]
@@ -365,20 +735,181 @@ mod tests {
     use super::*;
 
     #[test]
-    fn all_outings_render_through_takeoff_and_landing() {
+    fn idle_gestures_leave_the_whale_in_place() {
+        for (choice, duration) in [(0, 70), (1, 71), (80, 150)] {
+            let mut life = Life {
+                choice,
+                altitude: 5,
+                ..Life::default()
+            };
+            let mut still = 0;
+            let mut blinked = false;
+            let mut moved_fin = false;
+            for tick in 0..duration {
+                life.update(tick, 60, 10, 1, 1);
+                assert_eq!((life.mood, life.x, life.altitude), (Mood::Idle, 60, 5));
+                match life.pose() {
+                    (0, 0, 0) => still += 1,
+                    (0, 2, 0) => blinked = true,
+                    (1, 1, 0) => moved_fin = true,
+                    other => panic!("unexpected idle pose {other:?}"),
+                }
+            }
+            assert!(still > duration * 9 / 10 && blinked);
+            assert_eq!(moved_fin, choice & 1 != 0);
+            life.update(duration, 60, 10, 1, 1);
+            assert_ne!(life.mood, Mood::Idle);
+        }
+    }
+
+    #[test]
+    fn raster_resizes_with_the_terminal_and_fits_the_last_sixel_band() {
+        let mut pet = Pet::default();
+        for (cols, rows, side) in [(100, 40, 192), (80, 24, 160), (5, 24, 40), (80, 1, 18)] {
+            pet.draw(0, cols, rows, 10, 20, &mut Vec::new());
+            let image = pet.previous.as_ref().unwrap();
+            assert_eq!(image.w, side);
+            assert!(usize::from(image.col - 1) * 10 + side <= usize::from(cols - 1) * 10);
+            assert!(
+                usize::from(image.row - 1) * 20 + side.next_multiple_of(6)
+                    <= usize::from(rows) * 20
+            );
+        }
+    }
+
+    #[test]
+    fn touch_requires_a_painted_cell_and_finishes_despite_other_events() {
         let mut pet = Pet::default();
         let mut out = Vec::new();
-        let mut poses = Vec::new();
-        for tick in 0..240 {
-            out.clear();
-            pet.draw(tick, 30, 12, 4, 8, &mut out);
-            if tick % 40 == 32 {
-                poses.push(pet.previous.as_ref().unwrap().pixels.clone());
+        pet.draw(0, 80, 24, 10, 20, &mut out);
+        let image = pet.previous.as_ref().unwrap();
+        let (col, row) = (image.col, image.row);
+        pet.notice_touch(col, row);
+        assert_eq!(pet.life.mood, Mood::Idle);
+        pet.notice_touch(col + 6, row + 3);
+        pet.life.hunger = 100;
+        pet.notice_food(1, 1);
+        for tick in 1..20 {
+            pet.notice_touch(col + 6, row + 3);
+            pet.notice_bell();
+            pet.life.update(tick, 66, 17, 13, 7);
+            assert_eq!((pet.life.mood, pet.life.age), (Mood::Wave, tick as u16));
+        }
+        pet.life.update(20, 66, 17, 13, 7);
+        assert_eq!(pet.life.mood, Mood::Idle);
+    }
+
+    #[test]
+    fn bell_wakes_a_sleeping_pet_and_repeated_bells_allow_it_to_land() {
+        let mut pet = Pet::default();
+        pet.life.mood = Mood::Nap;
+        for tick in 0..=12 {
+            pet.notice_bell();
+            pet.life.update(tick, 5, 5, 1, 1);
+            if tick == 4 {
+                assert_eq!(pet.life.pose().2, 5);
             }
         }
-        poses.sort();
-        poses.dedup();
-        assert_eq!(poses.len(), 6);
+        assert_eq!(pet.life.mood, Mood::Idle);
+        pet.notice_bell();
+        assert_eq!(pet.life.mood, Mood::Idle);
+        pet.life.update(60, 5, 5, 1, 1);
+        pet.notice_bell();
+        assert_eq!(pet.life.mood, Mood::Startled);
+    }
+
+    #[test]
+    fn undisturbed_whale_blows_rising_bubbles() {
+        let mut life = Life::default();
+        for tick in 0..2000 {
+            life.update(tick, 60, 10, 1, 1);
+            if life.mood == Mood::Bubbles {
+                assert!(life.effect_color(82, 25).is_some());
+                life.update(tick + 10, 60, 10, 1, 1);
+                assert!(life.effect_color(87, 10).is_some());
+                life.update(tick + 20, 60, 10, 1, 1);
+                assert_ne!(life.mood, Mood::Bubbles);
+                return;
+            }
+        }
+        panic!("the whale never blew bubbles");
+    }
+
+    #[test]
+    fn fed_pet_uses_every_action_and_stays_in_bounds() {
+        let mut life = Life::default();
+        let mut seen = [false; 6];
+        for tick in 0..12000 {
+            let travel = (tick / 31 % 8) as u16;
+            if tick % 600 == 0 {
+                life.food = Some((1, 1));
+            }
+            life.update(tick, travel, 0, 1, 1);
+            let (action, pose, _) = life.pose();
+            seen[action] = true;
+            assert!(life.x <= travel && pose < 4);
+        }
+        assert_eq!(seen, [true; 6]);
+    }
+
+    #[test]
+    fn typing_cannot_restart_or_chain_a_glance() {
+        let mut pet = Pet::default();
+        pet.notice_input();
+        for tick in 0..16 {
+            pet.life.update(tick, 20, 0, 1, 1);
+            pet.notice_input();
+            assert_eq!(pet.life.mood, Mood::Watch);
+            assert_eq!(pet.life.age, tick as u16);
+        }
+        pet.life.update(16, 20, 0, 1, 1);
+        pet.notice_input();
+        assert_eq!(pet.life.mood, Mood::Idle);
+    }
+
+    #[test]
+    fn moving_pointer_cannot_extend_pursuit() {
+        let mut pet = Pet::default();
+        pet.life.curiosity = 0;
+        for tick in 0..=33 {
+            pet.notice_mouse(1 + tick as u16, 1);
+            pet.life.update(tick, 200, 0, 1, 1);
+        }
+        assert!(pet.life.mouse.is_none());
+        assert!(pet.life.cooldown > 0);
+    }
+
+    #[test]
+    fn swoop_travels_while_rising_and_falling() {
+        let mut life = Life {
+            mood: Mood::Swoop,
+            ..Life::default()
+        };
+        life.update(0, 100, 20, 1, 1);
+        life.update(20, 100, 20, 1, 1);
+        assert_eq!(life.x, 80);
+        assert!(life.pose().2 >= 5);
+        life.update(39, 100, 20, 1, 1);
+        assert_eq!((life.x, life.pose().2), (61, 0));
+    }
+
+    #[test]
+    fn targets_follow_both_axes_and_stale_food_is_not_eaten() {
+        let mut pet = Pet::default();
+        pet.life.curiosity = 0;
+        pet.notice_mouse(12, 2);
+        pet.life.update(0, 20, 10, 1, 1);
+        pet.life.update(9, 20, 10, 1, 1);
+        assert_eq!((pet.life.x, pet.life.altitude), (11, 9));
+        pet.life.hunger = 100;
+        pet.notice_food(18, 8);
+        assert_eq!(pet.life.update(12, 20, 10, 1, 1), None);
+        pet.forget_food();
+        assert_eq!(pet.life.update(45, 20, 10, 1, 1), None);
+        pet.notice_food(3, 4);
+        assert_eq!(pet.life.update(70, 20, 10, 1, 1), Some((3, 4)));
+        pet.notice_food(4, 4);
+        assert_eq!(pet.life.update(110, 20, 10, 1, 1), None);
     }
 
     #[test]

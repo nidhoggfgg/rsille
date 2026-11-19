@@ -24,9 +24,12 @@ impl Boundary {
         matches!(self.state, State::Ground) && self.continuation == 0
     }
 
-    pub fn feed(&mut self, bytes: &[u8]) {
+    /// Reports an audible BEL in ordinary output. BEL also terminates OSC strings.
+    pub fn feed(&mut self, bytes: &[u8]) -> bool {
         use self::State::*;
+        let mut rang = false;
         for &b in bytes {
+            rang |= b == 7 && self.ready();
             // A continuation byte can look exactly like an eight-bit C1 control.
             if self.continuation != 0 && matches!(b, 0x80..=0xbf) {
                 self.continuation -= 1;
@@ -61,6 +64,7 @@ impl Boundary {
                 (s, _) => s,
             };
         }
+        rang
     }
 }
 
@@ -91,6 +95,22 @@ mod tests {
             for (i, b) in seq.iter().enumerate() {
                 boundary.feed(std::slice::from_ref(b));
                 assert_eq!(boundary.ready(), i + 1 == seq.len(), "{seq:?} at {i}");
+            }
+        }
+    }
+
+    #[test]
+    fn bell_is_distinct_from_a_control_string_terminator() {
+        for seq in [
+            b"\x1b]2;title\x07".as_slice(),
+            b"\x1bPq\x07\x1b\\",
+            b"\x9dtitle\x07",
+        ] {
+            for split in 0..=seq.len() {
+                let mut b = Boundary::default();
+                assert!(!b.feed(&seq[..split]));
+                assert!(!b.feed(&seq[split..]));
+                assert!(b.feed(b"x\x07y"));
             }
         }
     }

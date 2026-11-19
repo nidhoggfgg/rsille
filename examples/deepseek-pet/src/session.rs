@@ -87,13 +87,16 @@ fn check_sixel(original: &libc::termios) -> io::Result<()> {
     result
 }
 
-struct Terminal(libc::termios);
+struct Terminal {
+    original: libc::termios,
+}
 impl Drop for Terminal {
     fn drop(&mut self) {
+        let _ = io::stdout().write_all(b"\x18\x1b[?1003l\x1b[?1006l");
         let _ = io::stdout().write_all(b"\x1b[0m\x1b[?1049l");
         let _ = io::stdout().flush();
         unsafe {
-            libc::tcsetattr(0, libc::TCSANOW, &self.0);
+            libc::tcsetattr(0, libc::TCSANOW, &self.original);
         }
     }
 }
@@ -151,9 +154,14 @@ pub fn run(mut pet: crate::pet::Pet) -> io::Result<()> {
         libc::cfmakeraw(&mut raw);
     }
     check(unsafe { libc::tcsetattr(0, libc::TCSANOW, &raw) })?;
-    let _terminal = Terminal(original);
+    let _terminal = Terminal { original };
+    let mut decoder = crate::mouse::Mouse::default();
+    let mut input_deadline = None;
+    let mut food = crate::food::Food::home();
+    let mut food_deadline = None;
     let mut out = io::stdout().lock();
     out.write_all(b"\x1b[?1049h\x1b[2J\x1b[H")?;
+    out.write_all(b"\x1b[?1006h\x1b[?1003h")?;
     let mut pending = std::collections::VecDeque::<u8>::new();
     let mut input = [0u8; 4096];
     let mut output = [0u8; 8192];
@@ -167,6 +175,17 @@ pub fn run(mut pet: crate::pet::Pet) -> io::Result<()> {
     let mut boundary = crate::boundary::Boundary::default();
     loop {
         let now = Instant::now();
+        if input_deadline.is_some_and(|d| now >= d) {
+            decoder.flush(&mut pending);
+            if !pending.is_empty() {
+                pet.notice_input();
+            }
+            input_deadline = None;
+        }
+        if food_deadline.is_some_and(|d| now >= d) {
+            pet.forget_food();
+            food_deadline = None;
+        }
         let tick = now >= next;
         if tick {
             let new = size(1)?;
@@ -180,14 +199,28 @@ pub fn run(mut pet: crate::pet::Pet) -> io::Result<()> {
                 {
                     pixels = measured;
                 }
+                food.resize();
+                pet.forget_food();
+                food_deadline = None;
                 pet.invalidate();
             }
             frame = frame.wrapping_add(1);
             next = now + Duration::from_millis(100);
         }
         if tick || due.is_some_and(|d| now >= d) || batch.len() == CAP {
+            if let Some(cell) = food.feed(&batch, s.ws_col, s.ws_row) {
+                if let Some((col, row)) = cell {
+                    pet.notice_food(col, row);
+                    food_deadline = Some(now + Duration::from_secs(3));
+                } else {
+                    pet.forget_food();
+                    food_deadline = None;
+                }
+            }
             let start = boundary.ready();
-            boundary.feed(&batch);
+            if boundary.feed(&batch) {
+                pet.notice_bell();
+            }
             let end = boundary.ready();
             update.clear();
             if start && !batch.is_empty() {
@@ -225,6 +258,7 @@ pub fn run(mut pet: crate::pet::Pet) -> io::Result<()> {
         let ms = due
             .unwrap_or(next)
             .min(next)
+            .min(input_deadline.unwrap_or(next))
             .saturating_duration_since(Instant::now())
             .as_nanos()
             .div_ceil(1_000_000) as i32;
@@ -272,7 +306,22 @@ pub fn run(mut pet: crate::pet::Pet) -> io::Result<()> {
             if bytes.contains(&0x1d) {
                 break;
             }
-            pending.extend(bytes);
+            decoder.feed(bytes, &mut pending, |kind, col, row| {
+                use crate::mouse::MouseKind;
+                if col <= s.ws_col && row <= s.ws_row {
+                    match kind {
+                        MouseKind::Motion => pet.notice_mouse(col, row),
+                        MouseKind::LeftPress => pet.notice_touch(col, row),
+                        MouseKind::Other => {}
+                    }
+                }
+            });
+            input_deadline = decoder
+                .has_partial_report()
+                .then(|| Instant::now() + Duration::from_millis(100));
+            if !pending.is_empty() {
+                pet.notice_input();
+            }
         }
     }
     update.clear();
