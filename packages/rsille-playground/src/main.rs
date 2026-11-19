@@ -13,10 +13,19 @@ struct Args {
     experience: Option<Experience>,
 }
 
+#[derive(Clone, Copy, clap::ValueEnum)]
+enum PetCharacter {
+    Deepseek,
+}
+
 #[derive(Subcommand)]
 enum Experience {
+    /// Start a terminal pet session
+    Pet {
+        #[arg(value_enum, default_value = "deepseek")]
+        character: PetCharacter,
+    },
     /// Explore the AI Babies animation
-    #[command(visible_alias = "pet")]
     AiBabies,
     /// Plot functions in a Sixel terminal
     #[command(visible_alias = "draw")]
@@ -31,6 +40,9 @@ impl Experience {
             _ if !io::stdin().is_terminal() || !io::stdout().is_terminal() => {
                 Err("This experience needs an interactive terminal.".into())
             }
+            Self::Pet {
+                character: PetCharacter::Deepseek,
+            } => Ok(deepseek_pet::run()?),
             Self::AiBabies => ai_babies::run(),
             Self::FunctionPlotter => rsille_function_plotter::run(),
             Self::Jellyfish => rsille_jellyfish::run(),
@@ -51,9 +63,12 @@ fn main() -> Result<(), Box<dyn Error>> {
             return Ok(());
         }
         match choice.trim() {
-            "1" | "draw" | "function-plotter" => Experience::FunctionPlotter,
-            "2" | "pet" | "ai-babies" => Experience::AiBabies,
-            "3" | "jellyfish" => Experience::Jellyfish,
+            "1" | "4" | "draw" | "function-plotter" => Experience::FunctionPlotter,
+            "2" | "pet" => Experience::Pet {
+                character: PetCharacter::Deepseek,
+            },
+            "3" | "ai-babies" => Experience::AiBabies,
+            "5" | "jellyfish" => Experience::Jellyfish,
             "q" | "quit" => return Ok(()),
             _ => {
                 println!("Choose one of the listed experiences.");

@@ -8,10 +8,10 @@ Run these commands from the repository root in an interactive terminal. To pick 
 cargo run -p rsille-playground -- draw
 ```
 
-**Pet:**
+**Pet** (defaults to DeepSeek if the character is omitted):
 
 ```sh
-cargo run -p rsille-playground -- pet
+cargo run -p rsille-playground -- pet deepseek
 ```
 
 To see the available commands without starting a session, run `cargo run -p rsille-playground -- --help`.

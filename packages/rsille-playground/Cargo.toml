@@ -12,6 +12,7 @@ name = "rsille"
 path = "src/main.rs"
 
 [dependencies]
+deepseek-pet = { path = "../../examples/deepseek-pet" }
 ai-babies = { path = "../../examples/ai-babies", version = "0.1.0" }
 rsille-function-plotter = { path = "../../examples/function-plotter", version = "0.1.0" }
 rsille-jellyfish = { path = "../../examples/jellyfish", version = "0.1.0" }
