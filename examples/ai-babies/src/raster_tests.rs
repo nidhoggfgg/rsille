@@ -138,7 +138,7 @@ fn raster_playback_preserves_sources_across_holds_switches_and_resize() {
     assert_eq!((cell.canvas.width(), cell.canvas.height()), (320, 320));
     assert_eq!(Some(cell.options.background), options.background);
     assert_eq!(first.raster_cells().count(), 32 * 16);
-        assert_eq!(first.overlay_cells().count(), 0);
+    assert_eq!(first.overlay_cells().count(), 0);
     let identity = (cell.canvas.id(), cell.canvas.version());
     nursery.time = 0.5;
     let held = export::frame(&mut nursery, size).unwrap();
