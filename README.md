@@ -65,6 +65,10 @@ and a standalone application starter.
 npx skills add nidhoggfgg/rsille.skills --skill rsille
 ```
 
+## Try the terminal playground
+
+Run `cargo run -p rsille-playground` from the repository root to open the menu. Choose `draw` or `pet`, or see the [playground guide](packages/rsille-playground/README.md) to launch either directly.
+
 ## Installation
 
 ```toml

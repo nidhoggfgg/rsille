@@ -63,6 +63,10 @@ Function Plotter 为离线 RGB 预览，非终端录屏，
 npx skills add nidhoggfgg/rsille.skills --skill rsille
 ```
 
+## 体验终端游乐场
+
+在仓库根目录运行 `cargo run -p rsille-playground` 打开菜单，选择 `draw` 或 `pet`。也可以直接启动对应的命令，见 [playground 使用指南](packages/rsille-playground/README.md)。
+
 ## 在应用中引入 rsille
 
 ```toml

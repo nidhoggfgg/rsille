@@ -1,6 +1,0 @@
-{
-  "services": [
-    {"name": "api", "version": "1.2.0", "status": "ready", "deployment": "api"},
-    {"name": "worker", "version": "1.1.0", "status": "ready", "deployment": "worker"}
-  ]
-}
