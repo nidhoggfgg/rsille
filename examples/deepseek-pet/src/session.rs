@@ -203,7 +203,11 @@ pub fn run(options: crate::Options) -> io::Result<()> {
     let mut s = size(1)?;
     let mut original = unsafe { std::mem::zeroed() };
     check(unsafe { libc::tcgetattr(0, &mut original) })?;
-    let cursor = probe_terminal(&original, forage && !options.alt_screen).map_err(|e| {
+    let cursor = probe_terminal(
+        &original,
+        (forage || !options.no_restore) && !options.alt_screen,
+    )
+    .map_err(|e| {
         io::Error::new(
             e.kind(),
             format!("无法确认终端支持 Sixel，未启动 shell：{e}"),
@@ -248,14 +252,16 @@ pub fn run(options: crate::Options) -> io::Result<()> {
     };
     let mut decoder = crate::mouse::Mouse::default();
     let mut input_deadline = None;
-    let mut food = forage.then(|| {
-        let cursor = if options.alt_screen {
-            Some((1, 1))
-        } else {
-            cursor
-        };
-        crate::food::Food::new(cursor.filter(|&(col, row)| col <= s.ws_col && row <= s.ws_row))
-    });
+    let cursor = if options.alt_screen {
+        Some((1, 1))
+    } else {
+        cursor
+    }
+    .filter(|&(col, row)| col <= s.ws_col && row <= s.ws_row);
+    if !options.no_restore {
+        pet.screen = cursor.and_then(|pos| crate::screen::Screen::new(s.ws_row, s.ws_col, pos));
+    }
+    let mut food = forage.then(|| crate::food::Food::new(cursor));
     let mut food_deadline = None;
     let mut out = io::stdout().lock();
     if options.alt_screen {
@@ -331,6 +337,11 @@ pub fn run(options: crate::Options) -> io::Result<()> {
                 if let Some(food) = &mut food {
                     food.resize();
                 }
+                if let Some(screen) = &mut pet.screen {
+                    if !screen.resize(s.ws_row, s.ws_col) {
+                        pet.screen = None;
+                    }
+                }
                 pet.forget_food();
                 food_deadline = None;
                 pet.invalidate();
@@ -357,13 +368,24 @@ pub fn run(options: crate::Options) -> io::Result<()> {
             }
             let end = boundary.ready();
             update.clear();
-            if start && !batch.is_empty() {
-                pet.hide(s.ws_col, s.ws_row, &mut update);
+            if !batch.is_empty() {
+                if start {
+                    pet.hide(s.ws_col, s.ws_row, &mut update);
+                }
+                if let Some(screen) = &mut pet.screen {
+                    screen.feed(&batch);
+                }
             }
             sprite.clear();
             terminal.child_alternate = boundary.alternate;
             // Forward the screen switch first. Resume drawing on a later batch.
-            if end && !boundary.alternate && !boundary.screen_selected {
+            // A full batch can be followed immediately by more shell output.
+            // During a flood, cap sprite repaints at the animation tick rate.
+            if end
+                && !boundary.alternate
+                && !boundary.screen_selected
+                && (tick || batch.len() < CAP)
+            {
                 pet.draw(
                     frame.wrapping_sub(1),
                     s.ws_col,

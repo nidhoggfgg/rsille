@@ -93,6 +93,63 @@ struct Image {
 }
 
 impl Image {
+    /// Erase old ink that the new sprite no longer covers, in horizontal cell runs.
+    fn clear_uncovered(
+        &self,
+        next: Option<&Image>,
+        cols: u16,
+        rows: u16,
+        screen: Option<&crate::screen::Screen>,
+        out: &mut Vec<u8>,
+    ) {
+        if self.col > cols || self.row > rows {
+            return;
+        }
+        let cw = usize::from(self.cell_w);
+        let ch = usize::from(self.cell_h);
+        let same_grid = next.filter(|n| (n.cell_w, n.cell_h) == (self.cell_w, self.cell_h));
+        let width = self.w.div_ceil(cw).min(usize::from(cols - self.col) + 1);
+        let mut dirty = vec![false; width];
+        let start = out.len();
+        for (dy, band) in self
+            .pixels
+            .chunks(self.w * ch)
+            .take(usize::from(rows - self.row) + 1)
+            .enumerate()
+        {
+            let row = self.row + dy as u16;
+            dirty.fill(false);
+            for (py, line) in band.chunks_exact(self.w).enumerate() {
+                for (px, &color) in line.iter().take(width * cw).enumerate() {
+                    let dx = px / cw;
+                    if color == 256 || dirty[dx] {
+                        continue;
+                    }
+                    let col = self.col + dx as u16;
+                    let covered = same_grid.is_some_and(|n| {
+                        if col < n.col || row < n.row {
+                            return false;
+                        }
+                        let x = usize::from(col - n.col) * cw + px % cw;
+                        let y = usize::from(row - n.row) * ch + py;
+                        x < n.w && y < n.w && n.pixels[y * n.w + x] != 256
+                    });
+                    dirty[dx] = !covered;
+                }
+            }
+            let mut col = usize::from(self.col);
+            for run in dirty.chunk_by(|a, b| a == b) {
+                if run[0] {
+                    if out.len() == start {
+                        out.extend_from_slice(b"\x1b[49m");
+                    }
+                    crate::screen::clear_span(screen, col as u16, row, run.len() as u16, out);
+                }
+                col += run.len();
+            }
+        }
+    }
+
     fn covers_cell(&self, col: u16, row: u16) -> bool {
         let (Some(dx), Some(dy)) = (col.checked_sub(self.col), row.checked_sub(self.row)) else {
             return false;
@@ -124,6 +181,7 @@ struct FrameKey {
 }
 
 pub struct Pet<'a> {
+    pub(crate) screen: Option<crate::screen::Screen>,
     catalog: &'a crate::dialogue::Catalog,
     features: BTreeSet<Feature>,
     speech: Option<Speech<'a>>,
@@ -148,6 +206,7 @@ impl<'a> Pet<'a> {
         use std::hash::BuildHasher;
         let choice = std::collections::hash_map::RandomState::new().hash_one(()) as u32;
         Self {
+            screen: None,
             life: Life::new(choice, &features),
             catalog,
             speech: features.contains(&Feature::Speech).then(Speech::default),
@@ -223,40 +282,14 @@ impl<'a> Pet<'a> {
 
     /// Remove the visible sprite while its original coordinates are still valid.
     pub fn hide(&mut self, cols: u16, rows: u16, out: &mut Vec<u8>) {
-        use std::io::Write;
         if let Some(old) = self.bubble.take() {
-            old.erase(cols, rows, out);
+            old.erase(cols, rows, self.screen.as_ref(), out);
         }
         let Some(old) = self.previous.take() else {
             return;
         };
         self.last_frame = None;
-        let cw = usize::from(old.cell_w);
-        let ch = usize::from(old.cell_h);
-        let mut cells = vec![false; old.w.div_ceil(cw)];
-        out.extend_from_slice(b"\x1b[49m");
-        for (dy, band) in old.pixels.chunks(old.w * ch).enumerate() {
-            cells.fill(false);
-            for (i, &pixel) in band.iter().enumerate() {
-                if pixel != 256 {
-                    cells[(i % old.w) / cw] = true;
-                }
-            }
-            let mut x = 0;
-            for run in cells.chunk_by(|a, b| a == b) {
-                if run[0] {
-                    write!(
-                        out,
-                        "\x1b[{};{}H\x1b[{}X",
-                        usize::from(old.row) + dy,
-                        usize::from(old.col) + x,
-                        run.len()
-                    )
-                    .unwrap();
-                }
-                x += run.len();
-            }
-        }
+        old.clear_uncovered(None, cols, rows, self.screen.as_ref(), out);
     }
 
     pub fn draw(
@@ -299,7 +332,11 @@ impl<'a> Pet<'a> {
             .life
             .update(tick, travel, rise, size.width, size.height)
         {
+            let start = out.len();
             write!(out, "\x1b[49m\x1b[{r};{c}H\x1b[X").unwrap();
+            if let Some(screen) = &mut self.screen {
+                screen.consume(&out[start..]);
+            }
             self.dirty = true;
         }
         let frame = self.life.frame();
@@ -311,7 +348,7 @@ impl<'a> Pet<'a> {
             .and_then(|speech| speech.place(col, row, (size.width, size.height), cols, rows));
         if self.bubble != bubble {
             if let Some(old) = self.bubble.take() {
-                old.erase(cols, rows, out);
+                old.erase(cols, rows, self.screen.as_ref(), out);
             }
             self.dirty = true;
         }
@@ -359,34 +396,7 @@ impl<'a> Pet<'a> {
         }
         self.dirty = false;
         if let Some(old) = &self.previous {
-            let mut stale = std::collections::BTreeSet::new();
-            for (i, &color) in old.pixels.iter().enumerate() {
-                if color == 256 {
-                    continue;
-                }
-                let (x, y) = (i % old.w, i / old.w);
-                let c = old.col + (x / usize::from(old.cell_w)) as u16;
-                let r = old.row + (y / usize::from(old.cell_h)) as u16;
-                if c > cols || r > rows {
-                    continue;
-                }
-                if (old.cell_w, old.cell_h) == (cell_w, cell_h) && c >= col && r >= row {
-                    let nx = usize::from(c - col) * usize::from(cell_w) + x % usize::from(cell_w);
-                    let ny = usize::from(r - row) * usize::from(cell_h) + y % usize::from(cell_h);
-                    if nx < w && ny < h && image.pixels[ny * w + nx] != 256 {
-                        continue;
-                    }
-                }
-                stale.insert((r, c));
-            }
-            // ECH on terminals that erase graphics restores only the default
-            // background, not underlying content. Redraw surviving pixels below.
-            if !stale.is_empty() {
-                out.extend_from_slice(b"\x1b[49m");
-                for (r, c) in stale {
-                    write!(out, "\x1b[{r};{c}H\x1b[X").unwrap();
-                }
-            }
+            old.clear_uncovered(Some(&image), cols, rows, self.screen.as_ref(), out);
         }
         write!(out, "\x1b[{row};{col}H\x1bP0;1q\"1;1;{w};{h}").unwrap();
         for (c, _) in palette.iter().enumerate().filter(|(_, used)| **used) {
@@ -466,7 +476,8 @@ fn sixel_redraw_contract() {
     assert_ne!(out, first);
     out.clear();
     pet.draw(128, 80, 24, 10, 20, &mut out).unwrap();
-    let erased = out.windows(3).filter(|s| *s == b"\x1b[X").count();
+    let before_sprite = out.split(|&byte| byte == b'P').next().unwrap();
+    let erased = before_sprite.iter().filter(|&&byte| byte == b'X').count();
     assert!((1..=16 * 9).contains(&erased));
 }
 
@@ -474,6 +485,81 @@ fn sixel_redraw_contract() {
 mod tests {
     use super::*;
     use std::time::Instant;
+
+    #[test]
+    fn moving_and_hiding_the_pet_and_bubble_restores_shell_text() {
+        let catalog = crate::dialogue::Catalog::load(None).unwrap();
+        let mut pet = Pet::new(&catalog, [Feature::Speech, Feature::Roam].into());
+        let backing = crate::screen::Screen::new(24, 80, (1, 1)).unwrap();
+        pet.screen = Some(backing);
+        let mut visible = vt100::Parser::new(24.try_into().unwrap(), 80.try_into().unwrap(), 0);
+        let mut shell = Vec::new();
+        for row in 1..=24 {
+            use std::io::Write;
+            write!(shell, "\x1b[{row};1H\x1b[32m{}", "x鲸".repeat(26)).unwrap();
+        }
+        visible.process(&shell);
+        pet.screen.as_mut().unwrap().feed(&shell);
+        let expected = visible.screen().clone();
+        pet.notice_command(b'+', catalog.commands["ls"]);
+        let mut bytes = Vec::new();
+        for x in [63, 60, 55, 50] {
+            pet.life.x = x;
+            pet.draw(0, 80, 24, 10, 20, &mut bytes).unwrap();
+            visible.process(&bytes);
+            bytes.clear();
+        }
+        assert!(pet.bubble.is_some());
+        pet.hide(80, 24, &mut bytes);
+        visible.process(&bytes);
+        for row in 0..24 {
+            for col in 0..80 {
+                assert_eq!(
+                    visible.screen().cell(row, col),
+                    expected.cell(row, col),
+                    "({col},{row})"
+                );
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "release-mode timing comparison; run with --ignored --nocapture"]
+    fn measure_swimming_over_text() {
+        let catalog = crate::dialogue::Catalog::default();
+        let mut shell = String::new();
+        for row in 1..=40 {
+            write!(shell, "\x1b[{row};1H\x1b[36m{}", "鲸abc".repeat(23)).unwrap();
+        }
+        let mut samples = [Vec::new(), Vec::new()];
+        for first in [false, true, false, true, false] {
+            for restore in [first, !first] {
+                let mut pet = Pet::new(&catalog, [Feature::Roam].into());
+                pet.life.choice = 0;
+                if restore {
+                    let mut screen = crate::screen::Screen::new(40, 120, (1, 1)).unwrap();
+                    screen.feed(shell.as_bytes());
+                    pet.screen = Some(screen);
+                }
+                let mut out = Vec::new();
+                pet.draw(0, 120, 40, 10, 20, &mut out).unwrap();
+                let start = Instant::now();
+                for step in 0..400_u16 {
+                    pet.life.x = (step % 180).abs_diff(90);
+                    pet.life.mood = Mood::Swim;
+                    pet.life.age = step % animation::SWIM.duration;
+                    out.clear();
+                    pet.draw(0, 120, 40, 10, 20, &mut out).unwrap();
+                    std::hint::black_box(&out);
+                }
+                samples[usize::from(restore)].push(start.elapsed() / 400);
+            }
+        }
+        for (restore, mut times) in [false, true].into_iter().zip(samples) {
+            times.sort_unstable();
+            eprintln!("swim render, restore={restore}: {:?}/frame", times[2]);
+        }
+    }
 
     #[test]
     fn speech_and_mouse_work_together_at_a_fixed_position() {
@@ -553,7 +639,7 @@ mod tests {
         pet.speech.as_mut().unwrap().held_speech.as_mut().unwrap().1 = Instant::now();
         pet.draw(0, 80, 24, 10, 20, &mut out).unwrap();
         let mut erase = Vec::new();
-        first.erase(80, 24, &mut erase);
+        first.erase(80, 24, None, &mut erase);
         assert!(out.starts_with(&erase));
         assert!(pet.bubble.is_none());
         pet.notice_command(b'r', pet.catalog.editing("cargo test").unwrap());

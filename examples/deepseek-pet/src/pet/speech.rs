@@ -110,8 +110,13 @@ impl<'a> Bubble<'a> {
         })
     }
 
-    pub(super) fn erase(self, cols: u16, rows: u16, out: &mut Vec<u8>) {
-        use std::io::Write;
+    pub(super) fn erase(
+        self,
+        cols: u16,
+        rows: u16,
+        screen: Option<&crate::screen::Screen>,
+        out: &mut Vec<u8>,
+    ) {
         let viewport = Area::from(Size::from((cols, rows)));
         let Some(visible) = self.area.clamp_to(&viewport) else {
             return;
@@ -120,7 +125,7 @@ impl<'a> Bubble<'a> {
         let width = visible.width();
         out.extend_from_slice(b"\x1b[49m");
         for y in visible.y()..visible.y() + visible.height() {
-            write!(out, "\x1b[{};{col}H\x1b[{width}X", y + 1).unwrap();
+            crate::screen::clear_span(screen, col, y + 1, width, out);
         }
     }
 
@@ -173,7 +178,7 @@ mod tests {
             assert!(drawing.contains(tail));
             assert_eq!(drawing.matches('─').count(), 11); // two six-cell edges, one pointer
             let mut erase = Vec::new();
-            bubble.erase(15, top + 1, &mut erase);
+            bubble.erase(15, top + 1, None, &mut erase);
             assert_eq!(
                 erase,
                 format!("\x1b[49m\x1b[{top};12H\x1b[4X\x1b[{};12H\x1b[4X", top + 1).as_bytes()

@@ -17,6 +17,7 @@ fastrand = "2"
 libc = "0.2"
 png = "0.18"
 tempfile = "3"
+vt100 = "0.18.1"
 
 [build-dependencies]
 yaml_serde = "0.10"

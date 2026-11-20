@@ -17,6 +17,8 @@ mod mouse;
 #[cfg(unix)]
 mod pet;
 #[cfg(unix)]
+mod screen;
+#[cfg(unix)]
 mod session;
 
 mod features;
@@ -40,6 +42,9 @@ pub struct Options {
     /// Enable only the listed behaviors (comma-separated). An empty list keeps the idle pet.
     #[arg(long, value_enum, value_delimiter = ',', num_args = 0..=1)]
     pub features: Option<Vec<Feature>>,
+    /// Skip caching and restoring shell text covered by the pet
+    #[arg(long)]
+    pub no_restore: bool,
     /// Disable pet mouse capture
     #[arg(long = "quite", action = clap::ArgAction::SetFalse)]
     pub capture_mouse: bool,
@@ -55,6 +60,7 @@ impl Default for Options {
     fn default() -> Self {
         Self {
             features: None,
+            no_restore: false,
             capture_mouse: true,
             alt_screen: false,
             commands: None,
