@@ -150,11 +150,34 @@ impl Drop for Child {
 
 /// Requires exclusive use of stdin, stdout and the spawned child's wait status.
 pub fn run(mut pet: crate::pet::Pet, options: crate::Options) -> io::Result<()> {
-    let shell = std::env::var_os("SHELL")
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "/bin/sh".into());
+    let shell = std::env::var_os("SHELL").unwrap_or_else(|| "/bin/sh".into());
+    if shell.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "SHELL 为空，请指定已安装的 shell 路径，或直接在 fish 中运行",
+        ));
+    }
+    let hooks = crate::commands::Hooks::prepare(shell.as_ref())?;
+    let environment = hooks
+        .as_ref()
+        .filter(|(hooks, _)| hooks.fish_init.is_none())
+        .map(|(hooks, _)| {
+            hooks
+                .environment
+                .iter()
+                .map(|v| v.as_ptr())
+                .chain(std::iter::once(std::ptr::null()))
+                .collect::<Vec<_>>()
+        });
     let shell = CString::new(shell.as_bytes())?;
-    let args = [shell.as_ptr(), b"-i\0".as_ptr().cast(), std::ptr::null()];
+    let mut args = vec![shell.as_ptr(), b"-i\0".as_ptr().cast()];
+    if let Some(init) = hooks
+        .as_ref()
+        .and_then(|(hooks, _)| hooks.fish_init.as_ref())
+    {
+        args.extend([b"-C\0".as_ptr().cast(), init.as_ptr()]);
+    }
+    args.push(std::ptr::null());
     let mut pixels = CellPixels::resolve(None).map_err(|e| {
         io::Error::new(
             e.kind(),
@@ -175,11 +198,22 @@ pub fn run(mut pet: crate::pet::Pet, options: crate::Options) -> io::Result<()> 
         check(unsafe { libc::forkpty(&mut fd, std::ptr::null_mut(), &mut original, &mut s) })?;
     if pid == 0 {
         unsafe {
-            libc::execv(shell.as_ptr(), args.as_ptr());
+            if let Some((_, sender)) = &hooks {
+                if libc::fcntl(sender.as_raw_fd(), libc::F_SETFD, 0) < 0 {
+                    libc::_exit(127);
+                }
+            }
+            if let Some(env) = &environment {
+                libc::execve(shell.as_ptr(), args.as_ptr(), env.as_ptr());
+            } else {
+                libc::execv(shell.as_ptr(), args.as_ptr());
+            }
             libc::_exit(127);
         }
     }
     let _child = Child(pid);
+    let mut preview = crate::commands::FishPreview::default();
+    let hooks = hooks.map(|(hooks, _)| hooks);
     let mut master = unsafe { File::from_raw_fd(fd) };
     let flags = check(unsafe { libc::fcntl(fd, libc::F_GETFL) })?;
     check(unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) })?;
@@ -229,6 +263,23 @@ pub fn run(mut pet: crate::pet::Pet, options: crate::Options) -> io::Result<()> 
             pet.forget_food();
             food_deadline = None;
         }
+        if let Some(hooks) = &hooks {
+            let mut event = [0u8; 3];
+            for _ in 0..64 {
+                match hooks.events.recv(&mut event) {
+                    Ok(2) if hooks.fish_init.is_some() && &event[..2] == b"p0" => preview.prompt(),
+                    Ok(2) => {
+                        if hooks.fish_init.is_some() && event[0] == b'r' && preview.end() {
+                            pet.notice_command(b'e', b'0');
+                        }
+                        pet.notice_command(event[0], event[1]);
+                    }
+                    Ok(_) => continue,
+                    Err(e) if retry(&e) => break,
+                    Err(e) => return Err(e),
+                }
+            }
+        }
         let tick = now >= next;
         if tick {
             let new = size(1)?;
@@ -267,7 +318,7 @@ pub fn run(mut pet: crate::pet::Pet, options: crate::Options) -> io::Result<()> 
             let end = boundary.ready();
             update.clear();
             if start && !batch.is_empty() {
-                pet.hide(&mut update);
+                pet.hide(s.ws_col, s.ws_row, &mut update);
             }
             sprite.clear();
             terminal.child_alternate = boundary.alternate;
@@ -279,7 +330,7 @@ pub fn run(mut pet: crate::pet::Pet, options: crate::Options) -> io::Result<()> 
                     pixels.width,
                     pixels.height,
                     &mut sprite,
-                );
+                )?;
             }
             render_batch(&mut out, &update, &batch, &sprite, start && end)?;
             batch.clear();
@@ -328,7 +379,11 @@ pub fn run(mut pet: crate::pet::Pet, options: crate::Options) -> io::Result<()> 
         if fds[1].revents & libc::POLLOUT != 0 {
             match master.write(pending.as_slices().0) {
                 Ok(n) => {
-                    pending.drain(..n);
+                    for byte in pending.drain(..n) {
+                        if let Some(kind) = preview.input(byte) {
+                            pet.notice_command(b'e', kind);
+                        }
+                    }
                 }
                 Err(e) if retry(&e) => {}
                 Err(e) => return Err(e),
@@ -374,7 +429,7 @@ pub fn run(mut pet: crate::pet::Pet, options: crate::Options) -> io::Result<()> 
     }
     update.clear();
     if boundary.ready() {
-        pet.hide(&mut update);
+        pet.hide(s.ws_col, s.ws_row, &mut update);
     }
     boundary.feed(&batch);
     terminal.child_alternate = boundary.alternate;

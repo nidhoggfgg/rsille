@@ -96,9 +96,9 @@ pub fn render_background(chunk: &mut Chunk, style: Style) {
     }
 }
 
-// Box-drawing characters are ambiguous in some width policies. Fall back to
-// one-column ASCII so borders retain their geometry on those terminals.
-fn border_chars(chunk: &Chunk<'_>, border: BorderStyle) -> BorderChars {
+/// Selects the same single-column glyphs as `render_border` for custom border segments.
+/// Falls back to ASCII when the chunk measures box-drawing glyphs as wide.
+pub fn border_chars(chunk: &Chunk<'_>, border: BorderStyle) -> BorderChars {
     let chars = border.chars();
     let mut bytes = [0; 4];
     if chunk

@@ -12,3 +12,4 @@ rsille = { path = "../..", default-features = false }
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 png = "0.18"
+tempfile = "3"

@@ -1,4 +1,18 @@
-use std::{fmt::Write, io::Cursor, sync::OnceLock};
+use rsille::render::{
+    area::{Area, Size},
+    chunk::Chunk,
+    text::TextMetrics,
+    Builder, Draw, DrawErr,
+};
+use rsille::tui::{
+    layout::border_renderer::{border_chars, render_border},
+    style::{BorderStyle, Color, Style},
+};
+use std::{
+    fmt::Write,
+    io::{self, Cursor},
+    sync::OnceLock,
+};
 
 const TILE: usize = 320;
 const ATLAS_WIDTH: usize = 4 * TILE;
@@ -401,7 +415,105 @@ struct FrameKey {
     effect: Option<(Mood, u16)>,
 }
 
+#[derive(Clone, Copy, PartialEq)]
+struct Bubble {
+    text: &'static str,
+    area: Area,
+    above: bool,
+    tail: u16,
+}
+
+impl Bubble {
+    fn place(
+        text: &'static str,
+        col: u16,
+        row: u16,
+        size: (u16, u16),
+        cols: u16,
+        rows: u16,
+    ) -> Option<Self> {
+        let width = u16::try_from(TextMetrics::default().width(text))
+            .ok()?
+            .checked_add(4)?;
+        if width >= cols {
+            return None;
+        }
+        let room_above = row - 1;
+        let room_below = rows - (room_above + size.1);
+        let height = if room_above.max(room_below) >= 3 {
+            3
+        } else {
+            1
+        };
+        let above = room_above >= height;
+        let row = if above {
+            row - height
+        } else if room_below >= height {
+            row + size.1
+        } else {
+            return None;
+        };
+        let center = col + size.0 / 2;
+        let col = center.saturating_sub(width / 2).clamp(1, cols - width);
+        Some(Self {
+            text,
+            area: Area::new((col - 1, row - 1).into(), (width, height).into()),
+            above,
+            tail: (center - col).clamp(1, width - 2),
+        })
+    }
+
+    fn erase(self, cols: u16, rows: u16, out: &mut Vec<u8>) {
+        use std::io::Write;
+        let viewport = Area::from(Size::from((cols, rows)));
+        let Some(visible) = self.area.clamp_to(&viewport) else {
+            return;
+        };
+        let col = visible.x() + 1;
+        let width = visible.width();
+        out.extend_from_slice(b"\x1b[49m");
+        for y in visible.y()..visible.y() + visible.height() {
+            write!(out, "\x1b[{};{col}H\x1b[{width}X", y + 1).unwrap();
+        }
+    }
+
+    fn render(self, out: &mut Vec<u8>) -> io::Result<()> {
+        Builder::new()
+            .size(self.area.size().into())
+            .pos(self.area.pos().into())
+            .clear(false)
+            .build_render(self, out)
+            .render()
+    }
+}
+
+impl Draw for Bubble {
+    fn draw(&mut self, mut chunk: Chunk<'_>) -> Result<Size, DrawErr> {
+        let size = chunk.area().size();
+        let border = BorderStyle::Rounded;
+        let outline = Style::default().fg(Color::Indexed(116)).to_render_style();
+        let lettering = Style::default().fg(Color::Indexed(195)).to_render_style();
+        if size.height == 1 {
+            let side = border_chars(&chunk, border).vertical;
+            chunk.set_char(0, 0, side, outline)?;
+            chunk.set_char(size.width - 1, 0, side, outline)?;
+        } else {
+            render_border(&mut chunk, border, outline);
+            let (row, tip) = if self.above {
+                (size.height - 1, '▾')
+            } else {
+                (0, '▴')
+            };
+            chunk.set_char(self.tail, row, tip, outline)?;
+        }
+        chunk.set_string(2, size.height / 2, self.text, lettering)?;
+        Ok(size)
+    }
+}
+
 pub struct Pet {
+    speech: Option<(&'static str, std::time::Instant)>,
+    bubble: Option<Bubble>,
     life: Life,
     previous: Option<Image>,
     last_frame: Option<FrameKey>,
@@ -418,6 +530,8 @@ impl Default for Pet {
                 curiosity: choice,
                 ..Life::default()
             },
+            speech: None,
+            bubble: None,
             previous: None,
             last_frame: None,
             dirty: false,
@@ -426,6 +540,33 @@ impl Default for Pet {
 }
 
 impl Pet {
+    pub fn notice_command(&mut self, phase: u8, command: u8) {
+        if (phase, command) == (b'e', b'0') {
+            self.speech = None;
+            return;
+        }
+        let (editing, running, done) = match command {
+            b't' => ("要跑测试啦？", "我陪你等测试", "测试通过啦！"),
+            b'b' => ("准备开工？", "我来帮你盯着", "顺利完成！"),
+            b'g' => ("看看改了什么？", "一起看看", "看完啦！"),
+            b'd' => ("要游去哪儿？", "跟上你啦", "到啦！"),
+            _ => return,
+        };
+        let (text, mood) = match phase {
+            b'e' => (editing, Mood::Watch),
+            b'r' => (running, Mood::Swim),
+            b'+' => (done, Mood::Wave),
+            b'-' => ("咦，出错了？", Mood::Startled),
+            b'i' => ("好，歇一会儿", Mood::Idle),
+            _ => return,
+        };
+        self.life.react(mood);
+        self.speech = Some((
+            text,
+            std::time::Instant::now() + std::time::Duration::from_secs(3),
+        ));
+    }
+
     pub fn notice_touch(&mut self, col: u16, row: u16) {
         if self.life.mood != Mood::Wave
             && self
@@ -487,8 +628,11 @@ impl Pet {
     }
 
     /// Remove the visible sprite while its original coordinates are still valid.
-    pub fn hide(&mut self, out: &mut Vec<u8>) {
+    pub fn hide(&mut self, cols: u16, rows: u16, out: &mut Vec<u8>) {
         use std::io::Write;
+        if let Some(old) = self.bubble.take() {
+            old.erase(cols, rows, out);
+        }
         let Some(old) = self.previous.take() else {
             return;
         };
@@ -529,12 +673,12 @@ impl Pet {
         cell_w: u16,
         cell_h: u16,
         out: &mut Vec<u8>,
-    ) {
+    ) -> io::Result<()> {
         use rsille::render::raster_output::CellPixels;
         use std::io::Write;
         // A PTY can report rows and columns without pixel dimensions.
         if cell_w == 0 || cell_h == 0 {
-            return;
+            return Ok(());
         }
         let width = usize::from(cols.saturating_sub(1)) * usize::from(cell_w);
         let height = usize::from(rows) * usize::from(cell_h);
@@ -545,7 +689,7 @@ impl Pet {
             .min(height / 6 * 6);
         if h == 0 {
             self.invalidate();
-            return;
+            return Ok(());
         }
         let w = h;
         let metrics = CellPixels {
@@ -567,6 +711,18 @@ impl Pet {
         let (action, pose, lift) = self.life.pose();
         let col = 1 + self.life.x;
         let row = 1 + (rise - self.life.altitude).saturating_sub(lift);
+        self.speech = self
+            .speech
+            .filter(|&(_, until)| std::time::Instant::now() < until);
+        let bubble = self.speech.and_then(|(text, _)| {
+            Bubble::place(text, col, row, (size.width, size.height), cols, rows)
+        });
+        if self.bubble != bubble {
+            if let Some(old) = self.bubble.take() {
+                old.erase(cols, rows, out);
+            }
+            self.dirty = true;
+        }
         let leftward = self.life.leftward;
         let key = FrameKey {
             origin: (col, row),
@@ -583,7 +739,7 @@ impl Pet {
             },
         };
         if !self.dirty && self.last_frame.as_ref() == Some(&key) {
-            return;
+            return Ok(());
         }
         self.last_frame = Some(key);
         let mut pixels = Vec::with_capacity(w * h);
@@ -620,7 +776,7 @@ impl Pet {
             pixels,
         };
         if !self.dirty && self.previous.as_ref() == Some(&image) {
-            return;
+            return Ok(());
         }
         self.dirty = false;
         if let Some(old) = &self.previous {
@@ -694,6 +850,11 @@ impl Pet {
         }
         out.extend_from_slice(b"\x1b\\");
         self.previous = Some(image);
+        if let Some(b) = bubble {
+            b.render(out)?;
+        }
+        self.bubble = bubble;
+        Ok(())
     }
 }
 
@@ -701,7 +862,7 @@ impl Pet {
 fn unknown_cell_size_emits_nothing() {
     let mut out = Vec::new();
     for (w, h) in [(0, 0), (0, 20), (10, 0)] {
-        Pet::default().draw(0, 80, 24, w, h, &mut out);
+        Pet::default().draw(0, 80, 24, w, h, &mut out).unwrap();
         assert!(out.is_empty());
     }
 }
@@ -711,21 +872,21 @@ fn sixel_redraw_contract() {
     let mut pet = Pet::default();
     pet.life.choice = 0;
     let mut out = Vec::new();
-    pet.draw(0, 80, 24, 10, 20, &mut out);
+    pet.draw(0, 80, 24, 10, 20, &mut out).unwrap();
     let first = std::mem::take(&mut out);
     assert!(first.starts_with(b"\x1b[16;64H\x1bP0;1q\"1;1;160;160"));
     assert!(first.ends_with(b"\x1b\\"));
-    pet.draw(1, 80, 24, 10, 20, &mut out);
+    pet.draw(1, 80, 24, 10, 20, &mut out).unwrap();
     assert!(out.is_empty());
     pet.invalidate();
-    pet.draw(1, 80, 24, 10, 20, &mut out);
+    pet.draw(1, 80, 24, 10, 20, &mut out).unwrap();
     assert_eq!(out, first);
     out.clear();
-    pet.draw(32, 80, 24, 10, 20, &mut out);
+    pet.draw(32, 80, 24, 10, 20, &mut out).unwrap();
     assert!(!out.is_empty());
     assert_ne!(out, first);
     out.clear();
-    pet.draw(128, 80, 24, 10, 20, &mut out);
+    pet.draw(128, 80, 24, 10, 20, &mut out).unwrap();
     let erased = out.windows(3).filter(|s| *s == b"\x1b[X").count();
     assert!((1..=16 * 9).contains(&erased));
 }
@@ -733,6 +894,77 @@ fn sixel_redraw_contract() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bubble_points_at_the_whale_and_clears_only_visible_rows() {
+        for (row, top, tail) in [(1, 3, '▴'), (7, 4, '▾')] {
+            let bubble = Bubble::place("你好", 17, row, (3, 2), 20, 8).unwrap();
+            assert_eq!(bubble.area, Area::new((11, top - 1).into(), (8, 3).into()));
+            let mut out = Vec::new();
+            bubble.render(&mut out).unwrap();
+            let drawing = String::from_utf8(out).unwrap();
+            assert!(drawing.contains(tail));
+            assert_eq!(drawing.matches('─').count(), 11); // two six-cell edges, one pointer
+            let mut erase = Vec::new();
+            bubble.erase(15, top + 1, &mut erase);
+            assert_eq!(
+                erase,
+                format!("\x1b[49m\x1b[{top};12H\x1b[4X\x1b[{};12H\x1b[4X", top + 1).as_bytes()
+            );
+        }
+        assert_eq!(
+            Bubble::place("你好", 1, 2, (3, 2), 20, 4)
+                .unwrap()
+                .area
+                .height(),
+            1
+        );
+    }
+
+    #[test]
+    fn bubble_uses_framework_text_metrics_and_renders_only_its_rectangle() {
+        // A CJK glyph, an ASCII letter with a combining accent, and an emoji cluster.
+        let message = "鲸e\u{301}👩‍💻";
+        let bubble = Bubble::place(message, 5, 7, (3, 2), 20, 10).unwrap();
+        assert_eq!(bubble.area.width(), 9);
+        let mut bytes = Vec::new();
+        bubble.render(&mut bytes).unwrap();
+        let output = String::from_utf8(bytes).unwrap();
+        assert!(output.contains(message));
+        assert!(!output.contains("\x1b[2J") && !output.contains('\n'));
+    }
+
+    #[test]
+    fn command_bubble_tracks_edits_results_and_available_space() {
+        let mut pet = Pet::default();
+        let mut out = Vec::new();
+        pet.notice_command(b'e', b't');
+        pet.draw(0, 80, 24, 10, 20, &mut out).unwrap();
+        let first = pet.bubble.unwrap();
+        assert_eq!(first.text, "要跑测试啦？");
+        assert!(first.area.real_size().width < 80);
+        assert_eq!(
+            first.area.real_size().height + 1,
+            pet.previous.as_ref().unwrap().row
+        );
+        pet.notice_command(b'e', b'0');
+        out.clear();
+        pet.draw(0, 80, 24, 10, 20, &mut out).unwrap();
+        let mut erase = Vec::new();
+        first.erase(80, 24, &mut erase);
+        assert!(out.starts_with(&erase));
+        assert!(pet.bubble.is_none());
+        pet.notice_command(b'r', b't');
+        pet.notice_command(b'+', b't');
+        assert_eq!(pet.life.mood, Mood::Wave);
+        pet.draw(1, 5, 2, 10, 20, &mut out).unwrap();
+        assert!(pet.bubble.is_none());
+        pet.draw(1, 80, 24, 10, 20, &mut out).unwrap();
+        assert_eq!(pet.bubble.unwrap().text, "测试通过啦！");
+        pet.speech.as_mut().unwrap().1 = std::time::Instant::now();
+        pet.draw(2, 80, 24, 10, 20, &mut out).unwrap();
+        assert!(pet.bubble.is_none());
+    }
 
     #[test]
     fn idle_gestures_leave_the_whale_in_place() {
@@ -766,7 +998,7 @@ mod tests {
     fn raster_resizes_with_the_terminal_and_fits_the_last_sixel_band() {
         let mut pet = Pet::default();
         for (cols, rows, side) in [(100, 40, 192), (80, 24, 160), (5, 24, 40), (80, 1, 18)] {
-            pet.draw(0, cols, rows, 10, 20, &mut Vec::new());
+            pet.draw(0, cols, rows, 10, 20, &mut Vec::new()).unwrap();
             let image = pet.previous.as_ref().unwrap();
             assert_eq!(image.w, side);
             assert!(usize::from(image.col - 1) * 10 + side <= usize::from(cols - 1) * 10);
@@ -781,7 +1013,7 @@ mod tests {
     fn touch_requires_a_painted_cell_and_finishes_despite_other_events() {
         let mut pet = Pet::default();
         let mut out = Vec::new();
-        pet.draw(0, 80, 24, 10, 20, &mut out);
+        pet.draw(0, 80, 24, 10, 20, &mut out).unwrap();
         let image = pet.previous.as_ref().unwrap();
         let (col, row) = (image.col, image.row);
         pet.notice_touch(col, row);
