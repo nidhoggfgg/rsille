@@ -10,6 +10,7 @@ use std::{
 #[serde(deny_unknown_fields)]
 struct Pack {
     version: u32,
+    command_not_found: Option<Vec<String>>,
     failed: Option<Vec<String>>,
     interrupted: Option<Vec<String>>,
     #[serde(default)]
@@ -45,6 +46,7 @@ pub struct Catalog {
     pub commands: BTreeMap<String, usize>,
     pub families: BTreeMap<String, usize>,
     rules: Vec<Rule>,
+    command_not_found: Vec<String>,
     failed: Vec<String>,
     interrupted: Vec<String>,
 }
@@ -74,6 +76,11 @@ impl Catalog {
             return Err(format!("不支持的规则版本 {}", pack.version));
         }
         for (name, lines, target) in [
+            (
+                "command_not_found",
+                pack.command_not_found,
+                &mut self.command_not_found,
+            ),
             ("failed", pack.failed, &mut self.failed),
             ("interrupted", pack.interrupted, &mut self.interrupted),
         ] {
@@ -182,14 +189,15 @@ pub struct Dialogue {
 
 impl Dialogue {
     pub fn choose<'a>(&mut self, catalog: &'a Catalog, phase: u8, id: usize) -> Option<&'a str> {
-        let rule = catalog.rules.get(id.checked_sub(1)?)?;
+        let rule = id.checked_sub(1).and_then(|i| catalog.rules.get(i));
         let (key, lines) = match (rule, phase) {
-            (Rule::Family(f), b'e') => (id, &f.editing),
-            (Rule::Group(g), b'e') => (id, &g.editing),
-            (Rule::Group(g), b'r') => (id, &g.running),
-            (Rule::Group(g), b'+') => (id, &g.done),
-            (Rule::Group(_), b'-') => (0, &catalog.failed),
-            (Rule::Group(_), b'i') => (0, &catalog.interrupted),
+            (Some(Rule::Family(f)), b'e') => (id, &f.editing),
+            (Some(Rule::Group(g)), b'e') => (id, &g.editing),
+            (Some(Rule::Group(g)), b'r') => (id, &g.running),
+            (Some(Rule::Group(g)), b'+') => (id, &g.done),
+            (Some(Rule::Group(_)), b'-') => (0, &catalog.failed),
+            (Some(Rule::Group(_)), b'i') => (0, &catalog.interrupted),
+            (None, b'n') if id == 0 => (0, &catalog.command_not_found),
             _ => return None,
         };
         let index = match self.last.get(&(phase, key)) {
@@ -263,6 +271,9 @@ groups:
                 previous = Some(line);
             }
         }
+        let missing = dialogue.choose(&catalog, b'n', 0).unwrap();
+        assert!(catalog.command_not_found.iter().any(|line| line == missing));
+        assert_ne!(dialogue.choose(&catalog, b'n', 0), Some(missing));
         assert!(dialogue.choose(&catalog, b'+', 0).is_none());
     }
 

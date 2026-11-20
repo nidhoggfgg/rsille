@@ -173,6 +173,7 @@ enum Mood {
     Bubbles,
     Wave,
     Startled,
+    Puzzled,
     Snack,
     Nap,
     #[default]
@@ -241,7 +242,7 @@ impl Life {
             }
             self.pursuit = self.pursuit.saturating_sub(1);
             let meal = self.food.filter(|_| self.full == 0 && self.hunger >= 30);
-            let reacting = matches!(self.mood, Mood::Wave | Mood::Startled);
+            let reacting = matches!(self.mood, Mood::Wave | Mood::Startled | Mood::Puzzled);
             if let Some((c, r)) = meal.or(self.mouse).filter(|_| !reacting) {
                 let x = (c - 1).saturating_sub(width / 2).min(travel);
                 let altitude = rise - (r - 1).saturating_sub(height / 2).min(rise);
@@ -285,7 +286,7 @@ impl Life {
             let duration = match self.mood {
                 Mood::Swim => 48 + (self.choice % 49) as u16,
                 Mood::Nap => 48,
-                Mood::Watch | Mood::Hop => 16,
+                Mood::Watch | Mood::Hop | Mood::Puzzled => 16,
                 Mood::Wave | Mood::Bubbles => 20,
                 Mood::Startled => 12,
                 Mood::Swoop => 40,
@@ -326,6 +327,7 @@ impl Life {
             Mood::Swim => (2, t / 4 % 4, (t / 6 % 2) as u16),
             Mood::Bubbles => (0, usize::from(t < 3) * 2, 0),
             Mood::Wave => (1, [0, 1, 2, 3, 2, 3, 2, 1, 0, 0][t / 2], 0),
+            Mood::Puzzled => (0, 0, 0),
             Mood::Startled => (3, [1, 2, 2, 2, 3, 0][t / 2], [0, 3, 5, 4, 2, 0][t / 2]),
             Mood::Swoop => {
                 let phase = t as f32 / 39.0;
@@ -374,6 +376,15 @@ impl Life {
                 if t < 9 && (74..=76).contains(&x) && ((6..=10).contains(&y) || y == 13) =>
             {
                 Some(0b111_110_01)
+            }
+            Mood::Puzzled if (70..80).contains(&x) && (5..12).contains(&y) => {
+                let mark = [
+                    b" ### ", b"#   #", b"    #", b"   # ", b"  #  ", b"     ", b"  #  ",
+                ];
+                let col = (x - 70) / 2;
+                // The sprite mirrors when swimming left. Keep the glyph readable.
+                let col = if self.leftward { 4 - col } else { col };
+                (mark[y - 5][col] == b'#').then_some(0b100_111_11)
             }
             Mood::Bubbles => {
                 for delay in [0, 4, 8] {
@@ -566,6 +577,7 @@ impl<'a> Pet<'a> {
             b'r' => Mood::Swim,
             b'+' => Mood::Wave,
             b'-' => Mood::Startled,
+            b'n' => Mood::Puzzled,
             b'i' => Mood::Idle,
             _ => return,
         };
@@ -753,6 +765,7 @@ impl<'a> Pet<'a> {
             pose,
             leftward,
             effect: match self.life.mood {
+                Mood::Puzzled => Some((Mood::Puzzled, 0)),
                 Mood::Snack | Mood::Wave | Mood::Startled | Mood::Bubbles => {
                     Some((self.life.mood, self.life.age))
                 }
@@ -1082,6 +1095,33 @@ mod tests {
         }
         pet.life.update(20, 66, 17, 13, 7);
         assert_eq!(pet.life.mood, Mood::Idle);
+    }
+
+    #[test]
+    fn missing_command_shows_a_stationary_question_mark_with_its_reply() {
+        for leftward in [false, true] {
+            let mut pet = Pet::default();
+            pet.life.leftward = leftward;
+            pet.life.altitude = 4;
+            pet.draw(0, 80, 24, 10, 20, &mut Vec::new()).unwrap();
+            let origin = pet.last_frame.as_ref().unwrap().origin;
+            pet.notice_command(b'n', 0);
+            let reply = pet.latest_speech.unwrap().0;
+            for tick in 1..16 {
+                pet.draw(tick, 80, 24, 10, 20, &mut Vec::new()).unwrap();
+                assert_eq!(pet.last_frame.as_ref().unwrap().origin, origin);
+                assert_eq!(pet.bubble.unwrap().text, reply);
+                // The upper hook curves to the reader's right, above a separate dot.
+                let ink = |x: usize, y| {
+                    let x = if leftward { 79 - x } else { 70 + x };
+                    pet.life.effect_color(x, y).is_some()
+                };
+                assert!(ink(8, 7) && !ink(0, 7));
+                assert!(!ink(4, 10) && ink(4, 11));
+            }
+            pet.draw(16, 80, 24, 10, 20, &mut Vec::new()).unwrap();
+            assert_eq!(pet.life.mood, Mood::Idle);
+        }
     }
 
     #[test]

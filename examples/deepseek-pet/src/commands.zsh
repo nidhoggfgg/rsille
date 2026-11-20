@@ -10,6 +10,8 @@ _rsille_pet_classify() {
   # Attribute the exit status only to a simple foreground command.
   [[ $line == *[\;\|\&\<\>\(\)\`]* || $line == *$'\n'* ]] && return 0
   local -a words=( ${(z)line} )
+  # Zero tracks an unlisted simple command until its exit status is known.
+  [[ $2 != edit ]] && reply=0
   case "${(j: :)words}" in
 @{COMMAND_CASES}@
   esac
@@ -36,7 +38,7 @@ _rsille_pet_run() {
   local reply
   _rsille_pet_classify "$3"
   _rsille_pet_active=$reply
-  if [[ -n $reply ]]; then
+  if [[ -n $reply && $reply != 0 ]]; then
     _rsille_pet_send "r$reply"
   elif [[ -n $_rsille_pet_preview ]]; then
     _rsille_pet_send e0
@@ -47,7 +49,9 @@ _rsille_pet_run() {
 _rsille_pet_prompt() {
   local result=$?
   emulate -L zsh
-  if [[ -n $_rsille_pet_active ]]; then
+  if [[ -n $_rsille_pet_active && $result == 127 ]]; then
+    _rsille_pet_send n0
+  elif [[ -n $_rsille_pet_active && $_rsille_pet_active != 0 ]]; then
     local phase=+
     (( result == 0 )) || phase=-
     (( result == 130 )) && phase=i

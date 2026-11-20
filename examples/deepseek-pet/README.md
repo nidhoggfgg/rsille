@@ -12,6 +12,8 @@ cargo run --manifest-path examples/deepseek-pet/Cargo.toml
 
 试试 `ls -la`、`pwd`、`cd`、`rg`、`find`、`cat`、`mkdir`、`cp` 或 `mv`。小鲸鱼也认识常用的 Git 操作（如 `git diff`、`git commit`、`git pull`）、构建和测试命令（如 `cargo build`、`make`、`go test`、`pytest`），以及 `npm install` 等安装依赖的命令。每类命令在输入、运行、成功时各有三句候选台词，失败和中断也有各自的回应。每次随机选一句，并避开同一组上次说过的话。
 
+在 fish 或 zsh 中，如果 `l` 没有定义，输入它并回车，小鲸鱼会在原地停一停，头顶浮出一个问号，气泡里写着「咦，这条命令游哪儿去了？」之类的台词。它根据简单命令的退出码 127 触发这组台词，所以 shell 报错用什么语言都可以；程序自行返回 127 时也会触发。
+
 命令类别和执行结果通过本地通道传给宠物。管道、复合命令以及其他 shell 继续使用普通的打字反应。如果登录 shell 是 fish，直接使用上面的 Cargo 命令。要在 fish 中显式指定本次会话的 shell，可以运行：
 
 ```fish
@@ -46,7 +48,7 @@ cargo run --manifest-path examples/deepseek-pet/Cargo.toml -- --commands ./my-co
 - `commands` 列出共用一组台词的命令。匹配从命令开头逐词进行，最长的完整前缀优先。例如 `git status -s src` 用上面的短清单台词，`git status src` 仍用内置的仓库台词。参数按书写顺序匹配，等价写法可以逐项列出。
 - 匹配项用单个空格分词，每个词可含 ASCII 字母、数字和 `-_./+=:@`。用户文件里的同名匹配项覆盖内置项，同组的其他别名保留原回复。同一文件内，每个匹配项在 `groups` 和 `families` 中各只能出现一次。
 - `groups` 中每组填写 `editing`、`running`、`done` 三个台词列表。每个列表至少一句，有多句时会避开上次抽中的台词。
-- 可选的 `families` 用于刚输入工具名时的开场，每项填写单词工具名列表 `commands` 和台词列表 `editing`。顶层的 `failed` 和 `interrupted` 可以分别替换所有命令共用的失败和中断台词。
+- 可选的 `families` 用于刚输入工具名时的开场，每项填写单词工具名列表 `commands` 和台词列表 `editing`。顶层的 `command_not_found`、`failed` 和 `interrupted` 可以分别替换找不到命令、普通失败和中断的台词。
 
 ## 显示与交互
 

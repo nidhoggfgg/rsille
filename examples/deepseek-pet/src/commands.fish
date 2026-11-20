@@ -4,19 +4,26 @@ function __rsille_pet_send
 end
 
 function __rsille_pet_run --on-event fish_preexec
-    set -g __rsille_pet_kind 0
+    set -e __rsille_pet_kind
     if not string match -qr '[;&|()<>`\n]' -- "$argv[1]"
+        set -g __rsille_pet_kind 0
         set -l line (string replace -ar '[ \t]+' ' ' -- (string trim -- "$argv[1]"))
         switch "$line"
 @{COMMAND_CASES}@
         end
     end
-    __rsille_pet_send r$__rsille_pet_kind
+    if set -q __rsille_pet_kind
+        __rsille_pet_send r$__rsille_pet_kind
+    else
+        __rsille_pet_send r0
+    end
 end
 
 function __rsille_pet_done --on-event fish_postexec
     set -l result $status
-    if set -q __rsille_pet_kind; and test "$__rsille_pet_kind" != 0
+    if set -q __rsille_pet_kind; and test $result -eq 127
+        __rsille_pet_send n0
+    else if set -q __rsille_pet_kind; and test "$__rsille_pet_kind" != 0
         switch $result
             case 0
                 __rsille_pet_send +$__rsille_pet_kind
