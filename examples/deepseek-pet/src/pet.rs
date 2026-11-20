@@ -1,3 +1,4 @@
+use crate::animation::{self, Clip, SIDE};
 use rsille::render::{
     area::{Area, Size},
     chunk::Chunk,
@@ -10,44 +11,17 @@ use rsille::tui::{
 };
 use std::{
     fmt::Write,
-    io::{self, Cursor},
-    sync::OnceLock,
+    io,
     time::{Duration, Instant},
 };
 
-const TILE: usize = 320;
-const ATLAS_WIDTH: usize = 4 * TILE;
 const MAX_SIDE: usize = 192;
 const BUBBLE_READ_TIME: Duration = Duration::from_millis(1500);
 const BUBBLE_LIFETIME: Duration = Duration::from_secs(3);
 
-// The 4-by-6 sheet is decoded once. Rows within a tile retain the atlas stride.
-fn atlas_tile(action: usize, pose: usize) -> &'static [u8] {
-    static PIXELS: OnceLock<Vec<u8>> = OnceLock::new();
-    let pixels = PIXELS.get_or_init(|| {
-        let png = include_bytes!("../../ai-babies/assets/deepseek-actions-320x320.png");
-        let mut reader = png::Decoder::new(Cursor::new(png))
-            .read_info()
-            .expect("embedded DeepSeek atlas");
-        let mut rgba = vec![0; ATLAS_WIDTH * 6 * TILE * 4];
-        let info = reader
-            .next_frame(&mut rgba)
-            .expect("embedded DeepSeek pixels");
-        assert_eq!(
-            (info.width, info.height),
-            (ATLAS_WIDTH as u32, (6 * TILE) as u32)
-        );
-        assert_eq!(
-            (info.color_type, info.bit_depth),
-            (png::ColorType::Rgba, png::BitDepth::Eight)
-        );
-        rgba
-    });
-    &pixels[(action * TILE * ATLAS_WIDTH + pose * TILE) * 4..]
-}
-
 /// Return (column, row, SGR-colored text) runs for a cleared viewport.
 /// Transparent cells and the rightmost column are never painted.
+#[allow(dead_code)] // Text preview; the interactive session uses Sixel.
 pub fn frame(tick: u64, cols: u16, rows: u16) -> Vec<(u16, u16, String)> {
     let usable = usize::from(cols.saturating_sub(1));
     let rows = usize::from(rows);
@@ -55,53 +29,37 @@ pub fn frame(tick: u64, cols: u16, rows: u16) -> Vec<(u16, u16, String)> {
         .min(rows.saturating_sub(rows / 6))
         .min(usable.div_ceil(2));
     let w = (2 * h).min(usable);
-    let (action, t, pose) = animation(tick);
-    let margin = usable - w;
-    spans(action, t, pose, margin, rows, w, h)
-}
-
-fn animation(tick: u64) -> (usize, usize, usize) {
-    let action = (tick / 64 % 6) as usize;
+    let clips = [
+        &animation::PREVIEW_IDLE,
+        &animation::PREVIEW_FIN,
+        &animation::SWIM,
+        &animation::PREVIEW_HOP,
+        &animation::PREVIEW_WATCH,
+        &animation::PREVIEW_NAP,
+    ];
+    let action = (tick / 64 % clips.len() as u64) as usize;
     let t = (tick % 64) as usize;
-    let pose = match action {
-        0 => usize::from((48..52).contains(&t)) * 2, // brief blink
-        1 => [0, 1, 2, 3, 2, 3, 1, 0][t / 8],
-        2 => (t / 4) % 4,
-        3 => [0, 1, 2, 2, 2, 2, 3, 0][t % 32 / 4],
-        _ => t / 16,
-    };
-    (action, t, pose)
-}
-
-fn spans(
-    action: usize,
-    t: usize,
-    pose: usize,
-    margin: usize,
-    rows: usize,
-    w: usize,
-    h: usize,
-) -> Vec<(u16, u16, String)> {
+    let tile = animation::pixels(clips[action].frame(t as u16));
+    let margin = usable - w;
     let mut spans = Vec::new();
     let mut left = margin / 2;
     let mut top = rows - h;
     let returning = action == 2 && t >= 32;
     if action == 2 {
         left += (margin - left).min(16) * t.min(63 - t) / 31;
-    } else if action == 3 && pose == 2 {
+    } else if action == 3 && (8..24).contains(&(t % 32)) {
         let flight = t % 32 - 8;
         top -= top.min(5) * (flight * (15 - flight)) / 56;
     }
-    let tile = atlas_tile(action, pose);
     for y in 0..h {
         let mut run = String::new();
         let mut start = 0;
         let mut color = None;
         for x in 0..w {
-            let sx = (2 * x + 1) * TILE / (2 * w);
-            let sx = if returning { TILE - 1 - sx } else { sx };
-            let sy = (2 * y + 1) * TILE / (2 * h);
-            let i = (sy * ATLAS_WIDTH + sx) * 4;
+            let sx = (2 * x + 1) * SIDE / (2 * w);
+            let sx = if returning { SIDE - 1 - sx } else { sx };
+            let sy = (2 * y + 1) * SIDE / (2 * h);
+            let i = (sy * SIDE + sx) * 4;
             if tile[i + 3] < 128 {
                 if !run.is_empty() {
                     run.push_str("\x1b[0m");
@@ -202,7 +160,7 @@ struct Life {
 
 impl Life {
     fn react(&mut self, mood: Mood) {
-        self.altitude = self.altitude.saturating_add(self.pose().2);
+        self.altitude = self.altitude.saturating_add(self.lift());
         self.mood = mood;
         self.age = 0;
         self.mouse = None;
@@ -252,7 +210,7 @@ impl Life {
                 self.x = approach(self.x, x);
                 self.altitude = approach(self.altitude, altitude);
                 self.mood = Mood::Swim;
-                self.age %= 16;
+                self.age %= animation::SWIM.duration;
                 if (self.x, self.altitude) == (x, altitude) {
                     self.age = 0;
                     self.mouse = None;
@@ -285,15 +243,11 @@ impl Life {
             }
             let duration = match self.mood {
                 Mood::Swim => 48 + (self.choice % 49) as u16,
-                Mood::Nap => 48,
-                Mood::Watch | Mood::Hop | Mood::Puzzled => 16,
-                Mood::Wave | Mood::Bubbles => 20,
-                Mood::Startled => 12,
-                Mood::Swoop => 40,
                 Mood::Idle => 70 + (self.choice % 81) as u16,
-                Mood::Snack => 24,
+                Mood::Swoop => 40,
+                _ => self.clip().duration,
             };
-            if self.age == duration {
+            if self.age >= duration {
                 if self.mood == Mood::Nap {
                     self.fatigue = 0;
                 }
@@ -321,89 +275,48 @@ impl Life {
         eaten
     }
 
-    fn pose(&self) -> (usize, usize, u16) {
-        let t = usize::from(self.age);
+    fn clip(&self) -> &'static Clip {
         match self.mood {
-            Mood::Swim => (2, t / 4 % 4, (t / 6 % 2) as u16),
-            Mood::Bubbles => (0, usize::from(t < 3) * 2, 0),
-            Mood::Wave => (1, [0, 1, 2, 3, 2, 3, 2, 1, 0, 0][t / 2], 0),
-            Mood::Puzzled => (0, 0, 0),
-            Mood::Startled => (3, [1, 2, 2, 2, 3, 0][t / 2], [0, 3, 5, 4, 2, 0][t / 2]),
-            Mood::Swoop => {
-                let phase = t as f32 / 39.0;
-                let amplitude = 5 + self.choice % 9;
-                (
-                    2,
-                    t / 4 % 4,
-                    ((phase * std::f32::consts::PI).sin() * amplitude as f32).round() as u16,
-                )
-            }
-            Mood::Hop => (
-                3,
-                [0, 1, 2, 2, 2, 2, 3, 0][t / 2],
-                [0, 0, 1, 3, 3, 1, 0, 0][t / 2],
-            ),
-            Mood::Watch => (4, [0, 1, 2, 3, 2, 1, 0, 0][t / 2], 0),
-            Mood::Snack => (1, [0, 1, 3, 2, 3, 0][t / 4], 0),
-            Mood::Nap => (5, [0, 1, 2, 3, 2, 1][t / 8], 0),
-            Mood::Idle => match (t + (self.choice % 21) as usize) % 79 {
-                32 | 33 => (0, 2, 0),
-                60..=62 if self.choice & 1 != 0 => (1, 1, 0),
-                _ => (0, 0, 0),
-            },
+            Mood::Swim | Mood::Swoop => &animation::SWIM,
+            Mood::Bubbles => &animation::BUBBLES,
+            Mood::Wave => &animation::WAVE,
+            Mood::Puzzled if self.leftward => &animation::PUZZLED_LEFT,
+            Mood::Puzzled => &animation::PUZZLED,
+            Mood::Startled => &animation::STARTLED,
+            Mood::Hop => &animation::HOP,
+            Mood::Watch => &animation::WATCH,
+            Mood::Snack => &animation::SNACK,
+            Mood::Nap => &animation::NAP,
+            Mood::Idle if self.choice & 1 != 0 => &animation::IDLE_FIN,
+            Mood::Idle => &animation::IDLE,
         }
     }
 
-    // Effects are authored on a 96-by-48 logical grid, independent of tile resolution.
-    fn effect_color(&self, x: usize, y: usize) -> Option<u8> {
-        let t = usize::from(self.age);
+    fn frame(&self) -> usize {
+        let age = if self.mood == Mood::Idle {
+            self.age + (self.choice % 21) as u16
+        } else {
+            self.age
+        };
+        self.clip().frame(age)
+    }
+
+    fn lift(&self) -> u16 {
+        // Keep the motion in step with the clip even when its frame timings change.
+        let arc = |heights: &[u16]| {
+            let phase = usize::from(self.age) * heights.len() / usize::from(self.clip().duration);
+            heights[phase.min(heights.len() - 1)]
+        };
         match self.mood {
-            Mood::Wave => {
-                let top = 13 - t / 2;
-                let heart = [
-                    0b0110110u8,
-                    0b1111111,
-                    0b1111111,
-                    0b0111110,
-                    0b0011100,
-                    0b0001000,
-                ];
-                let bit = x.checked_sub(70)? / 2;
-                let row = heart.get(y.checked_sub(top)?)?;
-                (bit < 7 && row & (1 << bit) != 0).then_some(0b111_011_10)
+            Mood::Swim => self.age / 6 % 2,
+            Mood::Startled => arc(&[0, 3, 5, 4, 2, 0]),
+            Mood::Hop => arc(&[0, 0, 1, 3, 3, 1, 0, 0]),
+            Mood::Swoop => {
+                let phase = f32::from(self.age) / 39.0;
+                let amplitude = 5 + self.choice % 9;
+                ((phase * std::f32::consts::PI).sin() * amplitude as f32).round() as u16
             }
-            Mood::Startled
-                if t < 9 && (74..=76).contains(&x) && ((6..=10).contains(&y) || y == 13) =>
-            {
-                Some(0b111_110_01)
-            }
-            Mood::Puzzled if (70..80).contains(&x) && (5..12).contains(&y) => {
-                let mark = [
-                    b" ### ", b"#   #", b"    #", b"   # ", b"  #  ", b"     ", b"  #  ",
-                ];
-                let col = (x - 70) / 2;
-                // The sprite mirrors when swimming left. Keep the glyph readable.
-                let col = if self.leftward { 4 - col } else { col };
-                (mark[y - 5][col] == b'#').then_some(0b100_111_11)
-            }
-            Mood::Bubbles => {
-                for delay in [0, 4, 8] {
-                    if let Some(age @ 0..=13) = t.checked_sub(delay) {
-                        let cx = 78 + age / 2 + delay / 2;
-                        let cy = 25 - age * 3 / 2;
-                        let d = x.abs_diff(cx).pow(2) + (2 * y.abs_diff(cy)).pow(2);
-                        if (7..=17).contains(&d) {
-                            return Some(0b100_111_11);
-                        }
-                    }
-                }
-                None
-            }
-            Mood::Snack if t >= 16 => {
-                let d = x.abs_diff(80).pow(2) + y.abs_diff(24 - (t - 16) * 2).pow(2);
-                (9..=16).contains(&d).then_some(255)
-            }
-            _ => None,
+            _ => 0,
         }
     }
 }
@@ -423,10 +336,8 @@ struct FrameKey {
     origin: (u16, u16),
     cell_pixels: (u16, u16),
     side: usize,
-    action: usize,
-    pose: usize,
+    frame: usize,
     leftward: bool,
-    effect: Option<(Mood, u16)>,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -729,9 +640,9 @@ impl<'a> Pet<'a> {
             write!(out, "\x1b[49m\x1b[{r};{c}H\x1b[X").unwrap();
             self.dirty = true;
         }
-        let (action, pose, lift) = self.life.pose();
+        let frame = self.life.frame();
         let col = 1 + self.life.x;
-        let row = 1 + (rise - self.life.altitude).saturating_sub(lift);
+        let row = 1 + (rise - self.life.altitude).saturating_sub(self.life.lift());
         let now = Instant::now();
         self.latest_speech = self.latest_speech.filter(|&(_, until)| now < until);
         let bubble = self
@@ -761,16 +672,8 @@ impl<'a> Pet<'a> {
             origin: (col, row),
             cell_pixels: (cell_w, cell_h),
             side: w,
-            action,
-            pose,
+            frame,
             leftward,
-            effect: match self.life.mood {
-                Mood::Puzzled => Some((Mood::Puzzled, 0)),
-                Mood::Snack | Mood::Wave | Mood::Startled | Mood::Bubbles => {
-                    Some((self.life.mood, self.life.age))
-                }
-                _ => None,
-            },
         };
         if !self.dirty && self.last_frame.as_ref() == Some(&key) {
             return Ok(());
@@ -778,20 +681,14 @@ impl<'a> Pet<'a> {
         self.last_frame = Some(key);
         let mut pixels = Vec::with_capacity(w * h);
         let mut palette = [false; 256];
-        let tile = atlas_tile(action, pose);
+        let tile = animation::pixels(frame);
         for y in 0..h {
-            let sy = (2 * y + 1) * TILE / (2 * h);
-            let effect_y = (2 * y + 1) * 48 / (2 * h);
+            let sy = (2 * y + 1) * SIDE / (2 * h);
             for x in 0..w {
                 let x = if leftward { w - 1 - x } else { x };
-                let sx = (2 * x + 1) * TILE / (2 * w);
-                let i = (sy * ATLAS_WIDTH + sx) * 4;
-                let c = if let Some(color) =
-                    self.life.effect_color((2 * x + 1) * 96 / (2 * w), effect_y)
-                {
-                    palette[usize::from(color)] = true;
-                    u16::from(color)
-                } else if tile[i + 3] < 128 {
+                let sx = (2 * x + 1) * SIDE / (2 * w);
+                let i = (sy * SIDE + sx) * 4;
+                let c = if tile[i + 3] < 128 {
                     256
                 } else {
                     let c = (tile[i] & 224) | ((tile[i + 1] >> 3) & 28) | (tile[i + 2] >> 6);
@@ -1046,11 +943,12 @@ mod tests {
             for tick in 0..duration {
                 life.update(tick, 60, 10, 1, 1);
                 assert_eq!((life.mood, life.x, life.altitude), (Mood::Idle, 60, 5));
-                match life.pose() {
-                    (0, 0, 0) => still += 1,
-                    (0, 2, 0) => blinked = true,
-                    (1, 1, 0) => moved_fin = true,
-                    other => panic!("unexpected idle pose {other:?}"),
+                assert_eq!(life.lift(), 0);
+                match life.frame() {
+                    f if f == animation::IDLE.frame(0) => still += 1,
+                    f if f == animation::IDLE.frame(32) => blinked = true,
+                    f if f == animation::IDLE_FIN.frame(60) => moved_fin = true,
+                    other => panic!("unexpected idle frame {other}"),
                 }
             }
             assert!(still > duration * 9 / 10 && blinked);
@@ -1087,13 +985,14 @@ mod tests {
         pet.notice_touch(col + 6, row + 3);
         pet.life.hunger = 100;
         pet.notice_food(1, 1);
-        for tick in 1..20 {
+        let duration = u64::from(animation::WAVE.duration);
+        for tick in 1..duration {
             pet.notice_touch(col + 6, row + 3);
             pet.notice_bell();
             pet.life.update(tick, 66, 17, 13, 7);
             assert_eq!((pet.life.mood, pet.life.age), (Mood::Wave, tick as u16));
         }
-        pet.life.update(20, 66, 17, 13, 7);
+        pet.life.update(duration, 66, 17, 13, 7);
         assert_eq!(pet.life.mood, Mood::Idle);
     }
 
@@ -1112,9 +1011,13 @@ mod tests {
                 assert_eq!(pet.last_frame.as_ref().unwrap().origin, origin);
                 assert_eq!(pet.bubble.unwrap().text, reply);
                 // The upper hook curves to the reader's right, above a separate dot.
-                let ink = |x: usize, y| {
+                let ink = |x: usize, y: usize| {
                     let x = if leftward { 79 - x } else { 70 + x };
-                    pet.life.effect_color(x, y).is_some()
+                    let image = pet.previous.as_ref().unwrap();
+                    let px = (2 * x + 1) * image.w / (2 * 96);
+                    let px = if leftward { image.w - 1 - px } else { px };
+                    let py = (2 * y + 1) * image.w / (2 * 48);
+                    image.pixels[py * image.w + px] == 0b100_111_11
                 };
                 assert!(ink(8, 7) && !ink(0, 7));
                 assert!(!ink(4, 10) && ink(4, 11));
@@ -1132,7 +1035,7 @@ mod tests {
             pet.notice_bell();
             pet.life.update(tick, 5, 5, 1, 1);
             if tick == 4 {
-                assert_eq!(pet.life.pose().2, 5);
+                assert_eq!(pet.life.lift(), 5);
             }
         }
         assert_eq!(pet.life.mood, Mood::Idle);
@@ -1149,9 +1052,15 @@ mod tests {
         for tick in 0..2000 {
             life.update(tick, 60, 10, 1, 1);
             if life.mood == Mood::Bubbles {
-                assert!(life.effect_color(82, 25).is_some());
+                let has_bubble = |frame, x: usize, y: usize| {
+                    let px: usize = (2 * x + 1) * SIDE / (2 * 96);
+                    let py: usize = (2 * y + 1) * SIDE / (2 * 48);
+                    let i = (py * SIDE + px) * 4;
+                    animation::pixels(frame)[i..i + 4] == [146, 255, 255, 255]
+                };
+                assert!(has_bubble(life.frame(), 82, 25));
                 life.update(tick + 10, 60, 10, 1, 1);
-                assert!(life.effect_color(87, 10).is_some());
+                assert!(has_bubble(life.frame(), 87, 10));
                 life.update(tick + 20, 60, 10, 1, 1);
                 assert_ne!(life.mood, Mood::Bubbles);
                 return;
@@ -1163,6 +1072,14 @@ mod tests {
     #[test]
     fn fed_pet_uses_every_action_and_stays_in_bounds() {
         let mut life = Life::default();
+        let actions = [
+            Mood::Idle,
+            Mood::Snack,
+            Mood::Swim,
+            Mood::Hop,
+            Mood::Watch,
+            Mood::Nap,
+        ];
         let mut seen = [false; 6];
         for tick in 0..12000 {
             let travel = (tick / 31 % 8) as u16;
@@ -1170,9 +1087,10 @@ mod tests {
                 life.food = Some((1, 1));
             }
             life.update(tick, travel, 0, 1, 1);
-            let (action, pose, _) = life.pose();
-            seen[action] = true;
-            assert!(life.x <= travel && pose < 4);
+            if let Some(i) = actions.iter().position(|&mood| mood == life.mood) {
+                seen[i] = true;
+            }
+            assert!(life.x <= travel);
         }
         assert_eq!(seen, [true; 6]);
     }
@@ -1213,9 +1131,9 @@ mod tests {
         life.update(0, 100, 20, 1, 1);
         life.update(20, 100, 20, 1, 1);
         assert_eq!(life.x, 80);
-        assert!(life.pose().2 >= 5);
+        assert!(life.lift() >= 5);
         life.update(39, 100, 20, 1, 1);
-        assert_eq!((life.x, life.pose().2), (61, 0));
+        assert_eq!((life.x, life.lift()), (61, 0));
     }
 
     #[test]
