@@ -1,6 +1,6 @@
 # Loaded by fish -C after the user's startup files.
 function __rsille_pet_send
-    builtin printf '%s' "$argv[1]" >&@EVENT_FD@
+    builtin printf '%s' "$argv[1]" >&@{EVENT_FD}@
 end
 
 function __rsille_pet_run --on-event fish_preexec
@@ -8,7 +8,7 @@ function __rsille_pet_run --on-event fish_preexec
     if not string match -qr '[;&|()<>`\n]' -- "$argv[1]"
         set -l line (string replace -ar '[ \t]+' ' ' -- (string trim -- "$argv[1]"))
         switch "$line"
-@COMMAND_CASES@
+@{COMMAND_CASES}@
         end
     end
     __rsille_pet_send r$__rsille_pet_kind

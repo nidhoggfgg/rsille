@@ -149,7 +149,7 @@ impl Drop for Child {
 }
 
 /// Requires exclusive use of stdin, stdout and the spawned child's wait status.
-pub fn run(mut pet: crate::pet::Pet, options: crate::Options) -> io::Result<()> {
+pub fn run(options: crate::Options) -> io::Result<()> {
     let shell = std::env::var_os("SHELL").unwrap_or_else(|| "/bin/sh".into());
     if shell.is_empty() {
         return Err(io::Error::new(
@@ -157,7 +157,9 @@ pub fn run(mut pet: crate::pet::Pet, options: crate::Options) -> io::Result<()> 
             "SHELL 为空，请指定已安装的 shell 路径，或直接在 fish 中运行",
         ));
     }
-    let hooks = crate::commands::Hooks::prepare(shell.as_ref())?;
+    let catalog = crate::dialogue::Catalog::load(options.commands.as_deref())?;
+    let mut pet = crate::pet::Pet::new(&catalog);
+    let hooks = crate::commands::Hooks::prepare(shell.as_ref(), &catalog)?;
     let environment = hooks
         .as_ref()
         .filter(|(hooks, _)| hooks.fish_init.is_none())
@@ -264,15 +266,21 @@ pub fn run(mut pet: crate::pet::Pet, options: crate::Options) -> io::Result<()> 
             food_deadline = None;
         }
         if let Some(hooks) = &hooks {
-            let mut event = [0u8; 3];
+            let mut event = [0u8; 32];
             for _ in 0..64 {
                 match hooks.events.recv(&mut event) {
                     Ok(2) if hooks.fish_init.is_some() && &event[..2] == b"p0" => preview.prompt(),
-                    Ok(2) => {
+                    Ok(n) if (2..event.len()).contains(&n) => {
+                        let Some(id) = std::str::from_utf8(&event[1..n])
+                            .ok()
+                            .and_then(|s| s.parse::<usize>().ok())
+                        else {
+                            continue;
+                        };
                         if hooks.fish_init.is_some() && event[0] == b'r' && preview.end() {
-                            pet.notice_command(b'e', b'0');
+                            pet.notice_command(b'e', 0);
                         }
-                        pet.notice_command(event[0], event[1]);
+                        pet.notice_command(event[0], id);
                     }
                     Ok(_) => continue,
                     Err(e) if retry(&e) => break,
@@ -380,7 +388,7 @@ pub fn run(mut pet: crate::pet::Pet, options: crate::Options) -> io::Result<()> 
             match master.write(pending.as_slices().0) {
                 Ok(n) => {
                     for byte in pending.drain(..n) {
-                        if let Some(kind) = preview.input(byte) {
+                        if let Some(kind) = preview.input(&catalog, byte) {
                             pet.notice_command(b'e', kind);
                         }
                     }

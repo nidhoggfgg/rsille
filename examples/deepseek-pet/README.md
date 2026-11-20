@@ -18,6 +18,38 @@ cargo run --manifest-path examples/deepseek-pet/Cargo.toml
 env SHELL=(command -s fish) cargo run --manifest-path examples/deepseek-pet/Cargo.toml
 ```
 
+## 自定义命令回复
+
+内置规则随程序打包，见 [assets/commands.yaml](assets/commands.yaml)。要添加自己的回复，可以把下面的内容保存为 `my-commands.yaml`：
+
+```yaml
+version: 1
+groups:
+  - commands: ["git status --short", "git status -s"]
+    editing: ["只看简短的改动清单？"]
+    running: ["我来数数改了几处"]
+    done: ["清单在这儿啦", "看完啦"]
+```
+
+```sh
+rsille pet --commands ./my-commands.yaml
+```
+
+从仓库根目录用 Cargo 启动时，把参数放在 `--` 后面：
+
+```sh
+cargo run --manifest-path examples/deepseek-pet/Cargo.toml -- --commands ./my-commands.yaml
+```
+
+省略 `--commands` 时使用内置规则。自定义文件在启动时加载一次，文件有误时，程序会指出文件路径和原因。
+
+- `commands` 列出共用一组台词的命令。匹配从命令开头逐词进行，最长的完整前缀优先。例如 `git status -s src` 用上面的短清单台词，`git status src` 仍用内置的仓库台词。参数按书写顺序匹配，等价写法可以逐项列出。
+- 匹配项用单个空格分词，每个词可含 ASCII 字母、数字和 `-_./+=:@`。用户文件里的同名匹配项覆盖内置项，同组的其他别名保留原回复。同一文件内，每个匹配项在 `groups` 和 `families` 中各只能出现一次。
+- `groups` 中每组填写 `editing`、`running`、`done` 三个台词列表。每个列表至少一句，有多句时会避开上次抽中的台词。
+- 可选的 `families` 用于刚输入工具名时的开场，每项填写单词工具名列表 `commands` 和台词列表 `editing`。顶层的 `failed` 和 `interrupted` 可以分别替换所有命令共用的失败和中断台词。
+
+## 显示与交互
+
 要改用备用屏幕，可以运行 `rsille pet --alt-screen`，或在上面的 Cargo 命令后加 `-- --alt-screen`。退出备用屏幕会恢复启动前的画面。这个参数可与 `--quite` 组合。
 
 动画使用 `../ai-babies/assets` 中每帧 **320×320 像素**的 DeepSeek 图集。两种模式中的小鲸鱼通常占窗口像素高度的三分之一，最大绘制为 **192×192 像素**，窄窗口里会自动缩小。启动时会检查终端是否声明支持 **Sixel**，并使用 rsille 自动探测字符格的像素尺寸；任一项无法确认都会提示并退出。宠物轮廓以外的透明像素不填背景色。姿态和位置都没变化时跳过动画重绘。

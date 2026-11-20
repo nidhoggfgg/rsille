@@ -419,16 +419,16 @@ struct FrameKey {
 }
 
 #[derive(Clone, Copy, PartialEq)]
-struct Bubble {
-    text: &'static str,
+struct Bubble<'a> {
+    text: &'a str,
     area: Area,
     above: bool,
     tail: u16,
 }
 
-impl Bubble {
+impl<'a> Bubble<'a> {
     fn place(
-        text: &'static str,
+        text: &'a str,
         col: u16,
         row: u16,
         size: (u16, u16),
@@ -490,7 +490,7 @@ impl Bubble {
     }
 }
 
-impl Draw for Bubble {
+impl Draw for Bubble<'_> {
     fn draw(&mut self, mut chunk: Chunk<'_>) -> Result<Size, DrawErr> {
         let size = chunk.area().size();
         let border = BorderStyle::Rounded;
@@ -514,19 +514,29 @@ impl Draw for Bubble {
     }
 }
 
-pub struct Pet {
+pub struct Pet<'a> {
+    catalog: &'a crate::dialogue::Catalog,
     dialogue: crate::dialogue::Dialogue,
-    latest_speech: Option<(&'static str, Instant)>,
-    held_speech: Option<(&'static str, Instant)>,
-    bubble: Option<Bubble>,
+    latest_speech: Option<(&'a str, Instant)>,
+    held_speech: Option<(&'a str, Instant)>,
+    bubble: Option<Bubble<'a>>,
     life: Life,
     previous: Option<Image>,
     last_frame: Option<FrameKey>,
     dirty: bool,
 }
 
-impl Default for Pet {
+#[cfg(test)]
+impl Default for Pet<'static> {
     fn default() -> Self {
+        static CATALOG: std::sync::LazyLock<crate::dialogue::Catalog> =
+            std::sync::LazyLock::new(|| crate::dialogue::Catalog::load(None).unwrap());
+        Self::new(&CATALOG)
+    }
+}
+
+impl<'a> Pet<'a> {
+    pub fn new(catalog: &'a crate::dialogue::Catalog) -> Self {
         use std::hash::BuildHasher;
         let choice = std::collections::hash_map::RandomState::new().hash_one(()) as u32;
         Self {
@@ -535,6 +545,7 @@ impl Default for Pet {
                 curiosity: choice,
                 ..Life::default()
             },
+            catalog,
             dialogue: Default::default(),
             latest_speech: None,
             held_speech: None,
@@ -544,11 +555,9 @@ impl Default for Pet {
             dirty: false,
         }
     }
-}
 
-impl Pet {
-    pub fn notice_command(&mut self, phase: u8, command: u8) {
-        if (phase, command) == (b'e', b'0') {
+    pub fn notice_command(&mut self, phase: u8, command: usize) {
+        if (phase, command) == (b'e', 0) {
             self.latest_speech = None;
             return;
         }
@@ -560,7 +569,7 @@ impl Pet {
             b'i' => Mood::Idle,
             _ => return,
         };
-        let Some(text) = self.dialogue.choose(phase, command) else {
+        let Some(text) = self.dialogue.choose(self.catalog, phase, command) else {
             return;
         };
         self.life.react(mood);
@@ -950,7 +959,7 @@ mod tests {
     fn command_bubble_tracks_edits_results_and_available_space() {
         let mut pet = Pet::default();
         let mut out = Vec::new();
-        pet.notice_command(b'e', b't');
+        pet.notice_command(b'e', pet.catalog.editing("cargo test").unwrap());
         let edit = pet.latest_speech.unwrap().0;
         pet.draw(0, 80, 24, 10, 20, &mut out).unwrap();
         let first = pet.bubble.unwrap();
@@ -960,7 +969,7 @@ mod tests {
             first.area.real_size().height + 1,
             pet.previous.as_ref().unwrap().row
         );
-        pet.notice_command(b'e', b'0');
+        pet.notice_command(b'e', 0);
         out.clear();
         pet.draw(0, 80, 24, 10, 20, &mut out).unwrap();
         assert_eq!(pet.bubble.unwrap().text, edit);
@@ -970,8 +979,8 @@ mod tests {
         first.erase(80, 24, &mut erase);
         assert!(out.starts_with(&erase));
         assert!(pet.bubble.is_none());
-        pet.notice_command(b'r', b't');
-        pet.notice_command(b'+', b't');
+        pet.notice_command(b'r', pet.catalog.editing("cargo test").unwrap());
+        pet.notice_command(b'+', pet.catalog.editing("cargo test").unwrap());
         assert_eq!(pet.life.mood, Mood::Wave);
         pet.draw(1, 5, 2, 10, 20, &mut out).unwrap();
         assert!(pet.bubble.is_none());
@@ -988,10 +997,15 @@ mod tests {
     fn rapid_command_changes_hold_the_visible_line_then_show_the_latest_result() {
         let mut pet = Pet::default();
         let mut out = Vec::new();
-        pet.notice_command(b'e', b'G');
+        pet.notice_command(b'e', pet.catalog.editing("git").unwrap());
         pet.draw(0, 80, 24, 10, 20, &mut out).unwrap();
         let first = pet.held_speech.unwrap();
-        for (phase, kind) in [(b'e', b'g'), (b'e', b'0'), (b'r', b'g'), (b'+', b'g')] {
+        for (phase, kind) in [
+            (b'e', pet.catalog.editing("git status").unwrap()),
+            (b'e', 0),
+            (b'r', pet.catalog.editing("git status").unwrap()),
+            (b'+', pet.catalog.editing("git status").unwrap()),
+        ] {
             pet.notice_command(phase, kind);
             pet.hide(80, 24, &mut out);
             pet.draw(1, 80, 24, 10, 20, &mut out).unwrap();

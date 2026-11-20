@@ -24,12 +24,8 @@ enum Experience {
     Pet {
         #[arg(value_enum, default_value = "deepseek")]
         character: PetCharacter,
-        /// Disable pet mouse capture
-        #[arg(long)]
-        quite: bool,
-        /// Run the pet on the alternate screen
-        #[arg(long)]
-        alt_screen: bool,
+        #[command(flatten)]
+        options: deepseek_pet::Options,
     },
     /// Explore the AI Babies animation
     AiBabies,
@@ -48,13 +44,8 @@ impl Experience {
             }
             Self::Pet {
                 character: PetCharacter::Deepseek,
-                quite,
-                alt_screen,
-            } => Ok(deepseek_pet::Options {
-                capture_mouse: !quite,
-                alt_screen,
-            }
-            .run()?),
+                options,
+            } => Ok(options.run()?),
             Self::AiBabies => ai_babies::run(),
             Self::FunctionPlotter => rsille_function_plotter::run(),
             Self::Jellyfish => rsille_jellyfish::run(),
@@ -78,8 +69,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             "1" | "4" | "draw" | "function-plotter" => Experience::FunctionPlotter,
             "2" | "pet" => Experience::Pet {
                 character: PetCharacter::Deepseek,
-                quite: false,
-                alt_screen: false,
+                options: deepseek_pet::Options::default(),
             },
             "3" | "ai-babies" => Experience::AiBabies,
             "5" | "jellyfish" => Experience::Jellyfish,

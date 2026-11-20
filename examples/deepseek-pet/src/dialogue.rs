@@ -1,213 +1,287 @@
-//! The shell hooks send a category and phase; only the pet chooses the dialogue.
-use std::collections::HashMap;
+//! A session loads one catalogue for both shell hooks and bubble selection.
+use serde::Deserialize;
+use std::{
+    collections::{BTreeMap, HashMap, HashSet},
+    fs, io,
+    path::Path,
+};
 
-type Lines = [&'static str; 3];
-
-// These categories describe the tool while its subcommand is still being edited.
-pub const FAMILIES: &[(&[&str], u8, Lines)] = &[
-    (
-        &["git"],
-        b'G',
-        ["要看看仓库吗？", "这回想对仓库做什么？", "我也来逛逛仓库"],
-    ),
-    (
-        &["cargo", "go"],
-        b'B',
-        ["今天要捣鼓哪个项目？", "让我看看你的工程", "我来给你打下手"],
-    ),
-    (
-        &["npm", "pnpm", "yarn", "pip"],
-        b'P',
-        ["要用包管理器啦？", "工具箱打开啦", "这回要用哪个工具？"],
-    ),
-];
-
-pub struct CommandGroup {
-    pub code: u8,
-    pub commands: &'static [&'static str],
-    editing: Lines,
-    running: Lines,
-    done: Lines,
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Pack {
+    version: u32,
+    failed: Option<Vec<String>>,
+    interrupted: Option<Vec<String>>,
+    #[serde(default)]
+    families: Vec<Family>,
+    #[serde(default)]
+    groups: Vec<Group>,
 }
 
-pub const GROUPS: &[CommandGroup] = &[
-    CommandGroup {
-        code: b'l',
-        commands: &["ls", "tree", "eza"],
-        editing: ["这儿藏着什么？", "让我也瞧一眼", "来数数文件？"],
-        running: ["我挨个儿瞧瞧", "尾巴收好，别挡字", "让我探个头"],
-        done: ["都在这儿啦", "这一眼看清啦", "有你要找的吗？"],
-    },
-    CommandGroup {
-        code: b'p',
-        commands: &["pwd"],
-        editing: ["游到哪儿了？", "看看咱们的位置？", "让我认认路"],
-        running: ["找找路标", "我看看地址", "地图摊开啦"],
-        done: ["原来在这里", "记住这个路口啦", "位置找到了"],
-    },
-    CommandGroup {
-        code: b'd',
-        commands: &["cd", "pushd", "popd"],
-        editing: ["要游去哪儿？", "这回往哪走？", "我跟你换个地方"],
-        running: ["跟上你啦", "带上我！", "等等我的小尾巴"],
-        done: ["到啦！", "新位置记住啦", "我也游过来了"],
-    },
-    CommandGroup {
-        code: b's',
-        commands: &["find", "fd", "rg", "grep"],
-        editing: ["在找什么？", "我来当你的眼睛", "要找点线索？"],
-        running: ["让我仔细瞅瞅", "我往这边找找", "水底也看看"],
-        done: ["找完这一趟啦", "看看有没有线索？", "这片翻过啦"],
-    },
-    CommandGroup {
-        code: b'f',
-        commands: &["cat", "less", "head", "tail", "bat"],
-        editing: ["想读哪一段？", "我也来旁听", "给我留个位置"],
-        running: ["借我瞄一眼", "我陪你慢慢读", "我趴在边上看"],
-        done: ["这段看完啦", "读到这儿啦", "我把位置让给你"],
-    },
-    CommandGroup {
-        code: b'g',
-        commands: &["git status", "git diff", "git log", "git show"],
-        editing: ["看看改了什么？", "要翻翻仓库记录？", "我也看看仓库"],
-        running: ["一起看看", "我在旁边对一眼", "让我凑近一点"],
-        done: ["看完啦！", "仓库看过一遍啦", "有你关心的那条吗？"],
-    },
-    CommandGroup {
-        code: b'v',
-        commands: &["git add", "git commit", "git stash"],
-        editing: ["要收好这些改动？", "这份工作要存起来？", "我看着这些改动"],
-        running: ["我陪你收拾", "看着呢", "我在这儿守着"],
-        done: ["这一步办好啦", "收拾妥当", "好，接着往下游"],
-    },
-    CommandGroup {
-        code: b'n',
-        commands: &["git fetch", "git pull", "git push"],
-        editing: ["去远端看看？", "对岸有个仓库", "要和远端碰头？"],
-        running: ["我去码头张望", "等对岸的消息", "看看远端怎么说"],
-        done: ["这趟来回顺利", "和对岸聊完啦", "远端的事办好啦"],
-    },
-    CommandGroup {
-        code: b't',
-        commands: &[
-            "cargo test",
-            "npm test",
-            "pnpm test",
-            "yarn test",
-            "go test",
-            "pytest",
-        ],
-        editing: ["要跑测试啦？", "这轮能全绿吗？", "我来给测试加油"],
-        running: ["我陪你等测试", "我来盯着结果", "一项一项来"],
-        done: ["测试通过啦！", "绿灯亮啦！", "这轮过关了！"],
-    },
-    CommandGroup {
-        code: b'b',
-        commands: &["cargo build", "cargo check", "go build", "make", "cmake"],
-        editing: ["准备开工？", "我来当监工", "工具都带齐了？"],
-        running: ["我来帮你盯着", "这会儿我值班", "等它忙完"],
-        done: ["顺利完成！", "收工，挥个鳍！", "这一关过啦"],
-    },
-    CommandGroup {
-        code: b'i',
-        commands: &[
-            "npm install",
-            "pnpm install",
-            "yarn install",
-            "pip install",
-            "cargo fetch",
-        ],
-        editing: ["要补点依赖？", "缺什么零件啦？", "去取工具包？"],
-        running: ["我在这儿等包裹", "让我守着工具箱", "给新零件腾个位置"],
-        done: ["工具备好啦", "这批依赖齐啦", "包裹收到啦"],
-    },
-    CommandGroup {
-        code: b'c',
-        commands: &["mkdir", "touch", "cp", "mv"],
-        editing: ["要整理文件啦？", "让我挪挪尾巴", "这边腾个位置"],
-        running: ["我帮你看着", "我让条路", "小心放稳哦"],
-        done: ["安顿好啦", "文件的事办妥啦", "收拾好了！"],
-    },
-];
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Family {
+    commands: Vec<String>,
+    editing: Vec<String>,
+}
 
-const FAILED: Lines = ["咦，没顺利结束？", "我陪你看看输出", "要再瞧一眼吗？"];
-const INTERRUPTED: Lines = ["好，歇一会儿", "收到，先停下", "我就在这儿等你"];
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Group {
+    commands: Vec<String>,
+    editing: Vec<String>,
+    running: Vec<String>,
+    done: Vec<String>,
+}
+
+enum Rule {
+    Family(Family),
+    Group(Group),
+}
+
+#[derive(Default)]
+pub struct Catalog {
+    // One-based indices into rules. Zero clears a preview.
+    pub commands: BTreeMap<String, usize>,
+    pub families: BTreeMap<String, usize>,
+    rules: Vec<Rule>,
+    failed: Vec<String>,
+    interrupted: Vec<String>,
+}
+
+impl Catalog {
+    pub fn load(path: Option<&Path>) -> io::Result<Self> {
+        let mut catalog = Self::default();
+        catalog
+            .extend(include_str!("../assets/commands.yaml"))
+            .map_err(io::Error::other)?;
+        if let Some(path) = path {
+            let source = fs::read_to_string(path)
+                .map_err(|e| io::Error::new(e.kind(), format!("{}: {e}", path.display())))?;
+            catalog.extend(&source).map_err(|e| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("{}: {e}", path.display()),
+                )
+            })?;
+        }
+        Ok(catalog)
+    }
+
+    fn extend(&mut self, source: &str) -> Result<(), String> {
+        let pack: Pack = yaml_serde::from_str(source).map_err(|e| e.to_string())?;
+        if pack.version != 1 {
+            return Err(format!("不支持的规则版本 {}", pack.version));
+        }
+        for (name, lines, target) in [
+            ("failed", pack.failed, &mut self.failed),
+            ("interrupted", pack.interrupted, &mut self.interrupted),
+        ] {
+            if let Some(lines) = lines {
+                validate_lines(name, &lines)?;
+                *target = lines;
+            }
+        }
+        self.add_rules(pack.families.into_iter().map(Rule::Family))?;
+        self.add_rules(pack.groups.into_iter().map(Rule::Group))
+    }
+
+    fn add_rules(&mut self, rules: impl Iterator<Item = Rule>) -> Result<(), String> {
+        let mut seen = HashSet::new();
+        for rule in rules {
+            let (names, index) = match &rule {
+                Rule::Family(f) => {
+                    validate_lines(&format!("{:?}.editing", f.commands), &f.editing)?;
+                    if f.commands.iter().any(|name| name.contains(' ')) {
+                        return Err(format!("families 只接受单词工具名：{:?}", f.commands));
+                    }
+                    (&f.commands, &mut self.families)
+                }
+                Rule::Group(g) => {
+                    for (phase, lines) in [
+                        ("editing", &g.editing),
+                        ("running", &g.running),
+                        ("done", &g.done),
+                    ] {
+                        validate_lines(&format!("{:?}.{phase}", g.commands), lines)?;
+                    }
+                    (&g.commands, &mut self.commands)
+                }
+            };
+            if names.is_empty() {
+                return Err("commands 至少需要一个匹配项".into());
+            }
+            for name in names {
+                if !valid_pattern(name) {
+                    return Err(format!("无效的命令匹配项 {name:?}"));
+                }
+                if !seen.insert(name.clone()) {
+                    return Err(format!("规则文件中有重复匹配项 {name:?}"));
+                }
+                index.insert(name.clone(), self.rules.len() + 1);
+            }
+            self.rules.push(rule);
+        }
+        Ok(())
+    }
+
+    pub fn editing(&self, prefix: &str) -> Option<usize> {
+        let mut words = prefix.trim_end();
+        loop {
+            if let Some(id) = self.commands.get(words) {
+                return Some(*id);
+            }
+            match words.rsplit_once(' ') {
+                Some((rest, _)) => words = rest,
+                None => return self.families.get(words).copied(),
+            }
+        }
+    }
+
+    pub fn known_prefix(&self, prefix: &str) -> bool {
+        [&self.commands, &self.families].into_iter().any(|index| {
+            index
+                .range::<str, _>((
+                    std::ops::Bound::Included(prefix),
+                    std::ops::Bound::Unbounded,
+                ))
+                .next()
+                .is_some_and(|(name, _)| name.starts_with(prefix))
+        })
+    }
+}
+
+// Both shell hooks embed these literal words in case statements.
+fn valid_pattern(name: &str) -> bool {
+    name.split(' ').all(|word| {
+        !word.is_empty()
+            && word
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b"-_./+=:@".contains(&b))
+    })
+}
+
+fn validate_lines(field: &str, lines: &[String]) -> Result<(), String> {
+    let mut seen = HashSet::new();
+    if lines.is_empty()
+        || lines.iter().any(|line| {
+            line.trim().is_empty() || line.chars().any(char::is_control) || !seen.insert(line)
+        })
+    {
+        return Err(format!(
+            "{field} 需要至少一句台词，每句须非空、无控制字符且不重复"
+        ));
+    }
+    Ok(())
+}
 
 #[derive(Default)]
 pub struct Dialogue {
-    last: HashMap<(u8, u8), usize>,
+    last: HashMap<(u8, usize), usize>,
 }
 
 impl Dialogue {
-    pub fn choose(&mut self, phase: u8, code: u8) -> Option<&'static str> {
-        // Shared result lines have a shared history, even when the command changes.
-        let (key, lines) = if let Some(group) = GROUPS.iter().find(|group| group.code == code) {
-            match phase {
-                b'e' => ((phase, code), &group.editing),
-                b'r' => ((phase, code), &group.running),
-                b'+' => ((phase, code), &group.done),
-                b'-' => ((phase, 0), &FAILED),
-                b'i' => ((phase, 0), &INTERRUPTED),
-                _ => return None,
+    pub fn choose<'a>(&mut self, catalog: &'a Catalog, phase: u8, id: usize) -> Option<&'a str> {
+        let rule = catalog.rules.get(id.checked_sub(1)?)?;
+        let (key, lines) = match (rule, phase) {
+            (Rule::Family(f), b'e') => (id, &f.editing),
+            (Rule::Group(g), b'e') => (id, &g.editing),
+            (Rule::Group(g), b'r') => (id, &g.running),
+            (Rule::Group(g), b'+') => (id, &g.done),
+            (Rule::Group(_), b'-') => (0, &catalog.failed),
+            (Rule::Group(_), b'i') => (0, &catalog.interrupted),
+            _ => return None,
+        };
+        let index = match self.last.get(&(phase, key)) {
+            Some(&previous) if lines.len() > 1 => {
+                (previous + fastrand::usize(1..lines.len())) % lines.len()
             }
-        } else {
-            let (_, _, lines) = FAMILIES
-                .iter()
-                .find(|(_, kind, _)| *kind == code && phase == b'e')?;
-            ((phase, code), lines)
+            _ => fastrand::usize(..lines.len()),
         };
-        let index = match self.last.get(&key) {
-            Some(&previous) => (previous + fastrand::usize(1..lines.len())) % lines.len(),
-            None => fastrand::usize(..lines.len()),
-        };
-        self.last.insert(key, index);
-        Some(lines[index])
+        self.last.insert((phase, key), index);
+        Some(&lines[index])
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashSet;
 
     #[test]
-    fn every_command_has_distinct_replies_and_remembers_each_stage() {
+    fn imports_specific_prefixes_and_overrides_only_named_aliases() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        fs::write(
+            file.path(),
+            r#"
+version: 1
+families: [{commands: [task], editing: [开工]}]
+groups:
+  - commands: [git status, task check]
+    editing: [准备]
+    running: [检查]
+    done: [完成]
+  - commands: [git status -s]
+    editing: [简报]
+    running: [稍候]
+    done: [就绪]
+"#,
+        )
+        .unwrap();
+        let catalog = Catalog::load(Some(file.path())).unwrap();
         let mut dialogue = Dialogue::default();
-        let mut names = HashSet::new();
-        let mut codes = HashSet::new();
-        for group in GROUPS {
-            assert!(codes.insert(group.code));
-            for name in group.commands {
-                assert!(names.insert(name));
-            }
-            for pool in [
-                &group.editing,
-                &group.running,
-                &group.done,
-                &FAILED,
-                &INTERRUPTED,
-            ] {
-                assert_eq!(pool.iter().collect::<HashSet<_>>().len(), pool.len());
-            }
-            let mut previous = [None; 5];
-            for _ in 0..12 {
-                for ((phase, pool), last) in [
-                    (b'e', &group.editing),
-                    (b'r', &group.running),
-                    (b'+', &group.done),
-                    (b'-', &FAILED),
-                    (b'i', &INTERRUPTED),
-                ]
-                .into_iter()
-                .zip(previous.iter_mut())
-                {
-                    let line = dialogue.choose(phase, group.code).unwrap();
-                    assert!(pool.contains(&line));
-                    assert_ne!(*last, Some(line));
-                    *last = Some(line);
-                }
+        for (line, phase, expected) in [
+            ("task", b'e', "开工"),
+            ("task check", b'r', "检查"),
+            ("git status -s src", b'e', "简报"),
+            ("git status -something", b'+', "完成"),
+        ] {
+            let id = catalog.editing(line).unwrap();
+            for _ in 0..2 {
+                assert_eq!(dialogue.choose(&catalog, phase, id), Some(expected));
             }
         }
-        assert!(dialogue.choose(b'+', b'0').is_none());
+        assert_ne!(catalog.commands["git diff"], catalog.commands["git status"]);
+        assert!(dialogue
+            .choose(&catalog, b'+', catalog.families["task"])
+            .is_none());
+    }
+
+    #[test]
+    fn multi_line_pools_remember_their_last_reply() {
+        let catalog = Catalog::load(None).unwrap();
+        let mut dialogue = Dialogue::default();
+        for phase in [b'e', b'r', b'+', b'-', b'i'] {
+            let mut previous = None;
+            for turn in 0..12 {
+                let id = if matches!(phase, b'-' | b'i') && turn % 2 == 0 {
+                    catalog.commands["ls"]
+                } else {
+                    catalog.commands["pwd"]
+                };
+                let line = dialogue.choose(&catalog, phase, id).unwrap();
+                assert_ne!(Some(line), previous);
+                previous = Some(line);
+            }
+        }
+        assert!(dialogue.choose(&catalog, b'+', 0).is_none());
+    }
+
+    #[test]
+    fn rejects_invalid_imports_with_the_source_path() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        for content in [
+            "version: 2",
+            "version: 1\ngropus: []",
+            "version: 1\nfailed: []",
+            "version: 1\nfailed: [same, same]",
+            "version: 1\nfailed: [\"line\\nbreak\"]",
+            "version: 1\nfamilies: [{commands: ['a*b'], editing: [hi]}]",
+            "version: 1\nfamilies: [{commands: [git, git], editing: [hi]}]",
+        ] {
+            fs::write(file.path(), content).unwrap();
+            let error = Catalog::load(Some(file.path())).err().expect(content);
+            assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+            assert!(error.to_string().contains(file.path().to_str().unwrap()));
+        }
     }
 }

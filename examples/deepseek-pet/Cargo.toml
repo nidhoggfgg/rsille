@@ -7,9 +7,12 @@ publish = false
 [workspace]
 
 [dependencies]
+clap = { version = "4.5", features = ["derive"] }
 rsille = { path = "../..", default-features = false }
 
 [target.'cfg(unix)'.dependencies]
+serde = { version = "1", features = ["derive"] }
+yaml_serde = "0.10"
 fastrand = "2"
 libc = "0.2"
 png = "0.18"

@@ -1,5 +1,5 @@
 _rsille_pet_send() {
-  builtin print -rnu @EVENT_FD@ -- "$1" 2>/dev/null || :
+  builtin print -rnu @{EVENT_FD}@ -- "$1" 2>/dev/null || :
 }
 
 _rsille_pet_classify() {
@@ -11,11 +11,11 @@ _rsille_pet_classify() {
   [[ $line == *[\;\|\&\<\>\(\)\`]* || $line == *$'\n'* ]] && return 0
   local -a words=( ${(z)line} )
   case "${(j: :)words}" in
-@COMMAND_CASES@
+@{COMMAND_CASES}@
   esac
   if [[ -z $reply && $2 == edit ]]; then
     case "${words[1]}" in
-@FAMILY_CASES@
+@{FAMILY_CASES}@
     esac
   fi
 }

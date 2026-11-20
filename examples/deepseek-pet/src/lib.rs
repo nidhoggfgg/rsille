@@ -29,10 +29,17 @@ pub fn run_with_mouse_capture(capture_mouse: bool) -> std::io::Result<()> {
     .run()
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, clap::Parser)]
 pub struct Options {
+    /// Disable pet mouse capture
+    #[arg(long = "quite", action = clap::ArgAction::SetFalse)]
     pub capture_mouse: bool,
+    /// Run the pet on the alternate screen
+    #[arg(long)]
     pub alt_screen: bool,
+    /// Load custom command replies from a YAML file
+    #[arg(long, value_name = "FILE")]
+    pub commands: Option<std::path::PathBuf>,
 }
 
 impl Default for Options {
@@ -40,6 +47,7 @@ impl Default for Options {
         Self {
             capture_mouse: true,
             alt_screen: false,
+            commands: None,
         }
     }
 }
@@ -47,7 +55,7 @@ impl Default for Options {
 impl Options {
     #[cfg(unix)]
     pub fn run(self) -> std::io::Result<()> {
-        session::run(crate::pet::Pet::default(), self)
+        session::run(self)
     }
 
     #[cfg(not(unix))]
