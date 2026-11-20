@@ -1,4 +1,5 @@
 //! A private datagram socket carries only fixed command categories from the interactive shell.
+use crate::dialogue::GROUPS;
 use std::{
     ffi::CString,
     fs, io,
@@ -25,18 +26,18 @@ impl Hooks {
         let (events, sender) = UnixDatagram::pair()?;
         events.set_nonblocking(true)?;
         sender.set_nonblocking(true)?;
-        if fish {
-            let mut cases = String::new();
-            for &(command, kind) in COMMANDS {
-                use std::fmt::Write;
+        use std::fmt::Write;
+        let mut cases = String::new();
+        for (command, kind) in commands() {
+            let code = char::from(kind);
+            if fish {
                 writeln!(cases, "            case '{command}' '{command} *'").unwrap();
-                writeln!(
-                    cases,
-                    "                set -g __rsille_pet_kind {}",
-                    char::from(kind)
-                )
-                .unwrap();
+                writeln!(cases, "                set -g __rsille_pet_kind {code}").unwrap();
+            } else {
+                writeln!(cases, "    '{command}'|'{command} '*) reply={code} ;;").unwrap();
             }
+        }
+        if fish {
             let init = include_str!("commands.fish")
                 .replace("@COMMAND_CASES@", &cases)
                 .replace("@EVENT_FD@", &sender.as_raw_fd().to_string());
@@ -54,8 +55,9 @@ impl Hooks {
             .prefix("rsille-pet-")
             .permissions(fs::Permissions::from_mode(0o700))
             .tempdir()?;
-        let script =
-            include_str!("commands.zsh").replace("@EVENT_FD@", &sender.as_raw_fd().to_string());
+        let script = include_str!("commands.zsh")
+            .replace("@COMMAND_CASES@", &cases)
+            .replace("@EVENT_FD@", &sender.as_raw_fd().to_string());
         fs::write(
             startup.path().join(".zshenv"),
             include_str!("startup.zshenv"),
@@ -88,16 +90,11 @@ impl Hooks {
     }
 }
 
-const COMMANDS: &[(&str, u8)] = &[
-    ("cargo test", b't'),
-    ("npm test", b't'),
-    ("pytest", b't'),
-    ("cargo build", b'b'),
-    ("cargo check", b'b'),
-    ("make", b'b'),
-    ("git status", b'g'),
-    ("cd", b'd'),
-];
+fn commands() -> impl Iterator<Item = (&'static str, u8)> {
+    GROUPS
+        .iter()
+        .flat_map(|group| group.commands.iter().map(|&name| (name, group.code)))
+}
 
 // Only keep a prefix of a known command. Complex line edits defer to fish_preexec.
 #[derive(Default)]
@@ -132,18 +129,16 @@ impl FishPreview {
         }
         self.prefix = match byte {
             8 | 127 => Some(&prefix[..prefix.len().saturating_sub(1)]),
-            _ => COMMANDS
-                .iter()
-                .map(|&(name, _)| name)
+            _ => commands()
+                .map(|(name, _)| name)
                 .find(|name| {
                     name.starts_with(prefix) && name.as_bytes().get(prefix.len()) == Some(&byte)
                 })
                 .map(|name| &name[..prefix.len() + 1]),
         };
-        let kind = COMMANDS
-            .iter()
-            .find(|&&(name, _)| Some(name) == self.prefix)
-            .map(|&(_, kind)| kind);
+        let kind = commands()
+            .find(|&(name, _)| Some(name) == self.prefix)
+            .map(|(_, kind)| kind);
         if kind == self.shown {
             return None;
         }

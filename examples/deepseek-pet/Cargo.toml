@@ -10,6 +10,7 @@ publish = false
 rsille = { path = "../..", default-features = false }
 
 [target.'cfg(unix)'.dependencies]
+fastrand = "2"
 libc = "0.2"
 png = "0.18"
 tempfile = "3"

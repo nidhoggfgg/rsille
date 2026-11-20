@@ -10,11 +10,8 @@ _rsille_pet_classify() {
   # Attribute the exit status only to a simple foreground command.
   [[ $line == *[\;\|\&\<\>\(\)\`]* || $line == *$'\n'* ]] && return 0
   local -a words=( ${(z)line} )
-  case "${words[1]} ${words[2]}" in
-    'cargo test'|'npm test'|'pytest '*) reply=t ;;
-    'cargo build'|'cargo check'|'make '*) reply=b ;;
-    'git status') reply=g ;;
-    'cd '*) reply=d ;;
+  case "${(j: :)words}" in
+@COMMAND_CASES@
   esac
 }
 
@@ -61,6 +58,7 @@ _rsille_pet_init() {
   emulate -L zsh
   precmd_functions+=( _rsille_pet_prompt )
   preexec_functions+=( _rsille_pet_run )
+  zmodload zsh/zle || return
   autoload -Uz add-zle-hook-widget
   add-zle-hook-widget line-pre-redraw _rsille_pet_edit
 }

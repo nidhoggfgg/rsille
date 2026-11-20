@@ -512,6 +512,7 @@ impl Draw for Bubble {
 }
 
 pub struct Pet {
+    dialogue: crate::dialogue::Dialogue,
     speech: Option<(&'static str, std::time::Instant)>,
     bubble: Option<Bubble>,
     life: Life,
@@ -530,6 +531,7 @@ impl Default for Pet {
                 curiosity: choice,
                 ..Life::default()
             },
+            dialogue: Default::default(),
             speech: None,
             bubble: None,
             previous: None,
@@ -545,20 +547,16 @@ impl Pet {
             self.speech = None;
             return;
         }
-        let (editing, running, done) = match command {
-            b't' => ("要跑测试啦？", "我陪你等测试", "测试通过啦！"),
-            b'b' => ("准备开工？", "我来帮你盯着", "顺利完成！"),
-            b'g' => ("看看改了什么？", "一起看看", "看完啦！"),
-            b'd' => ("要游去哪儿？", "跟上你啦", "到啦！"),
+        let mood = match phase {
+            b'e' => Mood::Watch,
+            b'r' => Mood::Swim,
+            b'+' => Mood::Wave,
+            b'-' => Mood::Startled,
+            b'i' => Mood::Idle,
             _ => return,
         };
-        let (text, mood) = match phase {
-            b'e' => (editing, Mood::Watch),
-            b'r' => (running, Mood::Swim),
-            b'+' => (done, Mood::Wave),
-            b'-' => ("咦，出错了？", Mood::Startled),
-            b'i' => ("好，歇一会儿", Mood::Idle),
-            _ => return,
+        let Some(text) = self.dialogue.choose(phase, command) else {
+            return;
         };
         self.life.react(mood);
         self.speech = Some((
@@ -939,9 +937,10 @@ mod tests {
         let mut pet = Pet::default();
         let mut out = Vec::new();
         pet.notice_command(b'e', b't');
+        let edit = pet.speech.unwrap().0;
         pet.draw(0, 80, 24, 10, 20, &mut out).unwrap();
         let first = pet.bubble.unwrap();
-        assert_eq!(first.text, "要跑测试啦？");
+        assert_eq!(first.text, edit);
         assert!(first.area.real_size().width < 80);
         assert_eq!(
             first.area.real_size().height + 1,
@@ -960,7 +959,8 @@ mod tests {
         pet.draw(1, 5, 2, 10, 20, &mut out).unwrap();
         assert!(pet.bubble.is_none());
         pet.draw(1, 80, 24, 10, 20, &mut out).unwrap();
-        assert_eq!(pet.bubble.unwrap().text, "测试通过啦！");
+        assert_eq!(pet.bubble.unwrap().text, pet.speech.unwrap().0);
+        assert_ne!(pet.bubble.unwrap().text, edit);
         pet.speech.as_mut().unwrap().1 = std::time::Instant::now();
         pet.draw(2, 80, 24, 10, 20, &mut out).unwrap();
         assert!(pet.bubble.is_none());

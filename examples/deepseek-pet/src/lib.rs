@@ -7,6 +7,8 @@ mod boundary;
 #[cfg(unix)]
 mod commands;
 #[cfg(unix)]
+mod dialogue;
+#[cfg(unix)]
 mod food;
 #[cfg(unix)]
 mod mouse;
