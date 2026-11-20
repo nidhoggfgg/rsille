@@ -20,6 +20,30 @@ cargo run --manifest-path examples/deepseek-pet/Cargo.toml
 env SHELL=(command -s fish) cargo run --manifest-path examples/deepseek-pet/Cargo.toml
 ```
 
+## 组合宠物功能
+
+用 `--features` 列出这次会话要启用的功能，名称之间用逗号分隔，顺序不限。
+
+```sh
+rsille pet --features speech,mouse
+```
+
+这个组合让鲸鱼待在右下角。使用 fish 或 zsh 时，它会用气泡回应命令；点到它的身体，它会挥鳍。想让它也能追着指针游，把 `roam` 加进列表即可。
+
+| 功能 | 效果 |
+| --- | --- |
+| `roam` | 自主游动，允许为追鼠标或觅食改变位置。省略时固定在右下角，仍可眨眼和原地做动作。 |
+| `mouse` | 捕获鼠标以响应点击。配合 `roam` 可追指针。 |
+| `speech` | 在 fish 或 zsh 中用气泡回应命令编辑、执行和结果。 |
+| `command-reactions` | 在 fish 或 zsh 中用动作回应命令，例如成功时挥鳍。可与气泡同时启用。 |
+| `typing` | 打字时偶尔抬头看。 |
+| `bell` | 听到终端铃声时做受惊动作。 |
+| `forage` | 吃可触及的新输出字符。固定时只吃宠物区域内的字符，配合 `roam` 可游过去吃。 |
+
+只要右下角的待机动画，用 `rsille pet --features`。想让它到处游、对命令做动作又保持安静，用 `rsille pet --features roam,command-reactions`。
+
+省略整个 `--features` 参数沿用已有行为。`--quite` 仍可关闭鼠标捕获，`--alt-screen` 单独控制会话使用哪块屏幕。宠物直接叠画在终端上，擦除时仍可能留下空白。
+
 ## 自定义命令回复
 
 内置规则随程序打包，见 [assets/commands.yaml](assets/commands.yaml)。要添加自己的回复，可以把下面的内容保存为 `my-commands.yaml`：
@@ -54,7 +78,7 @@ cargo run --manifest-path examples/deepseek-pet/Cargo.toml -- --commands ./my-co
 
 要改用备用屏幕，可以运行 `rsille pet --alt-screen`，或在上面的 Cargo 命令后加 `-- --alt-screen`。退出备用屏幕会恢复启动前的画面。这个参数可与 `--quite` 组合。
 
-动画帧随 `deepseek-pet` 编译进可执行文件。两种模式中的小鲸鱼通常占窗口像素高度的三分之一，最大绘制为 **192×192 像素**，窄窗口里会自动缩小。启动时会检查终端是否声明支持 **Sixel**，并使用 rsille 自动探测字符格的像素尺寸；任一项无法确认都会提示并退出。宠物轮廓以外的透明像素不填背景色。姿态和位置都没变化时跳过动画重绘。
+动画帧随 `deepseek-pet` 编译进可执行文件。小鲸鱼通常占窗口像素高度的三分之一，最大绘制为 **192×192 像素**，窄窗口里会自动缩小。启动时会检查终端是否声明支持 **Sixel**，并使用 rsille 自动探测字符格的像素尺寸；任一项无法确认都会提示并退出。宠物轮廓以外的透明像素不填背景色。姿态和位置都没变化时跳过动画重绘。
 
 小鲸鱼饿了会盯上刚输出的可见 ASCII 字符，游过去吞掉一格，再打个嗝。吃饱后它会有一阵子不再觅食。被吃掉的只是屏幕上的字符，不会修改命令、文件或子进程的数据。屏幕滚动或无法确认字符位置时，它会放弃目标，而不是猜着吃。
 
@@ -85,4 +109,7 @@ wave:
 
 每项填写相对于 `assets/animations/` 的路径和显示时长。一个时间单位为 100 毫秒，上例的三帧分别显示 200、100 和 300 毫秒，挥鳍在 600 毫秒后结束。可以重复引用同一张图，也可以跨动作复用帧。待机和游泳在行为持续期间循环播放。
 
-调整已有动作只需改图片和清单。要新增一种交互，在清单中起一个小写动作名（如 `nod`），然后在 [src/pet.rs](src/pet.rs) 的行为触发逻辑和 `Life::clip` 中接入对应的 `animation::NOD`。构建时会检查清单引用的图片和时长。
+调整已有动作只需改图片和清单。要新增一种交互，在清单中起一个小写动作名（如 `nod`），然后在 [src/pet/behavior.rs](src/pet/behavior.rs) 的行为触发逻辑和 `Life::clip` 中接入对应的 `animation::NOD`。构建时会检查清单引用的图片和时长。
+
+
+功能名统一定义在 [features.rs](src/features.rs)。[session.rs](src/session.rs) 按所选功能接入鼠标、shell 命令钩子和输出字符追踪。[pet.rs](src/pet.rs) 将同一条命令事件分发给已启用的[动作](src/pet/behavior.rs)和[气泡](src/pet/speech.rs)。例如新增一种命令反馈时，可以直接消费这条事件，沿用已有的 shell 钩子。

@@ -1,23 +1,15 @@
-use crate::animation::{self, Clip, SIDE};
-use rsille::render::{
-    area::{Area, Size},
-    chunk::Chunk,
-    text::TextMetrics,
-    Builder, Draw, DrawErr,
+mod behavior;
+mod speech;
+
+use crate::{
+    animation::{self, SIDE},
+    Feature,
 };
-use rsille::tui::{
-    layout::border_renderer::{border_chars, render_border},
-    style::{BorderStyle, Color, Style},
-};
-use std::{
-    fmt::Write,
-    io,
-    time::{Duration, Instant},
-};
+use behavior::{Life, Mood};
+use speech::{Bubble, Speech};
+use std::{collections::BTreeSet, fmt::Write, io};
 
 const MAX_SIDE: usize = 192;
-const BUBBLE_READ_TIME: Duration = Duration::from_millis(1500);
-const BUBBLE_LIFETIME: Duration = Duration::from_secs(3);
 
 /// Return (column, row, SGR-colored text) runs for a cleared viewport.
 /// Transparent cells and the rightmost column are never painted.
@@ -122,215 +114,6 @@ impl Image {
     }
 }
 
-#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
-enum Mood {
-    Swim,
-    Watch,
-    Hop,
-    Swoop,
-    Bubbles,
-    Wave,
-    Startled,
-    Puzzled,
-    Snack,
-    Nap,
-    #[default]
-    Idle,
-}
-
-#[derive(Default)]
-struct Life {
-    mood: Mood,
-    age: u16,
-    fatigue: u16,
-    hunger: u16,
-    cooldown: u16,
-    bell_cooldown: u16,
-    choice: u32,
-    leftward: bool,
-    x: u16,
-    altitude: u16,
-    curiosity: u32,
-    pursuit: u16,
-    mouse: Option<(u16, u16)>,
-    food: Option<(u16, u16)>,
-    full: u16,
-    last: Option<u64>,
-}
-
-impl Life {
-    fn react(&mut self, mood: Mood) {
-        self.altitude = self.altitude.saturating_add(self.lift());
-        self.mood = mood;
-        self.age = 0;
-        self.mouse = None;
-        self.pursuit = 0;
-    }
-
-    fn update(
-        &mut self,
-        tick: u64,
-        travel: u16,
-        rise: u16,
-        width: u16,
-        height: u16,
-    ) -> Option<(u16, u16)> {
-        let mut eaten = None;
-        self.altitude = self.altitude.min(rise);
-        let visible =
-            |&(c, r): &(u16, u16)| c > 0 && r > 0 && c <= travel + width && r <= rise + height;
-        self.food = self.food.filter(visible);
-        self.mouse = self.mouse.filter(visible);
-        if self.last.is_none() {
-            self.x = travel;
-        }
-        self.x = self.x.min(travel);
-        // A suspended session resumes near its last pose, without unbounded catch-up.
-        let elapsed = tick
-            .saturating_sub(self.last.replace(tick).unwrap_or(tick))
-            .min(128);
-        for _ in 0..elapsed {
-            self.age += 1;
-            self.cooldown = self.cooldown.saturating_sub(1);
-            self.bell_cooldown = self.bell_cooldown.saturating_sub(1);
-            self.hunger = self.hunger.saturating_add(1);
-            self.full = self.full.saturating_sub(1);
-            if self.pursuit == 0 {
-                self.mouse = None;
-            }
-            self.pursuit = self.pursuit.saturating_sub(1);
-            let meal = self.food.filter(|_| self.full == 0 && self.hunger >= 30);
-            let reacting = matches!(self.mood, Mood::Wave | Mood::Startled | Mood::Puzzled);
-            if let Some((c, r)) = meal.or(self.mouse).filter(|_| !reacting) {
-                let x = (c - 1).saturating_sub(width / 2).min(travel);
-                let altitude = rise - (r - 1).saturating_sub(height / 2).min(rise);
-                if self.x != x {
-                    self.leftward = x < self.x;
-                }
-                self.x = approach(self.x, x);
-                self.altitude = approach(self.altitude, altitude);
-                self.mood = Mood::Swim;
-                self.age %= animation::SWIM.duration;
-                if (self.x, self.altitude) == (x, altitude) {
-                    self.age = 0;
-                    self.mouse = None;
-                    if meal.is_some() {
-                        eaten = self.food.take();
-                        self.full = 120;
-                        self.hunger = 0;
-                        self.mood = Mood::Snack;
-                    } else {
-                        self.mood = Mood::Watch;
-                    }
-                }
-                continue;
-            }
-            if !reacting && !matches!(self.mood, Mood::Snack | Mood::Idle) {
-                self.altitude = self.altitude.saturating_sub(1);
-            }
-            if matches!(self.mood, Mood::Swim | Mood::Swoop) {
-                self.fatigue = self.fatigue.saturating_add(1);
-                if self.mood == Mood::Swoop || self.age % 2 == 0 {
-                    if self.x == 0 || self.x == travel {
-                        self.leftward = self.x != 0;
-                    }
-                    self.x = if self.leftward {
-                        self.x.saturating_sub(1)
-                    } else {
-                        self.x.saturating_add(1).min(travel)
-                    };
-                }
-            }
-            let duration = match self.mood {
-                Mood::Swim => 48 + (self.choice % 49) as u16,
-                Mood::Idle => 70 + (self.choice % 81) as u16,
-                Mood::Swoop => 40,
-                _ => self.clip().duration,
-            };
-            if self.age >= duration {
-                if self.mood == Mood::Nap {
-                    self.fatigue = 0;
-                }
-                if self.mood == Mood::Snack {
-                    self.hunger = 0;
-                }
-                self.choice = self.choice.wrapping_mul(1664525).wrapping_add(1013904223);
-                self.mood = if self.fatigue >= 160 {
-                    Mood::Nap
-                } else if self.mood == Mood::Idle {
-                    let actions = [
-                        Mood::Swim,
-                        Mood::Watch,
-                        Mood::Swoop,
-                        Mood::Hop,
-                        Mood::Bubbles,
-                    ];
-                    actions[(self.choice >> 16) as usize % actions.len()]
-                } else {
-                    Mood::Idle
-                };
-                self.age = 0;
-            }
-        }
-        eaten
-    }
-
-    fn clip(&self) -> &'static Clip {
-        match self.mood {
-            Mood::Swim | Mood::Swoop => &animation::SWIM,
-            Mood::Bubbles => &animation::BUBBLES,
-            Mood::Wave => &animation::WAVE,
-            Mood::Puzzled if self.leftward => &animation::PUZZLED_LEFT,
-            Mood::Puzzled => &animation::PUZZLED,
-            Mood::Startled => &animation::STARTLED,
-            Mood::Hop => &animation::HOP,
-            Mood::Watch => &animation::WATCH,
-            Mood::Snack => &animation::SNACK,
-            Mood::Nap => &animation::NAP,
-            Mood::Idle if self.choice & 1 != 0 => &animation::IDLE_FIN,
-            Mood::Idle => &animation::IDLE,
-        }
-    }
-
-    fn frame(&self) -> usize {
-        let age = if self.mood == Mood::Idle {
-            self.age + (self.choice % 21) as u16
-        } else {
-            self.age
-        };
-        self.clip().frame(age)
-    }
-
-    fn lift(&self) -> u16 {
-        // Keep the motion in step with the clip even when its frame timings change.
-        let arc = |heights: &[u16]| {
-            let phase = usize::from(self.age) * heights.len() / usize::from(self.clip().duration);
-            heights[phase.min(heights.len() - 1)]
-        };
-        match self.mood {
-            Mood::Swim => self.age / 6 % 2,
-            Mood::Startled => arc(&[0, 3, 5, 4, 2, 0]),
-            Mood::Hop => arc(&[0, 0, 1, 3, 3, 1, 0, 0]),
-            Mood::Swoop => {
-                let phase = f32::from(self.age) / 39.0;
-                let amplitude = 5 + self.choice % 9;
-                ((phase * std::f32::consts::PI).sin() * amplitude as f32).round() as u16
-            }
-            _ => 0,
-        }
-    }
-}
-
-fn approach(value: u16, goal: u16) -> u16 {
-    if value < goal {
-        value + 1
-    } else if value > goal {
-        value - 1
-    } else {
-        value
-    }
-}
-
 #[derive(PartialEq)]
 struct FrameKey {
     origin: (u16, u16),
@@ -340,107 +123,10 @@ struct FrameKey {
     leftward: bool,
 }
 
-#[derive(Clone, Copy, PartialEq)]
-struct Bubble<'a> {
-    text: &'a str,
-    area: Area,
-    above: bool,
-    tail: u16,
-}
-
-impl<'a> Bubble<'a> {
-    fn place(
-        text: &'a str,
-        col: u16,
-        row: u16,
-        size: (u16, u16),
-        cols: u16,
-        rows: u16,
-    ) -> Option<Self> {
-        let width = u16::try_from(TextMetrics::default().width(text))
-            .ok()?
-            .checked_add(4)?;
-        if width >= cols {
-            return None;
-        }
-        let room_above = row - 1;
-        let room_below = rows - (room_above + size.1);
-        let height = if room_above.max(room_below) >= 3 {
-            3
-        } else {
-            1
-        };
-        let above = room_above >= height;
-        let row = if above {
-            row - height
-        } else if room_below >= height {
-            row + size.1
-        } else {
-            return None;
-        };
-        let center = col + size.0 / 2;
-        let col = center.saturating_sub(width / 2).clamp(1, cols - width);
-        Some(Self {
-            text,
-            area: Area::new((col - 1, row - 1).into(), (width, height).into()),
-            above,
-            tail: (center - col).clamp(1, width - 2),
-        })
-    }
-
-    fn erase(self, cols: u16, rows: u16, out: &mut Vec<u8>) {
-        use std::io::Write;
-        let viewport = Area::from(Size::from((cols, rows)));
-        let Some(visible) = self.area.clamp_to(&viewport) else {
-            return;
-        };
-        let col = visible.x() + 1;
-        let width = visible.width();
-        out.extend_from_slice(b"\x1b[49m");
-        for y in visible.y()..visible.y() + visible.height() {
-            write!(out, "\x1b[{};{col}H\x1b[{width}X", y + 1).unwrap();
-        }
-    }
-
-    fn render(self, out: &mut Vec<u8>) -> io::Result<()> {
-        Builder::new()
-            .size(self.area.size().into())
-            .pos(self.area.pos().into())
-            .clear(false)
-            .build_render(self, out)
-            .render()
-    }
-}
-
-impl Draw for Bubble<'_> {
-    fn draw(&mut self, mut chunk: Chunk<'_>) -> Result<Size, DrawErr> {
-        let size = chunk.area().size();
-        let border = BorderStyle::Rounded;
-        let outline = Style::default().fg(Color::Indexed(116)).to_render_style();
-        let lettering = Style::default().fg(Color::Indexed(195)).to_render_style();
-        if size.height == 1 {
-            let side = border_chars(&chunk, border).vertical;
-            chunk.set_char(0, 0, side, outline)?;
-            chunk.set_char(size.width - 1, 0, side, outline)?;
-        } else {
-            render_border(&mut chunk, border, outline);
-            let (row, tip) = if self.above {
-                (size.height - 1, '▾')
-            } else {
-                (0, '▴')
-            };
-            chunk.set_char(self.tail, row, tip, outline)?;
-        }
-        chunk.set_string(2, size.height / 2, self.text, lettering)?;
-        Ok(size)
-    }
-}
-
 pub struct Pet<'a> {
     catalog: &'a crate::dialogue::Catalog,
-    dialogue: crate::dialogue::Dialogue,
-    latest_speech: Option<(&'a str, Instant)>,
-    held_speech: Option<(&'a str, Instant)>,
+    features: BTreeSet<Feature>,
+    speech: Option<Speech<'a>>,
     bubble: Option<Bubble<'a>>,
     life: Life,
     previous: Option<Image>,
@@ -453,24 +139,19 @@ impl Default for Pet<'static> {
     fn default() -> Self {
         static CATALOG: std::sync::LazyLock<crate::dialogue::Catalog> =
             std::sync::LazyLock::new(|| crate::dialogue::Catalog::load(None).unwrap());
-        Self::new(&CATALOG)
+        Self::new(&CATALOG, crate::Options::default().enabled_features())
     }
 }
 
 impl<'a> Pet<'a> {
-    pub fn new(catalog: &'a crate::dialogue::Catalog) -> Self {
+    pub fn new(catalog: &'a crate::dialogue::Catalog, features: BTreeSet<Feature>) -> Self {
         use std::hash::BuildHasher;
         let choice = std::collections::hash_map::RandomState::new().hash_one(()) as u32;
         Self {
-            life: Life {
-                choice,
-                curiosity: choice,
-                ..Life::default()
-            },
+            life: Life::new(choice, &features),
             catalog,
-            dialogue: Default::default(),
-            latest_speech: None,
-            held_speech: None,
+            speech: features.contains(&Feature::Speech).then(Speech::default),
+            features,
             bubble: None,
             previous: None,
             last_frame: None,
@@ -480,27 +161,41 @@ impl<'a> Pet<'a> {
 
     pub fn notice_command(&mut self, phase: u8, command: usize) {
         if (phase, command) == (b'e', 0) {
-            self.latest_speech = None;
+            if let Some(speech) = &mut self.speech {
+                speech.clear_preview();
+            }
             return;
         }
-        let mood = match phase {
-            b'e' => Mood::Watch,
-            b'r' => Mood::Swim,
-            b'+' => Mood::Wave,
-            b'-' => Mood::Startled,
-            b'n' => Mood::Puzzled,
-            b'i' => Mood::Idle,
-            _ => return,
-        };
-        let Some(text) = self.dialogue.choose(self.catalog, phase, command) else {
+        let Some(event) = self.catalog.event(phase, command) else {
             return;
         };
-        self.life.react(mood);
-        self.latest_speech = Some((text, Instant::now() + BUBBLE_LIFETIME));
+        if let Some(speech) = &mut self.speech {
+            speech.notice_command(event);
+        }
+        if self.features.contains(&Feature::CommandReactions) {
+            self.life.notice_command(event.phase);
+        }
+    }
+
+    pub fn notice_input(&mut self) {
+        if self.features.contains(&Feature::Typing) {
+            self.life.notice_input();
+        }
+    }
+
+    pub fn notice_bell(&mut self) {
+        if self.features.contains(&Feature::Bell) {
+            self.life.notice_bell();
+        }
+    }
+
+    pub fn notice_mouse(&mut self, col: u16, row: u16) {
+        self.life.notice_mouse(col, row);
     }
 
     pub fn notice_touch(&mut self, col: u16, row: u16) {
-        if self.life.mood != Mood::Wave
+        if self.features.contains(&Feature::Mouse)
+            && self.life.mood != Mood::Wave
             && self
                 .previous
                 .as_ref()
@@ -510,51 +205,18 @@ impl<'a> Pet<'a> {
         }
     }
 
-    pub fn notice_bell(&mut self) {
-        if self.life.bell_cooldown == 0 && self.life.mood != Mood::Wave {
-            self.life.react(Mood::Startled);
-            self.life.bell_cooldown = 60;
-        }
-    }
-
-    /// Notice a mouse position in one-based terminal cells.
-    pub fn notice_mouse(&mut self, col: u16, row: u16) {
-        if self.life.mouse.is_some() {
-            self.life.mouse = Some((col, row));
-        } else if self.life.cooldown == 0
-            && matches!(self.life.mood, Mood::Swim | Mood::Idle | Mood::Watch)
-        {
-            self.life.curiosity = self
-                .life
-                .curiosity
-                .wrapping_mul(1664525)
-                .wrapping_add(1013904223);
-            self.life.cooldown = 5;
-            if self.life.curiosity >> 31 == 0 {
-                self.life.pursuit = 32;
-                self.life.cooldown = 48;
-                self.life.mouse = Some((col, row));
-            }
-        }
-    }
-
     /// Replace the latest edible output cell (one-based terminal coordinates).
     pub fn notice_food(&mut self, col: u16, row: u16) {
-        self.life.food = Some((col, row));
+        if let Some(foraging) = &mut self.life.foraging {
+            foraging.target = Some((col, row));
+        }
     }
 
     pub fn forget_food(&mut self) {
-        self.life.food = None;
-    }
-    /// Occasionally look up. Key repeats cannot restart the gesture.
-    pub fn notice_input(&mut self) {
-        if self.life.cooldown == 0 && matches!(self.life.mood, Mood::Idle | Mood::Swim) {
-            self.life.mood = Mood::Watch;
-            self.life.age = 0;
-            self.life.cooldown = 120;
+        if let Some(foraging) = &mut self.life.foraging {
+            foraging.target = None;
         }
     }
-
     pub fn invalidate(&mut self) {
         self.dirty = true;
     }
@@ -643,24 +305,10 @@ impl<'a> Pet<'a> {
         let frame = self.life.frame();
         let col = 1 + self.life.x;
         let row = 1 + (rise - self.life.altitude).saturating_sub(self.life.lift());
-        let now = Instant::now();
-        self.latest_speech = self.latest_speech.filter(|&(_, until)| now < until);
         let bubble = self
-            .held_speech
-            .filter(|&(_, until)| now < until)
-            .or(self.latest_speech)
-            .and_then(|(text, _)| {
-                Bubble::place(text, col, row, (size.width, size.height), cols, rows)
-            });
-        // Shell output can erase and repaint the same bubble on every keystroke.
-        // Start its reading time only when a different line first fits on screen.
-        let visible = bubble.map(|b| b.text);
-        if visible != self.held_speech.map(|(text, _)| text) {
-            self.held_speech = visible.map(|text| (text, now + BUBBLE_READ_TIME));
-            if let Some(text) = visible {
-                self.latest_speech = Some((text, now + BUBBLE_LIFETIME));
-            }
-        }
+            .speech
+            .as_mut()
+            .and_then(|speech| speech.place(col, row, (size.width, size.height), cols, rows));
         if self.bubble != bubble {
             if let Some(old) = self.bubble.take() {
                 old.erase(cols, rows, out);
@@ -825,44 +473,63 @@ fn sixel_redraw_contract() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Instant;
 
     #[test]
-    fn bubble_points_at_the_whale_and_clears_only_visible_rows() {
-        for (row, top, tail) in [(1, 3, '▴'), (7, 4, '▾')] {
-            let bubble = Bubble::place("你好", 17, row, (3, 2), 20, 8).unwrap();
-            assert_eq!(bubble.area, Area::new((11, top - 1).into(), (8, 3).into()));
-            let mut out = Vec::new();
-            bubble.render(&mut out).unwrap();
-            let drawing = String::from_utf8(out).unwrap();
-            assert!(drawing.contains(tail));
-            assert_eq!(drawing.matches('─').count(), 11); // two six-cell edges, one pointer
-            let mut erase = Vec::new();
-            bubble.erase(15, top + 1, &mut erase);
-            assert_eq!(
-                erase,
-                format!("\x1b[49m\x1b[{top};12H\x1b[4X\x1b[{};12H\x1b[4X", top + 1).as_bytes()
-            );
+    fn speech_and_mouse_work_together_at_a_fixed_position() {
+        let catalog = crate::dialogue::Catalog::load(None).unwrap();
+        let mut pet = Pet::new(&catalog, [Feature::Speech, Feature::Mouse].into());
+        let mut out = Vec::new();
+        pet.draw(0, 80, 24, 10, 20, &mut out).unwrap();
+        let (col, row) = pet.last_frame.as_ref().unwrap().origin;
+        pet.notice_command(b'+', catalog.commands["ls"]);
+        pet.notice_input();
+        pet.notice_bell();
+        pet.notice_food(1, 1);
+        pet.notice_mouse(1, 1);
+        pet.draw(1, 80, 24, 10, 20, &mut out).unwrap();
+        assert!(pet.bubble.is_some());
+        assert_eq!(pet.life.mood, Mood::Idle);
+        assert!(pet.life.foraging.is_none() && pet.life.pointer.is_none());
+        pet.notice_touch(col + 6, row + 3);
+        assert_eq!(pet.life.mood, Mood::Wave);
+        for tick in [2, 120, 240, 360] {
+            pet.draw(tick, 80, 24, 10, 20, &mut out).unwrap();
+            assert_eq!(pet.last_frame.as_ref().unwrap().origin, (col, row));
         }
-        assert_eq!(
-            Bubble::place("你好", 1, 2, (3, 2), 20, 4)
-                .unwrap()
-                .area
-                .height(),
-            1
-        );
+        pet.draw(361, 100, 24, 10, 20, &mut out).unwrap();
+        assert_eq!(pet.last_frame.as_ref().unwrap().origin, (col + 20, row));
     }
 
     #[test]
-    fn bubble_uses_framework_text_metrics_and_renders_only_its_rectangle() {
-        // A CJK glyph, an ASCII letter with a combining accent, and an emoji cluster.
-        let message = "鲸e\u{301}👩‍💻";
-        let bubble = Bubble::place(message, 5, 7, (3, 2), 20, 10).unwrap();
-        assert_eq!(bubble.area.width(), 9);
-        let mut bytes = Vec::new();
-        bubble.render(&mut bytes).unwrap();
-        let output = String::from_utf8(bytes).unwrap();
-        assert!(output.contains(message));
-        assert!(!output.contains("\x1b[2J") && !output.contains('\n'));
+    fn command_gestures_work_without_speech_mouse_or_roaming() {
+        let catalog = crate::dialogue::Catalog::load(None).unwrap();
+        let mut pet = Pet::new(&catalog, [Feature::CommandReactions].into());
+        let mut out = Vec::new();
+        pet.draw(0, 80, 24, 10, 20, &mut out).unwrap();
+        let (col, row) = pet.last_frame.as_ref().unwrap().origin;
+        pet.notice_touch(col + 6, row + 3);
+        assert_eq!(pet.life.mood, Mood::Idle);
+        pet.notice_command(b'-', catalog.commands["ls"]);
+        pet.draw(4, 80, 24, 10, 20, &mut out).unwrap();
+        assert_eq!(pet.life.mood, Mood::Startled);
+        assert_eq!(pet.last_frame.as_ref().unwrap().origin, (col, row));
+        assert!(pet.bubble.is_none());
+    }
+
+    #[test]
+    fn anchored_foraging_only_eats_characters_within_reach() {
+        let catalog = crate::dialogue::Catalog::default();
+        let mut pet = Pet::new(&catalog, [Feature::Forage].into());
+        pet.notice_food(1, 1);
+        pet.life.update(0, 10, 5, 4, 3);
+        assert_eq!(pet.life.update(60, 10, 5, 4, 3), None);
+        pet.notice_food(13, 7);
+        assert_eq!(pet.life.update(61, 10, 5, 4, 3), Some((13, 7)));
+        assert_eq!(
+            (pet.life.x, pet.life.altitude, pet.life.mood),
+            (10, 0, Mood::Snack)
+        );
     }
 
     #[test]
@@ -870,7 +537,7 @@ mod tests {
         let mut pet = Pet::default();
         let mut out = Vec::new();
         pet.notice_command(b'e', pet.catalog.editing("cargo test").unwrap());
-        let edit = pet.latest_speech.unwrap().0;
+        let edit = pet.speech.as_ref().unwrap().latest_speech.unwrap().0;
         pet.draw(0, 80, 24, 10, 20, &mut out).unwrap();
         let first = pet.bubble.unwrap();
         assert_eq!(first.text, edit);
@@ -883,7 +550,7 @@ mod tests {
         out.clear();
         pet.draw(0, 80, 24, 10, 20, &mut out).unwrap();
         assert_eq!(pet.bubble.unwrap().text, edit);
-        pet.held_speech.as_mut().unwrap().1 = Instant::now();
+        pet.speech.as_mut().unwrap().held_speech.as_mut().unwrap().1 = Instant::now();
         pet.draw(0, 80, 24, 10, 20, &mut out).unwrap();
         let mut erase = Vec::new();
         first.erase(80, 24, &mut erase);
@@ -895,10 +562,19 @@ mod tests {
         pet.draw(1, 5, 2, 10, 20, &mut out).unwrap();
         assert!(pet.bubble.is_none());
         pet.draw(1, 80, 24, 10, 20, &mut out).unwrap();
-        assert_eq!(pet.bubble.unwrap().text, pet.latest_speech.unwrap().0);
+        assert_eq!(
+            pet.bubble.unwrap().text,
+            pet.speech.as_ref().unwrap().latest_speech.unwrap().0
+        );
         assert_ne!(pet.bubble.unwrap().text, edit);
-        pet.held_speech.as_mut().unwrap().1 = Instant::now();
-        pet.latest_speech.as_mut().unwrap().1 = Instant::now();
+        pet.speech.as_mut().unwrap().held_speech.as_mut().unwrap().1 = Instant::now();
+        pet.speech
+            .as_mut()
+            .unwrap()
+            .latest_speech
+            .as_mut()
+            .unwrap()
+            .1 = Instant::now();
         pet.draw(2, 80, 24, 10, 20, &mut out).unwrap();
         assert!(pet.bubble.is_none());
     }
@@ -909,7 +585,7 @@ mod tests {
         let mut out = Vec::new();
         pet.notice_command(b'e', pet.catalog.editing("git").unwrap());
         pet.draw(0, 80, 24, 10, 20, &mut out).unwrap();
-        let first = pet.held_speech.unwrap();
+        let first = pet.speech.as_ref().unwrap().held_speech.unwrap();
         for (phase, kind) in [
             (b'e', pet.catalog.editing("git status").unwrap()),
             (b'e', 0),
@@ -920,42 +596,13 @@ mod tests {
             pet.hide(80, 24, &mut out);
             pet.draw(1, 80, 24, 10, 20, &mut out).unwrap();
             assert_eq!(pet.bubble.unwrap().text, first.0);
-            assert_eq!(pet.held_speech.unwrap(), first);
+            assert_eq!(pet.speech.as_ref().unwrap().held_speech.unwrap(), first);
         }
-        let result = pet.latest_speech.unwrap().0;
-        pet.held_speech.as_mut().unwrap().1 = Instant::now();
+        let result = pet.speech.as_ref().unwrap().latest_speech.unwrap().0;
+        pet.speech.as_mut().unwrap().held_speech.as_mut().unwrap().1 = Instant::now();
         pet.draw(2, 80, 24, 10, 20, &mut out).unwrap();
         assert_ne!(result, first.0);
         assert_eq!(pet.bubble.unwrap().text, result);
-    }
-
-    #[test]
-    fn idle_gestures_leave_the_whale_in_place() {
-        for (choice, duration) in [(0, 70), (1, 71), (80, 150)] {
-            let mut life = Life {
-                choice,
-                altitude: 5,
-                ..Life::default()
-            };
-            let mut still = 0;
-            let mut blinked = false;
-            let mut moved_fin = false;
-            for tick in 0..duration {
-                life.update(tick, 60, 10, 1, 1);
-                assert_eq!((life.mood, life.x, life.altitude), (Mood::Idle, 60, 5));
-                assert_eq!(life.lift(), 0);
-                match life.frame() {
-                    f if f == animation::IDLE.frame(0) => still += 1,
-                    f if f == animation::IDLE.frame(32) => blinked = true,
-                    f if f == animation::IDLE_FIN.frame(60) => moved_fin = true,
-                    other => panic!("unexpected idle frame {other}"),
-                }
-            }
-            assert!(still > duration * 9 / 10 && blinked);
-            assert_eq!(moved_fin, choice & 1 != 0);
-            life.update(duration, 60, 10, 1, 1);
-            assert_ne!(life.mood, Mood::Idle);
-        }
     }
 
     #[test]
@@ -983,7 +630,7 @@ mod tests {
         pet.notice_touch(col, row);
         assert_eq!(pet.life.mood, Mood::Idle);
         pet.notice_touch(col + 6, row + 3);
-        pet.life.hunger = 100;
+        pet.life.foraging.as_mut().unwrap().hunger = 100;
         pet.notice_food(1, 1);
         let duration = u64::from(animation::WAVE.duration);
         for tick in 1..duration {
@@ -1005,7 +652,7 @@ mod tests {
             pet.draw(0, 80, 24, 10, 20, &mut Vec::new()).unwrap();
             let origin = pet.last_frame.as_ref().unwrap().origin;
             pet.notice_command(b'n', 0);
-            let reply = pet.latest_speech.unwrap().0;
+            let reply = pet.speech.as_ref().unwrap().latest_speech.unwrap().0;
             for tick in 1..16 {
                 pet.draw(tick, 80, 24, 10, 20, &mut Vec::new()).unwrap();
                 assert_eq!(pet.last_frame.as_ref().unwrap().origin, origin);
@@ -1047,55 +694,6 @@ mod tests {
     }
 
     #[test]
-    fn undisturbed_whale_blows_rising_bubbles() {
-        let mut life = Life::default();
-        for tick in 0..2000 {
-            life.update(tick, 60, 10, 1, 1);
-            if life.mood == Mood::Bubbles {
-                let has_bubble = |frame, x: usize, y: usize| {
-                    let px: usize = (2 * x + 1) * SIDE / (2 * 96);
-                    let py: usize = (2 * y + 1) * SIDE / (2 * 48);
-                    let i = (py * SIDE + px) * 4;
-                    animation::pixels(frame)[i..i + 4] == [146, 255, 255, 255]
-                };
-                assert!(has_bubble(life.frame(), 82, 25));
-                life.update(tick + 10, 60, 10, 1, 1);
-                assert!(has_bubble(life.frame(), 87, 10));
-                life.update(tick + 20, 60, 10, 1, 1);
-                assert_ne!(life.mood, Mood::Bubbles);
-                return;
-            }
-        }
-        panic!("the whale never blew bubbles");
-    }
-
-    #[test]
-    fn fed_pet_uses_every_action_and_stays_in_bounds() {
-        let mut life = Life::default();
-        let actions = [
-            Mood::Idle,
-            Mood::Snack,
-            Mood::Swim,
-            Mood::Hop,
-            Mood::Watch,
-            Mood::Nap,
-        ];
-        let mut seen = [false; 6];
-        for tick in 0..12000 {
-            let travel = (tick / 31 % 8) as u16;
-            if tick % 600 == 0 {
-                life.food = Some((1, 1));
-            }
-            life.update(tick, travel, 0, 1, 1);
-            if let Some(i) = actions.iter().position(|&mood| mood == life.mood) {
-                seen[i] = true;
-            }
-            assert!(life.x <= travel);
-        }
-        assert_eq!(seen, [true; 6]);
-    }
-
-    #[test]
     fn typing_cannot_restart_or_chain_a_glance() {
         let mut pet = Pet::default();
         pet.notice_input();
@@ -1113,38 +711,24 @@ mod tests {
     #[test]
     fn moving_pointer_cannot_extend_pursuit() {
         let mut pet = Pet::default();
-        pet.life.curiosity = 0;
+        pet.life.pointer.as_mut().unwrap().curiosity = 0;
         for tick in 0..=33 {
             pet.notice_mouse(1 + tick as u16, 1);
             pet.life.update(tick, 200, 0, 1, 1);
         }
-        assert!(pet.life.mouse.is_none());
+        assert!(pet.life.pointer.as_ref().unwrap().target.is_none());
         assert!(pet.life.cooldown > 0);
-    }
-
-    #[test]
-    fn swoop_travels_while_rising_and_falling() {
-        let mut life = Life {
-            mood: Mood::Swoop,
-            ..Life::default()
-        };
-        life.update(0, 100, 20, 1, 1);
-        life.update(20, 100, 20, 1, 1);
-        assert_eq!(life.x, 80);
-        assert!(life.lift() >= 5);
-        life.update(39, 100, 20, 1, 1);
-        assert_eq!((life.x, life.lift()), (61, 0));
     }
 
     #[test]
     fn targets_follow_both_axes_and_stale_food_is_not_eaten() {
         let mut pet = Pet::default();
-        pet.life.curiosity = 0;
+        pet.life.pointer.as_mut().unwrap().curiosity = 0;
         pet.notice_mouse(12, 2);
         pet.life.update(0, 20, 10, 1, 1);
         pet.life.update(9, 20, 10, 1, 1);
         assert_eq!((pet.life.x, pet.life.altitude), (11, 9));
-        pet.life.hunger = 100;
+        pet.life.foraging.as_mut().unwrap().hunger = 100;
         pet.notice_food(18, 8);
         assert_eq!(pet.life.update(12, 20, 10, 1, 1), None);
         pet.forget_food();

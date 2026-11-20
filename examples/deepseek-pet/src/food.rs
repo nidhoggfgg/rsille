@@ -2,6 +2,28 @@
 use crate::boundary::Boundary;
 
 type Cell = (u16, u16); // one-based terminal coordinates
+/// Tracks a meal independently of how the pet reaches the character.
+#[derive(Default)]
+pub struct Foraging {
+    pub target: Option<Cell>,
+    pub hunger: u16,
+    full: u16,
+}
+
+impl Foraging {
+    pub fn tick(&mut self) -> Option<Cell> {
+        self.hunger = self.hunger.saturating_add(1);
+        self.full = self.full.saturating_sub(1);
+        self.target.filter(|_| self.full == 0 && self.hunger >= 30)
+    }
+
+    pub fn eat(&mut self) -> Option<Cell> {
+        self.full = 120;
+        self.hunger = 0;
+        self.target.take()
+    }
+}
+
 pub struct Food {
     syntax: Boundary,
     cursor: Option<Cell>,

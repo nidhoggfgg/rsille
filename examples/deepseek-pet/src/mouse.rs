@@ -11,6 +11,48 @@ pub enum MouseKind {
     Other,
 }
 
+/// Decides whether to follow a pointer, and for how long.
+#[derive(Default)]
+pub struct Pursuit {
+    pub target: Option<(u16, u16)>,
+    pub curiosity: u32,
+    remaining: u16,
+}
+
+impl Pursuit {
+    pub fn tick(&mut self) -> Option<(u16, u16)> {
+        if self.remaining == 0 {
+            self.target = None;
+        }
+        self.remaining = self.remaining.saturating_sub(1);
+        self.target
+    }
+
+    pub fn motion(&mut self, cell: (u16, u16), receptive: bool, cooldown: &mut u16) {
+        if self.target.is_some() {
+            self.target = Some(cell);
+        } else if receptive && *cooldown == 0 {
+            self.curiosity = self
+                .curiosity
+                .wrapping_mul(1664525)
+                .wrapping_add(1013904223);
+            *cooldown = 5;
+            if self.curiosity >> 31 == 0 {
+                self.remaining = 32;
+                *cooldown = 48;
+                self.target = Some(cell);
+            }
+        }
+    }
+
+    pub fn new(curiosity: u32) -> Self {
+        Self {
+            curiosity,
+            ..Self::default()
+        }
+    }
+}
+
 impl Mouse {
     pub fn has_partial_report(&self) -> bool {
         !self.0.is_empty()

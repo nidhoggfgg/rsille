@@ -1,4 +1,5 @@
 //! Local interactive PTY session for an ANSI-compatible terminal.
+use crate::Feature;
 use rsille::render::raster_output::CellPixels;
 use std::{
     ffi::CString,
@@ -58,13 +59,13 @@ fn cursor_position(reply: &[u8]) -> Option<(u16, u16)> {
         })
 }
 
-fn probe_terminal(original: &libc::termios, alt_screen: bool) -> io::Result<Option<(u16, u16)>> {
+fn probe_terminal(original: &libc::termios, query_cursor: bool) -> io::Result<Option<(u16, u16)>> {
     let mut raw = *original;
     unsafe { libc::cfmakeraw(&mut raw) };
     check(unsafe { libc::tcsetattr(0, libc::TCSANOW, &raw) })?;
     let result = (|| {
         let mut out = io::stdout().lock();
-        if !alt_screen {
+        if query_cursor {
             out.write_all(b"\x1b[6n")?;
         }
         out.write_all(b"\x1b[c")?;
@@ -94,8 +95,8 @@ fn probe_terminal(original: &libc::termios, alt_screen: bool) -> io::Result<Opti
             }
             used += n as usize;
             if advertises_sixel(&reply[..used]) {
-                if alt_screen {
-                    return Ok(Some((1, 1)));
+                if !query_cursor {
+                    return Ok(None);
                 }
                 if let Some(cursor) = cursor_position(&reply[..used]) {
                     return Ok(Some(cursor));
@@ -157,9 +158,22 @@ pub fn run(options: crate::Options) -> io::Result<()> {
             "SHELL 为空，请指定已安装的 shell 路径，或直接在 fish 中运行",
         ));
     }
-    let catalog = crate::dialogue::Catalog::load(options.commands.as_deref())?;
-    let mut pet = crate::pet::Pet::new(&catalog);
-    let hooks = crate::commands::Hooks::prepare(shell.as_ref(), &catalog)?;
+    let features = options.enabled_features();
+    let command_events =
+        features.contains(&Feature::CommandReactions) || features.contains(&Feature::Speech);
+    let forage = features.contains(&Feature::Forage);
+    let capture_mouse = features.contains(&Feature::Mouse);
+    let catalog = if command_events || options.commands.is_some() {
+        crate::dialogue::Catalog::load(options.commands.as_deref())?
+    } else {
+        Default::default()
+    };
+    let mut pet = crate::pet::Pet::new(&catalog, features);
+    let hooks = if command_events {
+        crate::commands::Hooks::prepare(shell.as_ref(), &catalog)?
+    } else {
+        None
+    };
     let environment = hooks
         .as_ref()
         .filter(|(hooks, _)| hooks.fish_init.is_none())
@@ -189,7 +203,7 @@ pub fn run(options: crate::Options) -> io::Result<()> {
     let mut s = size(1)?;
     let mut original = unsafe { std::mem::zeroed() };
     check(unsafe { libc::tcgetattr(0, &mut original) })?;
-    let cursor = probe_terminal(&original, options.alt_screen).map_err(|e| {
+    let cursor = probe_terminal(&original, forage && !options.alt_screen).map_err(|e| {
         io::Error::new(
             e.kind(),
             format!("无法确认终端支持 Sixel，未启动 shell：{e}"),
@@ -214,7 +228,10 @@ pub fn run(options: crate::Options) -> io::Result<()> {
         }
     }
     let _child = Child(pid);
-    let mut preview = crate::commands::FishPreview::default();
+    let mut preview = hooks
+        .as_ref()
+        .filter(|(hooks, _)| hooks.fish_init.is_some())
+        .map(|_| crate::commands::FishPreview::default());
     let hooks = hooks.map(|(hooks, _)| hooks);
     let mut master = unsafe { File::from_raw_fd(fd) };
     let flags = check(unsafe { libc::fcntl(fd, libc::F_GETFL) })?;
@@ -231,14 +248,20 @@ pub fn run(options: crate::Options) -> io::Result<()> {
     };
     let mut decoder = crate::mouse::Mouse::default();
     let mut input_deadline = None;
-    let mut food =
-        crate::food::Food::new(cursor.filter(|&(col, row)| col <= s.ws_col && row <= s.ws_row));
+    let mut food = forage.then(|| {
+        let cursor = if options.alt_screen {
+            Some((1, 1))
+        } else {
+            cursor
+        };
+        crate::food::Food::new(cursor.filter(|&(col, row)| col <= s.ws_col && row <= s.ws_row))
+    });
     let mut food_deadline = None;
     let mut out = io::stdout().lock();
     if options.alt_screen {
         out.write_all(b"\x1b[?1049h\x1b[2J\x1b[H")?;
     }
-    if options.capture_mouse {
+    if capture_mouse {
         out.write_all(b"\x1b[?1006h\x1b[?1003h")?;
     }
     let mut pending = std::collections::VecDeque::<u8>::new();
@@ -269,7 +292,11 @@ pub fn run(options: crate::Options) -> io::Result<()> {
             let mut event = [0u8; 32];
             for _ in 0..64 {
                 match hooks.events.recv(&mut event) {
-                    Ok(2) if hooks.fish_init.is_some() && &event[..2] == b"p0" => preview.prompt(),
+                    Ok(2) if &event[..2] == b"p0" => {
+                        if let Some(preview) = &mut preview {
+                            preview.prompt();
+                        }
+                    }
                     Ok(n) if (2..event.len()).contains(&n) => {
                         let Some(id) = std::str::from_utf8(&event[1..n])
                             .ok()
@@ -277,7 +304,7 @@ pub fn run(options: crate::Options) -> io::Result<()> {
                         else {
                             continue;
                         };
-                        if hooks.fish_init.is_some() && event[0] == b'r' && preview.end() {
+                        if event[0] == b'r' && preview.as_mut().is_some_and(|p| p.end()) {
                             pet.notice_command(b'e', 0);
                         }
                         pet.notice_command(event[0], id);
@@ -301,7 +328,9 @@ pub fn run(options: crate::Options) -> io::Result<()> {
                 {
                     pixels = measured;
                 }
-                food.resize();
+                if let Some(food) = &mut food {
+                    food.resize();
+                }
                 pet.forget_food();
                 food_deadline = None;
                 pet.invalidate();
@@ -310,7 +339,10 @@ pub fn run(options: crate::Options) -> io::Result<()> {
             next = now + Duration::from_millis(100);
         }
         if tick || due.is_some_and(|d| now >= d) || batch.len() == CAP {
-            if let Some(cell) = food.feed(&batch, s.ws_col, s.ws_row) {
+            if let Some(cell) = food
+                .as_mut()
+                .and_then(|food| food.feed(&batch, s.ws_col, s.ws_row))
+            {
                 if let Some((col, row)) = cell {
                     pet.notice_food(col, row);
                     food_deadline = Some(now + Duration::from_secs(3));
@@ -394,9 +426,12 @@ pub fn run(options: crate::Options) -> io::Result<()> {
         if fds[1].revents & libc::POLLOUT != 0 {
             match master.write(pending.as_slices().0) {
                 Ok(n) => {
-                    for byte in pending.drain(..n) {
-                        if let Some(kind) = preview.input(&catalog, byte) {
-                            pet.notice_command(b'e', kind);
+                    let written = pending.drain(..n);
+                    if let Some(preview) = &mut preview {
+                        for byte in written {
+                            if let Some(kind) = preview.input(&catalog, byte) {
+                                pet.notice_command(b'e', kind);
+                            }
                         }
                     }
                 }
@@ -420,7 +455,7 @@ pub fn run(options: crate::Options) -> io::Result<()> {
             if bytes.contains(&0x1d) {
                 break;
             }
-            if options.capture_mouse {
+            if capture_mouse {
                 decoder.feed(bytes, &mut pending, |kind, col, row| {
                     use crate::mouse::MouseKind;
                     if col <= s.ws_col && row <= s.ws_row {

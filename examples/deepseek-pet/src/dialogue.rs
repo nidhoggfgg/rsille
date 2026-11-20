@@ -40,6 +40,25 @@ enum Rule {
     Group(Group),
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Phase {
+    Editing,
+    Running,
+    Done,
+    Failed,
+    Interrupted,
+    Missing,
+}
+
+/// A recognized shell event shared by gestures and speech. The speech module
+/// chooses a line only when it receives the event.
+#[derive(Clone, Copy)]
+pub struct CommandEvent<'a> {
+    pub phase: Phase,
+    pool: usize,
+    lines: &'a [String],
+}
+
 #[derive(Default)]
 pub struct Catalog {
     // One-based indices into rules. Zero clears a preview.
@@ -145,6 +164,21 @@ impl Catalog {
         }
     }
 
+    pub fn event(&self, phase: u8, id: usize) -> Option<CommandEvent<'_>> {
+        let rule = id.checked_sub(1).and_then(|i| self.rules.get(i));
+        let (phase, pool, lines) = match (rule, phase) {
+            (Some(Rule::Family(f)), b'e') => (Phase::Editing, id, &f.editing),
+            (Some(Rule::Group(g)), b'e') => (Phase::Editing, id, &g.editing),
+            (Some(Rule::Group(g)), b'r') => (Phase::Running, id, &g.running),
+            (Some(Rule::Group(g)), b'+') => (Phase::Done, id, &g.done),
+            (Some(Rule::Group(_)), b'-') => (Phase::Failed, 0, &self.failed),
+            (Some(Rule::Group(_)), b'i') => (Phase::Interrupted, 0, &self.interrupted),
+            (None, b'n') if id == 0 => (Phase::Missing, 0, &self.command_not_found),
+            _ => return None,
+        };
+        Some(CommandEvent { phase, pool, lines })
+    }
+
     pub fn known_prefix(&self, prefix: &str) -> bool {
         [&self.commands, &self.families].into_iter().any(|index| {
             index
@@ -184,30 +218,21 @@ fn validate_lines(field: &str, lines: &[String]) -> Result<(), String> {
 
 #[derive(Default)]
 pub struct Dialogue {
-    last: HashMap<(u8, usize), usize>,
+    last: HashMap<(Phase, usize), usize>,
 }
 
 impl Dialogue {
-    pub fn choose<'a>(&mut self, catalog: &'a Catalog, phase: u8, id: usize) -> Option<&'a str> {
-        let rule = id.checked_sub(1).and_then(|i| catalog.rules.get(i));
-        let (key, lines) = match (rule, phase) {
-            (Some(Rule::Family(f)), b'e') => (id, &f.editing),
-            (Some(Rule::Group(g)), b'e') => (id, &g.editing),
-            (Some(Rule::Group(g)), b'r') => (id, &g.running),
-            (Some(Rule::Group(g)), b'+') => (id, &g.done),
-            (Some(Rule::Group(_)), b'-') => (0, &catalog.failed),
-            (Some(Rule::Group(_)), b'i') => (0, &catalog.interrupted),
-            (None, b'n') if id == 0 => (0, &catalog.command_not_found),
-            _ => return None,
-        };
-        let index = match self.last.get(&(phase, key)) {
+    pub fn choose<'a>(&mut self, event: CommandEvent<'a>) -> &'a str {
+        let key = (event.phase, event.pool);
+        let lines = event.lines;
+        let index = match self.last.get(&key) {
             Some(&previous) if lines.len() > 1 => {
                 (previous + fastrand::usize(1..lines.len())) % lines.len()
             }
             _ => fastrand::usize(..lines.len()),
         };
-        self.last.insert((phase, key), index);
-        Some(&lines[index])
+        self.last.insert(key, index);
+        &lines[index]
     }
 }
 
@@ -245,13 +270,11 @@ groups:
         ] {
             let id = catalog.editing(line).unwrap();
             for _ in 0..2 {
-                assert_eq!(dialogue.choose(&catalog, phase, id), Some(expected));
+                assert_eq!(dialogue.choose(catalog.event(phase, id).unwrap()), expected);
             }
         }
         assert_ne!(catalog.commands["git diff"], catalog.commands["git status"]);
-        assert!(dialogue
-            .choose(&catalog, b'+', catalog.families["task"])
-            .is_none());
+        assert!(catalog.event(b'+', catalog.families["task"]).is_none());
     }
 
     #[test]
@@ -266,15 +289,15 @@ groups:
                 } else {
                     catalog.commands["pwd"]
                 };
-                let line = dialogue.choose(&catalog, phase, id).unwrap();
+                let line = dialogue.choose(catalog.event(phase, id).unwrap());
                 assert_ne!(Some(line), previous);
                 previous = Some(line);
             }
         }
-        let missing = dialogue.choose(&catalog, b'n', 0).unwrap();
+        let missing = dialogue.choose(catalog.event(b'n', 0).unwrap());
         assert!(catalog.command_not_found.iter().any(|line| line == missing));
-        assert_ne!(dialogue.choose(&catalog, b'n', 0), Some(missing));
-        assert!(dialogue.choose(&catalog, b'+', 0).is_none());
+        assert_ne!(dialogue.choose(catalog.event(b'n', 0).unwrap()), missing);
+        assert!(catalog.event(b'+', 0).is_none());
     }
 
     #[test]
