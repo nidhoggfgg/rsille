@@ -42,12 +42,31 @@ fn advertises_sixel(reply: &[u8]) -> bool {
     params.split(|&b| b == b';').skip(1).any(|p| p == b"4")
 }
 
-fn check_sixel(original: &libc::termios) -> io::Result<()> {
+fn cursor_position(reply: &[u8]) -> Option<(u16, u16)> {
+    reply
+        .windows(2)
+        .enumerate()
+        .filter(|(_, prefix)| *prefix == b"\x1b[")
+        .find_map(|(i, _)| {
+            let fields = reply[i + 2..]
+                .split_inclusive(|&b| b == b'R')
+                .next()?
+                .strip_suffix(b"R")?;
+            let (row, col) = std::str::from_utf8(fields).ok()?.split_once(';')?;
+            let (row, col) = (row.parse().ok()?, col.parse().ok()?);
+            (row > 0 && col > 0).then_some((col, row))
+        })
+}
+
+fn probe_terminal(original: &libc::termios, alt_screen: bool) -> io::Result<Option<(u16, u16)>> {
     let mut raw = *original;
     unsafe { libc::cfmakeraw(&mut raw) };
     check(unsafe { libc::tcsetattr(0, libc::TCSANOW, &raw) })?;
     let result = (|| {
         let mut out = io::stdout().lock();
+        if !alt_screen {
+            out.write_all(b"\x1b[6n")?;
+        }
         out.write_all(b"\x1b[c")?;
         out.flush()?;
         let deadline = Instant::now() + Duration::from_millis(500);
@@ -75,8 +94,16 @@ fn check_sixel(original: &libc::termios) -> io::Result<()> {
             }
             used += n as usize;
             if advertises_sixel(&reply[..used]) {
-                return Ok(());
+                if alt_screen {
+                    return Ok(Some((1, 1)));
+                }
+                if let Some(cursor) = cursor_position(&reply[..used]) {
+                    return Ok(Some(cursor));
+                }
             }
+        }
+        if advertises_sixel(&reply[..used]) {
+            return Ok(None);
         }
         Err(io::Error::new(
             io::ErrorKind::Unsupported,
@@ -89,12 +116,18 @@ fn check_sixel(original: &libc::termios) -> io::Result<()> {
 
 struct Terminal {
     original: libc::termios,
+    alt_screen: bool,
+    child_alternate: bool,
 }
 impl Drop for Terminal {
     fn drop(&mut self) {
         // Ctrl+] can also interrupt a child application that enabled mouse tracking.
         let _ = io::stdout().write_all(b"\x18\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l");
-        let _ = io::stdout().write_all(b"\x1b[0m\x1b[?1049l");
+        let mut out = io::stdout().lock();
+        let _ = out.write_all(b"\x1b[0m");
+        if self.alt_screen || self.child_alternate {
+            let _ = out.write_all(b"\x1b[?1049l");
+        }
         let _ = io::stdout().flush();
         unsafe {
             libc::tcsetattr(0, libc::TCSANOW, &self.original);
@@ -116,7 +149,7 @@ impl Drop for Child {
 }
 
 /// Requires exclusive use of stdin, stdout and the spawned child's wait status.
-pub fn run(mut pet: crate::pet::Pet, capture_mouse: bool) -> io::Result<()> {
+pub fn run(mut pet: crate::pet::Pet, options: crate::Options) -> io::Result<()> {
     let shell = std::env::var_os("SHELL")
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "/bin/sh".into());
@@ -131,7 +164,7 @@ pub fn run(mut pet: crate::pet::Pet, capture_mouse: bool) -> io::Result<()> {
     let mut s = size(1)?;
     let mut original = unsafe { std::mem::zeroed() };
     check(unsafe { libc::tcgetattr(0, &mut original) })?;
-    check_sixel(&original).map_err(|e| {
+    let cursor = probe_terminal(&original, options.alt_screen).map_err(|e| {
         io::Error::new(
             e.kind(),
             format!("无法确认终端支持 Sixel，未启动 shell：{e}"),
@@ -155,14 +188,21 @@ pub fn run(mut pet: crate::pet::Pet, capture_mouse: bool) -> io::Result<()> {
         libc::cfmakeraw(&mut raw);
     }
     check(unsafe { libc::tcsetattr(0, libc::TCSANOW, &raw) })?;
-    let _terminal = Terminal { original };
+    let mut terminal = Terminal {
+        original,
+        alt_screen: options.alt_screen,
+        child_alternate: false,
+    };
     let mut decoder = crate::mouse::Mouse::default();
     let mut input_deadline = None;
-    let mut food = crate::food::Food::home();
+    let mut food =
+        crate::food::Food::new(cursor.filter(|&(col, row)| col <= s.ws_col && row <= s.ws_row));
     let mut food_deadline = None;
     let mut out = io::stdout().lock();
-    out.write_all(b"\x1b[?1049h\x1b[2J\x1b[H")?;
-    if capture_mouse {
+    if options.alt_screen {
+        out.write_all(b"\x1b[?1049h\x1b[2J\x1b[H")?;
+    }
+    if options.capture_mouse {
         out.write_all(b"\x1b[?1006h\x1b[?1003h")?;
     }
     let mut pending = std::collections::VecDeque::<u8>::new();
@@ -230,7 +270,8 @@ pub fn run(mut pet: crate::pet::Pet, capture_mouse: bool) -> io::Result<()> {
                 pet.hide(&mut update);
             }
             sprite.clear();
-            if end {
+            terminal.child_alternate = boundary.alternate;
+            if end && !boundary.alternate {
                 pet.draw(
                     frame.wrapping_sub(1),
                     s.ws_col,
@@ -309,7 +350,7 @@ pub fn run(mut pet: crate::pet::Pet, capture_mouse: bool) -> io::Result<()> {
             if bytes.contains(&0x1d) {
                 break;
             }
-            if capture_mouse {
+            if options.capture_mouse {
                 decoder.feed(bytes, &mut pending, |kind, col, row| {
                     use crate::mouse::MouseKind;
                     if col <= s.ws_col && row <= s.ws_row {
@@ -332,10 +373,11 @@ pub fn run(mut pet: crate::pet::Pet, capture_mouse: bool) -> io::Result<()> {
         }
     }
     update.clear();
-    if !batch.is_empty() && boundary.ready() {
+    if boundary.ready() {
         pet.hide(&mut update);
     }
     boundary.feed(&batch);
+    terminal.child_alternate = boundary.alternate;
     render_batch(&mut out, &update, &batch, &[], boundary.ready())?;
     if !boundary.ready() {
         out.write_all(b"\x18")?; // Cancel unfinished shell output before terminal teardown.
@@ -393,6 +435,14 @@ fn cursor_update(out: &mut impl Write, update: &[u8]) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reads_one_based_cursor_position_alongside_device_attributes() {
+        assert_eq!(cursor_position(b"\x1b[?62;4c\x1b[21;7R"), Some((7, 21)));
+        assert_eq!(cursor_position(b"\x1b[21;7R\x1b[?62;4c"), Some((7, 21)));
+        assert_eq!(cursor_position(b"\x1b[0;7R"), None);
+        assert_eq!(cursor_position(b"\x1b[21;7"), None);
+    }
 
     #[test]
     fn requires_sixel_in_a_complete_device_attributes_reply() {

@@ -1,4 +1,4 @@
-//! Tracks syntactic boundaries only; terminal modes and cursor state are not modeled.
+//! Track safe output boundaries and child screen changes across PTY reads.
 
 #[derive(Clone, Copy, Default)]
 enum State {
@@ -17,6 +17,8 @@ enum State {
 pub struct Boundary {
     state: State,
     continuation: u8,
+    csi: Vec<u8>,
+    pub alternate: bool,
 }
 
 impl Boundary {
@@ -42,6 +44,23 @@ impl Boundary {
                 0xf0..=0xf4 => 3,
                 _ => 0,
             };
+            if matches!(self.state, Csi) {
+                if matches!(b, 0x40..=0x7e) && self.csi.len() < 128 {
+                    if let Some(params) = self.csi.strip_prefix(b"?") {
+                        if matches!(b, b'h' | b'l')
+                            && params
+                                .split(|&c| c == b';')
+                                .any(|p| matches!(p, b"47" | b"1047" | b"1049"))
+                        {
+                            self.alternate = b == b'h';
+                        }
+                    }
+                } else if self.csi.len() < 128 {
+                    self.csi.push(b);
+                }
+            } else {
+                self.csi.clear();
+            }
             self.state = match (self.state, b) {
                 (_, 0x18 | 0x1a | 0x9c) => Ground, // CAN, SUB, ST
                 (String { osc: true, .. }, 7) | (String { esc: true, .. }, b'\\') => Ground,
@@ -113,6 +132,19 @@ mod tests {
                 assert!(b.feed(b"x\x07y"));
             }
         }
+    }
+
+    #[test]
+    fn tracks_child_screen_across_reads_and_ignores_control_strings() {
+        let mut boundary = Boundary::default();
+        for byte in b"\x1b[?25;1049h" {
+            boundary.feed(&[*byte]);
+        }
+        assert!(boundary.alternate);
+        boundary.feed(b"\x1b]0;\x1b[?1049l\x07");
+        assert!(boundary.alternate);
+        boundary.feed(b"\x1b[?1049l");
+        assert!(!boundary.alternate);
     }
 
     #[test]

@@ -10,10 +10,10 @@ pub struct Food {
 }
 
 impl Food {
-    pub fn home() -> Self {
+    pub fn new(cursor: Option<Cell>) -> Self {
         Self {
             syntax: Boundary::default(),
-            cursor: Some((1, 1)),
+            cursor,
             seq: Vec::new(),
             absolute_safe: true,
         }
@@ -112,7 +112,7 @@ mod tests {
     use super::*;
     #[test]
     fn positions_and_uncertainty() {
-        let mut f = Food::home();
+        let mut f = Food::new(Some((1, 1)));
         assert_eq!(f.feed(b"ab\r\nc", 8, 2), Some(Some((1, 2))));
         assert_eq!(f.feed(b"\n", 8, 2), Some(None));
         assert_eq!(f.feed(b"\x1b[2", 8, 2), Some(None));

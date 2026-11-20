@@ -14,18 +14,43 @@ mod pet;
 mod session;
 
 pub fn run() -> std::io::Result<()> {
-    run_with_mouse_capture(false)
+    Options::default().run()
 }
 
-#[cfg(unix)]
 pub fn run_with_mouse_capture(capture_mouse: bool) -> std::io::Result<()> {
-    session::run(crate::pet::Pet::default(), capture_mouse)
+    Options {
+        capture_mouse,
+        ..Options::default()
+    }
+    .run()
 }
 
-#[cfg(not(unix))]
-pub fn run_with_mouse_capture(_capture_mouse: bool) -> std::io::Result<()> {
-    Err(std::io::Error::new(
-        std::io::ErrorKind::Unsupported,
-        "deepseek-pet requires a Unix terminal with PTY support",
-    ))
+#[derive(Clone, Copy)]
+pub struct Options {
+    pub capture_mouse: bool,
+    pub alt_screen: bool,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Self {
+            capture_mouse: true,
+            alt_screen: false,
+        }
+    }
+}
+
+impl Options {
+    #[cfg(unix)]
+    pub fn run(self) -> std::io::Result<()> {
+        session::run(crate::pet::Pet::default(), self)
+    }
+
+    #[cfg(not(unix))]
+    pub fn run(self) -> std::io::Result<()> {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "deepseek-pet requires a Unix terminal with PTY support",
+        ))
+    }
 }
