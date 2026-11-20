@@ -13,13 +13,18 @@ _rsille_pet_classify() {
   case "${(j: :)words}" in
 @COMMAND_CASES@
   esac
+  if [[ -z $reply && $2 == edit ]]; then
+    case "${words[1]}" in
+@FAMILY_CASES@
+    esac
+  fi
 }
 
 _rsille_pet_edit() {
   emulate -L zsh
   [[ $CONTEXT == start ]] || return 0
   local reply
-  _rsille_pet_classify "$BUFFER"
+  _rsille_pet_classify "$BUFFER" edit
   if [[ $reply != $_rsille_pet_preview ]]; then
     _rsille_pet_preview=$reply
     _rsille_pet_send "e${reply:-0}"

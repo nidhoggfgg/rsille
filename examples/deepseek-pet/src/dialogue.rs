@@ -3,6 +3,25 @@ use std::collections::HashMap;
 
 type Lines = [&'static str; 3];
 
+// These categories describe the tool while its subcommand is still being edited.
+pub const FAMILIES: &[(&[&str], u8, Lines)] = &[
+    (
+        &["git"],
+        b'G',
+        ["要看看仓库吗？", "这回想对仓库做什么？", "我也来逛逛仓库"],
+    ),
+    (
+        &["cargo", "go"],
+        b'B',
+        ["今天要捣鼓哪个项目？", "让我看看你的工程", "我来给你打下手"],
+    ),
+    (
+        &["npm", "pnpm", "yarn", "pip"],
+        b'P',
+        ["要用包管理器啦？", "工具箱打开啦", "这回要用哪个工具？"],
+    ),
+];
+
 pub struct CommandGroup {
     pub code: u8,
     pub commands: &'static [&'static str],
@@ -121,15 +140,21 @@ pub struct Dialogue {
 
 impl Dialogue {
     pub fn choose(&mut self, phase: u8, code: u8) -> Option<&'static str> {
-        let group = GROUPS.iter().find(|group| group.code == code)?;
         // Shared result lines have a shared history, even when the command changes.
-        let (key, lines) = match phase {
-            b'e' => ((phase, code), &group.editing),
-            b'r' => ((phase, code), &group.running),
-            b'+' => ((phase, code), &group.done),
-            b'-' => ((phase, 0), &FAILED),
-            b'i' => ((phase, 0), &INTERRUPTED),
-            _ => return None,
+        let (key, lines) = if let Some(group) = GROUPS.iter().find(|group| group.code == code) {
+            match phase {
+                b'e' => ((phase, code), &group.editing),
+                b'r' => ((phase, code), &group.running),
+                b'+' => ((phase, code), &group.done),
+                b'-' => ((phase, 0), &FAILED),
+                b'i' => ((phase, 0), &INTERRUPTED),
+                _ => return None,
+            }
+        } else {
+            let (_, _, lines) = FAMILIES
+                .iter()
+                .find(|(_, kind, _)| *kind == code && phase == b'e')?;
+            ((phase, code), lines)
         };
         let index = match self.last.get(&key) {
             Some(&previous) => (previous + fastrand::usize(1..lines.len())) % lines.len(),

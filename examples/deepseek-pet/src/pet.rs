@@ -12,11 +12,14 @@ use std::{
     fmt::Write,
     io::{self, Cursor},
     sync::OnceLock,
+    time::{Duration, Instant},
 };
 
 const TILE: usize = 320;
 const ATLAS_WIDTH: usize = 4 * TILE;
 const MAX_SIDE: usize = 192;
+const BUBBLE_READ_TIME: Duration = Duration::from_millis(1500);
+const BUBBLE_LIFETIME: Duration = Duration::from_secs(3);
 
 // The 4-by-6 sheet is decoded once. Rows within a tile retain the atlas stride.
 fn atlas_tile(action: usize, pose: usize) -> &'static [u8] {
@@ -513,7 +516,8 @@ impl Draw for Bubble {
 
 pub struct Pet {
     dialogue: crate::dialogue::Dialogue,
-    speech: Option<(&'static str, std::time::Instant)>,
+    latest_speech: Option<(&'static str, Instant)>,
+    held_speech: Option<(&'static str, Instant)>,
     bubble: Option<Bubble>,
     life: Life,
     previous: Option<Image>,
@@ -532,7 +536,8 @@ impl Default for Pet {
                 ..Life::default()
             },
             dialogue: Default::default(),
-            speech: None,
+            latest_speech: None,
+            held_speech: None,
             bubble: None,
             previous: None,
             last_frame: None,
@@ -544,7 +549,7 @@ impl Default for Pet {
 impl Pet {
     pub fn notice_command(&mut self, phase: u8, command: u8) {
         if (phase, command) == (b'e', b'0') {
-            self.speech = None;
+            self.latest_speech = None;
             return;
         }
         let mood = match phase {
@@ -559,10 +564,7 @@ impl Pet {
             return;
         };
         self.life.react(mood);
-        self.speech = Some((
-            text,
-            std::time::Instant::now() + std::time::Duration::from_secs(3),
-        ));
+        self.latest_speech = Some((text, Instant::now() + BUBBLE_LIFETIME));
     }
 
     pub fn notice_touch(&mut self, col: u16, row: u16) {
@@ -709,12 +711,24 @@ impl Pet {
         let (action, pose, lift) = self.life.pose();
         let col = 1 + self.life.x;
         let row = 1 + (rise - self.life.altitude).saturating_sub(lift);
-        self.speech = self
-            .speech
-            .filter(|&(_, until)| std::time::Instant::now() < until);
-        let bubble = self.speech.and_then(|(text, _)| {
-            Bubble::place(text, col, row, (size.width, size.height), cols, rows)
-        });
+        let now = Instant::now();
+        self.latest_speech = self.latest_speech.filter(|&(_, until)| now < until);
+        let bubble = self
+            .held_speech
+            .filter(|&(_, until)| now < until)
+            .or(self.latest_speech)
+            .and_then(|(text, _)| {
+                Bubble::place(text, col, row, (size.width, size.height), cols, rows)
+            });
+        // Shell output can erase and repaint the same bubble on every keystroke.
+        // Start its reading time only when a different line first fits on screen.
+        let visible = bubble.map(|b| b.text);
+        if visible != self.held_speech.map(|(text, _)| text) {
+            self.held_speech = visible.map(|text| (text, now + BUBBLE_READ_TIME));
+            if let Some(text) = visible {
+                self.latest_speech = Some((text, now + BUBBLE_LIFETIME));
+            }
+        }
         if self.bubble != bubble {
             if let Some(old) = self.bubble.take() {
                 old.erase(cols, rows, out);
@@ -937,7 +951,7 @@ mod tests {
         let mut pet = Pet::default();
         let mut out = Vec::new();
         pet.notice_command(b'e', b't');
-        let edit = pet.speech.unwrap().0;
+        let edit = pet.latest_speech.unwrap().0;
         pet.draw(0, 80, 24, 10, 20, &mut out).unwrap();
         let first = pet.bubble.unwrap();
         assert_eq!(first.text, edit);
@@ -949,6 +963,9 @@ mod tests {
         pet.notice_command(b'e', b'0');
         out.clear();
         pet.draw(0, 80, 24, 10, 20, &mut out).unwrap();
+        assert_eq!(pet.bubble.unwrap().text, edit);
+        pet.held_speech.as_mut().unwrap().1 = Instant::now();
+        pet.draw(0, 80, 24, 10, 20, &mut out).unwrap();
         let mut erase = Vec::new();
         first.erase(80, 24, &mut erase);
         assert!(out.starts_with(&erase));
@@ -959,11 +976,33 @@ mod tests {
         pet.draw(1, 5, 2, 10, 20, &mut out).unwrap();
         assert!(pet.bubble.is_none());
         pet.draw(1, 80, 24, 10, 20, &mut out).unwrap();
-        assert_eq!(pet.bubble.unwrap().text, pet.speech.unwrap().0);
+        assert_eq!(pet.bubble.unwrap().text, pet.latest_speech.unwrap().0);
         assert_ne!(pet.bubble.unwrap().text, edit);
-        pet.speech.as_mut().unwrap().1 = std::time::Instant::now();
+        pet.held_speech.as_mut().unwrap().1 = Instant::now();
+        pet.latest_speech.as_mut().unwrap().1 = Instant::now();
         pet.draw(2, 80, 24, 10, 20, &mut out).unwrap();
         assert!(pet.bubble.is_none());
+    }
+
+    #[test]
+    fn rapid_command_changes_hold_the_visible_line_then_show_the_latest_result() {
+        let mut pet = Pet::default();
+        let mut out = Vec::new();
+        pet.notice_command(b'e', b'G');
+        pet.draw(0, 80, 24, 10, 20, &mut out).unwrap();
+        let first = pet.held_speech.unwrap();
+        for (phase, kind) in [(b'e', b'g'), (b'e', b'0'), (b'r', b'g'), (b'+', b'g')] {
+            pet.notice_command(phase, kind);
+            pet.hide(80, 24, &mut out);
+            pet.draw(1, 80, 24, 10, 20, &mut out).unwrap();
+            assert_eq!(pet.bubble.unwrap().text, first.0);
+            assert_eq!(pet.held_speech.unwrap(), first);
+        }
+        let result = pet.latest_speech.unwrap().0;
+        pet.held_speech.as_mut().unwrap().1 = Instant::now();
+        pet.draw(2, 80, 24, 10, 20, &mut out).unwrap();
+        assert_ne!(result, first.0);
+        assert_eq!(pet.bubble.unwrap().text, result);
     }
 
     #[test]

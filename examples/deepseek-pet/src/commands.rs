@@ -1,5 +1,5 @@
 //! A private datagram socket carries only fixed command categories from the interactive shell.
-use crate::dialogue::GROUPS;
+use crate::dialogue::{FAMILIES, GROUPS};
 use std::{
     ffi::CString,
     fs, io,
@@ -55,8 +55,13 @@ impl Hooks {
             .prefix("rsille-pet-")
             .permissions(fs::Permissions::from_mode(0o700))
             .tempdir()?;
+        let mut families = String::new();
+        for (name, kind) in families_by_name() {
+            writeln!(families, "      '{name}') reply={} ;;", char::from(kind)).unwrap();
+        }
         let script = include_str!("commands.zsh")
             .replace("@COMMAND_CASES@", &cases)
+            .replace("@FAMILY_CASES@", &families)
             .replace("@EVENT_FD@", &sender.as_raw_fd().to_string());
         fs::write(
             startup.path().join(".zshenv"),
@@ -96,17 +101,34 @@ fn commands() -> impl Iterator<Item = (&'static str, u8)> {
         .flat_map(|group| group.commands.iter().map(|&name| (name, group.code)))
 }
 
+fn families_by_name() -> impl Iterator<Item = (&'static str, u8)> {
+    FAMILIES
+        .iter()
+        .flat_map(|&(names, kind, _)| names.iter().map(move |&name| (name, kind)))
+}
+
+fn family(name: &str) -> Option<u8> {
+    families_by_name()
+        .find(|&(tool, _)| tool == name)
+        .map(|(_, kind)| kind)
+}
+
 // Only keep a prefix of a known command. Complex line edits defer to fish_preexec.
 #[derive(Default)]
 pub struct FishPreview {
     prefix: Option<&'static str>,
+    extra_spaces: usize,
+    // Length of the unmatched ASCII suffix, so backspace can recover a known prefix.
+    tail: usize,
     shown: Option<u8>,
 }
 
 impl FishPreview {
     pub fn prompt(&mut self) {
-        self.prefix = Some("");
-        self.shown = None;
+        *self = Self {
+            prefix: Some(""),
+            ..Self::default()
+        };
     }
 
     pub fn end(&mut self) -> bool {
@@ -116,29 +138,65 @@ impl FishPreview {
 
     pub fn input(&mut self, byte: u8) -> Option<u8> {
         if byte.is_ascii_control() && !matches!(byte, 8 | 127)
-            || matches!(byte, b';' | b'|' | b'&' | b'>' | b'<' | b'(' | b')')
+            || matches!(byte, b';' | b'|' | b'&' | b'>' | b'<' | b'(' | b')' | b'`')
         {
             return self.end().then_some(b'0');
         }
-        let prefix = self.prefix?;
-        if byte == b' ' && (prefix.is_empty() || self.shown.is_some()) {
-            if self.shown.is_some() {
-                self.prefix = None;
+        let backspace = matches!(byte, 8 | 127);
+        let Some(prefix) = self.prefix else {
+            return (backspace && self.end()).then_some(b'0');
+        };
+        if !byte.is_ascii() {
+            // Leave Unicode editing to fish. A filename can keep its command's bubble.
+            self.prefix = None;
+            return if self.tail > 0 {
+                None
+            } else {
+                self.change(prefix.split_once(' ').and_then(|(tool, _)| family(tool)))
+            };
+        }
+        if self.tail > 0 {
+            if backspace {
+                self.tail -= 1;
+            } else {
+                self.tail += 1;
+            }
+            if self.tail > 0 {
+                return None;
+            }
+        } else if byte == b' ' && (prefix.is_empty() || prefix.ends_with(' ')) {
+            if !prefix.is_empty() {
+                self.extra_spaces += 1;
             }
             return None;
+        } else if backspace && prefix.ends_with(' ') && self.extra_spaces > 0 {
+            self.extra_spaces -= 1;
+            return None;
+        } else if backspace {
+            self.prefix = Some(&prefix[..prefix.len().saturating_sub(1)]);
+        } else if let Some(name) = commands().map(|(name, _)| name).find(|name| {
+            name.starts_with(prefix) && name.as_bytes().get(prefix.len()) == Some(&byte)
+        }) {
+            self.prefix = Some(&name[..prefix.len() + 1]);
+        } else {
+            self.tail = 1;
+            // A space starts arguments. Any other byte extends the current word.
+            let kind = if byte == b' ' {
+                self.shown
+            } else {
+                prefix.split_once(' ').and_then(|(tool, _)| family(tool))
+            };
+            return self.change(kind);
         }
-        self.prefix = match byte {
-            8 | 127 => Some(&prefix[..prefix.len().saturating_sub(1)]),
-            _ => commands()
-                .map(|(name, _)| name)
-                .find(|name| {
-                    name.starts_with(prefix) && name.as_bytes().get(prefix.len()) == Some(&byte)
-                })
-                .map(|name| &name[..prefix.len() + 1]),
-        };
+        let prefix = self.prefix?;
         let kind = commands()
-            .find(|&(name, _)| Some(name) == self.prefix)
-            .map(|(_, kind)| kind);
+            .find(|&(name, _)| name == prefix)
+            .map(|(_, kind)| kind)
+            .or_else(|| family(prefix.split(' ').next()?));
+        self.change(kind)
+    }
+
+    fn change(&mut self, kind: Option<u8>) -> Option<u8> {
         if kind == self.shown {
             return None;
         }
@@ -159,14 +217,24 @@ mod tests {
         };
         assert!(events(&mut preview, b"git status").is_empty());
         preview.prompt();
-        assert_eq!(events(&mut preview, b"git status"), b"g");
-        assert_eq!(events(&mut preview, b"\x7fs"), b"0g");
+        assert_eq!(events(&mut preview, b"gi"), b"");
+        assert_eq!(events(&mut preview, b"t"), b"G");
+        assert_eq!(events(&mut preview, b" sta"), b"");
+        assert_eq!(events(&mut preview, b"tus"), b"g");
+        assert_eq!(events(&mut preview, b"\x7fs"), b"Gg");
         assert_eq!(events(&mut preview, b" -s | cat"), b"0");
         preview.prompt();
         assert!(events(&mut preview, b"echo cargo test").is_empty());
         preview.prompt();
-        assert!(events(&mut preview, b"git sta\tcargo test").is_empty());
+        assert_eq!(events(&mut preview, b"git sta\tcargo test"), b"G0");
         preview.prompt();
-        assert_eq!(events(&mut preview, b"cargo test\rgit status"), b"t0");
+        assert_eq!(events(&mut preview, b"cargo test\rgit status"), b"Bt0");
+        preview.prompt();
+        assert_eq!(events(&mut preview, b"gitx\x7f  ps\x7fush origin"), b"G0Gn");
+        preview.prompt();
+        assert_eq!(events(&mut preview, b"npm install"), b"Pi");
+        preview.prompt();
+        assert_eq!(events(&mut preview, "git add 文件".as_bytes()), b"Gv");
+        assert_eq!(events(&mut preview, b" | cat"), b"0");
     }
 }
