@@ -19,6 +19,8 @@ pub struct Boundary {
     continuation: u8,
     csi: Vec<u8>,
     pub alternate: bool,
+    /// The last batch included a screen selection, even if it switched back.
+    pub screen_selected: bool,
 }
 
 impl Boundary {
@@ -30,6 +32,7 @@ impl Boundary {
     pub fn feed(&mut self, bytes: &[u8]) -> bool {
         use self::State::*;
         let mut rang = false;
+        self.screen_selected = false;
         for &b in bytes {
             rang |= b == 7 && self.ready();
             // A continuation byte can look exactly like an eight-bit C1 control.
@@ -53,6 +56,7 @@ impl Boundary {
                                 .any(|p| matches!(p, b"47" | b"1047" | b"1049"))
                         {
                             self.alternate = b == b'h';
+                            self.screen_selected = true;
                         }
                     }
                 } else if self.csi.len() < 128 {
@@ -145,6 +149,12 @@ mod tests {
         assert!(boundary.alternate);
         boundary.feed(b"\x1b[?1049l");
         assert!(!boundary.alternate);
+        assert!(boundary.screen_selected);
+        boundary.feed(b"prompt");
+        assert!(!boundary.screen_selected);
+        boundary.feed(b"\x1b[?47h\x1b[?47l");
+        assert!(!boundary.alternate);
+        assert!(boundary.screen_selected);
     }
 
     #[test]

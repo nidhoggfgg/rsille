@@ -330,7 +330,8 @@ pub fn run(options: crate::Options) -> io::Result<()> {
             }
             sprite.clear();
             terminal.child_alternate = boundary.alternate;
-            if end && !boundary.alternate {
+            // Forward the screen switch first. Resume drawing on a later batch.
+            if end && !boundary.alternate && !boundary.screen_selected {
                 pet.draw(
                     frame.wrapping_sub(1),
                     s.ws_col,
@@ -340,7 +341,13 @@ pub fn run(options: crate::Options) -> io::Result<()> {
                     &mut sprite,
                 )?;
             }
-            render_batch(&mut out, &update, &batch, &sprite, start && end)?;
+            render_batch(
+                &mut out,
+                &update,
+                &batch,
+                &sprite,
+                start && end && !boundary.screen_selected,
+            )?;
             batch.clear();
             due = None;
         }
@@ -436,12 +443,19 @@ pub fn run(options: crate::Options) -> io::Result<()> {
         }
     }
     update.clear();
-    if boundary.ready() {
+    let start = boundary.ready();
+    if start {
         pet.hide(s.ws_col, s.ws_row, &mut update);
     }
     boundary.feed(&batch);
     terminal.child_alternate = boundary.alternate;
-    render_batch(&mut out, &update, &batch, &[], boundary.ready())?;
+    render_batch(
+        &mut out,
+        &update,
+        &batch,
+        &[],
+        start && boundary.ready() && !boundary.screen_selected,
+    )?;
     if !boundary.ready() {
         out.write_all(b"\x18")?; // Cancel unfinished shell output before terminal teardown.
     }
@@ -453,9 +467,9 @@ fn render_batch(
     erase: &[u8],
     bytes: &[u8],
     sprite: &[u8],
-    complete: bool,
+    group_update: bool,
 ) -> io::Result<()> {
-    if !complete {
+    if !group_update {
         write_update(out, erase)?;
         out.write_all(bytes)?;
         return write_update(out, sprite);
