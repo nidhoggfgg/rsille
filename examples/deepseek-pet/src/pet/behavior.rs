@@ -1,6 +1,6 @@
 use crate::{
     animation::{self, Clip},
-    food::{Foraging, Treat, TreatState},
+    food::{Foraging, Treat},
     mouse::Pursuit,
     Feature,
 };
@@ -10,6 +10,7 @@ use std::collections::BTreeSet;
 pub(super) enum Mood {
     Swim,
     Watch,
+    Grab,
     Hop,
     Swoop,
     Bubbles,
@@ -17,6 +18,7 @@ pub(super) enum Mood {
     Startled,
     Puzzled,
     Snack,
+    EatFish,
     Nap,
     #[default]
     Idle,
@@ -118,12 +120,19 @@ impl Life {
             let treat = self.treat.filter(|t| reachable(&t.cell));
             let target = treat.map(|t| t.cell).or(meal).or(pointer);
             if let Some((c, r)) = target.filter(|_| !reacting) {
+                // Aim pointer interactions at the hands, slightly below the sprite center.
+                let hand_target = treat.is_some() || meal.is_none();
+                let offset_y = if hand_target {
+                    (height / 2 + (height / 8).max(1)).min(height - 1)
+                } else {
+                    height / 2
+                };
                 let (x, altitude) = if self.anchored {
                     (travel, 0)
                 } else {
                     (
                         (c - 1).saturating_sub(width / 2).min(travel),
-                        rise - (r - 1).saturating_sub(height / 2).min(rise),
+                        rise - (r - 1).saturating_sub(offset_y).min(rise),
                     )
                 };
                 if self.x != x {
@@ -139,25 +148,19 @@ impl Life {
                 if let Some(pointer) = &mut self.pointer {
                     pointer.target = None;
                 }
-                if let Some(treat) = treat {
-                    if treat.state != TreatState::Placed {
-                        if self.mood != Mood::Watch {
-                            self.age = 0;
-                        }
-                        self.mood = Mood::Watch;
-                        self.age %= animation::WATCH.duration;
-                        continue;
-                    }
+                if treat.is_some() {
                     self.treat = None;
                     if let Some(foraging) = &mut self.foraging {
                         foraging.fill_up();
                     }
-                    self.mood = Mood::Snack;
+                    self.playing = true;
+                    self.mood = Mood::EatFish;
                 } else if let Some(foraging) = self.foraging.as_mut().filter(|_| meal.is_some()) {
                     eaten = foraging.eat();
                     self.mood = Mood::Snack;
                 } else {
-                    self.mood = Mood::Watch;
+                    self.playing = true;
+                    self.mood = Mood::Grab;
                 }
                 self.age = 0;
                 continue;
@@ -189,7 +192,7 @@ impl Life {
                 if self.mood == Mood::Nap {
                     self.fatigue = 0;
                 }
-                if self.mood == Mood::Snack {
+                if matches!(self.mood, Mood::Snack | Mood::EatFish) {
                     if let Some(foraging) = &mut self.foraging {
                         foraging.hunger = 0;
                     }
@@ -264,7 +267,8 @@ impl Life {
             Mood::Startled => &animation::STARTLED,
             Mood::Hop => &animation::HOP,
             Mood::Watch => &animation::WATCH,
-            Mood::Snack => &animation::SNACK,
+            Mood::Grab => &animation::GRAB,
+            Mood::Snack | Mood::EatFish => &animation::SNACK,
             Mood::Nap => &animation::NAP,
             Mood::Idle if self.choice & 1 != 0 => &animation::IDLE_FIN,
             Mood::Idle => &animation::IDLE,

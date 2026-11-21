@@ -17,6 +17,54 @@ const TILE: [&[u8; 24]; 12] = [
     b"..............kk........",
 ];
 
+fn color(ink: u8) -> u16 {
+    match ink {
+        b'.' => 256,
+        b'k' => 0b011_010_00, // toasted outline
+        b'r' => 0b101_011_00,
+        b'a' => 0b110_100_01,
+        b'g' => 0b111_101_01,
+        b'c' => 0b111_111_10, // glint on the scales
+        b'e' => 0b001_001_00, // eye
+        _ => unreachable!("unknown fish sprite color"),
+    }
+}
+
+// Coordinates in the 320px snack frames, before scaling or mirroring.
+#[derive(Clone, Copy, PartialEq)]
+pub(super) struct FishBite {
+    left: usize,
+    top: usize,
+}
+
+impl FishBite {
+    pub(super) fn at(age: u16) -> Option<Self> {
+        let age = usize::from(age);
+        let (left, top) = match age {
+            // Lift the whole fish to the lips, then slide it head-first into the mouth.
+            0..=5 => (90 + age, 196 - 6 * age),
+            6..=8 => (96, 160),
+            9..=15 => (96 + 8 * (age - 8), 160),
+            _ => return None,
+        };
+        Some(Self { left, top })
+    }
+
+    pub(super) fn pixel(self, x: usize, y: usize) -> Option<u16> {
+        const WIDTH: usize = 64;
+        const HEIGHT: usize = WIDTH / 2;
+        if x < self.left
+            || x >= (self.left + WIDTH).min(160)
+            || !(self.top..self.top + HEIGHT).contains(&y)
+        {
+            return None;
+        }
+        let row = TILE[(y - self.top) * TILE.len() / HEIGHT];
+        let ink = row[(x - self.left) * row.len() / WIDTH];
+        (ink != b'.').then(|| color(ink))
+    }
+}
+
 #[derive(Clone, Copy, PartialEq)]
 pub(super) struct FishIcon {
     col: u16,
@@ -66,16 +114,7 @@ impl FishIcon {
             let line = TILE[(2 * y + 1) * TILE.len() / (2 * self.height)];
             for x in 0..self.width {
                 let ink = line[(2 * x + 1) * line.len() / (2 * self.width)];
-                pixels.push(match ink {
-                    b'.' => 256,
-                    b'k' => 0b011_010_00, // toasted outline
-                    b'r' => 0b101_011_00,
-                    b'a' => 0b110_100_01,
-                    b'g' => 0b111_101_01,
-                    b'c' => 0b111_111_10, // glint on the scales
-                    b'e' => 0b001_001_00, // eye
-                    _ => unreachable!("unknown fish sprite color"),
-                });
+                pixels.push(color(ink));
             }
         }
         super::sixel::draw(self.col, self.row, self.width, &pixels, out);

@@ -28,6 +28,11 @@ watch:
   - [watch/03.png, 2]
   - [watch/02.png, 2]
   - [watch/01.png, 4]
+grab:
+  - [hop/02.png, 2]
+  - [hop/03.png, 2]
+  - [grab/hold.png, 10]
+  - [hop/01.png, 2]
 nap:
   - [nap/01.png, 8]
   - [nap/02.png, 8]
