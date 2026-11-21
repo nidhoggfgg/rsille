@@ -366,6 +366,9 @@ pub fn run(options: crate::Options) -> io::Result<()> {
             if boundary.feed(&batch) {
                 pet.notice_bell();
             }
+            if boundary.screen_selected {
+                pet.put_away_treat();
+            }
             let end = boundary.ready();
             update.clear();
             if !batch.is_empty() {
@@ -479,13 +482,8 @@ pub fn run(options: crate::Options) -> io::Result<()> {
             }
             if capture_mouse {
                 decoder.feed(bytes, &mut pending, |kind, col, row| {
-                    use crate::mouse::MouseKind;
-                    if col <= s.ws_col && row <= s.ws_row {
-                        match kind {
-                            MouseKind::Motion => pet.notice_mouse(col, row),
-                            MouseKind::LeftPress => pet.notice_touch(col, row),
-                            MouseKind::Other => {}
-                        }
+                    if !boundary.alternate && s.ws_col > 1 && s.ws_row > 0 {
+                        pet.mouse_event(kind, col.min(s.ws_col - 1), row.min(s.ws_row));
                     }
                 });
                 input_deadline = decoder

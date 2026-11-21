@@ -7,6 +7,9 @@ pub struct Mouse(Vec<u8>);
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MouseKind {
     LeftPress,
+    LeftDrag,
+    LeftRelease,
+    RightPress,
     Motion,
     Other,
 }
@@ -118,7 +121,10 @@ impl Mouse {
                     let button = values[0] & !(4 | 8 | 16); // ignore keyboard modifiers
                     let kind = match (b, button) {
                         (b'M', 0) => MouseKind::LeftPress,
-                        (b'M', 32..=35) => MouseKind::Motion,
+                        (b'M', 32) => MouseKind::LeftDrag,
+                        (b'm', 0) => MouseKind::LeftRelease,
+                        (b'M', 2) => MouseKind::RightPress,
+                        (b'M', 33..=35) => MouseKind::Motion,
                         _ => MouseKind::Other,
                     };
                     report(kind, values[1], values[2]);
@@ -139,12 +145,15 @@ mod tests {
         let mut mouse = Mouse::default();
         let mut out = VecDeque::new();
         let mut kinds = vec![];
-        let bytes = b"\x1b[<4;8;9M\x1b[<0;8;9m\x1b[<32;8;9M\x1b[<35;8;9M\x1b[<64;8;9M";
+        let bytes = b"\x1b[<4;8;9M\x1b[<0;8;9m\x1b[<32;8;9M\x1b[<35;8;9M\x1b[<64;8;9M\x1b[<2;8;9M";
         for byte in bytes.chunks(1) {
             mouse.feed(byte, &mut out, |kind, _, _| kinds.push(kind));
         }
         use MouseKind::*;
-        assert_eq!(kinds, [LeftPress, Other, Motion, Motion, Other]);
+        assert_eq!(
+            kinds,
+            [LeftPress, LeftRelease, LeftDrag, Motion, Other, RightPress]
+        );
         assert!(out.is_empty());
     }
 

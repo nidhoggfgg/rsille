@@ -3,7 +3,7 @@
 pub enum Feature {
     /// Move around the terminal, including toward interactive targets.
     Roam,
-    /// Capture mouse input for petting and (when roaming) chasing the pointer.
+    /// Use the mouse to pet the whale, offer a treat, or lead a roaming whale.
     Mouse,
     /// Show command dialogue in a speech bubble.
     Speech,

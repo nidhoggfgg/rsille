@@ -1,11 +1,16 @@
 mod behavior;
+mod fish;
+mod sixel;
 mod speech;
 
 use crate::{
     animation::{self, SIDE},
+    food::Treat,
+    mouse::MouseKind,
     Feature,
 };
 use behavior::{Life, Mood};
+use fish::FishIcon;
 use speech::{Bubble, Speech};
 use std::{collections::BTreeSet, fmt::Write, io};
 
@@ -186,6 +191,7 @@ pub struct Pet<'a> {
     features: BTreeSet<Feature>,
     speech: Option<Speech<'a>>,
     bubble: Option<Bubble<'a>>,
+    fish_icon: Option<FishIcon>,
     life: Life,
     previous: Option<Image>,
     last_frame: Option<FrameKey>,
@@ -212,6 +218,7 @@ impl<'a> Pet<'a> {
             speech: features.contains(&Feature::Speech).then(Speech::default),
             features,
             bubble: None,
+            fish_icon: None,
             previous: None,
             last_frame: None,
             dirty: false,
@@ -248,20 +255,45 @@ impl<'a> Pet<'a> {
         }
     }
 
-    pub fn notice_mouse(&mut self, col: u16, row: u16) {
-        self.life.notice_mouse(col, row);
+    pub fn mouse_event(&mut self, kind: MouseKind, col: u16, row: u16) {
+        if !self.features.contains(&Feature::Mouse) {
+            return;
+        }
+        match kind {
+            MouseKind::LeftPress => {
+                let on_fish = self.fish_icon.is_some_and(|fish| fish.contains(col, row));
+                if !on_fish
+                    && self
+                        .previous
+                        .as_ref()
+                        .is_some_and(|image| image.covers_cell(col, row))
+                {
+                    if self.life.mood != Mood::Wave {
+                        self.life.react(Mood::Wave);
+                    }
+                } else {
+                    self.life.treat = Some(Treat {
+                        cell: (col, row),
+                        held: true,
+                    });
+                }
+            }
+            MouseKind::LeftDrag | MouseKind::LeftRelease => {
+                if let Some(treat) = self.life.treat.as_mut().filter(|t| t.held) {
+                    treat.cell = (col, row);
+                    treat.held = kind == MouseKind::LeftDrag;
+                } else if kind == MouseKind::LeftDrag {
+                    self.life.notice_mouse(col, row);
+                }
+            }
+            MouseKind::Motion => self.life.notice_mouse(col, row),
+            MouseKind::RightPress => self.put_away_treat(),
+            MouseKind::Other => {}
+        }
     }
 
-    pub fn notice_touch(&mut self, col: u16, row: u16) {
-        if self.features.contains(&Feature::Mouse)
-            && self.life.mood != Mood::Wave
-            && self
-                .previous
-                .as_ref()
-                .is_some_and(|image| image.covers_cell(col, row))
-        {
-            self.life.react(Mood::Wave);
-        }
+    pub fn put_away_treat(&mut self) {
+        self.life.treat = None;
     }
 
     /// Replace the latest edible output cell (one-based terminal coordinates).
@@ -282,6 +314,9 @@ impl<'a> Pet<'a> {
 
     /// Remove the visible sprite while its original coordinates are still valid.
     pub fn hide(&mut self, cols: u16, rows: u16, out: &mut Vec<u8>) {
+        if let Some(old) = self.fish_icon.take() {
+            old.erase(cols, rows, self.screen.as_ref(), out);
+        }
         if let Some(old) = self.bubble.take() {
             old.erase(cols, rows, self.screen.as_ref(), out);
         }
@@ -315,6 +350,8 @@ impl<'a> Pet<'a> {
             .min(width)
             .min(height / 6 * 6);
         if h == 0 {
+            self.put_away_treat();
+            self.hide(cols, rows, out);
             self.invalidate();
             return Ok(());
         }
@@ -346,6 +383,16 @@ impl<'a> Pet<'a> {
             .speech
             .as_mut()
             .and_then(|speech| speech.place(col, row, (size.width, size.height), cols, rows));
+        let fish = self
+            .life
+            .treat
+            .map(|t| FishIcon::place(t.cell, cols, rows, metrics));
+        if self.fish_icon != fish {
+            if let Some(old) = self.fish_icon.take() {
+                old.erase(cols, rows, self.screen.as_ref(), out);
+            }
+            self.dirty = true;
+        }
         if self.bubble != bubble {
             if let Some(old) = self.bubble.take() {
                 old.erase(cols, rows, self.screen.as_ref(), out);
@@ -365,7 +412,6 @@ impl<'a> Pet<'a> {
         }
         self.last_frame = Some(key);
         let mut pixels = Vec::with_capacity(w * h);
-        let mut palette = [false; 256];
         let tile = animation::pixels(frame);
         for y in 0..h {
             let sy = (2 * y + 1) * SIDE / (2 * h);
@@ -377,7 +423,6 @@ impl<'a> Pet<'a> {
                     256
                 } else {
                     let c = (tile[i] & 224) | ((tile[i + 1] >> 3) & 28) | (tile[i + 2] >> 6);
-                    palette[c as usize] = true;
                     u16::from(c)
                 };
                 pixels.push(c);
@@ -398,51 +443,16 @@ impl<'a> Pet<'a> {
         if let Some(old) = &self.previous {
             old.clear_uncovered(Some(&image), cols, rows, self.screen.as_ref(), out);
         }
-        write!(out, "\x1b[{row};{col}H\x1bP0;1q\"1;1;{w};{h}").unwrap();
-        for (c, _) in palette.iter().enumerate().filter(|(_, used)| **used) {
-            write!(
-                out,
-                "#{c};2;{};{};{}",
-                (c >> 5) * 100 / 7,
-                ((c >> 2) & 7) * 100 / 7,
-                (c & 3) * 100 / 3
-            )
-            .unwrap();
-        }
-        for y in (0..h).step_by(6) {
-            if y != 0 {
-                out.push(b'-');
-            }
-            for (c, _) in palette.iter().enumerate().filter(|(_, used)| **used) {
-                let mut band = [0u8; MAX_SIDE];
-                for dy in 0..6.min(h - y) {
-                    for (x, mask) in band[..w].iter_mut().enumerate() {
-                        if image.pixels[(y + dy) * w + x] == c as u16 {
-                            *mask |= 1 << dy;
-                        }
-                    }
-                }
-                if let Some(last) = band[..w].iter().rposition(|v| *v != 0) {
-                    write!(out, "#{c}").unwrap();
-                    for run in band[..=last].chunk_by(|a, b| a == b) {
-                        let ch = run[0] + 63;
-                        if run.len() > 3 {
-                            write!(out, "!{}", run.len()).unwrap();
-                            out.push(ch);
-                        } else {
-                            out.resize(out.len() + run.len(), ch);
-                        }
-                    }
-                    out.push(b'$');
-                }
-            }
-        }
-        out.extend_from_slice(b"\x1b\\");
+        sixel::draw(col, row, w, &image.pixels, out);
         self.previous = Some(image);
         if let Some(b) = bubble {
             b.render(out)?;
         }
         self.bubble = bubble;
+        if let Some(icon) = fish {
+            icon.draw(out);
+        }
+        self.fish_icon = fish;
         Ok(())
     }
 }
@@ -572,12 +582,12 @@ mod tests {
         pet.notice_input();
         pet.notice_bell();
         pet.notice_food(1, 1);
-        pet.notice_mouse(1, 1);
+        pet.mouse_event(MouseKind::Motion, 1, 1);
         pet.draw(1, 80, 24, 10, 20, &mut out).unwrap();
         assert!(pet.bubble.is_some());
         assert_eq!(pet.life.mood, Mood::Idle);
         assert!(pet.life.foraging.is_none() && pet.life.pointer.is_none());
-        pet.notice_touch(col + 6, row + 3);
+        pet.mouse_event(MouseKind::LeftPress, col + 6, row + 3);
         assert_eq!(pet.life.mood, Mood::Wave);
         for tick in [2, 120, 240, 360] {
             pet.draw(tick, 80, 24, 10, 20, &mut out).unwrap();
@@ -594,7 +604,7 @@ mod tests {
         let mut out = Vec::new();
         pet.draw(0, 80, 24, 10, 20, &mut out).unwrap();
         let (col, row) = pet.last_frame.as_ref().unwrap().origin;
-        pet.notice_touch(col + 6, row + 3);
+        pet.mouse_event(MouseKind::LeftPress, col + 6, row + 3);
         assert_eq!(pet.life.mood, Mood::Idle);
         pet.notice_command(b'-', catalog.commands["ls"]);
         pet.draw(4, 80, 24, 10, 20, &mut out).unwrap();
@@ -616,6 +626,67 @@ mod tests {
             (pet.life.x, pet.life.altitude, pet.life.mood),
             (10, 0, Mood::Snack)
         );
+    }
+
+    #[test]
+    fn whale_follows_a_held_treat_then_eats_it_without_erasing_shell_text() {
+        let mut pet = Pet::default();
+        let mut screen = crate::screen::Screen::new(24, 80, (1, 1)).unwrap();
+        let shell = "\x1b[8;20H\x1b[32m鲸鱼\x1b[0m";
+        screen.feed(shell.as_bytes());
+        pet.screen = Some(screen);
+        let mut visible = vt100::Parser::new(24.try_into().unwrap(), 80.try_into().unwrap(), 0);
+        visible.process(shell.as_bytes());
+        let expected = visible.screen().clone();
+        let mut draw = |pet: &mut Pet<'_>, tick| {
+            let mut out = Vec::new();
+            pet.draw(tick, 80, 24, 10, 20, &mut out).unwrap();
+            visible.process(&out);
+        };
+        draw(&mut pet, 0);
+        pet.mouse_event(MouseKind::LeftPress, 40, 8);
+        draw(&mut pet, 1);
+        assert!(pet.fish_icon.unwrap().contains(40, 8));
+        pet.mouse_event(MouseKind::LeftDrag, 21, 8);
+        pet.notice_food(1, 1);
+        draw(&mut pet, 65);
+        assert_eq!(pet.life.mood, Mood::Watch);
+        assert!(pet.previous.as_ref().unwrap().covers_cell(21, 8));
+        assert!(pet.fish_icon.unwrap().contains(21, 8));
+        pet.mouse_event(MouseKind::LeftRelease, 21, 8);
+        draw(&mut pet, 66);
+        assert_eq!(pet.life.mood, Mood::Snack);
+        assert!(pet.fish_icon.is_none());
+        assert_eq!(pet.life.foraging.as_mut().unwrap().tick(), None);
+        let mut out = Vec::new();
+        pet.hide(80, 24, &mut out);
+        visible.process(&out);
+        for col in 19..23 {
+            assert_eq!(visible.screen().cell(7, col), expected.cell(7, col));
+        }
+    }
+
+    #[test]
+    fn fixed_whale_can_be_hand_fed_and_distant_treats_can_be_retrieved() {
+        let catalog = crate::dialogue::Catalog::default();
+        let mut pet = Pet::new(&catalog, [Feature::Mouse].into());
+        let mut out = Vec::new();
+        pet.draw(0, 80, 24, 10, 20, &mut out).unwrap();
+        let origin = pet.last_frame.as_ref().unwrap().origin;
+        pet.mouse_event(MouseKind::LeftPress, 1, 1);
+        pet.mouse_event(MouseKind::LeftRelease, 1, 1);
+        pet.draw(40, 80, 24, 10, 20, &mut out).unwrap();
+        assert!(pet.fish_icon.unwrap().contains(1, 1));
+        assert_eq!(pet.last_frame.as_ref().unwrap().origin, origin);
+        pet.mouse_event(MouseKind::RightPress, 10, 2);
+        pet.draw(41, 80, 24, 10, 20, &mut out).unwrap();
+        assert!(pet.fish_icon.is_none());
+        pet.mouse_event(MouseKind::LeftPress, 2, 2);
+        pet.mouse_event(MouseKind::LeftRelease, origin.0 + 6, origin.1 + 3);
+        pet.draw(42, 80, 24, 10, 20, &mut out).unwrap();
+        assert_eq!(pet.life.mood, Mood::Snack);
+        assert_eq!(pet.last_frame.as_ref().unwrap().origin, origin);
+        assert!(pet.life.treat.is_none());
     }
 
     #[test]
@@ -713,14 +784,14 @@ mod tests {
         pet.draw(0, 80, 24, 10, 20, &mut out).unwrap();
         let image = pet.previous.as_ref().unwrap();
         let (col, row) = (image.col, image.row);
-        pet.notice_touch(col, row);
+        pet.mouse_event(MouseKind::LeftPress, col, row);
         assert_eq!(pet.life.mood, Mood::Idle);
-        pet.notice_touch(col + 6, row + 3);
+        pet.mouse_event(MouseKind::LeftPress, col + 6, row + 3);
         pet.life.foraging.as_mut().unwrap().hunger = 100;
         pet.notice_food(1, 1);
         let duration = u64::from(animation::WAVE.duration);
         for tick in 1..duration {
-            pet.notice_touch(col + 6, row + 3);
+            pet.mouse_event(MouseKind::LeftPress, col + 6, row + 3);
             pet.notice_bell();
             pet.life.update(tick, 66, 17, 13, 7);
             assert_eq!((pet.life.mood, pet.life.age), (Mood::Wave, tick as u16));
@@ -799,7 +870,7 @@ mod tests {
         let mut pet = Pet::default();
         pet.life.pointer.as_mut().unwrap().curiosity = 0;
         for tick in 0..=33 {
-            pet.notice_mouse(1 + tick as u16, 1);
+            pet.mouse_event(MouseKind::Motion, 1 + tick as u16, 1);
             pet.life.update(tick, 200, 0, 1, 1);
         }
         assert!(pet.life.pointer.as_ref().unwrap().target.is_none());
@@ -810,7 +881,7 @@ mod tests {
     fn targets_follow_both_axes_and_stale_food_is_not_eaten() {
         let mut pet = Pet::default();
         pet.life.pointer.as_mut().unwrap().curiosity = 0;
-        pet.notice_mouse(12, 2);
+        pet.mouse_event(MouseKind::Motion, 12, 2);
         pet.life.update(0, 20, 10, 1, 1);
         pet.life.update(9, 20, 10, 1, 1);
         assert_eq!((pet.life.x, pet.life.altitude), (11, 9));

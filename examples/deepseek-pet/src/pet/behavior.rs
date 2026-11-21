@@ -1,6 +1,6 @@
 use crate::{
     animation::{self, Clip},
-    food::Foraging,
+    food::{Foraging, Treat},
     mouse::Pursuit,
     Feature,
 };
@@ -29,6 +29,7 @@ pub(super) struct Life {
     pub(super) age: u16,
     fatigue: u16,
     pub(super) foraging: Option<Foraging>,
+    pub(super) treat: Option<Treat>,
     pub(super) cooldown: u16,
     bell_cooldown: u16,
     pub(super) choice: u32,
@@ -72,6 +73,7 @@ impl Life {
         self.altitude = self.altitude.min(rise);
         let visible =
             |&(c, r): &(u16, u16)| c > 0 && r > 0 && c <= travel + width && r <= rise + height;
+        self.treat = self.treat.filter(|t| visible(&t.cell));
         if let Some(foraging) = &mut self.foraging {
             foraging.target = foraging.target.filter(visible);
         }
@@ -85,6 +87,7 @@ impl Life {
         if self.anchored {
             self.altitude = 0;
         }
+        let reachable = |&(col, row): &(u16, u16)| !self.anchored || (col > travel && row > rise);
         // A suspended session resumes near its last pose, without unbounded catch-up.
         let elapsed = tick
             .saturating_sub(self.last.replace(tick).unwrap_or(tick))
@@ -97,10 +100,12 @@ impl Life {
                 .foraging
                 .as_mut()
                 .and_then(Foraging::tick)
-                .filter(|&(c, r)| !self.anchored || (c > travel && r > rise));
+                .filter(reachable);
             let pointer = self.pointer.as_mut().and_then(Pursuit::tick);
             let reacting = matches!(self.mood, Mood::Wave | Mood::Startled | Mood::Puzzled);
-            if let Some((c, r)) = meal.or(pointer).filter(|_| !reacting) {
+            let treat = self.treat.filter(|t| reachable(&t.cell));
+            let target = treat.map(|t| t.cell).or(meal).or(pointer);
+            if let Some((c, r)) = target.filter(|_| !reacting) {
                 let (x, altitude) = if self.anchored {
                     (travel, 0)
                 } else {
@@ -114,20 +119,35 @@ impl Life {
                 }
                 self.x = approach(self.x, x);
                 self.altitude = approach(self.altitude, altitude);
-                self.mood = Mood::Swim;
-                self.age %= animation::SWIM.duration;
-                if (self.x, self.altitude) == (x, altitude) {
-                    self.age = 0;
-                    if let Some(pointer) = &mut self.pointer {
-                        pointer.target = None;
-                    }
-                    if let Some(foraging) = self.foraging.as_mut().filter(|_| meal.is_some()) {
-                        eaten = foraging.eat();
-                        self.mood = Mood::Snack;
-                    } else {
-                        self.mood = Mood::Watch;
-                    }
+                if (self.x, self.altitude) != (x, altitude) {
+                    self.mood = Mood::Swim;
+                    self.age %= animation::SWIM.duration;
+                    continue;
                 }
+                if let Some(pointer) = &mut self.pointer {
+                    pointer.target = None;
+                }
+                if let Some(treat) = treat {
+                    if treat.held {
+                        if self.mood != Mood::Watch {
+                            self.age = 0;
+                        }
+                        self.mood = Mood::Watch;
+                        self.age %= animation::WATCH.duration;
+                        continue;
+                    }
+                    self.treat = None;
+                    if let Some(foraging) = &mut self.foraging {
+                        foraging.fill_up();
+                    }
+                    self.mood = Mood::Snack;
+                } else if let Some(foraging) = self.foraging.as_mut().filter(|_| meal.is_some()) {
+                    eaten = foraging.eat();
+                    self.mood = Mood::Snack;
+                } else {
+                    self.mood = Mood::Watch;
+                }
+                self.age = 0;
                 continue;
             }
             if !reacting && !matches!(self.mood, Mood::Snack | Mood::Idle) {
@@ -203,6 +223,9 @@ impl Life {
 
     /// Notice a mouse position in one-based terminal cells.
     pub(super) fn notice_mouse(&mut self, col: u16, row: u16) {
+        if self.treat.is_some() {
+            return;
+        }
         if let Some(pointer) = &mut self.pointer {
             let receptive = matches!(self.mood, Mood::Swim | Mood::Idle | Mood::Watch);
             pointer.motion((col, row), receptive, &mut self.cooldown);

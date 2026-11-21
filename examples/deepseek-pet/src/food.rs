@@ -2,6 +2,13 @@
 use crate::boundary::Boundary;
 
 type Cell = (u16, u16); // one-based terminal coordinates
+
+#[derive(Clone, Copy)]
+pub struct Treat {
+    pub cell: Cell,
+    pub held: bool,
+}
+
 /// Tracks a meal independently of how the pet reaches the character.
 #[derive(Default)]
 pub struct Foraging {
@@ -18,9 +25,13 @@ impl Foraging {
     }
 
     pub fn eat(&mut self) -> Option<Cell> {
+        self.fill_up();
+        self.target.take()
+    }
+
+    pub fn fill_up(&mut self) {
         self.full = 120;
         self.hunger = 0;
-        self.target.take()
     }
 }
 

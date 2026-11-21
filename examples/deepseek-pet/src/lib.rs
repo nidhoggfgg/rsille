@@ -1,5 +1,5 @@
 //! With pet mouse interaction enabled, the session reserves SGR mouse reports for chasing
-//! the pointer and petting the whale. In that mode a literal escape prefix may be delayed
+//! the pointer, petting the whale, and dragging treats. In that mode a literal escape prefix may be delayed
 //! briefly and pasted reports look like mouse input.
 //! Food is inferred only from recent ASCII glyphs at known terminal positions.
 #[cfg(unix)]
