@@ -43,7 +43,7 @@ while running. After font or DPI changes, restart to measure again.
 Native Windows has no query fallback; explicit dimensions are still needed there.
 If both automatic sources fail, native startup fails: measure text-area pixels /
 columns and rows; do not guess 8x18. Explicit overrides skip all OS metric lookup
-and terminal queries, and stay fixed after font changes. An override matching the
+and cell-size queries, and stay fixed after font changes. An override matching the
 grid requires --force-cell-pixels; use it only for a verified unusual cell size.
 Dimensions must be 1..=1024 with area <=65536 pixels per character cell.
 Metric queries do not detect Sixel support.
@@ -58,7 +58,9 @@ Normal invocation requires native Sixel; it never silently falls back. Build wit
 erasure, stable palettes, and non-scrolling positioned output.
 Partial final six-pixel bands must preserve transparent padding without scrolling.
 Actual cell sizes such as 10x20 are supported; do not round the height to 18 or 24.
-No automatic capability detection is performed.
+On Unix (including macOS and WSL), startup checks for Sixel in the terminal's
+primary device attributes (DA1), even with --cell-pixels.
+Erase, palette, and scrolling behavior must still be verified separately.
 The --headless checks do not certify terminal compatibility.";
 
 #[derive(Default, Debug)]
@@ -503,6 +505,12 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
     if options.headless {
         return headless();
+    }
+    #[cfg(all(unix, feature = "sixel"))]
+    if !RasterCapabilities::probe_sixel(std::time::Duration::from_millis(500))
+        .map_err(|err| format!("could not confirm Sixel support (DA1): {err}"))?
+    {
+        return Err("terminal did not advertise Sixel support".into());
     }
     let (width, height) = crossterm::terminal::size()?;
     let config = options.native_config((width, height))?;

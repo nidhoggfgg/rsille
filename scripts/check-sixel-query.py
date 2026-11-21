@@ -21,6 +21,7 @@ import termios
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
+DA1 = b"\x1b[c"
 QUERY = b"\x1b[16t"
 FRAME_END = b"\x1b[?2026l"
 TILE = b'\x1bP7;1;0q"1;1;10;20'
@@ -30,6 +31,8 @@ def check(binary, mode, formula=None):
     master, slave = pty.openpty()
     os.set_blocking(master, False)
     pixels = (1100, 720) if mode == "os" else (0, 0)
+    if mode == "query":
+        pixels = (1103, 727)  # Window padding prevents exact division by the grid.
     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 36, 110, *pixels))
     screen = bytearray()
     output_master, output_slave = pty.openpty() if mode == "mismatched-tty" else (master, slave)
@@ -43,12 +46,17 @@ def check(binary, mode, formula=None):
 import subprocess, sys, termios
 original = termios.tcgetattr(0)
 child = subprocess.run(sys.argv[1:])
-restored = termios.tcgetattr(0) == original
+after = termios.tcgetattr(0)
+if sys.platform == "darwin":
+    # The kernel sets PENDIN when returning from raw to canonical mode.
+    after[3] &= ~termios.PENDIN
+    original[3] &= ~termios.PENDIN
+restored = after == original
 print(f"RSILLE_TTY_RESTORED={restored}", flush=True)
 sys.exit(child.returncode if restored else 1)
 """
     args = [str(binary)]
-    if mode == "explicit":
+    if mode in ("explicit", "no-sixel"):
         args += ["--cell-pixels", "10x20"]
     if formula:
         args += ["--", formula]
@@ -96,8 +104,10 @@ sys.exit(child.returncode if restored else 1)
                 # A stalled/finished reader must never block this test driver.
                 try:
                     os.write(master, b"x" * 256)
-                except BlockingIOError:
-                    pass
+                except OSError as error:
+                    # Darwin can report EIO during teardown before poll() sees exit.
+                    if error.errno not in (errno.EAGAIN, errno.EWOULDBLOCK, errno.EIO):
+                        raise
             if time.monotonic() >= deadline:
                 raise AssertionError(
                     f"{mode}: timed out waiting for {description}; "
@@ -110,6 +120,22 @@ sys.exit(child.returncode if restored else 1)
         return re.sub(rb"\x1b\[[0-?]*[ -/]*[@-~]", b"", data)
 
     try:
+        if formula is None and mode != "mismatched-tty":
+            wait_until(lambda: DA1 in screen, "Sixel capability query")
+            if mode != "silent-da1":
+                # Ignore a secondary DA and malformed primary DA, then handle a fragmented reply.
+                send_input(b"\x1b[>1;4c\x1b[?62;4;?c\x1b[?")
+                send_input(b"62;14;24c" if mode == "no-sixel" else b"65;4;22c")
+            if mode in ("no-sixel", "silent-da1"):
+                wait_until(lambda: process.poll() is not None, "unsupported terminal exit")
+                while pump():
+                    pass
+                assert process.returncode != 0 and b"Sixel" in screen
+                assert QUERY not in screen and b"\x1bP" not in screen
+                assert b"\x1b[?1049h" not in screen and b"RSILLE_TTY_RESTORED=True" in screen
+                print(f"PASS {mode}: rejected before measuring cells or sending Sixel")
+                return
+
         if mode in ("query", "resize", "timeout", "noise", "invalid"):
             wait_until(lambda: QUERY in screen, "startup cell-size query", timeout=3)
             if mode in ("query", "resize"):
@@ -131,12 +157,18 @@ sys.exit(child.returncode if restored else 1)
             assert process.returncode != 0
             assert TILE not in screen
             assert FRAME_END not in screen, "failed startup must not render a frame"
-            assert b"CSI 16 t query" in screen
+            assert (b"DA1" if mode == "mismatched-tty" and formula is None else b"CSI 16 t query") in screen
             assert b"RSILLE_TTY_RESTORED=True" in screen
             assert screen.count(QUERY) == (0 if mode == "mismatched-tty" else 1)
             if mode == "mismatched-tty":
                 assert b"same controlling terminal" in screen
-                assert not select.select([master], [], [], 0.05)[0], "queried the unrelated terminal"
+                if select.select([master], [], [], 0.05)[0]:
+                    # A hung-up Darwin PTY is readable but has no query bytes.
+                    try:
+                        assert os.read(master, 1024) == b"", "queried the unrelated terminal"
+                    except OSError as error:
+                        if error.errno != errno.EIO:
+                            raise
             else:
                 assert b"timed out" in screen, "invalid/noisy input must not complete the probe"
             print(f"PASS {mode}: bounded startup failure and raw-mode restoration")
@@ -246,6 +278,9 @@ def main():
             cwd=ROOT, check=True, timeout=120,
         )
         binary = ROOT / "target/debug/examples" / example
+    if args.formula is None:
+        for mode in ("no-sixel", "silent-da1"):
+            check(binary.resolve(), mode)
     for mode in ("explicit", "os", "query", "resize", "timeout", "noise", "invalid", "mismatched-tty"):
         check(binary.resolve(), mode, args.formula)
 

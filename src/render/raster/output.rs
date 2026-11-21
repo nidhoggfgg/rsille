@@ -227,6 +227,18 @@ pub struct RasterCapabilities {
     pub cell_pixels: Option<CellPixels>,
 }
 
+impl RasterCapabilities {
+    /// Queries primary device attributes (DA1) on Unix, including WSL.
+    ///
+    /// Returns whether the terminal advertises Sixel. This does not test erase,
+    /// palette, or scrolling behavior. Call before any input reader as described
+    /// in [`CellPixels::probe`]. A missing reply produces a timeout error.
+    #[cfg(unix)]
+    pub fn probe_sixel(timeout: Duration) -> io::Result<bool> {
+        crate::render::terminal_probe::sixel(timeout)
+    }
+}
+
 /// Terminal raster settings shared by render builders and TUI applications.
 ///
 /// Raster presentation uses only Sixel and requires the default-enabled `sixel` feature.

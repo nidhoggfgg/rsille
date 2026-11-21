@@ -1,4 +1,4 @@
-//! Explicit startup-only cell-size discovery, before managed input owns the tty.
+//! Explicit startup-only terminal queries, before managed input owns the tty.
 //!
 //! This scan may consume keys, paste, or other unrelated input. It does not flush
 //! input, preserve events, or retain a reader after returning. External input
@@ -51,7 +51,7 @@ pub(super) fn reserve_input() -> io::Result<()> {
 pub(super) fn cell_pixels(timeout: Duration) -> io::Result<(u16, u16)> {
     #[cfg(unix)]
     {
-        unix::cell_pixels(timeout)
+        unix::query(timeout, unix::cell_pixels)
     }
     #[cfg(not(unix))]
     {
@@ -64,6 +64,11 @@ pub(super) fn cell_pixels(timeout: Duration) -> io::Result<(u16, u16)> {
 }
 
 #[cfg(unix)]
+pub(super) fn sixel(timeout: Duration) -> io::Result<bool> {
+    before_input(|| unix::query(timeout, unix::sixel))
+}
+
+#[cfg(unix)]
 mod unix {
     use std::{
         fs::{File, OpenOptions},
@@ -72,7 +77,10 @@ mod unix {
         time::{Duration, Instant},
     };
 
-    pub(super) fn cell_pixels(timeout: Duration) -> io::Result<(u16, u16)> {
+    pub(super) fn query<T>(
+        timeout: Duration,
+        exchange: impl FnOnce(&mut File, Instant) -> io::Result<T>,
+    ) -> io::Result<T> {
         let deadline = Instant::now().checked_add(timeout).ok_or_else(|| {
             io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -104,7 +112,7 @@ mod unix {
                 "terminal probing requires stdin and stdout on the same controlling terminal",
             ));
         }
-        probe_tty(&mut tty, deadline)
+        probe_tty(&mut tty, deadline, exchange)
     }
 
     struct RawMode {
@@ -177,7 +185,11 @@ mod unix {
         }
     }
 
-    fn probe_tty(tty: &mut File, deadline: Instant) -> io::Result<(u16, u16)> {
+    fn probe_tty<T>(
+        tty: &mut File,
+        deadline: Instant,
+        exchange: impl FnOnce(&mut File, Instant) -> io::Result<T>,
+    ) -> io::Result<T> {
         remaining(deadline)?;
         let mut raw = RawMode::acquire(tty)?;
         let result = exchange(tty, deadline);
@@ -190,49 +202,117 @@ mod unix {
         deadline
             .checked_duration_since(Instant::now())
             .filter(|remaining| !remaining.is_zero())
-            .ok_or_else(|| {
-                io::Error::new(
-                    io::ErrorKind::TimedOut,
-                    "terminal cell-size probe timed out",
-                )
-            })
+            .ok_or_else(|| io::Error::new(io::ErrorKind::TimedOut, "terminal probe timed out"))
     }
 
     fn wait(tty: &File, events: libc::c_short, deadline: Instant) -> io::Result<()> {
         loop {
             let left = remaining(deadline)?;
-            let millis = left
-                .as_millis()
-                .saturating_add(u128::from(left.subsec_nanos() % 1_000_000 != 0));
-            let mut fd = libc::pollfd {
-                fd: tty.as_raw_fd(),
-                events,
-                revents: 0,
-            };
-            // SAFETY: poll receives one initialized pollfd and a bounded timeout.
-            let result = unsafe { libc::poll(&mut fd, 1, millis.min(i32::MAX as u128) as i32) };
-            if result < 0 {
-                let error = io::Error::last_os_error();
-                if error.kind() != io::ErrorKind::Interrupted {
-                    return Err(error);
-                }
-            } else if result > 0 {
-                remaining(deadline)?;
-                if fd.revents & libc::POLLNVAL != 0 {
-                    return Err(io::Error::new(
-                        io::ErrorKind::InvalidInput,
-                        "invalid terminal descriptor",
-                    ));
-                }
-                if fd.revents & (events | libc::POLLHUP | libc::POLLERR) != 0 {
-                    return Ok(());
-                }
+            match wait_once(tty.as_raw_fd(), events, left) {
+                Ok(true) => return remaining(deadline).map(|_| ()),
+                Ok(false) => {}
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+                Err(error) => return Err(error),
             }
         }
     }
 
-    fn exchange(tty: &mut File, deadline: Instant) -> io::Result<(u16, u16)> {
-        let mut query = &b"\x1b[16t"[..];
+    #[cfg(not(target_os = "macos"))]
+    fn wait_once(fd: libc::c_int, events: libc::c_short, left: Duration) -> io::Result<bool> {
+        let millis = left.as_nanos().div_ceil(1_000_000).min(i32::MAX as u128);
+        let mut pollfd = libc::pollfd {
+            fd,
+            events,
+            revents: 0,
+        };
+        // SAFETY: poll receives one initialized pollfd and a bounded timeout.
+        if unsafe { libc::poll(&mut pollfd, 1, millis as i32) } < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        if pollfd.revents & libc::POLLNVAL != 0 {
+            return Err(io::Error::from_raw_os_error(libc::EBADF));
+        }
+        Ok(pollfd.revents & (events | libc::POLLHUP | libc::POLLERR) != 0)
+    }
+
+    // Darwin's poll returns POLLNVAL for the /dev/tty alias. select supports it.
+    #[cfg(target_os = "macos")]
+    fn wait_once(fd: libc::c_int, events: libc::c_short, left: Duration) -> io::Result<bool> {
+        if fd as usize >= libc::FD_SETSIZE {
+            return Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "terminal fd exceeds select capacity",
+            ));
+        }
+        let mut timeout = libc::timeval {
+            tv_sec: left.as_secs().min(i32::MAX as u64) as _,
+            tv_usec: left.subsec_micros() as _,
+        };
+        // SAFETY: fd belongs to the open tty and fits in the initialized set.
+        let result = unsafe {
+            let mut set = std::mem::zeroed();
+            libc::FD_SET(fd, &mut set);
+            let null = std::ptr::null_mut();
+            let (read, write) = if events == libc::POLLIN {
+                (&mut set as *mut _, null)
+            } else {
+                (null, &mut set as *mut _)
+            };
+            libc::select(fd + 1, read, write, null, &mut timeout)
+        };
+        if result < 0 {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(result > 0)
+        }
+    }
+
+    pub(super) fn cell_pixels(tty: &mut File, deadline: Instant) -> io::Result<(u16, u16)> {
+        let mut scan = Scan::default();
+        exchange(tty, deadline, b"\x1b[16t", |byte| scan.push(byte))
+    }
+
+    pub(super) fn sixel(tty: &mut File, deadline: Instant) -> io::Result<bool> {
+        // Keep only the current control sequence, including across partial reads.
+        let mut reply = Vec::with_capacity(128);
+        exchange(tty, deadline, b"\x1b[c", |byte| {
+            if byte == 0x1b {
+                reply.clear();
+                reply.push(byte);
+            } else if !reply.is_empty() {
+                if byte == b'c' {
+                    let advertised = da1_sixel(&reply);
+                    reply.clear();
+                    return advertised;
+                }
+                if reply.len() < 128 && (byte.is_ascii_digit() || b"[?;".contains(&byte)) {
+                    reply.push(byte);
+                } else {
+                    reply.clear();
+                }
+            }
+            None
+        })
+    }
+
+    fn da1_sixel(reply: &[u8]) -> Option<bool> {
+        let params = std::str::from_utf8(reply.strip_prefix(b"\x1b[?")?).ok()?;
+        let mut fields = params.split(';').map(str::parse::<u16>);
+        let class = fields.next()?.ok()?;
+        let mut sixel = false;
+        for field in fields {
+            sixel |= field.ok()? == 4;
+        }
+        // VT100-style reports encode option bits instead of a feature list.
+        Some(class >= 60 && sixel)
+    }
+
+    fn exchange<T>(
+        tty: &mut File,
+        deadline: Instant,
+        mut query: &[u8],
+        mut scan: impl FnMut(u8) -> Option<T>,
+    ) -> io::Result<T> {
         while !query.is_empty() {
             wait(tty, libc::POLLOUT, deadline)?;
             match tty.write(query) {
@@ -242,7 +322,6 @@ mod unix {
                 Err(error) => return Err(error),
             }
         }
-        let mut scan = Scan::default();
         let mut bytes = [0; 256];
         loop {
             wait(tty, libc::POLLIN, deadline)?;
@@ -251,8 +330,8 @@ mod unix {
                 Ok(count) => {
                     remaining(deadline)?;
                     for byte in &bytes[..count] {
-                        if let Some(pixels) = scan.push(*byte) {
-                            return Ok(pixels);
+                        if let Some(reply) = scan(*byte) {
+                            return Ok(reply);
                         }
                     }
                 }
@@ -367,7 +446,12 @@ mod unix {
             assert_eq!(before.c_iflag, after.c_iflag);
             assert_eq!(before.c_oflag, after.c_oflag);
             assert_eq!(before.c_cflag, after.c_cflag);
-            assert_eq!(before.c_lflag, after.c_lflag);
+            // Darwin sets PENDIN when canonical input is re-enabled.
+            #[cfg(target_os = "macos")]
+            let mask = !libc::PENDIN;
+            #[cfg(not(target_os = "macos"))]
+            let mask = !0;
+            assert_eq!(before.c_lflag & mask, after.c_lflag & mask);
             assert_eq!(before.c_cc, after.c_cc);
             assert_eq!(unsafe { libc::cfgetispeed(&before) }, unsafe {
                 libc::cfgetispeed(&after)
@@ -421,7 +505,12 @@ mod unix {
                     }
                 });
                 assert_eq!(
-                    probe_tty(&mut slave, Instant::now() + Duration::from_secs(2)).unwrap(),
+                    probe_tty(
+                        &mut slave,
+                        Instant::now() + Duration::from_secs(2),
+                        cell_pixels
+                    )
+                    .unwrap(),
                     (10, 20)
                 );
             });
@@ -440,7 +529,12 @@ mod unix {
                 let saved = attributes(&slave);
                 master.write_all(b"keys\x1b[6;20;10t\n").unwrap();
                 assert_eq!(
-                    probe_tty(&mut slave, Instant::now() + Duration::from_secs(2)).unwrap(),
+                    probe_tty(
+                        &mut slave,
+                        Instant::now() + Duration::from_secs(2),
+                        cell_pixels
+                    )
+                    .unwrap(),
                     (10, 20)
                 );
                 assert_restored(&slave, saved);
@@ -463,7 +557,7 @@ mod unix {
                 }
             }
             assert_eq!(
-                exchange(&mut input, Instant::now() + Duration::from_millis(30))
+                cell_pixels(&mut input, Instant::now() + Duration::from_millis(30))
                     .unwrap_err()
                     .kind(),
                 io::ErrorKind::TimedOut
@@ -475,9 +569,13 @@ mod unix {
             let (_master, mut slave) = pty();
             let saved = attributes(&slave);
             assert_eq!(
-                probe_tty(&mut slave, Instant::now() + Duration::from_millis(30))
-                    .unwrap_err()
-                    .kind(),
+                probe_tty(
+                    &mut slave,
+                    Instant::now() + Duration::from_millis(30),
+                    cell_pixels
+                )
+                .unwrap_err()
+                .kind(),
                 io::ErrorKind::TimedOut
             );
             assert_restored(&slave, saved);
@@ -502,7 +600,7 @@ mod unix {
                         }
                     }
                 });
-                let result = probe_tty(&mut slave, start + Duration::from_millis(100));
+                let result = probe_tty(&mut slave, start + Duration::from_millis(100), cell_pixels);
                 done.store(true, Ordering::Relaxed);
                 assert_eq!(result.unwrap_err().kind(), io::ErrorKind::TimedOut);
             });
@@ -524,7 +622,7 @@ mod unix {
                     assert_eq!(&query, b"\x1b[16t");
                 });
                 assert_eq!(
-                    exchange(&mut input, Instant::now() + Duration::from_secs(2))
+                    cell_pixels(&mut input, Instant::now() + Duration::from_secs(2))
                         .unwrap_err()
                         .kind(),
                     io::ErrorKind::UnexpectedEof

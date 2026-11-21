@@ -76,8 +76,10 @@ and click to bring a window forward. `e` cycles Canvas Braille/HalfBlock/Quadran
 smaller terminals and terminal resizing are supported.
 
 The entire terminal/multiplexer path must support Sixel, graphics ED 2 erasure,
-non-scrolling positioned output and stable palettes. The demo configures these
-capabilities without automatically detecting them.
+non-scrolling positioned output and stable palettes. On Unix (including macOS and WSL)
+the demo checks for Sixel in the terminal's primary device attributes (DA1) before
+measuring cells or drawing. This also applies with `--cell-pixels`. Erase, scroll,
+and palette behavior are still host requirements.
 Unsupported raster output returns an error, with no silent fallback. Startup probing
 uses OS window metrics first;
 unusable OS dimensions trigger a `CSI 16 t` query on Unix (including WSL), requiring
