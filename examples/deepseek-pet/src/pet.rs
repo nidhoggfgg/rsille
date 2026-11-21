@@ -1,20 +1,47 @@
 mod behavior;
 mod fish;
+mod menu;
 mod sixel;
 mod speech;
 
 use crate::{
     animation::{self, SIDE},
-    food::Treat,
+    food::{Treat, TreatState},
     mouse::MouseKind,
     Feature,
 };
 use behavior::{Life, Mood};
 use fish::FishIcon;
+use menu::{Action, Menu};
+use rsille::render::area::{Area, Size};
 use speech::{Bubble, Speech};
-use std::{collections::BTreeSet, fmt::Write, io};
+use std::{
+    collections::BTreeSet,
+    fmt::Write,
+    io,
+    time::{Duration, Instant},
+};
 
 const MAX_SIDE: usize = 192;
+
+fn erase_area(
+    area: Area,
+    cols: u16,
+    rows: u16,
+    screen: Option<&crate::screen::Screen>,
+    out: &mut Vec<u8>,
+) {
+    let viewport = Area::from(Size::from((cols, rows)));
+    let Some(visible) = area.clamp_to(&viewport) else {
+        return;
+    };
+    let col = visible.x() + 1;
+    let width = visible.width();
+    out.extend_from_slice(b"\x1b[49m");
+    for y in visible.y()..visible.y() + visible.height() {
+        crate::screen::clear_span(screen, col, y + 1, width, out);
+    }
+}
 
 /// Return (column, row, SGR-colored text) runs for a cleared viewport.
 /// Transparent cells and the rightmost column are never painted.
@@ -192,6 +219,9 @@ pub struct Pet<'a> {
     speech: Option<Speech<'a>>,
     bubble: Option<Bubble<'a>>,
     fish_icon: Option<FishIcon>,
+    menu_open: bool,
+    painted_menu: Option<Menu>,
+    hint_until: Option<Instant>,
     life: Life,
     previous: Option<Image>,
     last_frame: Option<FrameKey>,
@@ -219,6 +249,9 @@ impl<'a> Pet<'a> {
             features,
             bubble: None,
             fish_icon: None,
+            menu_open: false,
+            painted_menu: None,
+            hint_until: None,
             previous: None,
             last_frame: None,
             dirty: false,
@@ -238,19 +271,19 @@ impl<'a> Pet<'a> {
         if let Some(speech) = &mut self.speech {
             speech.notice_command(event);
         }
-        if self.features.contains(&Feature::CommandReactions) {
+        if !self.menu_open && self.features.contains(&Feature::CommandReactions) {
             self.life.notice_command(event.phase);
         }
     }
 
     pub fn notice_input(&mut self) {
-        if self.features.contains(&Feature::Typing) {
+        if !self.menu_open && self.features.contains(&Feature::Typing) {
             self.life.notice_input();
         }
     }
 
     pub fn notice_bell(&mut self) {
-        if self.features.contains(&Feature::Bell) {
+        if !self.menu_open && self.features.contains(&Feature::Bell) {
             self.life.notice_bell();
         }
     }
@@ -259,41 +292,77 @@ impl<'a> Pet<'a> {
         if !self.features.contains(&Feature::Mouse) {
             return;
         }
-        match kind {
-            MouseKind::LeftPress => {
+        let cell = (col, row);
+        if self.menu_open {
+            match kind {
+                MouseKind::LeftPress => {
+                    self.menu_open = false;
+                    match self.painted_menu.and_then(|menu| menu.action_at(col, row)) {
+                        Some(Action::Feed) => {
+                            self.life.treat = Some(Treat {
+                                cell,
+                                state: TreatState::Carried,
+                            })
+                        }
+                        Some(Action::Bubbles) => self.life.play(Mood::Bubbles),
+                        Some(Action::Nap) => self.life.play(Mood::Nap),
+                        None => {}
+                    }
+                }
+                MouseKind::RightPress => self.menu_open = false,
+                _ => {}
+            }
+            return;
+        }
+        let on_whale = || {
+            self.previous
+                .as_ref()
+                .is_some_and(|image| image.covers_cell(col, row))
+        };
+        match (kind, self.life.treat.as_mut()) {
+            (MouseKind::LeftPress, Some(treat)) if treat.state == TreatState::Carried => {
+                treat.cell = cell;
+                treat.state = TreatState::Dragging;
+            }
+            (MouseKind::LeftPress, _) => {
                 let on_fish = self.fish_icon.is_some_and(|fish| fish.contains(col, row));
-                if !on_fish
-                    && self
-                        .previous
-                        .as_ref()
-                        .is_some_and(|image| image.covers_cell(col, row))
-                {
+                if !on_fish && on_whale() {
                     if self.life.mood != Mood::Wave {
                         self.life.react(Mood::Wave);
                     }
+                    self.hint_until
+                        .get_or_insert_with(|| Instant::now() + Duration::from_secs(3));
                 } else {
                     self.life.treat = Some(Treat {
-                        cell: (col, row),
-                        held: true,
+                        cell,
+                        state: TreatState::Dragging,
                     });
                 }
             }
-            MouseKind::LeftDrag | MouseKind::LeftRelease => {
-                if let Some(treat) = self.life.treat.as_mut().filter(|t| t.held) {
-                    treat.cell = (col, row);
-                    treat.held = kind == MouseKind::LeftDrag;
-                } else if kind == MouseKind::LeftDrag {
-                    self.life.notice_mouse(col, row);
-                }
+            (MouseKind::LeftDrag, Some(treat)) if treat.state != TreatState::Placed => {
+                treat.cell = cell;
+                treat.state = TreatState::Dragging;
             }
-            MouseKind::Motion => self.life.notice_mouse(col, row),
-            MouseKind::RightPress => self.put_away_treat(),
-            MouseKind::Other => {}
+            (MouseKind::LeftRelease, Some(treat)) if treat.state == TreatState::Dragging => {
+                treat.cell = cell;
+                treat.state = TreatState::Placed;
+            }
+            (MouseKind::Motion, Some(treat)) if treat.state == TreatState::Carried => {
+                treat.cell = cell;
+            }
+            (MouseKind::Motion | MouseKind::LeftDrag, _) => self.life.notice_mouse(col, row),
+            (MouseKind::RightPress, Some(_)) => self.life.treat = None,
+            (MouseKind::RightPress, None) if on_whale() => {
+                self.menu_open = true;
+                self.hint_until = Some(Instant::now());
+            }
+            _ => {}
         }
     }
 
-    pub fn put_away_treat(&mut self) {
+    pub fn cancel_mouse_interaction(&mut self) {
         self.life.treat = None;
+        self.menu_open = false;
     }
 
     /// Replace the latest edible output cell (one-based terminal coordinates).
@@ -314,6 +383,9 @@ impl<'a> Pet<'a> {
 
     /// Remove the visible sprite while its original coordinates are still valid.
     pub fn hide(&mut self, cols: u16, rows: u16, out: &mut Vec<u8>) {
+        if let Some(old) = self.painted_menu.take() {
+            erase_area(old.area, cols, rows, self.screen.as_ref(), out);
+        }
         if let Some(old) = self.fish_icon.take() {
             old.erase(cols, rows, self.screen.as_ref(), out);
         }
@@ -350,7 +422,7 @@ impl<'a> Pet<'a> {
             .min(width)
             .min(height / 6 * 6);
         if h == 0 {
-            self.put_away_treat();
+            self.cancel_mouse_interaction();
             self.hide(cols, rows, out);
             self.invalidate();
             return Ok(());
@@ -365,6 +437,9 @@ impl<'a> Pet<'a> {
             .unwrap();
         let travel = cols - 1 - size.width;
         let rise = rows - size.height;
+        if self.menu_open {
+            self.life.pause_at(tick);
+        }
         if let Some((c, r)) = self
             .life
             .update(tick, travel, rise, size.width, size.height)
@@ -379,10 +454,28 @@ impl<'a> Pet<'a> {
         let frame = self.life.frame();
         let col = 1 + self.life.x;
         let row = 1 + (rise - self.life.altitude).saturating_sub(self.life.lift());
-        let bubble = self
-            .speech
-            .as_mut()
-            .and_then(|speech| speech.place(col, row, (size.width, size.height), cols, rows));
+        let whale = Area::new((col - 1, row - 1).into(), (size.width, size.height).into());
+        let menu = self
+            .menu_open
+            .then(|| Menu::place(whale, cols, rows))
+            .flatten();
+        self.menu_open = menu.is_some();
+        if self.painted_menu != menu {
+            if let Some(old) = self.painted_menu.take() {
+                erase_area(old.area, cols, rows, self.screen.as_ref(), out);
+            }
+            self.dirty = true;
+        }
+        let bubble_size = (size.width, size.height);
+        let bubble = if self.menu_open {
+            None
+        } else if self.hint_until.is_some_and(|until| Instant::now() < until) {
+            Bubble::place("右键点我，一起玩", col, row, bubble_size, cols, rows)
+        } else {
+            self.speech
+                .as_mut()
+                .and_then(|speech| speech.place(col, row, bubble_size, cols, rows))
+        };
         let fish = self
             .life
             .treat
@@ -453,6 +546,10 @@ impl<'a> Pet<'a> {
             icon.draw(out);
         }
         self.fish_icon = fish;
+        if let Some(menu) = menu {
+            menu.render(out)?;
+        }
+        self.painted_menu = menu;
         Ok(())
     }
 }
@@ -595,6 +692,118 @@ mod tests {
         }
         pet.draw(361, 100, 24, 10, 20, &mut out).unwrap();
         assert_eq!(pet.last_frame.as_ref().unwrap().origin, (col + 20, row));
+    }
+
+    fn open_menu(pet: &mut Pet<'_>, tick: u64) -> Area {
+        let (col, row) = pet.last_frame.as_ref().unwrap().origin;
+        pet.mouse_event(MouseKind::RightPress, col + 6, row + 3);
+        pet.draw(tick, 80, 24, 10, 20, &mut Vec::new()).unwrap();
+        pet.painted_menu.unwrap().area
+    }
+
+    #[test]
+    fn menu_pauses_roaming_and_dismisses_without_feeding() {
+        let mut pet = Pet::default();
+        pet.life.mood = Mood::Swim;
+        pet.draw(0, 80, 24, 10, 20, &mut Vec::new()).unwrap();
+        let origin = pet.last_frame.as_ref().unwrap().origin;
+        let area = open_menu(&mut pet, 1);
+        pet.mouse_event(MouseKind::Motion, 1, 1);
+        pet.notice_command(b'+', pet.catalog.commands["ls"]);
+        pet.notice_bell();
+        pet.notice_input();
+        pet.hide(80, 24, &mut Vec::new());
+        pet.draw(200, 80, 24, 10, 20, &mut Vec::new()).unwrap();
+        assert_eq!(pet.last_frame.as_ref().unwrap().origin, origin);
+        assert_eq!(pet.life.mood, Mood::Swim);
+        assert_eq!(pet.painted_menu.unwrap().area, area);
+        assert!(pet.bubble.is_none());
+        pet.mouse_event(MouseKind::LeftPress, 1, 1);
+        pet.mouse_event(MouseKind::LeftRelease, 1, 1);
+        pet.draw(201, 80, 24, 10, 20, &mut Vec::new()).unwrap();
+        assert!(!pet.menu_open && pet.painted_menu.is_none() && pet.life.treat.is_none());
+        assert_eq!(pet.life.age, 1);
+    }
+
+    #[test]
+    fn menu_actions_play_and_carry_or_cancel_a_treat() {
+        let catalog = crate::dialogue::Catalog::default();
+        let mut pet = Pet::new(&catalog, [Feature::Mouse].into());
+        pet.draw(0, 80, 24, 10, 20, &mut Vec::new()).unwrap();
+        let (col, row) = pet.last_frame.as_ref().unwrap().origin;
+        let body = (col + 6, row + 3);
+        pet.mouse_event(MouseKind::LeftPress, body.0, body.1);
+        pet.draw(0, 80, 24, 10, 20, &mut Vec::new()).unwrap();
+        assert_eq!(pet.bubble.unwrap().text, "右键点我，一起玩");
+        pet.hint_until = Some(Instant::now());
+        pet.mouse_event(MouseKind::LeftPress, body.0, body.1);
+        pet.draw(0, 80, 24, 10, 20, &mut Vec::new()).unwrap();
+        assert!(pet.bubble.is_none());
+
+        for (offset, mood) in [(1, Mood::Bubbles), (2, Mood::Nap)] {
+            let menu = open_menu(&mut pet, 1);
+            pet.mouse_event(MouseKind::LeftPress, menu.x() + 3, menu.y() + 2 + offset);
+            pet.draw(1, 80, 24, 10, 20, &mut Vec::new()).unwrap();
+            assert_eq!(pet.life.mood, mood);
+            assert!(pet.painted_menu.is_none() && pet.life.treat.is_none());
+        }
+
+        for cancel in [true, false] {
+            let menu = open_menu(&mut pet, 1);
+            let (x, y) = (menu.x() + 3, menu.y() + 2);
+            pet.mouse_event(MouseKind::LeftPress, x, y);
+            pet.mouse_event(MouseKind::LeftRelease, x, y);
+            pet.mouse_event(MouseKind::Motion, body.0, body.1);
+            pet.draw(2, 80, 24, 10, 20, &mut Vec::new()).unwrap();
+            assert!(pet.fish_icon.unwrap().contains(body.0, body.1));
+            assert!(pet.life.treat.unwrap().state == TreatState::Carried);
+            if cancel {
+                pet.mouse_event(MouseKind::RightPress, body.0, body.1);
+                assert!(pet.life.treat.is_none() && !pet.menu_open);
+            } else {
+                pet.mouse_event(MouseKind::LeftPress, 1, 1);
+                pet.mouse_event(MouseKind::LeftDrag, body.0, body.1);
+                pet.mouse_event(MouseKind::LeftRelease, body.0, body.1);
+                assert!(pet.life.treat.unwrap().state == TreatState::Placed);
+                pet.draw(60, 80, 24, 10, 20, &mut Vec::new()).unwrap();
+                assert!(pet.life.treat.is_none());
+            }
+        }
+    }
+
+    #[test]
+    fn menu_restores_text_and_releases_the_whale_if_resized_too_small() {
+        let mut pet = Pet::default();
+        pet.draw(0, 80, 24, 10, 20, &mut Vec::new()).unwrap();
+        let area = open_menu(&mut pet, 0);
+        let (x, y) = (area.x() + 1, area.y() + 2);
+        let shell = format!("\x1b[{y};{x}H\x1b[32;45m鲸鱼在这里");
+        pet.screen = crate::screen::Screen::new(24, 80, (1, 1));
+        pet.screen.as_mut().unwrap().feed(shell.as_bytes());
+        let mut visible = vt100::Parser::new(24.try_into().unwrap(), 80.try_into().unwrap(), 0);
+        visible.process(shell.as_bytes());
+        let expected = visible.screen().clone();
+        pet.invalidate();
+        let mut out = Vec::new();
+        pet.draw(1, 80, 24, 10, 20, &mut out).unwrap();
+        visible.process(&out);
+        assert!(visible.screen().contents().contains("喂小鱼干"));
+        for row in area.y()..area.real_size().height {
+            for col in area.x()..area.real_size().width {
+                let cell = visible.screen().cell(row, col).unwrap();
+                assert_eq!(cell.bgcolor(), vt100::Color::Default);
+            }
+        }
+        let label = visible.screen().cell(y - 1, area.x() + 2).unwrap();
+        assert_eq!(label.fgcolor(), vt100::Color::Default);
+        out.clear();
+        pet.hide(80, 24, &mut out);
+        visible.process(&out);
+        for col in area.x()..area.real_size().width {
+            assert_eq!(visible.screen().cell(y - 1, col), expected.cell(y - 1, col));
+        }
+        pet.draw(2, 8, 3, 10, 20, &mut Vec::new()).unwrap();
+        assert!(!pet.menu_open && pet.painted_menu.is_none());
     }
 
     #[test]

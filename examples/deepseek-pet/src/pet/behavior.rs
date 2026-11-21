@@ -1,6 +1,6 @@
 use crate::{
     animation::{self, Clip},
-    food::{Foraging, Treat},
+    food::{Foraging, Treat, TreatState},
     mouse::Pursuit,
     Feature,
 };
@@ -28,6 +28,7 @@ pub(super) struct Life {
     pub(super) mood: Mood,
     pub(super) age: u16,
     fatigue: u16,
+    playing: bool,
     pub(super) foraging: Option<Foraging>,
     pub(super) treat: Option<Treat>,
     pub(super) cooldown: u16,
@@ -54,11 +55,21 @@ impl Life {
 
     pub(super) fn react(&mut self, mood: Mood) {
         self.altitude = self.altitude.saturating_add(self.lift());
+        self.playing = false;
         self.mood = mood;
         self.age = 0;
         if let Some(pointer) = &mut self.pointer {
             pointer.target = None;
         }
+    }
+
+    pub(super) fn play(&mut self, mood: Mood) {
+        self.react(mood);
+        self.playing = true;
+    }
+
+    pub(super) fn pause_at(&mut self, tick: u64) {
+        self.last = Some(tick);
     }
 
     pub(super) fn update(
@@ -102,7 +113,8 @@ impl Life {
                 .and_then(Foraging::tick)
                 .filter(reachable);
             let pointer = self.pointer.as_mut().and_then(Pursuit::tick);
-            let reacting = matches!(self.mood, Mood::Wave | Mood::Startled | Mood::Puzzled);
+            let reacting =
+                self.playing || matches!(self.mood, Mood::Wave | Mood::Startled | Mood::Puzzled);
             let treat = self.treat.filter(|t| reachable(&t.cell));
             let target = treat.map(|t| t.cell).or(meal).or(pointer);
             if let Some((c, r)) = target.filter(|_| !reacting) {
@@ -128,7 +140,7 @@ impl Life {
                     pointer.target = None;
                 }
                 if let Some(treat) = treat {
-                    if treat.held {
+                    if treat.state != TreatState::Placed {
                         if self.mood != Mood::Watch {
                             self.age = 0;
                         }
@@ -173,6 +185,7 @@ impl Life {
                 _ => self.clip().duration,
             };
             if self.age >= duration {
+                self.playing = false;
                 if self.mood == Mood::Nap {
                     self.fatigue = 0;
                 }

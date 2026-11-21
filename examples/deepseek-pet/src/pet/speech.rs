@@ -71,7 +71,7 @@ pub(super) struct Bubble<'a> {
 }
 
 impl<'a> Bubble<'a> {
-    fn place(
+    pub(super) fn place(
         text: &'a str,
         col: u16,
         row: u16,
@@ -117,16 +117,7 @@ impl<'a> Bubble<'a> {
         screen: Option<&crate::screen::Screen>,
         out: &mut Vec<u8>,
     ) {
-        let viewport = Area::from(Size::from((cols, rows)));
-        let Some(visible) = self.area.clamp_to(&viewport) else {
-            return;
-        };
-        let col = visible.x() + 1;
-        let width = visible.width();
-        out.extend_from_slice(b"\x1b[49m");
-        for y in visible.y()..visible.y() + visible.height() {
-            crate::screen::clear_span(screen, col, y + 1, width, out);
-        }
+        super::erase_area(self.area, cols, rows, screen, out);
     }
 
     pub(super) fn render(self, out: &mut Vec<u8>) -> io::Result<()> {

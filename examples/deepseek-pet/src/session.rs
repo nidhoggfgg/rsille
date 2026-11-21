@@ -367,7 +367,7 @@ pub fn run(options: crate::Options) -> io::Result<()> {
                 pet.notice_bell();
             }
             if boundary.screen_selected {
-                pet.put_away_treat();
+                pet.cancel_mouse_interaction();
             }
             let end = boundary.ready();
             update.clear();

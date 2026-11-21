@@ -3,10 +3,17 @@ use crate::boundary::Boundary;
 
 type Cell = (u16, u16); // one-based terminal coordinates
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum TreatState {
+    Carried, // Follows the pointer after choosing food from the menu.
+    Dragging,
+    Placed,
+}
+
 #[derive(Clone, Copy)]
 pub struct Treat {
     pub cell: Cell,
-    pub held: bool,
+    pub state: TreatState,
 }
 
 /// Tracks a meal independently of how the pet reaches the character.
