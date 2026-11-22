@@ -1,0 +1,29 @@
+[package]
+name = "rsille-canvas"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+description = "Sample canvas with Braille, Half-block and Quadrant encoding for rsille"
+repository = "https://github.com/nidhoggfgg/rsille.git"
+readme = "README.md"
+
+[dependencies]
+rsille-render.workspace = true
+crossterm = { workspace = true }
+
+[dev-dependencies]
+criterion = "0.5.1"
+rand = "0.8.5"
+
+[[bench]]
+name = "vec_vs_map"
+harness = false
+
+[[bench]]
+name = "u8_vs_u32"
+harness = false
+
+[[bench]]
+name = "line"
+harness = false

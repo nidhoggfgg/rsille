@@ -1,0 +1,207 @@
+[package]
+name = "rsille-tui"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+description = "Composable terminal application framework for rsille"
+repository = "https://github.com/nidhoggfgg/rsille.git"
+readme = "README.md"
+
+[dependencies]
+crossterm = { workspace = true }
+rsille-render.workspace = true
+rsille-canvas.workspace = true
+rustc-hash = { workspace = true }
+smallvec = { workspace = true }
+syntect = { workspace = true, optional = true }
+taffy = { workspace = true }
+
+[features]
+default = []
+syntax-highlighting = ["dep:syntect"]
+sixel = ["rsille-render/sixel"]
+kitty = ["rsille-render/kitty"]
+
+[dev-dependencies]
+tokio = { workspace = true }
+
+[[example]]
+name = "workflow"
+path = "examples/basics/workflow.rs"
+
+[[example]]
+name = "hello"
+path = "examples/basics/hello.rs"
+
+[[example]]
+name = "headless"
+path = "examples/basics/headless.rs"
+
+[[example]]
+name = "background"
+path = "examples/basics/background.rs"
+
+[[example]]
+name = "flex"
+path = "examples/layout/flex.rs"
+
+[[example]]
+name = "grid"
+path = "examples/layout/grid.rs"
+
+[[example]]
+name = "overlay"
+path = "examples/layout/overlay.rs"
+
+[[example]]
+name = "scroll"
+path = "examples/layout/scroll.rs"
+
+[[example]]
+name = "split"
+path = "examples/layout/split.rs"
+
+[[example]]
+name = "stack"
+path = "examples/layout/stack.rs"
+
+[[example]]
+name = "theme"
+path = "examples/themes/theme.rs"
+
+[[example]]
+name = "visual"
+path = "examples/motion/visual.rs"
+
+[[example]]
+name = "button"
+path = "examples/widgets/button.rs"
+
+[[example]]
+name = "calendar"
+path = "examples/widgets/calendar.rs"
+
+[[example]]
+name = "canvas"
+path = "examples/widgets/canvas.rs"
+
+[[example]]
+name = "checkbox"
+path = "examples/widgets/checkbox.rs"
+
+[[example]]
+name = "code_viewer"
+path = "examples/widgets/code_viewer.rs"
+
+[[example]]
+name = "collapsible"
+path = "examples/widgets/collapsible.rs"
+
+[[example]]
+name = "command_palette"
+path = "examples/widgets/command_palette.rs"
+
+[[example]]
+name = "data_table"
+path = "examples/widgets/data_table.rs"
+
+[[example]]
+name = "dialog"
+path = "examples/widgets/dialog.rs"
+
+[[example]]
+name = "diff_viewer"
+path = "examples/widgets/diff_viewer.rs"
+
+[[example]]
+name = "divider"
+path = "examples/widgets/divider.rs"
+
+[[example]]
+name = "file_explorer"
+path = "examples/widgets/file_explorer.rs"
+
+[[example]]
+name = "label"
+path = "examples/widgets/label.rs"
+
+[[example]]
+name = "list"
+path = "examples/widgets/list.rs"
+
+[[example]]
+name = "loading_indicator"
+path = "examples/widgets/loading_indicator.rs"
+
+[[example]]
+name = "log_viewer"
+path = "examples/widgets/log_viewer.rs"
+
+[[example]]
+name = "markdown_viewer"
+path = "examples/widgets/markdown_viewer.rs"
+
+[[example]]
+name = "menu"
+path = "examples/widgets/menu.rs"
+
+[[example]]
+name = "panel"
+path = "examples/widgets/panel.rs"
+
+[[example]]
+name = "progress"
+path = "examples/widgets/progress.rs"
+
+[[example]]
+name = "radio_group"
+path = "examples/widgets/radio_group.rs"
+
+[[example]]
+name = "select"
+path = "examples/widgets/select.rs"
+
+[[example]]
+name = "selection"
+path = "examples/widgets/selection.rs"
+
+[[example]]
+name = "spacer"
+path = "examples/widgets/spacer.rs"
+
+[[example]]
+name = "switch"
+path = "examples/widgets/switch.rs"
+
+[[example]]
+name = "tabs"
+path = "examples/widgets/tabs.rs"
+
+[[example]]
+name = "text_input"
+path = "examples/widgets/text_input.rs"
+
+[[example]]
+name = "textarea"
+path = "examples/widgets/textarea.rs"
+
+[[example]]
+name = "tree"
+path = "examples/widgets/tree.rs"
+
+[[example]]
+name = "composition"
+path = "examples/basics/composition.rs"
+
+[[bench]]
+name = "layout"
+harness = false
+
+[[example]]
+name = "extensions"
+path = "examples/basics/extensions.rs"
+
+[[example]]
+name = "windows"
+path = "examples/layout/windows.rs"

@@ -12,32 +12,24 @@ repository = "https://github.com/nidhoggfgg/rsille.git"
 include = ["src/**", "/README.md", "/README_cn.md", "LICENCE", "Cargo.toml"]
 
 [dependencies]
-base64 = { workspace = true, optional = true }
-crossterm = { workspace = true }
-futures = { workspace = true }
-log = { workspace = true }
-rustc-hash = { workspace = true }
-smallvec = { workspace = true }
-syntect = { workspace = true, optional = true }
-taffy = { workspace = true }
-tokio = { workspace = true }
-unicode-segmentation = { workspace = true }
-unicode-width = { workspace = true }
+rsille-render.workspace = true
+rsille-canvas.workspace = true
+rsille-tui.workspace = true
 
-[target.'cfg(unix)'.dependencies]
-libc = { workspace = true }
+[dev-dependencies]
+tokio.workspace = true
 
 [features]
 default = ["sixel"]
-syntax-highlighting = ["dep:syntect"]
-sixel = []
-kitty = ["dep:base64"]
+syntax-highlighting = ["rsille-tui/syntax-highlighting"]
+sixel = ["rsille-tui/sixel"]
+kitty = ["rsille-tui/kitty"]
 
 [workspace]
 members = [
-    "packages/canvas",
-    "packages/render",
-    "packages/tui",
+    "packages/rsille-canvas",
+    "packages/rsille-render",
+    "packages/rsille-tui",
     "packages/rsille-typst",
     "packages/rsille-playground",
 ]
@@ -45,6 +37,9 @@ resolver = "3"
 exclude = ["examples"]
 
 [workspace.dependencies]
+rsille-render = { version = "0.1.0", path = "packages/rsille-render" }
+rsille-canvas = { version = "0.1.0", path = "packages/rsille-canvas" }
+rsille-tui = { version = "0.1.0", path = "packages/rsille-tui" }
 base64 = "0.22"
 crossterm = { version = "0.28.1", features = ["event-stream"] }
 futures = { version = "0.3.31", default-features = false, features = ["std", "async-await"] }

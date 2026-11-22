@@ -3,7 +3,7 @@
 [English](README.md) · 中文
 
 使用本地 `rsille` 构建的应用、游戏和图形示例。单个组件和运行时特性的用法见
-[TUI 小示例指南](../packages/tui/examples/README_cn.md)。
+[TUI 小示例指南](../packages/rsille-tui/examples/README_cn.md)。
 
 ## 运行示例
 
@@ -64,7 +64,7 @@ cargo check --manifest-path examples/rsille-showcase/Cargo.toml --all-targets
 
 ## 添加示例
 
-单项功能放在 `packages/tui/examples/`，并在 `packages/tui/Cargo.toml` 注册。
+单项功能放在 `packages/rsille-tui/examples/`，并在 `packages/rsille-tui/Cargo.toml` 注册。
 完整应用放在这里，设置 `publish = false`，通过路径依赖引用 `rsille`。
 同时提供中英文说明、启动命令、操作方式和可重复执行的验证命令。
 

@@ -72,7 +72,7 @@ def check(binary, arguments):
 
 def main():
     root = Path(__file__).resolve().parents[1]
-    subprocess.run(["cargo", "build", "-p", "tui", "--example", "workflow"], cwd=root, check=True)
+    subprocess.run(["cargo", "build", "-p", "rsille-tui", "--example", "workflow"], cwd=root, check=True)
     import json
     metadata = json.loads(subprocess.check_output(
         ["cargo", "metadata", "--no-deps", "--format-version", "1"], cwd=root))

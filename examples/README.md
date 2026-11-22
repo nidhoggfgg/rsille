@@ -4,7 +4,7 @@ English · [中文](README_cn.md)
 
 Runnable applications, games and graphics built with the local `rsille` package.
 For small examples of individual widgets and runtime features, use the
-[TUI example guide](../packages/tui/examples/README.md).
+[TUI example guide](../packages/rsille-tui/examples/README.md).
 
 ## Run an example
 
@@ -68,8 +68,8 @@ terminal I/O and do not measure end-to-end display frame rates.
 
 ## Add an example
 
-Keep single-feature demos under `packages/tui/examples/` and register their targets in
-`packages/tui/Cargo.toml`. Put larger applications here with `publish = false` and a
+Keep single-feature demos under `packages/rsille-tui/examples/` and register their targets in
+`packages/rsille-tui/Cargo.toml`. Put larger applications here with `publish = false` and a
 local `rsille` dependency. Include English and Chinese guides, startup commands,
 controls and a reproducible verification command.
 

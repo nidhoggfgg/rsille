@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify the single self-contained rsille publish archive and a clean consumer.
+"""Verify the four core crate archives and a downstream application.
 
 Requires Python 3.12+ and Cargo. Nothing is uploaded. Pass --offline to use cached
 third-party dependencies; first-time checks may need network access.
@@ -22,65 +22,64 @@ def main():
         ["cargo", "metadata", "--no-deps", "--format-version", "1"], cwd=root))
     target = Path(metadata["target_directory"])
     packages = {package["name"]: package for package in metadata["packages"]}
-    # Independent extensions may publish separately; this check targets only rsille.
-    registries = packages["rsille"]["publish"]
-    assert registries is None or "crates-io" in registries, "rsille must be publishable to crates.io"
-    for name in ("canvas", "render", "tui"):
-        assert packages[name]["publish"] == [], f"internal package {name} must set publish = false"
-    version = packages["rsille"]["version"]
+    core = ("rsille-render", "rsille-canvas", "rsille-tui", "rsille")
+    selection = [arg for name in core for arg in ("-p", name)]
+    for name in core:
+        registries = packages[name]["publish"]
+        assert registries is None or "crates-io" in registries, f"{name} must be publishable"
 
-    def cargo(*arguments, cwd=root):
+    def cargo(*arguments, cwd, program_args=()):
         command = ["cargo", *arguments]
         if args.offline:
             command.append("--offline")
+        if program_args:
+            command.extend(["--", *program_args])
         subprocess.run(command, cwd=cwd, check=True)
 
-    # Cargo's verification builds the archive without any other workspace crates.
-    cargo("package", "-p", "rsille", "--allow-dirty", "--all-features", "--registry", "crates-io")
-    archive = target / "package" / f"rsille-{version}.crate"
     with tempfile.TemporaryDirectory(prefix="rsille-release-check-") as folder:
-        extracted = Path(folder)
-        with tarfile.open(archive) as bundle:
-            bundle.extractall(extracted, filter="data")
-        source = extracted / f"rsille-{version}"
-        manifest = source / "Cargo.toml"
-        data = tomllib.loads(manifest.read_text())
-        other_workspace_packages = set(packages) - {"rsille"}
-        for section in ("dependencies", "dev-dependencies", "build-dependencies"):
-            for name, dependency in data.get(section, {}).items():
-                assert "path" not in dependency, (name, dependency)
-                assert dependency.get("package", name) not in other_workspace_packages, (name, dependency)
-        assert set(source.rglob("Cargo.toml")) == {manifest}, "only the rsille manifest belongs in the archive"
-        assert not (source / "packages").exists(), "archive must not contain workspace crate manifests"
-        assert not (source / ".dev").exists(), "archive must not contain development records"
-        assert {path.relative_to(source).as_posix() for path in source.rglob("README*")} == {
-            "README.md", "README_cn.md",
-        }, "only root READMEs belong in the archive"
-        for filename in ("README.md", "LICENCE", "src/render/api.rs", "src/canvas/api.rs", "src/tui/api.rs"):
-            assert (source / filename).is_file(), filename
-        # Cargo archives normalize file timestamps. A reused target directory
-        # can otherwise consider an older build of this version up to date.
-        cargo("clean", "--manifest-path", str(manifest), "-p", "rsille",
-              "--target-dir", str(target / "release-check-build"), cwd=source)
-        for features in ([], ["--all-features"]):
-            cargo("test", "--manifest-path", str(manifest),
-                  "--target-dir", str(target / "release-check-build"), *features, cwd=source)
+        extracted = Path(folder).resolve()
+        patches = []
+        members = []
+        config = extracted / "archives.toml"
+        for name in core:
+            # Resolve unpublished dependencies from the archives already verified.
+            config.write_text("[patch.crates-io]\n" + "\n".join(patches))
+            cargo("package", "-p", name, "--allow-dirty", "--all-features",
+                  "--registry", "crates-io", "--config", str(config), cwd=root)
+            directory = f'{name}-{packages[name]["version"]}'
+            with tarfile.open(target / "package" / f"{directory}.crate") as bundle:
+                bundle.extractall(extracted, filter="data")
+            source = extracted / directory
+            manifest = source / "Cargo.toml"
+            data = tomllib.loads(manifest.read_text())
+            assert set(source.rglob("Cargo.toml")) == {manifest}
+            assert (source / "src/lib.rs").is_file()
+            assert data["package"]["name"] == name
+            for table in (data, *data.get("target", {}).values()):
+                for kind in ("dependencies", "dev-dependencies", "build-dependencies"):
+                    for dep in table.get(kind, {}).values():
+                        assert "path" not in dep and "git" not in dep, (name, dep)
+            members.append(directory)
+            patches.append(f'{name} = {{ path = {json.dumps(str(source))} }}')
 
-        # Only rsille is a local dependency; all modules come from the archive.
         consumer = extracted / "consumer"
         (consumer / "src").mkdir(parents=True)
-        (consumer / "Cargo.toml").write_text('''[package]
+        (extracted / "Cargo.toml").write_text(
+            '[workspace]\nresolver = "3"\nmembers = ' + json.dumps([*members, "consumer"])
+            + '\n[patch.crates-io]\n' + '\n'.join(patches) + '\n')
+        (consumer / "Cargo.toml").write_text(f'''[package]
 name = "rsille-release-consumer"
 version = "0.0.0"
 edition = "2021"
 [dependencies]
-rsille = { path = "../rsille-RSILLE_VERSION" }
-tokio = { version = "1", features = ["rt", "time", "net"] }
+rsille = {{ version = "={packages["rsille"]["version"]}" }}
+tokio = {{ version = "1", features = ["rt", "time", "net"] }}
 [features]
 syntax-highlighting = ["rsille/syntax-highlighting"]
-'''.replace("RSILLE_VERSION", version))
-        workflow = root / "packages/tui/examples/basics/workflow.rs"
-        program = workflow.read_text().replace("use tui::", "use rsille::tui::")
+kitty = ["rsille/kitty"]
+''')
+        workflow = root / "packages/rsille-tui/examples/basics/workflow.rs"
+        program = workflow.read_text().replace("use rsille_tui::", "use rsille::tui::")
         program = program.replace('    let exit = if std::env::args()', '    check_canvas();\n    let exit = if std::env::args()')
         program += '''
 fn check_canvas() {
@@ -108,22 +107,17 @@ fn check_canvas() {
     assert_eq!(colors.background, Some(Color::Rgb(0, 0, 255).into()));
 }
 '''
-        (consumer / "src/main.rs").write_text(program)
+        extensions = (workflow.parent / "extensions.rs").read_text().replace("use rsille_tui::", "use rsille::tui::")
+        main_rs = consumer / "src/main.rs"
+        main_rs.write_text(program)
+        build_args = ["--target-dir", str(target / "release-check-build")]
         for features in ([], ["--all-features"]):
-            command = ["cargo", "run", "--manifest-path", str(consumer / "Cargo.toml"),
-                       "--target-dir", str(target / "release-check-build"), *features]
-            if args.offline:
-                command.append("--offline")
-            subprocess.run([*command, "--", "--headless"], cwd=consumer, check=True)
-        extensions = (root / "packages/tui/examples/basics/extensions.rs").read_text()
-        (consumer / "src/main.rs").write_text(extensions.replace("use tui::", "use rsille::tui::"))
-        for features in ([], ["--all-features"]):
-            command = ["cargo", "run", "--manifest-path", str(consumer / "Cargo.toml"),
-                       "--target-dir", str(target / "release-check-build"), *features]
-            if args.offline:
-                command.append("--offline")
-            subprocess.run([*command, "--", "--headless"], cwd=consumer, check=True)
-    print("The rsille archive, extracted tests and clean consumer passed with default/all features; nothing uploaded.")
+            cargo("test", *selection, "--lib", *build_args, *features, cwd=extracted)
+            cargo("test", *selection, "--doc", *build_args, *features, cwd=extracted)
+            for example in (program, extensions):
+                main_rs.write_text(example)
+                cargo("run", *build_args, *features, cwd=consumer, program_args=["--headless"])
+    print("Verified all four core archives and the headless consumer.")
 
 
 if __name__ == "__main__":

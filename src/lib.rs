@@ -117,8 +117,8 @@
 /// assert_eq!(buffer.size(), Size::from((12, 2)));
 /// # Ok::<(), rsille::render::DrawErr>(())
 /// ```
-#[path = "render/api.rs"]
-pub mod render;
+#[doc(inline)]
+pub use rsille_render as render;
 
 /// Independent opaque RGB drawing, shared with the renderer.
 ///
@@ -149,8 +149,8 @@ pub use render::raster;
 /// assert!(!output.is_empty());
 /// # Ok::<(), std::io::Error>(())
 /// ```
-#[path = "canvas/api.rs"]
-pub mod canvas;
+#[doc(inline)]
+pub use rsille_canvas as canvas;
 
 /// Stateful terminal applications with widgets, layout, effects, and animation.
 ///
@@ -171,5 +171,5 @@ pub mod canvas;
 /// - [`state`](tui::state) and [`shell`](tui::shell) hold application helper state.
 ///
 /// Enable the `syntax-highlighting` feature for syntect-backed code highlighting.
-#[path = "tui/api.rs"]
-pub mod tui;
+#[doc(inline)]
+pub use rsille_tui as tui;

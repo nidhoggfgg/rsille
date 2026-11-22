@@ -1,0 +1,397 @@
+//! Tabs widget.
+
+use rsille_render::text::TextWidth;
+
+use crate::event::{Event, KeyCode, MouseButton, MouseEventKind};
+use crate::focus::FocusConfig;
+use crate::layout::Constraints;
+use crate::style::Style;
+use crate::widget::{EventCtx, EventPhase, RenderCtx, Widget};
+
+/// A tab with a stable value and a display label.
+///
+/// Converting a string uses it for both the value and label.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TabItem {
+    /// Stable option value passed to selection callbacks.
+    pub value: String,
+    /// User-visible text for this item.
+    pub label: String,
+    /// Whether this item is skipped by navigation and activation.
+    pub disabled: bool,
+}
+
+impl TabItem {
+    /// Creates an enabled tab with a stable value and a visible label.
+    pub fn new(value: impl Into<String>, label: impl Into<String>) -> Self {
+        Self {
+            value: value.into(),
+            label: label.into(),
+            disabled: false,
+        }
+    }
+
+    /// Sets whether this item is skipped by navigation and activation.
+    pub fn disabled(mut self, disabled: bool) -> Self {
+        self.disabled = disabled;
+        self
+    }
+}
+
+impl From<&str> for TabItem {
+    fn from(value: &str) -> Self {
+        Self::new(value, value)
+    }
+}
+
+impl From<String> for TabItem {
+    fn from(value: String) -> Self {
+        Self::new(value.clone(), value)
+    }
+}
+
+/// Persistent internal navigation state for a tab strip.
+#[derive(Debug, Clone, Default)]
+pub struct TabsState {
+    /// Value at the internal navigation cursor, if initialized.
+    pub active_value: Option<String>,
+}
+
+/// A horizontal tab strip that emits the active tab value.
+///
+/// The application renders the corresponding content separately. Internal
+/// navigation state takes precedence over the preferred [`Self::selected`] value.
+pub struct Tabs<M = ()> {
+    items: Vec<TabItem>,
+    selected_value: Option<String>,
+    disabled: bool,
+    custom_style: Option<Style>,
+    custom_focus_style: Option<Style>,
+    on_change: Option<Box<dyn Fn(String) -> M>>,
+    widget_key: Option<String>,
+}
+
+impl<M> std::fmt::Debug for Tabs<M> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Tabs")
+            .field("items", &self.items)
+            .field("selected_value", &self.selected_value)
+            .field("disabled", &self.disabled)
+            .field("on_change", &self.on_change.is_some())
+            .finish()
+    }
+}
+
+impl<M> Tabs<M> {
+    /// Creates an empty tab strip with no preferred selected value.
+    pub fn new() -> Self {
+        Self {
+            items: Vec::new(),
+            selected_value: None,
+            disabled: false,
+            custom_style: None,
+            custom_focus_style: None,
+            on_change: None,
+            widget_key: None,
+        }
+    }
+
+    /// Sets the stable widget key used to identify this widget across view rebuilds.
+    pub fn key(mut self, name: impl Into<String>) -> Self {
+        self.widget_key = Some(name.into());
+        self
+    }
+
+    /// Appends a tab to the strip.
+    pub fn tab(mut self, item: impl Into<TabItem>) -> Self {
+        self.items.push(item.into());
+        self
+    }
+
+    /// Appends tabs in iteration order, preserving existing tabs.
+    pub fn tabs<I>(mut self, items: I) -> Self
+    where
+        I: IntoIterator,
+        I::Item: Into<TabItem>,
+    {
+        self.items.extend(items.into_iter().map(Into::into));
+        self
+    }
+
+    /// Sets the preferred selected value, used when no valid internal active value exists.
+    pub fn selected(mut self, value: impl Into<String>) -> Self {
+        self.selected_value = Some(value.into());
+        self
+    }
+
+    /// Sets or clears the preferred selected value.
+    ///
+    /// `None` leaves selection to internal navigation state and the first enabled item.
+    pub fn selected_opt(mut self, value: Option<String>) -> Self {
+        self.selected_value = value;
+        self
+    }
+
+    /// Sets whether this widget ignores input and is excluded from keyboard focus.
+    pub fn disabled(mut self, disabled: bool) -> Self {
+        self.disabled = disabled;
+        self
+    }
+
+    /// Sets the custom rendering style.
+    pub fn style(mut self, style: Style) -> Self {
+        self.custom_style = Some(style);
+        self
+    }
+
+    /// Sets the style used to highlight the active item or control while focused.
+    pub fn focus_style(mut self, style: Style) -> Self {
+        self.custom_focus_style = Some(style);
+        self
+    }
+
+    /// Sets the callback receiving the active option's value after user selection.
+    pub fn on_change<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(String) -> M + 'static,
+    {
+        self.on_change = Some(Box::new(handler));
+        self
+    }
+
+    fn has_enabled_items(&self) -> bool {
+        self.items.iter().any(|item| !item.disabled)
+    }
+
+    fn first_enabled_index(&self) -> Option<usize> {
+        self.items.iter().position(|item| !item.disabled)
+    }
+
+    fn last_enabled_index(&self) -> Option<usize> {
+        self.items.iter().rposition(|item| !item.disabled)
+    }
+
+    fn index_for_value(&self, value: &str) -> Option<usize> {
+        self.items
+            .iter()
+            .position(|item| item.value == value && !item.disabled)
+    }
+
+    fn active_index_from_state(&self, state: &TabsState) -> Option<usize> {
+        state
+            .active_value
+            .as_deref()
+            .and_then(|value| self.index_for_value(value))
+            .or_else(|| {
+                self.selected_value
+                    .as_deref()
+                    .and_then(|value| self.index_for_value(value))
+            })
+            .or_else(|| self.first_enabled_index())
+    }
+
+    fn next_enabled_index(&self, current: usize) -> Option<usize> {
+        self.items
+            .iter()
+            .enumerate()
+            .skip(current.saturating_add(1))
+            .find(|(_, item)| !item.disabled)
+            .map(|(index, _)| index)
+    }
+
+    fn prev_enabled_index(&self, current: usize) -> Option<usize> {
+        self.items
+            .iter()
+            .enumerate()
+            .take(current)
+            .rev()
+            .find(|(_, item)| !item.disabled)
+            .map(|(index, _)| index)
+    }
+
+    fn index_at_column(&self, column: u16) -> Option<usize> {
+        let mut x = 0u16;
+        for (index, item) in self.items.iter().enumerate() {
+            let width = item.label.width() as u16 + 3;
+            if column >= x && column < x.saturating_add(width) {
+                return (!item.disabled).then_some(index);
+            }
+            x = x.saturating_add(width + 1);
+        }
+
+        None
+    }
+}
+
+impl<M> Default for Tabs<M> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<M: 'static> Widget<M> for Tabs<M> {
+    fn render(&self, chunk: &mut rsille_render::chunk::Chunk, ctx: &RenderCtx) {
+        let area = chunk.area();
+        if area.width() == 0 || area.height() == 0 {
+            return;
+        }
+
+        let theme = ctx.theme();
+        let base_style = self
+            .custom_style
+            .map(|style| style.merge(theme.styles.interactive))
+            .unwrap_or(theme.styles.interactive)
+            .to_render_style();
+        let active_style = if ctx.is_focused() {
+            self.custom_focus_style
+                .unwrap_or(theme.styles.selected_focused)
+        } else {
+            theme.styles.selected
+        }
+        .to_render_style();
+        let disabled_style = theme.styles.interactive_disabled.to_render_style();
+        let state = ctx.state_or_default::<TabsState>();
+        let active_index = self.active_index_from_state(state);
+        let mut x = 0u16;
+
+        for (index, item) in self.items.iter().enumerate() {
+            if x >= area.width() {
+                break;
+            }
+
+            let is_selected = self.selected_value.as_deref() == Some(item.value.as_str());
+            let is_active = active_index == Some(index);
+            let style = if self.disabled || item.disabled {
+                disabled_style
+            } else if is_selected || is_active {
+                active_style
+            } else {
+                base_style
+            };
+            let text = if is_selected {
+                format!("[{}]", item.label)
+            } else {
+                format!(" {} ", item.label)
+            };
+            let available = area.width().saturating_sub(x) as usize;
+            let display = truncate_to_width(&text, available, chunk.text_metrics());
+            let _ = chunk.set_string(x, 0, &display, style);
+            x = x.saturating_add(chunk.text_metrics().width(&display) as u16 + 1);
+        }
+    }
+
+    fn handle_event(&self, event: &Event, ctx: &mut EventCtx<M>) {
+        if crate::event::is_key_release(event) {
+            return;
+        }
+        if ctx.phase() != EventPhase::Target || self.disabled || !self.has_enabled_items() {
+            return;
+        }
+
+        let clicked_index = match event {
+            Event::Mouse(mouse_event)
+                if matches!(mouse_event.kind, MouseEventKind::Down(MouseButton::Left)) =>
+            {
+                ctx.local_mouse_position(event)
+                    .and_then(|(column, row)| (row == 0).then_some(column))
+                    .and_then(|column| self.index_at_column(column))
+            }
+            _ => None,
+        };
+        let mut next_value = None;
+        {
+            let state = ctx.state_mut::<TabsState>();
+            let Some(mut active_index) = self.active_index_from_state(state) else {
+                return;
+            };
+
+            match event {
+                Event::Key(key_event) => match key_event.code {
+                    KeyCode::Left | KeyCode::Up => {
+                        if let Some(index) = self.prev_enabled_index(active_index) {
+                            active_index = index;
+                        }
+                    }
+                    KeyCode::Right | KeyCode::Down => {
+                        if let Some(index) = self.next_enabled_index(active_index) {
+                            active_index = index;
+                        }
+                    }
+                    KeyCode::Home => {
+                        if let Some(index) = self.first_enabled_index() {
+                            active_index = index;
+                        }
+                    }
+                    KeyCode::End => {
+                        if let Some(index) = self.last_enabled_index() {
+                            active_index = index;
+                        }
+                    }
+                    KeyCode::Enter | KeyCode::Char(' ') => {}
+                    _ => return,
+                },
+                Event::Mouse(mouse_event)
+                    if matches!(mouse_event.kind, MouseEventKind::Down(MouseButton::Left)) =>
+                {
+                    let Some(index) = clicked_index else {
+                        return;
+                    };
+                    active_index = index;
+                }
+                _ => return,
+            }
+
+            let value = self.items[active_index].value.clone();
+            state.active_value = Some(value.clone());
+            if self.selected_value.as_deref() != Some(value.as_str()) {
+                next_value = Some(value);
+            }
+        }
+
+        ctx.set_handled();
+        if let (Some(value), Some(handler)) = (next_value, self.on_change.as_ref()) {
+            ctx.emit(handler(value));
+        }
+    }
+
+    fn constraints(&self) -> Constraints {
+        let width = self
+            .items
+            .iter()
+            .map(|item| item.label.width() as u16 + 3)
+            .sum::<u16>()
+            .saturating_add(self.items.len().saturating_sub(1) as u16);
+        Constraints {
+            min_width: width.max(1),
+            max_width: None,
+            min_height: 1,
+            max_height: Some(1),
+            flex: None,
+        }
+    }
+
+    fn focus_config(&self) -> FocusConfig {
+        if self.disabled || !self.has_enabled_items() {
+            FocusConfig::None
+        } else {
+            FocusConfig::Composite
+        }
+    }
+
+    fn key(&self) -> Option<&str> {
+        self.widget_key.as_deref()
+    }
+}
+
+fn truncate_to_width(
+    text: &str,
+    max_width: usize,
+    metrics: rsille_render::text::TextMetrics,
+) -> String {
+    metrics.clip(text, 0, max_width)
+}
+
+/// Creates an empty [`Tabs`] strip.
+pub fn tabs<M>() -> Tabs<M> {
+    Tabs::new()
+}

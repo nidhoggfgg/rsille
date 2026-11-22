@@ -1,0 +1,604 @@
+//! TextInput widget — stateful text input using WidgetStore
+
+use crate::text::{
+    cursor_scroll, floor_boundary, paint_editor_line, EditBuffer, TextMetrics, UnicodeSegmentation,
+};
+
+use crate::animation::AnimationCtx;
+use crate::event::{Event, KeyModifiers, MouseButton, MouseEventKind};
+use crate::focus::FocusConfig;
+use crate::layout::border_renderer;
+use crate::layout::Constraints;
+use crate::style::{BorderStyle, Style, Theme};
+use crate::widget::{EventCtx, EventPhase, Lifecycle, RenderCtx, StateCtx, Widget};
+use crate::widgets::pointer::EditorPointer;
+use crate::widgets::VariantWidget;
+
+/// Text input style variants.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TextInputVariant {
+    /// A single-line input with a border (default).
+    #[default]
+    Default,
+    /// A single-line input without a border.
+    Borderless,
+    /// A bordered input with visually masked text; callbacks still receive plain text.
+    Password,
+}
+
+/// Persistent state for [`TextInput`], stored in the [`WidgetStore`](crate::widget::WidgetStore).
+///
+/// This state survives `view()` rebuilds because it lives in the store,
+/// not inside the widget instance.
+///
+/// Stores `value` for correct handling of key repeat: when multiple events
+/// arrive in one frame (e.g. holding Backspace), we use the value from the
+/// previous emit in the same batch instead of the stale `self.value` from
+/// the cached tree.
+#[derive(Debug, Clone, Default)]
+pub struct TextInputState {
+    /// Whether a left-button selection gesture is in progress.
+    pub dragging: bool,
+    /// Caret position as a UTF-8 byte offset at a grapheme boundary.
+    pub cursor_position: usize,
+    /// UTF-8 byte offset of the selection anchor, or `None` for no selection.
+    pub selection_anchor: Option<usize>,
+    /// Horizontal viewport offset in terminal columns.
+    pub horizontal_offset: usize,
+    /// Current editing value, synchronized before input and updated on each edit.
+    pub value: Option<String>,
+}
+
+/// Single-line text input field.
+///
+/// The `value` is controlled by the application state (passed in via `.value()`).
+/// The cursor position is managed by the framework via [`WidgetStore`](crate::widget::WidgetStore).
+pub struct TextInput<M = ()> {
+    value: String,
+    placeholder: Option<String>,
+    variant: TextInputVariant,
+    border: BorderStyle,
+    disabled: bool,
+    custom_style: Option<Style>,
+    custom_focus_style: Option<Style>,
+    on_change: Option<Box<dyn Fn(String) -> M>>,
+    on_submit: Option<Box<dyn Fn(String) -> M>>,
+    widget_key: Option<String>,
+}
+
+impl<M> std::fmt::Debug for TextInput<M> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TextInput")
+            .field("value", &self.value)
+            .field("placeholder", &self.placeholder)
+            .field("variant", &self.variant)
+            .field("border", &self.border)
+            .field("disabled", &self.disabled)
+            .field("on_change", &self.on_change.is_some())
+            .field("on_submit", &self.on_submit.is_some())
+            .finish()
+    }
+}
+
+impl<M> TextInput<M> {
+    /// Creates an empty, enabled text input with the default border treatment.
+    pub fn new() -> Self {
+        Self {
+            value: String::new(),
+            placeholder: None,
+            variant: TextInputVariant::default(),
+            border: BorderStyle::Single,
+            disabled: false,
+            custom_style: None,
+            custom_focus_style: None,
+            on_change: None,
+            on_submit: None,
+            widget_key: None,
+        }
+    }
+
+    /// Sets the stable widget key used to identify this widget across view rebuilds.
+    pub fn key(mut self, name: impl Into<String>) -> Self {
+        self.widget_key = Some(name.into());
+        self
+    }
+
+    /// Sets the application-controlled text.
+    ///
+    /// Store text emitted by `on_change` and pass it back on the next view rebuild.
+    pub fn value(mut self, value: impl Into<String>) -> Self {
+        self.value = value.into();
+        self
+    }
+
+    /// Sets the hint shown when the value is empty.
+    pub fn placeholder(mut self, placeholder: impl Into<String>) -> Self {
+        self.placeholder = Some(placeholder.into());
+        self
+    }
+
+    /// Sets whether this widget ignores input and is excluded from keyboard focus.
+    pub fn disabled(mut self, disabled: bool) -> Self {
+        self.disabled = disabled;
+        self
+    }
+
+    /// Sets the border character style (defaults to [`BorderStyle::Single`]).
+    ///
+    /// For [`TextInputVariant::Borderless`], this styles the underline only.
+    /// This does not change the variant, padding, or sizing.
+    pub fn border(mut self, border: BorderStyle) -> Self {
+        self.border = border;
+        self
+    }
+
+    /// Sets the custom rendering style.
+    pub fn style(mut self, style: Style) -> Self {
+        self.custom_style = Some(style);
+        self
+    }
+
+    /// Sets the style used to highlight the active item or control while focused.
+    pub fn focus_style(mut self, style: Style) -> Self {
+        self.custom_focus_style = Some(style);
+        self
+    }
+
+    /// Sets the callback receiving the complete edited text.
+    ///
+    /// Update application state and pass the text back through [`Self::value`].
+    pub fn on_change<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(String) -> M + 'static,
+    {
+        self.on_change = Some(Box::new(handler));
+        self
+    }
+
+    /// Sets the callback receiving the current text when Enter is pressed.
+    pub fn on_submit<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(String) -> M + 'static,
+    {
+        self.on_submit = Some(Box::new(handler));
+        self
+    }
+
+    fn compute_style(&self, theme: &Theme, is_focused: bool) -> Style {
+        let base_style = if self.disabled {
+            theme.styles.interactive_disabled
+        } else if is_focused {
+            theme.styles.interactive_focused
+        } else {
+            theme.styles.interactive
+        };
+
+        if is_focused {
+            if let Some(ref focus_style) = self.custom_focus_style {
+                return focus_style.merge(base_style);
+            }
+        }
+
+        self.custom_style
+            .as_ref()
+            .map(|s| s.merge(base_style))
+            .unwrap_or(base_style)
+    }
+}
+
+impl<M> VariantWidget for TextInput<M> {
+    type Variant = TextInputVariant;
+
+    fn variant(mut self, variant: Self::Variant) -> Self {
+        self.variant = variant;
+        self
+    }
+}
+
+impl<M> Default for TextInput<M> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<M: 'static> Widget<M> for TextInput<M> {
+    fn animate(&self, ctx: &mut AnimationCtx) -> bool {
+        ctx.track_value(
+            "input-hover",
+            if !self.disabled && ctx.is_hovered() {
+                1.0
+            } else {
+                0.0
+            },
+            ctx.animation_theme().fast,
+        )
+    }
+
+    fn lifecycle(&self, ctx: &mut StateCtx) {
+        if ctx.lifecycle() == Lifecycle::Unmount {
+            return;
+        }
+        let state = ctx.state_mut::<TextInputState>();
+        if state.value.as_deref() != Some(self.value.as_str()) {
+            state.value = Some(self.value.clone());
+            state.dragging = false;
+        }
+        state.cursor_position = floor_boundary(&self.value, state.cursor_position);
+        state.selection_anchor = state
+            .selection_anchor
+            .map(|a| floor_boundary(&self.value, a));
+    }
+
+    fn render(&self, chunk: &mut rsille_render::chunk::Chunk, ctx: &RenderCtx) {
+        let area = chunk.area();
+        ctx.record_bounds(area);
+        let width = area.width();
+        let height = area.height();
+
+        if width < 4 || height < 3 {
+            return;
+        }
+
+        let is_focused = ctx.is_focused();
+        let theme = ctx.theme();
+        let style = self.compute_style(theme, is_focused);
+        let render_style = style.to_render_style();
+
+        // Single theme lookup for all theme-dependent styles
+        let border_style = if is_focused {
+            theme.styles.border_focused.to_render_style()
+        } else {
+            let hover = if self.disabled {
+                0.0
+            } else {
+                ctx.animation_value("input-hover")
+                    .unwrap_or(if ctx.is_hovered() { 1.0 } else { 0.0 })
+            };
+            theme
+                .styles
+                .border
+                .interpolate(theme.styles.border_focused, hover)
+                .to_render_style()
+        };
+        let placeholder_style = theme.styles.text_placeholder.to_render_style();
+        let cursor_style = theme.styles.cursor.to_render_style();
+
+        match self.variant {
+            TextInputVariant::Default | TextInputVariant::Password => {
+                border_renderer::render_border(chunk, self.border, border_style);
+            }
+            TextInputVariant::Borderless => {
+                border_renderer::render_border_bottom(chunk, self.border, border_style);
+            }
+        }
+
+        let (text_y, text_start_x, available_width) = match self.variant {
+            TextInputVariant::Borderless => (1, 1u16, (width - 2) as usize),
+            _ => (1, 2u16, (width - 4) as usize),
+        };
+
+        if available_width == 0 {
+            return;
+        }
+
+        let state = ctx.state_or_default::<TextInputState>();
+        let cursor = floor_boundary(&self.value, state.cursor_position);
+        let metrics = theme.text_metrics;
+        let mut selection = state
+            .selection_anchor
+            .filter(|a| *a != cursor)
+            .map(|a| a.min(cursor)..a.max(cursor));
+        let masked;
+        let (text, cursor) = if self.variant == TextInputVariant::Password {
+            selection = selection.map(|s| {
+                self.value[..s.start].graphemes(true).count() * "•".len()
+                    ..self.value[..s.end].graphemes(true).count() * "•".len()
+            });
+            masked = "•".repeat(self.value.graphemes(true).count());
+            (
+                masked.as_str(),
+                self.value[..cursor].graphemes(true).count() * "•".len(),
+            )
+        } else {
+            (self.value.as_str(), cursor)
+        };
+        let column = metrics.byte_to_column(text, cursor);
+        let offset = cursor_scroll(column, state.horizontal_offset, available_width);
+
+        if text.is_empty() && !is_focused {
+            if let Some(placeholder) = &self.placeholder {
+                let display = metrics.clip(placeholder, 0, available_width);
+                let _ = chunk.set_string(text_start_x, text_y, &display, placeholder_style);
+            }
+        } else {
+            paint_editor_line(
+                chunk,
+                (text_start_x, text_y),
+                text,
+                0,
+                selection,
+                (offset, available_width),
+                render_style,
+                theme.styles.selection_range.to_render_style(),
+            );
+            if is_focused {
+                let g = text[cursor..].graphemes(true).next().unwrap_or(" ");
+                let width = metrics.grapheme_width(g, column);
+                let g = if width == 0 || column - offset + width > available_width {
+                    " "
+                } else {
+                    g
+                };
+                let _ = chunk.set_forced(
+                    text_start_x + (column - offset) as u16,
+                    text_y,
+                    rsille_render::style::Stylized::grapheme(g, cursor_style),
+                );
+            }
+        }
+    }
+
+    fn handle_event(&self, event: &Event, ctx: &mut EventCtx<M>) {
+        if crate::event::is_key_release(event) {
+            return;
+        }
+        if ctx.phase() != EventPhase::Target {
+            return;
+        }
+        if self.disabled || matches!(event, Event::FocusLost) {
+            ctx.state_mut::<TextInputState>().dragging = false;
+            return;
+        }
+        let pointer_state = ctx.state_mut::<TextInputState>();
+        if matches!(event, Event::Mouse(mouse) if mouse.kind == MouseEventKind::Down(MouseButton::Left))
+        {
+            pointer_state.dragging = false;
+        }
+        let mut pointer = EditorPointer {
+            anchor: pointer_state.dragging.then_some(
+                pointer_state
+                    .selection_anchor
+                    .unwrap_or(pointer_state.cursor_position),
+            ),
+            scrolled: false,
+        };
+        if matches!(event, Event::Mouse(mouse) if mouse.kind == MouseEventKind::Up(MouseButton::Left))
+        {
+            if std::mem::take(&mut ctx.state_mut::<TextInputState>().dragging) {
+                ctx.set_handled();
+            }
+            return;
+        }
+        let metrics = ctx.text_metrics();
+        let local = ctx.relative_mouse_position(event);
+        let width = ctx.bounds().map(|a| a.width()).unwrap_or(24);
+        let (start_x, available) = match self.variant {
+            TextInputVariant::Borderless => (1, width.saturating_sub(2) as usize),
+            _ => (2, width.saturating_sub(4) as usize),
+        };
+        let state = ctx.state_mut::<TextInputState>();
+        let mut editor = EditBuffer::new(
+            state.value.clone().unwrap_or_else(|| self.value.clone()),
+            state.cursor_position,
+            state.selection_anchor,
+        );
+        let result = if let Event::Mouse(mouse) = event {
+            let Some((x, y)) = local else {
+                return;
+            };
+            if available == 0 {
+                return;
+            }
+            let dragging = mouse.kind == MouseEventKind::Drag(MouseButton::Left);
+            match mouse.kind {
+                MouseEventKind::Down(MouseButton::Left)
+                    if y == 1 && x >= start_x && x < start_x + available as i32 =>
+                {
+                    pointer.anchor = None;
+                }
+                MouseEventKind::Drag(MouseButton::Left) if pointer.anchor.is_some() => {}
+                _ => return,
+            }
+            let cursor_column = if self.variant == TextInputVariant::Password {
+                editor.value[..editor.cursor].graphemes(true).count() * metrics.width("•")
+            } else {
+                metrics.byte_to_column(&editor.value, editor.cursor)
+            };
+            let mut offset = cursor_scroll(cursor_column, state.horizontal_offset, available);
+            if dragging {
+                if x < start_x {
+                    offset = offset.saturating_sub(1);
+                }
+                if x >= start_x + available as i32 {
+                    offset = offset.saturating_add(1);
+                }
+            }
+            let column = offset + (x - start_x).clamp(0, available as i32 - 1) as usize;
+            let old_cursor = editor.cursor;
+            editor.cursor = if self.variant == TextInputVariant::Password {
+                editor
+                    .value
+                    .grapheme_indices(true)
+                    .nth(column / metrics.width("•").max(1))
+                    .map(|(b, _)| b)
+                    .unwrap_or(editor.value.len())
+            } else {
+                metrics.column_to_byte(&editor.value, column)
+            };
+            if dragging {
+                editor.anchor = pointer.anchor.map(|a| floor_boundary(&editor.value, a));
+            } else if mouse.modifiers.contains(KeyModifiers::SHIFT) {
+                let anchor = editor.anchor.unwrap_or(old_cursor);
+                editor.anchor = Some(anchor);
+                pointer.anchor = Some(anchor);
+            } else {
+                pointer.anchor = Some(editor.cursor);
+                editor.anchor = None;
+            }
+            state.horizontal_offset = offset;
+            crate::text::EditResult {
+                handled: true,
+                ..Default::default()
+            }
+        } else {
+            pointer.anchor = None;
+            editor.handle(event, metrics, false)
+        };
+        if !result.handled {
+            return;
+        }
+        let message = if result.changed {
+            self.on_change.as_ref().map(|f| f(editor.value.clone()))
+        } else if result.submit {
+            self.on_submit.as_ref().map(|f| f(editor.value.clone()))
+        } else {
+            None
+        };
+        state.cursor_position = editor.cursor;
+        state.selection_anchor = editor.anchor;
+        state.horizontal_offset = input_scroll(
+            &editor.value,
+            editor.cursor,
+            state.horizontal_offset,
+            available,
+            metrics,
+            self.variant,
+        );
+        state.value = Some(editor.value);
+        state.dragging = pointer.anchor.is_some();
+        ctx.set_handled();
+        if let Some(message) = message {
+            ctx.emit(message);
+        }
+    }
+
+    fn constraints(&self) -> Constraints {
+        Constraints {
+            min_width: 20,
+            max_width: None,
+            min_height: 3,
+            max_height: Some(3),
+            flex: None,
+        }
+    }
+
+    fn focus_config(&self) -> FocusConfig {
+        if self.disabled {
+            FocusConfig::None
+        } else {
+            FocusConfig::Leaf
+        }
+    }
+
+    fn key(&self) -> Option<&str> {
+        self.widget_key.as_deref()
+    }
+}
+
+/// Create a new text input widget.
+pub fn text_input<M>() -> TextInput<M> {
+    TextInput::new()
+}
+
+fn input_scroll(
+    value: &str,
+    cursor: usize,
+    offset: usize,
+    width: usize,
+    metrics: TextMetrics,
+    variant: TextInputVariant,
+) -> usize {
+    let column = if variant == TextInputVariant::Password {
+        value[..cursor].graphemes(true).count() * metrics.width("•")
+    } else {
+        metrics.byte_to_column(value, cursor)
+    };
+    cursor_scroll(column, offset, width)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::animation::AnimationStore;
+    use crate::widget::WidgetStore;
+    use rsille_render::{area::Area, buffer::Buffer, chunk::Chunk};
+    use std::{cell::RefCell, collections::HashMap};
+
+    fn render_rows(input: TextInput<()>) -> Vec<String> {
+        let mut buffer = Buffer::new((8, 3).into());
+        let area = Area::new((0, 0).into(), (8, 3).into());
+        let store = WidgetStore::new();
+        let animations = AnimationStore::new();
+        let theme = Theme::dark();
+        let geometry = RefCell::new(HashMap::new());
+        let ctx = RenderCtx::new(&store, &animations, &theme, None, &geometry);
+        input.render(&mut Chunk::new(&mut buffer, area).unwrap(), &ctx);
+        buffer
+            .content()
+            .chunks(8)
+            .map(|row| {
+                row.iter()
+                    .map(|cell| cell.content.as_char().unwrap_or(' '))
+                    .collect()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn default_border_remains_single() {
+        let input = text_input::<()>().value("Hi");
+        assert_eq!(input.border, BorderStyle::Single);
+        assert_eq!(render_rows(input), ["┌──────┐", "│ Hi   │", "└──────┘"]);
+    }
+
+    #[test]
+    fn configured_borders_preserve_variants_and_sizing() {
+        for (border, top, bottom, side) in [
+            (BorderStyle::Rounded, "╭──────╮", "╰──────╯", '│'),
+            (BorderStyle::Double, "╔══════╗", "╚══════╝", '║'),
+            (BorderStyle::Thick, "┏━━━━━━┓", "┗━━━━━━┛", '┃'),
+            (BorderStyle::None, "        ", "        ", ' '),
+        ] {
+            for (variant, text) in [
+                (TextInputVariant::Default, "Hi"),
+                (TextInputVariant::Password, "••"),
+            ] {
+                let input = text_input::<()>()
+                    .value("Hi")
+                    .variant(variant)
+                    .border(border);
+                assert_eq!(input.variant, variant);
+                let constraints = input.constraints();
+                assert_eq!(constraints.min_width, 20);
+                assert_eq!(constraints.max_width, None);
+                assert_eq!(constraints.min_height, 3);
+                assert_eq!(constraints.max_height, Some(3));
+                assert_eq!(
+                    render_rows(input),
+                    [
+                        top.to_string(),
+                        format!("{side} {text}   {side}"),
+                        bottom.to_string()
+                    ]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn borderless_underline_uses_configured_border() {
+        for (border, underline) in [
+            (BorderStyle::Single, "────────"),
+            (BorderStyle::Rounded, "────────"),
+            (BorderStyle::Double, "════════"),
+            (BorderStyle::Thick, "━━━━━━━━"),
+            (BorderStyle::None, "        "),
+        ] {
+            let input = text_input::<()>()
+                .border(border)
+                .variant(TextInputVariant::Borderless)
+                .value("Hi");
+            assert_eq!(render_rows(input), ["        ", " Hi     ", underline]);
+        }
+    }
+}

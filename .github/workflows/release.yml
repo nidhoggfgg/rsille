@@ -15,11 +15,14 @@ concurrency:
 jobs:
   release:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     permissions:
       contents: write
     env:
       CARGO_TERM_COLOR: always
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      CARGO_INCREMENTAL: "0"
       RELEASE_TAG: ${{ github.ref_name }}
     steps:
       - uses: actions/checkout@v4
@@ -54,8 +57,8 @@ jobs:
         env:
           RUSTDOCFLAGS: "-D warnings"
         run: |
-          cargo doc -p rsille --no-default-features --no-deps
-          cargo doc -p rsille --all-features --no-deps
+          cargo doc -p rsille -p rsille-render -p rsille-canvas -p rsille-tui --no-default-features --no-deps
+          cargo doc -p rsille -p rsille-render -p rsille-canvas -p rsille-tui --all-features --no-deps
 
       - name: Verify package and independent consumers
         run: python3 scripts/check-release.py
@@ -63,19 +66,31 @@ jobs:
       - name: Check terminal restoration
         run: python3 scripts/check-terminal.py
 
-      - name: Write package checksum
-        working-directory: target/package
-        run: sha256sum "rsille-${RELEASE_TAG#v}.crate" > SHA256SUMS
-
       - name: Publish to crates.io
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
           if [ -z "$CARGO_REGISTRY_TOKEN" ]; then
-            echo "::error::Set the CARGO_REGISTRY_TOKEN repository secret to a crates.io API token with publish access to rsille."
+            echo "::error::Set the CARGO_REGISTRY_TOKEN repository secret to a crates.io API token with publish access to the four core crates."
             exit 1
           fi
-          cargo publish -p rsille --all-features --registry crates-io
+          packages=(-p rsille)
+          metadata=$(cargo metadata --no-deps --format-version 1)
+          for name in rsille-render rsille-canvas rsille-tui; do
+            version=$(jq -er --arg name "$name" '.packages[] | select(.name == $name).version' <<< "$metadata")
+            status=$(curl -sS --retry 3 -A "rsille release ($GITHUB_SERVER_URL/$GITHUB_REPOSITORY)" \
+              -o /dev/null -w '%{http_code}' "https://crates.io/api/v1/crates/$name/$version")
+            case "$status" in
+              200) echo "$name $version is already published" ;;
+              404) packages+=(-p "$name") ;;
+              *) echo "::error::Failed to check $name $version (HTTP $status)"; exit 1 ;;
+            esac
+          done
+          cargo publish "${packages[@]}" --all-features --registry crates-io
+
+      - name: Write package checksum
+        working-directory: target/package
+        run: sha256sum "rsille-${RELEASE_TAG#v}.crate" > SHA256SUMS
 
       - name: Publish GitHub Release
         env:

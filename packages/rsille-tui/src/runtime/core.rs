@@ -1,0 +1,3508 @@
+//! Shared application core for terminal event loops and explicit runtime steps.
+
+use std::cell::RefCell;
+use std::collections::VecDeque;
+use std::collections::{HashMap, HashSet};
+use std::sync::mpsc::{self, Receiver};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use crate::app::RasterSetting;
+use crossterm::event::Event;
+use rsille_render::area::Size;
+use rsille_render::chunk::Chunk;
+use rsille_render::{Draw, DrawErr, InlineMouseMode, InputCapabilities, KeyboardMode, Update};
+
+use super::{Clock, Executor};
+use crate::animation::{
+    AnimationCtx, AnimationStore, MotionPolicy, TimelineFrame, TransitionEffect,
+};
+use crate::effect::{
+    run_task_attempt, CancellationToken, Effect, Task, TaskContext, TaskEvent, TaskEventSender,
+    TaskId, TaskState, TaskStatus, UpdateCtx,
+};
+use crate::event::{InputEvent, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind};
+use crate::focus::FocusManager;
+use crate::gesture::DragCancelReason;
+use crate::layout::{
+    AxisLimit, Invalidation, LayoutCache, LayoutGeometry, LayoutStats, SizeProposal,
+};
+use crate::scope::{ResourceKey, Scope};
+use crate::shell::{CommandMatch, CommandRouter, HotkeyRegistry};
+use crate::style::Theme;
+use crate::subscription::Subscription;
+use crate::widget::{
+    EventCtx, EventPhase, FocusRequest, HitRegion, Lifecycle, MeasureCtx, RenderCtx, StateCtx,
+    Widget, WidgetId, WidgetKey, WidgetPath, WidgetStore,
+};
+use crate::widgets::visual::TerminalVisualCapabilities;
+use crate::WidgetResult;
+
+use crate::app::{
+    App, AppExit, EventHandler, ExitReason, FrameHandler, FrameInfo, InputHandler, Mode,
+    QuitBehavior, SubscriptionResolver, ThemeResolver,
+};
+
+type PointerSpace = Vec<((i32, i32), u16, u16)>;
+enum WidgetInput<'a> {
+    Terminal(&'a Event),
+    PointerCancel(DragCancelReason),
+    FocusEnter,
+}
+
+struct TickRuntime<M> {
+    interval: Duration,
+    next_fire_at: Instant,
+    handler: EventHandler<M>,
+}
+
+#[derive(Debug)]
+struct FrameRuntime {
+    started_at: Option<Instant>,
+    last_frame_at: Option<Instant>,
+    frame: u64,
+}
+
+impl FrameRuntime {
+    fn new() -> Self {
+        Self {
+            started_at: None,
+            last_frame_at: None,
+            frame: 0,
+        }
+    }
+
+    fn next(&mut self, now: Instant) -> FrameInfo {
+        let started_at = *self.started_at.get_or_insert(now);
+        let delta = self
+            .last_frame_at
+            .map(|last| now.saturating_duration_since(last))
+            .unwrap_or(Duration::ZERO);
+        let info = FrameInfo {
+            now,
+            delta,
+            since_start: now.saturating_duration_since(started_at),
+            frame: self.frame,
+        };
+
+        self.last_frame_at = Some(now);
+        self.frame = self.frame.wrapping_add(1);
+        info
+    }
+}
+
+/// Adapts application update callbacks to the core's effect-aware interface.
+pub(crate) trait UpdateDriver<State, M> {
+    /// Applies one message and records any effects through `ctx`.
+    fn handle(&mut self, state: &mut State, message: M, ctx: &mut UpdateCtx<M>);
+}
+
+/// Wraps an update callback that does not produce effects.
+pub(crate) struct SimpleUpdate<F>(pub(crate) F);
+
+impl<State, M, F> UpdateDriver<State, M> for SimpleUpdate<F>
+where
+    F: Fn(&mut State, M),
+{
+    fn handle(&mut self, state: &mut State, message: M, _ctx: &mut UpdateCtx<M>) {
+        (self.0)(state, message);
+    }
+}
+
+impl<State, M, F> UpdateDriver<State, M> for F
+where
+    F: Fn(&mut State, M, &mut UpdateCtx<M>),
+{
+    fn handle(&mut self, state: &mut State, message: M, ctx: &mut UpdateCtx<M>) {
+        (self)(state, message, ctx);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// AppRuntime – implements Draw + Update for the render event loop
+// ---------------------------------------------------------------------------
+
+/// A clonable sender for delivering application messages from other threads.
+///
+/// Obtain a handle with [`Runtime::handle`]. Messages enter an unbounded FIFO
+/// queue and notify the runtime's wake handle. Each runtime turn processes at
+/// most 256 queued messages; a host using [`Runtime::step`] must drive those
+/// turns explicitly.
+pub struct AppHandle<M> {
+    sender: TaskEventSender<M>,
+}
+
+impl<M> Clone for AppHandle<M> {
+    fn clone(&self) -> Self {
+        Self {
+            sender: self.sender.clone(),
+        }
+    }
+}
+
+impl<M> AppHandle<M> {
+    /// Enqueues a message and notifies the runtime without waiting for an update.
+    ///
+    /// Success means the message was queued, not that it has been processed.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`mpsc::SendError`] containing the original message if the
+    /// receiving runtime has been dropped.
+    pub fn send(&self, message: M) -> Result<(), mpsc::SendError<M>> {
+        self.sender.send_message(message)
+    }
+}
+
+type RuntimeUpdate<State, M> = Box<dyn Fn(&mut State, M, &mut UpdateCtx<M>)>;
+type RuntimeView<State, M> = Box<dyn Fn(&State) -> Box<dyn Widget<M>>>;
+
+/// An application that can be driven one step at a time without a terminal.
+///
+/// Create it with [`App::build`] or [`App::build_with_effects`]. The initial
+/// buffer is 80 columns by 24 rows; use [`size`](Self::size) to override it.
+/// [`step`](Self::step) processes input, messages and time-dependent work, and
+/// [`frame`](Self::frame) exposes the rendered buffer for inspection or display.
+///
+/// [`run`](Self::run), [`run_inline`](Self::run_inline) and
+/// [`run_async`](Self::run_async) consume the runtime and enter a terminal event
+/// loop using the same application state and message queue.
+pub struct Runtime<State, M> {
+    core: AppRuntime<State, RuntimeUpdate<State, M>, RuntimeView<State, M>, M>,
+    buffer: rsille_render::buffer::Buffer,
+    needs_draw: bool,
+    #[cfg(test)]
+    fail_next_draw: bool,
+    pending_events: VecDeque<Event>,
+    resume_after_commit: bool,
+    mouse_capture: bool,
+    inline_mouse_mode: InlineMouseMode,
+}
+
+/// Rendering, exit and scheduling information from one [`Runtime::step`].
+#[derive(Clone, Copy, Debug)]
+pub struct StepResult {
+    /// Whether at least one frame was drawn during the step.
+    ///
+    /// This does not indicate whether the rendered cells changed.
+    pub rendered: bool,
+    /// A hard frame boundary was reached. `Runtime::frame()` is the committed
+    /// snapshot (including raster metadata); the continuation runs next step.
+    pub committed: bool,
+    /// Whether the application has requested exit and should no longer be stepped.
+    pub should_quit: bool,
+    /// Earliest scheduled update in the injected clock's time domain.
+    ///
+    /// `None` means no update is scheduled or the runtime has stopped. New input
+    /// or messages can still require a step; see [`Runtime::wake_handle`].
+    pub next_update_at: Option<Instant>,
+}
+
+impl<State, M: Send + 'static> Runtime<State, M> {
+    pub(crate) fn from_app<F, V, W>(app: App<State, M>, update: F, view: V) -> Self
+    where
+        F: Fn(&mut State, M, &mut UpdateCtx<M>) + 'static,
+        V: Fn(&State) -> W + 'static,
+        W: Widget<M> + 'static,
+    {
+        let update: RuntimeUpdate<State, M> = Box::new(update);
+        let view: RuntimeView<State, M> = Box::new(move |state| Box::new(view(state)));
+        let inline = app.mode == Mode::Inline;
+        Runtime {
+            mouse_capture: app.mouse_capture,
+            inline_mouse_mode: app.inline_mouse_mode,
+            core: AppRuntime::new(app, update, view, inline, 50),
+            buffer: rsille_render::buffer::Buffer::new((80, 24).into()),
+            needs_draw: true,
+            #[cfg(test)]
+            fail_next_draw: false,
+            pending_events: VecDeque::new(),
+            resume_after_commit: false,
+        }
+    }
+
+    /// Runs the terminal event loop in the application's configured mode.
+    ///
+    /// Obtain a [`handle`](Self::handle) before calling this method to send
+    /// messages from other threads. Returns the final state and exit reason.
+    /// This creates a private Tokio runtime; inside an existing runtime, use
+    /// [`run_async`](Self::run_async).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if called inside a Tokio runtime or if terminal setup,
+    /// input handling or rendering fails.
+    pub fn run(self) -> WidgetResult<AppExit<State>> {
+        self.core
+            .run_terminal(self.mouse_capture, self.inline_mouse_mode)
+    }
+
+    /// Runs the terminal event loop in inline mode, overriding the app's mode.
+    ///
+    /// Uses the current state and message queue, returning the final state and
+    /// exit reason. Like [`run`](Self::run), this creates a private Tokio runtime.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if called inside a Tokio runtime or if terminal setup,
+    /// input handling or rendering fails.
+    pub fn run_inline(mut self) -> WidgetResult<AppExit<State>> {
+        self.core.inline_mode = true;
+        self.core
+            .run_terminal(self.mouse_capture, self.inline_mouse_mode)
+    }
+
+    /// Sets the in-memory frame size in terminal cells and returns the runtime.
+    ///
+    /// This is the builder form of [`resize`](Self::resize). Terminal event
+    /// loops determine their own dimensions from the terminal.
+    pub fn size(mut self, width: u16, height: u16) -> Self {
+        self.resize((width, height).into());
+        self
+    }
+
+    /// Replaces the in-memory buffer and requests a draw on the next step.
+    ///
+    /// Dimensions are measured in terminal cells. The previous frame contents
+    /// are discarded immediately; this does not resize a physical terminal.
+    pub fn resize(&mut self, size: Size) {
+        self.buffer = rsille_render::buffer::Buffer::new(size);
+        self.needs_draw = true;
+    }
+
+    /// Returns a sender sharing this runtime's application message queue.
+    pub fn handle(&self) -> AppHandle<M> {
+        AppHandle {
+            sender: self.core.task_sender.clone(),
+        }
+    }
+
+    /// Borrows the current application state after the most recent update.
+    pub fn state(&self) -> &State {
+        self.core.state.as_ref().expect("runtime state")
+    }
+
+    /// Borrows the in-memory frame without triggering a draw.
+    ///
+    /// The buffer is blank before the first step and immediately after resizing.
+    /// Raster metadata is retained without requiring terminal capabilities.
+    /// Presenting a frame containing raster content requires a native graphics backend.
+    pub fn frame(&self) -> &rsille_render::buffer::Buffer {
+        &self.buffer
+    }
+
+    /// Returns the keyboard-focused widget's path, or `None` if none is focused.
+    pub fn focused_path(&self) -> Option<&WidgetPath> {
+        self.core.focus.current_path()
+    }
+
+    /// Returns the focused widget's named key, if it has one.
+    ///
+    /// Positional keys return `None`. For a focused root, this reads the root
+    /// widget's own key.
+    pub fn focused_key(&self) -> Option<&str> {
+        let path = self.focused_path()?;
+        match path.as_slice().last() {
+            Some(WidgetKey::Named(key)) => Some(key),
+            None => self.core.cached_tree.as_ref()?.key(),
+            _ => None,
+        }
+    }
+
+    /// The topmost visible pointer target, independent of keyboard focus.
+    pub fn hovered_path(&self) -> Option<&WidgetPath> {
+        self.core.store.hovered_path.as_ref()
+    }
+
+    /// Returns a widget's recorded bounds from the last draw, if available.
+    ///
+    /// Use [`layout_geometry`](Self::layout_geometry) for separate target,
+    /// displayed, clipping and hit-test areas.
+    pub fn bounds(&self, path: &WidgetPath) -> Option<rsille_render::area::Area> {
+        self.core.geometry.borrow().get(path).copied()
+    }
+
+    /// Target, displayed allocation, visible clip and hit area from the last paint.
+    pub fn layout_geometry(&self, path: &WidgetPath) -> Option<LayoutGeometry> {
+        self.core.store.layout_geometry.borrow().get(path).copied()
+    }
+
+    /// Cumulative layout computations and cache hits for profiling/tests.
+    pub fn layout_stats(&self) -> LayoutStats {
+        self.core.layouts.stats()
+    }
+
+    /// Refresh layout (and paint) on the next step, including custom external dependencies.
+    pub fn request_layout(&mut self) {
+        self.core.layouts.clear();
+        self.needs_draw = true;
+        self.core.wake.wake();
+    }
+
+    /// Paint the existing view and reuse its layout on the next step.
+    pub fn request_paint(&mut self) {
+        self.needs_draw = true;
+        self.core.wake.wake();
+    }
+
+    /// Borrows widget-local state by identity and concrete state type.
+    ///
+    /// Returns `None` if the widget has no stored state or its type is not `T`.
+    pub fn widget_state<T: 'static>(&self, id: &WidgetId) -> Option<&T> {
+        self.core.store.get(id.clone())
+    }
+
+    /// Returns snapshots of retained task statuses in task creation order.
+    ///
+    /// The list can include finished tasks until their records are pruned.
+    pub fn tasks(&self) -> Vec<TaskStatus> {
+        self.core.task_statuses()
+    }
+
+    /// Returns the earliest scheduled update in the injected clock's time domain.
+    ///
+    /// Includes timers, task deadlines and retries, ticks, frames and animations.
+    /// Queued messages/input and pending or failed draws request an immediate update. `None`
+    /// means no deadline is scheduled or the runtime has stopped; external
+    /// messages notify [`wake_handle`](Self::wake_handle) separately.
+    pub fn next_update_at(&self) -> Option<Instant> {
+        if !self.core.should_quit
+            && (self.needs_draw || self.resume_after_commit || !self.pending_events.is_empty())
+        {
+            Some(self.core.clock.now())
+        } else {
+            self.core.next_update_at()
+        }
+    }
+
+    /// Returns a shared notification handle for work arriving between steps.
+    ///
+    /// Embedding hosts can combine notifications with
+    /// [`next_update_at`](Self::next_update_at) when scheduling their next step.
+    pub fn wake_handle(&self) -> rsille_render::WakeHandle {
+        self.core.wake.clone()
+    }
+
+    /// Supply a simulated input backend's capabilities for headless testing.
+    /// Delivers the same startup notification as terminal setup, on the next step.
+    pub fn set_input_capabilities(&mut self, capabilities: InputCapabilities) {
+        self.core.on_input_capabilities(capabilities);
+    }
+
+    /// Stops the runtime, unmounts widgets and cancels timers and active tasks.
+    ///
+    /// Signals cooperative cancellation without waiting for blocking jobs.
+    /// Preserves an existing exit reason, or sets [`ExitReason::Shutdown`].
+    /// Subsequent steps report `should_quit` without processing further work.
+    pub fn shutdown(&mut self) {
+        self.core.shutdown();
+    }
+
+    /// Shuts down the runtime and returns its owned state and exit reason.
+    ///
+    /// Uses [`ExitReason::Shutdown`] if no exit reason has been recorded.
+    pub fn into_exit(mut self) -> AppExit<State> {
+        self.core.take_exit()
+    }
+
+    /// Returns the recorded exit reason, or `None` while no exit was requested.
+    pub fn exit_reason(&self) -> Option<ExitReason> {
+        self.core.exit_reason
+    }
+
+    /// Runs the terminal event loop on the calling Tokio runtime.
+    ///
+    /// The Tokio runtime must have the time driver enabled. Uses the app's
+    /// configured terminal mode and returns the final state and exit reason.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if terminal setup, input handling or rendering fails.
+    pub async fn run_async(self) -> WidgetResult<AppExit<State>> {
+        self.core
+            .run_terminal_async(self.mouse_capture, self.inline_mouse_mode)
+            .await
+    }
+
+    /// Dispatches an input batch, processes queued work and draws as needed.
+    ///
+    /// An initial pending draw establishes focus and hit geometry before input
+    /// dispatch. Resize events update the in-memory buffer dimensions. The
+    /// runtime then processes messages and due work using its configured clock,
+    /// and draws again if needed and no exit was requested.
+    ///
+    /// Pass an empty slice to process messages or time advanced through a
+    /// [`ManualClock`](super::ManualClock). This method does not wait for input,
+    /// sleep until deadlines or run jobs queued in a
+    /// [`ManualExecutor`](super::ManualExecutor). Message processing is bounded
+    /// per update, so a backlog can require multiple calls. Events are dispatched
+    /// individually, with update checkpoints but coalesced drawing. A frame commit ends
+    /// the step immediately; remaining input is retained in order for later steps,
+    /// after the commit's continuation. Clone `frame()` to retain a snapshot.
+    ///
+    /// Once stopped, returns `should_quit: true` without drawing or processing
+    /// input. Use [`into_exit`](Self::into_exit) to recover the final state.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`DrawErr`] if input handling, updating or drawing fails.
+    /// Input is retained across drawing failures; retry with an empty slice
+    /// rather than resubmitting it. Failed frames are retried before queued input
+    /// or a pending commit's continuation is processed.
+    pub fn step(&mut self, events: &[Event]) -> Result<StepResult, DrawErr> {
+        if self.core.should_quit {
+            return Ok(StepResult {
+                rendered: false,
+                committed: false,
+                should_quit: true,
+                next_update_at: None,
+            });
+        }
+        // Own input before any fallible drawing, including initial/retry frames.
+        self.pending_events.extend(events.iter().cloned());
+        let mut rendered = false;
+        if self.needs_draw || self.core.frame_commit_pending() {
+            self.draw_frame()?;
+            rendered = true;
+            if self.core.frame_commit_pending() {
+                self.core.frame_committed();
+                self.buffer.reset_diff();
+                self.resume_after_commit = true;
+                return Ok(StepResult {
+                    rendered,
+                    committed: true,
+                    should_quit: self.core.should_quit,
+                    next_update_at: self.next_update_at(),
+                });
+            }
+        }
+        let mut committed = false;
+        loop {
+            // A continuation must establish the next prompt before more input.
+            let resuming = self.resume_after_commit;
+            let event = if resuming || self.core.frame_commit_pending() {
+                None
+            } else {
+                self.pending_events.pop_front()
+            };
+            self.resume_after_commit = false;
+            if let Some(Event::Resize(width, height)) = event.as_ref() {
+                self.resize((*width, *height).into());
+            }
+            if !self.core.frame_commit_pending() {
+                self.core.on_events(event.as_slice())?;
+            }
+            let changed = self.core.update()?;
+            self.needs_draw |= changed || event.is_some() || self.core.frame_commit_pending();
+            if !self.core.should_quit
+                && self.needs_draw
+                && (self.core.frame_commit_pending() || resuming || self.pending_events.is_empty())
+            {
+                self.draw_frame()?;
+                rendered = true;
+            }
+            if self.core.frame_commit_pending() {
+                self.core.frame_committed();
+                self.buffer.reset_diff();
+                self.resume_after_commit = true;
+                committed = true;
+                break;
+            }
+            if self.core.should_quit || self.pending_events.is_empty() {
+                break;
+            }
+        }
+        Ok(StepResult {
+            rendered,
+            committed,
+            should_quit: self.core.should_quit,
+            next_update_at: self.next_update_at(),
+        })
+    }
+
+    fn draw_frame(&mut self) -> Result<(), DrawErr> {
+        // Keep the frame pending until the entire draw succeeds. A retry must
+        // precede new input, especially for the post-commit prompt.
+        self.needs_draw = true;
+        self.buffer.clear();
+        #[cfg(test)]
+        if std::mem::take(&mut self.fail_next_draw) {
+            return Err(DrawErr::Io(std::io::Error::other("injected draw failure")));
+        }
+        let area = rsille_render::area::Area::new((0, 0).into(), self.buffer.size());
+        let chunk = Chunk::new(&mut self.buffer, area)?;
+        self.core.draw(chunk)?;
+        self.needs_draw = false;
+        Ok(())
+    }
+}
+
+struct TaskRecord<M> {
+    status: TaskStatus,
+    lease: ScopeLease,
+    accept_results: bool,
+    cancellation: CancellationToken,
+    task: Task<M>,
+    deadline: Option<Instant>,
+    retry_at: Option<Instant>,
+}
+
+#[derive(Clone)]
+struct ScopeLease {
+    scope: Scope,
+    generation: u64,
+}
+
+struct MountedScope {
+    owner: WidgetId,
+    generation: u64,
+}
+
+enum QueuedMessage<M> {
+    Effect(Effect<M>, ScopeLease),
+    Plain(M),
+    Scoped {
+        lease: ScopeLease,
+        message: M,
+    },
+    Task {
+        id: TaskId,
+        attempt: u32,
+        message: M,
+    },
+}
+
+struct MessageQueue<M>(VecDeque<QueuedMessage<M>>);
+
+impl<M> MessageQueue<M> {
+    fn new() -> Self {
+        Self(VecDeque::new())
+    }
+    fn push_back(&mut self, message: M) {
+        self.0.push_back(QueuedMessage::Plain(message));
+    }
+    fn push_scoped(&mut self, lease: ScopeLease, message: M) {
+        self.0.push_back(QueuedMessage::Scoped { lease, message });
+    }
+    fn extend(&mut self, messages: impl IntoIterator<Item = M>) {
+        self.0
+            .extend(messages.into_iter().map(QueuedMessage::Plain));
+    }
+    fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+    fn pop_front(&mut self) -> Option<QueuedMessage<M>> {
+        self.0.pop_front()
+    }
+    fn contains_task(&self, task_id: TaskId) -> bool {
+        self.0
+            .iter()
+            .any(|message| matches!(message, QueuedMessage::Task { id, .. } if *id == task_id))
+    }
+}
+
+/// Owns application state, widget lifecycle, input routing and scheduled work.
+///
+/// Both the terminal adapter and [`Runtime`] drive this core through [`Draw`]
+/// and [`Update`], keeping rendering and message handling consistent.
+pub(crate) struct AppRuntime<State, U, V, M> {
+    state: Option<State>,
+    theme: Theme,
+    theme_resolver: Option<ThemeResolver<State>>,
+    subscriptions: Option<SubscriptionResolver<State, M>>,
+    subscription_tasks: HashMap<ResourceKey, TaskId>,
+    scopes: HashMap<Scope, MountedScope>,
+    next_scope_generation: u64,
+    update_fn: U,
+    view_fn: V,
+    store: WidgetStore,
+    animation_store: RefCell<AnimationStore>,
+    geometry: RefCell<HashMap<WidgetPath, rsille_render::area::Area>>,
+    hit_regions: RefCell<Vec<HitRegion>>,
+    layouts: LayoutCache,
+    focus: FocusManager,
+    cached_tree: Option<Box<dyn Widget<M>>>,
+    previous_tree: Option<Box<dyn Widget<M>>>,
+    previous_geometry: HashMap<WidgetPath, rsille_render::area::Area>,
+    exiting_visuals: Vec<ExitingVisual<M>>,
+    messages: MessageQueue<M>,
+    pending_commit: Option<(ScopeLease, M)>,
+    deferred_effects: Vec<(Effect<M>, ScopeLease)>,
+    should_quit: bool,
+    exit_reason: Option<ExitReason>,
+    quit_behavior: QuitBehavior,
+    global_key_handlers: HashMap<KeyCode, Box<dyn Fn() -> M>>,
+    input_handler: Option<InputHandler<M>>,
+    keyboard_mode: KeyboardMode,
+    raster_output: RasterSetting,
+    focus_events: bool,
+    hotkeys: HotkeyRegistry<M>,
+    command_router: Option<CommandRouter<M>>,
+    command_resolver: Option<crate::app::CommandResolver<State, M>>,
+    tick_handlers: Vec<TickRuntime<M>>,
+    frame_handlers: Vec<FrameHandler<M>>,
+    frame_runtime: FrameRuntime,
+    animation_epoch: Instant,
+    animation_frame: u64,
+    render_frame: u64,
+    pointer_capture: Option<WidgetPath>,
+    pointer_space: Option<PointerSpace>,
+    input_viewport: Option<((u16, u16), Size)>,
+    inline_pointer_origin: Option<(u16, u16)>,
+    motion_policy: MotionPolicy,
+    visual_capabilities: TerminalVisualCapabilities,
+    inline_mode: bool,
+    inline_max_height: u16,
+    task_sender: TaskEventSender<M>,
+    task_receiver: Receiver<TaskEvent<M>>,
+    debounces: HashMap<ResourceKey, (Instant, ScopeLease, M)>,
+    timers: Vec<(Instant, ScopeLease, M)>,
+    wake: rsille_render::WakeHandle,
+    clock: Arc<dyn Clock>,
+    executor: Arc<dyn Executor>,
+    next_animation_at: Option<Instant>,
+    next_task_id: u64,
+    tasks: HashMap<TaskId, TaskRecord<M>>,
+    task_keys: HashMap<ResourceKey, TaskId>,
+    task_order: Vec<TaskId>,
+}
+
+struct ExitingVisual<M> {
+    store: WidgetStore,
+    animations: AnimationStore,
+    root: Box<dyn Widget<M>>,
+    nodes: Vec<ExitingNode>,
+}
+
+struct ExitingNode {
+    path: WidgetPath,
+    bounds: rsille_render::area::Area,
+}
+
+/// The same identity walk is used for visible and explicitly retained children.
+/// Focus, event routing and animation continue to traverse visible children only.
+fn visit_widgets<M>(
+    widget: &(dyn Widget<M> + 'static),
+    visitor: &mut impl FnMut(&(dyn Widget<M> + 'static), &WidgetPath, &WidgetId),
+) {
+    fn walk<M>(
+        widget: &(dyn Widget<M> + 'static),
+        path: &WidgetPath,
+        id: &WidgetId,
+        scope: &WidgetId,
+        visitor: &mut impl FnMut(&(dyn Widget<M> + 'static), &WidgetPath, &WidgetId),
+    ) {
+        visitor(widget, path, id);
+        for (index, child) in widget
+            .children()
+            .iter()
+            .chain(widget.retained_children())
+            .enumerate()
+        {
+            let key = WidgetKey::for_child(index, child.as_ref());
+            let (child_id, child_scope) = WidgetId::for_child(id, scope, &key);
+            walk(
+                child.as_ref(),
+                &path.child(key),
+                &child_id,
+                &child_scope,
+                visitor,
+            );
+        }
+    }
+    walk(
+        widget,
+        &WidgetPath::root(),
+        &WidgetId::root(),
+        &WidgetId::root(),
+        visitor,
+    );
+}
+
+fn sync_widget_states<M: 'static>(widget: &(dyn Widget<M> + 'static), store: &mut WidgetStore) {
+    reconcile_widget_states(widget, store, true);
+}
+
+fn reconcile_widget_states<M: 'static>(
+    widget: &(dyn Widget<M> + 'static),
+    store: &mut WidgetStore,
+    sync_existing: bool,
+) {
+    visit_widgets(widget, &mut |widget, path, id| {
+        let lifecycle = store.mount(id, widget.widget_type());
+        if lifecycle == Lifecycle::Sync && !sync_existing {
+            return;
+        }
+        widget.lifecycle(&mut StateCtx::new(
+            store,
+            path.clone(),
+            id.clone(),
+            lifecycle,
+        ));
+    });
+}
+
+fn unmount_widget_states<M>(widget: &(dyn Widget<M> + 'static), store: &mut WidgetStore) {
+    visit_widgets(widget, &mut |widget, path, id| {
+        if store.component_type(id).is_some() {
+            widget.lifecycle(&mut StateCtx::new(
+                store,
+                path.clone(),
+                id.clone(),
+                Lifecycle::Unmount,
+            ));
+        }
+    });
+    store.retain_active(|_| false);
+}
+
+impl<State, U, V, M> Drop for AppRuntime<State, U, V, M> {
+    fn drop(&mut self) {
+        if let Some(tree) = self.cached_tree.as_ref().or(self.previous_tree.as_ref()) {
+            unmount_widget_states(tree.as_ref(), &mut self.store);
+        }
+        // Blocking jobs may outlive the UI. Signal cancellation without joining
+        // them; dropping the receiver rejects all later messages.
+        for record in self.tasks.values() {
+            record.cancellation.cancel();
+        }
+    }
+}
+
+fn exit_display_area(
+    area: rsille_render::area::Area,
+    frames: &[TimelineFrame],
+) -> rsille_render::area::Area {
+    frames
+        .iter()
+        .fold(area, |display_area, frame| match frame.transition.effect {
+            TransitionEffect::Collapse | TransitionEffect::Expand => {
+                vertical_area_for_exit(display_area, 1.0 - frame.progress)
+            }
+            TransitionEffect::ScaleFromCenter => {
+                scale_area_for_exit(display_area, 1.0 - frame.progress)
+            }
+            TransitionEffect::Layout(_)
+            | TransitionEffect::Fade
+            | TransitionEffect::BorderEmphasis => display_area,
+        })
+}
+
+fn vertical_area_for_exit(
+    area: rsille_render::area::Area,
+    progress: f64,
+) -> rsille_render::area::Area {
+    let height = ((area.height() as f64) * progress.clamp(0.0, 1.0)).round() as u16;
+    rsille_render::area::Area::new(area.pos(), (area.width(), height).into())
+}
+
+fn scale_area_for_exit(
+    area: rsille_render::area::Area,
+    progress: f64,
+) -> rsille_render::area::Area {
+    let progress = progress.clamp(0.0, 1.0);
+    let width = ((area.width() as f64) * progress).round() as u16;
+    let height = ((area.height() as f64) * progress).round() as u16;
+    let x = area.x() + area.width().saturating_sub(width) / 2;
+    let y = area.y() + area.height().saturating_sub(height) / 2;
+
+    rsille_render::area::Area::new((x, y).into(), (width, height).into())
+}
+
+fn inline_available_height(terminal_height: u16, force_follow_viewport: bool) -> u16 {
+    if force_follow_viewport {
+        terminal_height.saturating_sub(1).max(1)
+    } else {
+        terminal_height
+    }
+}
+
+fn mouse_position(event: &Event) -> Option<(u16, u16)> {
+    match event {
+        Event::Mouse(mouse) => Some((mouse.column, mouse.row)),
+        _ => None,
+    }
+}
+
+fn hit_test_path(hit_regions: &[HitRegion], x: u16, y: u16) -> Option<WidgetPath> {
+    hit_regions
+        .iter()
+        .rev()
+        .find(|region| region.contains(x, y))
+        .map(|region| region.path.clone())
+}
+
+fn hover_target_path(
+    hit_regions: &[HitRegion],
+    position: Option<(u16, u16)>,
+    focus: &FocusManager,
+) -> Option<WidgetPath> {
+    let (x, y) = position?;
+    hit_test_path(hit_regions, x, y)
+        .filter(|path| focus.analysis_id(path).is_some())
+        .filter(|path| {
+            focus
+                .modal_path()
+                .is_none_or(|modal| path.starts_with(modal))
+        })
+}
+
+fn mouse_target_path(
+    event: &Event,
+    hit_regions: &[HitRegion],
+    pointer_capture: Option<&WidgetPath>,
+) -> Option<WidgetPath> {
+    let Event::Mouse(mouse) = event else {
+        return None;
+    };
+
+    let hit_path = hit_test_path(hit_regions, mouse.column, mouse.row);
+    match mouse.kind {
+        MouseEventKind::Drag(_) | MouseEventKind::Up(_) => pointer_capture.cloned().or(hit_path),
+        _ => hit_path,
+    }
+}
+
+impl<State, U, V, M: Send + 'static> AppRuntime<State, U, V, M> {
+    pub(crate) fn new(
+        app: App<State, M>,
+        update: U,
+        view: V,
+        inline_mode: bool,
+        inline_max_height: u16,
+    ) -> Self {
+        let App {
+            state,
+            mode: _,
+            theme,
+            theme_resolver,
+            subscriptions,
+            global_key_handlers,
+            input_handler,
+            keyboard_mode,
+            raster_output,
+            focus_events,
+            hotkeys,
+            command_router,
+            command_resolver,
+            tick_handlers,
+            frame_handlers,
+            quit_behavior,
+            mouse_capture: _,
+            inline_mouse_mode: _,
+            motion_policy,
+            visual_capabilities,
+            clock,
+            executor,
+        } = app;
+
+        let now = clock.now();
+        let (sender, task_receiver) = mpsc::channel();
+        let wake = rsille_render::WakeHandle::new();
+        let task_sender = TaskEventSender::new(sender, wake.clone());
+
+        AppRuntime {
+            state: Some(state),
+            theme,
+            theme_resolver,
+            subscriptions,
+            subscription_tasks: HashMap::new(),
+            scopes: HashMap::new(),
+            next_scope_generation: 0,
+            update_fn: update,
+            view_fn: view,
+            store: WidgetStore::new(),
+            animation_store: RefCell::new(AnimationStore::new()),
+            geometry: RefCell::new(HashMap::new()),
+            hit_regions: RefCell::new(Vec::new()),
+            layouts: LayoutCache::default(),
+            focus: FocusManager::new(),
+            cached_tree: None,
+            previous_tree: None,
+            previous_geometry: HashMap::new(),
+            exiting_visuals: Vec::new(),
+            messages: MessageQueue::new(),
+            pending_commit: None,
+            deferred_effects: Vec::new(),
+            should_quit: false,
+            exit_reason: None,
+            quit_behavior,
+            global_key_handlers,
+            input_handler,
+            keyboard_mode,
+            raster_output,
+            focus_events,
+            hotkeys,
+            command_router,
+            command_resolver,
+            tick_handlers: tick_handlers
+                .into_iter()
+                .map(|tick| TickRuntime {
+                    interval: tick.interval,
+                    next_fire_at: now + tick.interval,
+                    handler: tick.handler,
+                })
+                .collect(),
+            frame_handlers: frame_handlers
+                .into_iter()
+                .map(|frame| frame.handler)
+                .collect(),
+            frame_runtime: FrameRuntime::new(),
+            animation_epoch: now,
+            animation_frame: 0,
+            render_frame: 0,
+            pointer_capture: None,
+            pointer_space: None,
+            input_viewport: None,
+            inline_pointer_origin: None,
+            motion_policy,
+            visual_capabilities,
+            inline_mode,
+            inline_max_height,
+            task_sender,
+            task_receiver,
+            debounces: HashMap::new(),
+            timers: Vec::new(),
+            wake,
+            clock,
+            executor,
+            next_animation_at: None,
+            next_task_id: 0,
+            tasks: HashMap::new(),
+            task_keys: HashMap::new(),
+            task_order: Vec::new(),
+        }
+    }
+
+    const MAX_TRACKED_TASKS: usize = 256;
+
+    fn ensure_tree(&mut self)
+    where
+        V: Fn(&State) -> Box<dyn Widget<M>>,
+    {
+        self.ensure_tree_with_sync(true);
+    }
+
+    fn ensure_tree_with_sync(&mut self, sync_existing: bool)
+    where
+        V: Fn(&State) -> Box<dyn Widget<M>>,
+    {
+        if self.cached_tree.is_some() {
+            return;
+        }
+        self.layouts.clear();
+        if let Some(resolver) = &self.command_resolver {
+            self.command_router = Some(resolver(self.state.as_ref().expect("runtime state")));
+        }
+        let tree = (self.view_fn)(self.state.as_ref().expect("runtime state"));
+        // Validate before modifying state: even keys below separate unkeyed
+        // wrappers share the nearest named ancestor's namespace.
+        let mut mounted = HashMap::new();
+        visit_widgets(tree.as_ref(), &mut |widget, path, id| {
+            if let Some((previous, _)) =
+                mounted.insert(id.clone(), (path.clone(), widget.widget_type()))
+            {
+                panic!("Duplicate widget key/identity {id:?}: paths {previous:?} and {path:?}. Keys must be unique within the nearest keyed ancestor (including retained children).");
+            }
+        });
+
+        let mut removed = HashSet::new();
+        let mut root_key_changed = false;
+        if let Some(previous) = self.previous_tree.take() {
+            // The root always uses WidgetId::root(); its explicit key still
+            // defines a lifetime boundary for the entire application view.
+            root_key_changed = previous.key() != tree.key();
+            visit_widgets(previous.as_ref(), &mut |widget, path, id| {
+                if root_key_changed
+                    || mounted.get(id).map(|(_, ty)| *ty) != Some(widget.widget_type())
+                {
+                    removed.insert(id.clone());
+                    widget.lifecycle(&mut StateCtx::new(
+                        &mut self.store,
+                        path.clone(),
+                        id.clone(),
+                        Lifecycle::Unmount,
+                    ));
+                }
+            });
+            for id in &removed {
+                self.focus.forget(id);
+            }
+            if let Some(captured) = self.pointer_capture.as_ref() {
+                // Capture follows identity across reordering, but never crosses
+                // an unmount/type change into a replacement at the same path.
+                let mut captured_id = None;
+                visit_widgets(previous.as_ref(), &mut |_, path, id| {
+                    if path == captured {
+                        captured_id = Some(id.clone());
+                    }
+                });
+                self.pointer_capture = captured_id
+                    .filter(|id| !removed.contains(id))
+                    .and_then(|id| mounted.get(&id).map(|(path, _)| path.clone()));
+            }
+            let geometry = std::mem::take(&mut self.previous_geometry);
+            self.start_exit_visuals(previous, geometry, &removed, self.animation_time());
+        }
+        self.reconcile_scopes(tree.as_ref(), &removed, root_key_changed);
+        self.store.retain_active(|id| mounted.contains_key(id));
+        reconcile_widget_states(tree.as_ref(), &mut self.store, sync_existing);
+        self.focus.rebuild(tree.as_ref());
+        if let Some(router) = self.command_router.as_mut() {
+            router.sync_focus(self.focus.current_id());
+        }
+        self.cached_tree = Some(tree);
+        self.reconcile_pointer_capture();
+        self.reconcile_subscriptions();
+        self.prune_live_animations();
+    }
+
+    fn lease(&self, scope: &Scope) -> Option<ScopeLease> {
+        if *scope == Scope::root() {
+            Some(ScopeLease {
+                scope: scope.clone(),
+                generation: 0,
+            })
+        } else {
+            self.scopes.get(scope).map(|s| ScopeLease {
+                scope: scope.clone(),
+                generation: s.generation,
+            })
+        }
+    }
+
+    fn lease_is_live(&self, lease: &ScopeLease) -> bool {
+        lease.scope == Scope::root()
+            || self
+                .scopes
+                .get(&lease.scope)
+                .is_some_and(|live| live.generation == lease.generation)
+    }
+
+    fn reconcile_scopes(
+        &mut self,
+        tree: &(dyn Widget<M> + 'static),
+        removed: &HashSet<WidgetId>,
+        reset: bool,
+    ) {
+        let mut paths = HashMap::<WidgetPath, Scope>::new();
+        let mut next = HashMap::new();
+        visit_widgets(tree, &mut |widget, path, id| {
+            let mut parent = path.clone();
+            parent.pop();
+            let mut scope = if path.is_empty() {
+                Scope::root()
+            } else {
+                paths[&parent].clone()
+            };
+            if let Some(name) = widget.resource_scope() {
+                let parent_continues = self.scopes.get(&scope).map(|s| s.generation)
+                    == next.get(&scope).map(|s: &MountedScope| s.generation);
+                scope = scope.child(name);
+                let generation = self
+                    .scopes
+                    .get(&scope)
+                    .filter(|s| {
+                        !reset && parent_continues && s.owner == *id && !removed.contains(id)
+                    })
+                    .map(|s| s.generation)
+                    .unwrap_or_else(|| {
+                        self.next_scope_generation += 1;
+                        self.next_scope_generation
+                    });
+                if next
+                    .insert(
+                        scope.clone(),
+                        MountedScope {
+                            owner: id.clone(),
+                            generation,
+                        },
+                    )
+                    .is_some()
+                {
+                    panic!("Duplicate resource scope {scope} at widget path {path:?}");
+                }
+            }
+            paths.insert(path.clone(), scope);
+        });
+        self.scopes = next;
+        let stale: Vec<_> = self
+            .tasks
+            .iter()
+            .filter(|(_, r)| !self.lease_is_live(&r.lease))
+            .map(|(&id, _)| id)
+            .collect();
+        for id in stale {
+            self.cancel_task(id);
+        }
+        let scopes = &self.scopes;
+        let live = |lease: &ScopeLease| {
+            lease.scope == Scope::root()
+                || scopes
+                    .get(&lease.scope)
+                    .is_some_and(|s| s.generation == lease.generation)
+        };
+        self.timers.retain(|(_, lease, _)| live(lease));
+        self.debounces.retain(|_, (_, lease, _)| live(lease));
+    }
+
+    fn reconcile_subscriptions(&mut self) {
+        fn collect<M>(
+            source: Subscription<M>,
+            scope: Scope,
+            out: &mut Vec<(ResourceKey, Task<M>)>,
+        ) {
+            match source {
+                Subscription::None => {}
+                Subscription::Batch(sources) => {
+                    for source in sources {
+                        collect(source, scope.clone(), out);
+                    }
+                }
+                Subscription::Run { key, mut task } => {
+                    // Subscription identity is tracked separately from task keys.
+                    task.key = None;
+                    out.push((ResourceKey::new(scope, key), task));
+                }
+                Subscription::Scoped(inner, source) => collect(*source, scope.join(&inner), out),
+            }
+        }
+        let Some(resolver) = &self.subscriptions else {
+            return;
+        };
+        let mut desired = Vec::new();
+        collect(
+            resolver(self.state.as_ref().expect("runtime state")),
+            Scope::root(),
+            &mut desired,
+        );
+        let mut keys = HashSet::new();
+        for (key, _) in &desired {
+            assert!(
+                keys.insert(key.clone()),
+                "Duplicate subscription key {:?} in scope {}",
+                key.key,
+                key.scope
+            );
+        }
+        let stale: Vec<_> = self
+            .subscription_tasks
+            .iter()
+            .filter(|(key, id)| {
+                !keys.contains(*key)
+                    || self
+                        .tasks
+                        .get(id)
+                        .is_none_or(|r| !self.lease_is_live(&r.lease))
+            })
+            .map(|(key, id)| (key.clone(), *id))
+            .collect();
+        for (key, id) in stale {
+            self.subscription_tasks.remove(&key);
+            self.cancel_task(id);
+        }
+        for (key, task) in desired {
+            if self.subscription_tasks.contains_key(&key) {
+                continue;
+            }
+            if let Some(lease) = self.lease(&key.scope) {
+                // Subscription IDs and one-shot task keys are separate namespaces.
+                let id = self.spawn_task(task, lease);
+                self.subscription_tasks.insert(key, id);
+            }
+        }
+    }
+
+    fn prune_live_animations(&mut self) {
+        let mut live_shared_ids = HashSet::new();
+        if let Some(tree) = self.cached_tree.as_ref() {
+            let mut path = WidgetPath::root();
+            Self::collect_shared_transition_ids(tree.as_ref(), &mut path, &mut live_shared_ids);
+        }
+        // Hidden children keep widget state only. Exiting state and animations
+        // are owned by the exit renderer, never by the live tree.
+        let mut animation_store = self.animation_store.borrow_mut();
+        animation_store.retain_active(|id| self.focus.live_ids().contains(id));
+        animation_store.retain_timeline_paths(|path| self.focus.live_paths().contains(path));
+        animation_store.retain_shared_layouts(|id| live_shared_ids.contains(id));
+    }
+
+    fn collect_shared_transition_ids(
+        widget: &dyn Widget<M>,
+        path: &mut WidgetPath,
+        ids: &mut HashSet<String>,
+    ) {
+        if let Some(shared) = widget.shared_transition() {
+            ids.insert(shared.id.clone());
+        }
+
+        for (index, child) in widget.children().iter().enumerate() {
+            path.push(WidgetKey::for_child(index, child.as_ref()));
+            Self::collect_shared_transition_ids(child.as_ref(), path, ids);
+            path.pop();
+        }
+    }
+
+    fn start_exit_visuals(
+        &mut self,
+        previous_tree: Box<dyn Widget<M>>,
+        previous_geometry: HashMap<WidgetPath, rsille_render::area::Area>,
+        removed: &HashSet<WidgetId>,
+        now: Instant,
+    ) {
+        let mut candidates = Vec::new();
+        let mut surviving_paths = Vec::new();
+        visit_widgets(previous_tree.as_ref(), &mut |_, path, id| {
+            if !removed.contains(id) {
+                surviving_paths.push(path.clone());
+            }
+        });
+        visit_widgets(previous_tree.as_ref(), &mut |widget, path, id| {
+            if !removed.contains(id) {
+                return;
+            }
+            // A keyed descendant that moved elsewhere remains mounted. Do not
+            // duplicate it in an ancestor exit or move its live state away.
+            if surviving_paths.iter().any(|live| live.starts_with(path)) {
+                return;
+            }
+            if let Some(timeline) = widget.presence().and_then(|presence| presence.exit.clone()) {
+                if let Some(bounds) = previous_geometry.get(path).copied() {
+                    candidates.push((path.clone(), bounds, timeline));
+                }
+            }
+        });
+
+        candidates.sort_by_key(|(path, _, _)| path.len());
+
+        let mut removed_paths = Vec::new();
+        visit_widgets(previous_tree.as_ref(), &mut |_, path, id| {
+            if removed.contains(id) {
+                removed_paths.push(path.clone());
+            }
+        });
+        let mut animations = self
+            .animation_store
+            .borrow_mut()
+            .extract(removed, &removed_paths);
+        let store = self.store.extract(|id| removed.contains(id));
+        let mut nodes: Vec<ExitingNode> = Vec::new();
+        for (path, bounds, timeline) in candidates {
+            if nodes.iter().any(|node| path.starts_with(&node.path)) {
+                continue;
+            }
+
+            animations.track_timeline(
+                &path,
+                "exit",
+                timeline.clone(),
+                true,
+                now,
+                self.motion_policy,
+            );
+            nodes.push(ExitingNode { path, bounds });
+        }
+
+        if !nodes.is_empty() {
+            self.exiting_visuals.push(ExitingVisual {
+                store,
+                animations,
+                root: previous_tree,
+                nodes,
+            });
+        }
+    }
+
+    fn sync_theme(&mut self) {
+        if let Some(resolver) = self.theme_resolver.as_ref() {
+            let theme = resolver(self.state.as_ref().expect("runtime state"));
+            if self.theme != theme {
+                self.theme = theme;
+                self.layouts.clear();
+                self.store.invalidation.request_paint();
+            }
+        }
+    }
+
+    fn build_event_route<'a>(
+        tree: &'a dyn Widget<M>,
+        target_path: Option<&WidgetPath>,
+        include_retained: bool,
+    ) -> Vec<(WidgetPath, WidgetId, WidgetId, &'a dyn Widget<M>)> {
+        let mut route = vec![(WidgetPath::root(), WidgetId::root(), WidgetId::root(), tree)];
+        let Some(target_path) = target_path else {
+            return route;
+        };
+
+        let mut current_widget = tree;
+        let mut current_path = WidgetPath::root();
+        let mut current_id = WidgetId::root();
+        let mut stable_scope_id = WidgetId::root();
+
+        for key in target_path.as_slice() {
+            let children = current_widget.children().iter().chain(if include_retained {
+                current_widget.retained_children()
+            } else {
+                &[]
+            });
+            let next = match key {
+                WidgetKey::Index(index) => children
+                    .enumerate()
+                    .find(|(i, _)| i == index)
+                    .map(|(_, c)| c.as_ref()),
+                WidgetKey::Named(name) => children
+                    .filter(|c| c.key() == Some(name.as_str()))
+                    .map(|c| c.as_ref())
+                    .next(),
+            };
+
+            let Some(next_widget) = next else {
+                break;
+            };
+
+            current_path.push(key.clone());
+            let (next_id, next_stable_scope_id) =
+                WidgetId::for_child(&current_id, &stable_scope_id, key);
+            current_id = next_id;
+            stable_scope_id = next_stable_scope_id;
+            route.push((
+                current_path.clone(),
+                current_id.clone(),
+                stable_scope_id.clone(),
+                next_widget,
+            ));
+            current_widget = next_widget;
+        }
+
+        route
+    }
+
+    fn dispatch_to_widget(
+        widget: &dyn Widget<M>,
+        input: WidgetInput<'_>,
+        store: &mut WidgetStore,
+        messages: &mut MessageQueue<M>,
+        path: WidgetPath,
+        id: WidgetId,
+        stable_scope_id: WidgetId,
+        focused_path: Option<WidgetPath>,
+        geometry: &HashMap<WidgetPath, rsille_render::area::Area>,
+        phase: EventPhase,
+        already_handled: bool,
+        theme: &Theme,
+        now: Instant,
+        frame: u64,
+        visual_capabilities: TerminalVisualCapabilities,
+    ) -> crate::widget::EventOutcome {
+        let mut emitted = Vec::new();
+        let mut ctx = EventCtx::with_runtime(
+            store,
+            &mut emitted,
+            path,
+            id,
+            stable_scope_id,
+            focused_path,
+            geometry,
+            phase,
+            already_handled,
+            theme,
+            now,
+            frame,
+            visual_capabilities,
+        );
+        match input {
+            WidgetInput::Terminal(event) => widget.handle_event(event, &mut ctx),
+            WidgetInput::PointerCancel(reason) => widget.pointer_cancel(reason, &mut ctx),
+            WidgetInput::FocusEnter => widget.focus_enter(&mut ctx),
+        }
+        let outcome = ctx.finish();
+        messages.extend(emitted);
+        outcome
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn cancel_capture(
+        tree: &dyn Widget<M>,
+        path: &WidgetPath,
+        reason: DragCancelReason,
+        store: &mut WidgetStore,
+        messages: &mut MessageQueue<M>,
+        focus: &mut FocusManager,
+        geometry: &HashMap<WidgetPath, rsille_render::area::Area>,
+        theme: &Theme,
+        now: Instant,
+        frame: u64,
+        caps: TerminalVisualCapabilities,
+    ) -> bool {
+        let route = Self::build_event_route(tree, Some(path), true);
+        let Some((owner_path, id, scope, widget)) = route.last().filter(|(p, _, _, _)| p == path)
+        else {
+            return false;
+        };
+        let outcome = Self::dispatch_to_widget(
+            *widget,
+            WidgetInput::PointerCancel(reason),
+            store,
+            messages,
+            owner_path.clone(),
+            id.clone(),
+            scope.clone(),
+            focus.current_path().cloned(),
+            geometry,
+            EventPhase::Target,
+            false,
+            theme,
+            now,
+            frame,
+            caps,
+        );
+        Self::apply_focus_request(focus, outcome.focus_request);
+        outcome.handled
+    }
+
+    fn pointer_space(store: &WidgetStore, path: &WidgetPath) -> PointerSpace {
+        let geometry = store.layout_geometry.borrow();
+        path.ancestors_inclusive()
+            .iter()
+            .filter_map(|p| {
+                geometry.get(p).map(|n| {
+                    let (w, h) = if p == path {
+                        (0, 0)
+                    } else {
+                        (n.display.width(), n.display.height())
+                    };
+                    (n.coordinate_offset, w, h)
+                })
+            })
+            .collect()
+    }
+
+    fn reconcile_pointer_capture(&mut self) {
+        let Some(path) = self.pointer_capture.clone() else {
+            self.store.pointer_cancel_request = None;
+            return;
+        };
+        let tree = self.cached_tree.as_ref().expect("mounted tree");
+        let route = Self::build_event_route(tree.as_ref(), Some(&path), false);
+        let enabled = route
+            .last()
+            .is_some_and(|(p, _, _, w)| p == &path && w.pointer_enabled());
+        let requested = self
+            .store
+            .pointer_cancel_request
+            .take()
+            .filter(|(p, _)| path.starts_with(p))
+            .map(|(_, r)| r);
+        let reason = requested.or_else(|| {
+            if self
+                .focus
+                .modal_path()
+                .is_some_and(|m| !path.starts_with(m))
+            {
+                Some(DragCancelReason::ModalChanged)
+            } else if !self.focus.live_paths().contains(&path) {
+                Some(DragCancelReason::Hidden)
+            } else if !enabled {
+                Some(DragCancelReason::Disabled)
+            } else if self
+                .pointer_space
+                .as_ref()
+                .is_some_and(|basis| *basis != Self::pointer_space(&self.store, &path))
+            {
+                Some(DragCancelReason::CoordinateSpaceChanged)
+            } else {
+                None
+            }
+        });
+        if let Some(reason) = reason {
+            Self::cancel_capture(
+                tree.as_ref(),
+                &path,
+                reason,
+                &mut self.store,
+                &mut self.messages,
+                &mut self.focus,
+                &self.geometry.borrow(),
+                &self.theme,
+                self.clock.now(),
+                self.render_frame,
+                self.visual_capabilities,
+            );
+            self.pointer_capture = None;
+            self.pointer_space = None;
+        }
+    }
+
+    fn apply_focus_request(focus: &mut FocusManager, request: Option<FocusRequest>) {
+        match request {
+            Some(FocusRequest::Set(path)) => {
+                focus.request_focus(&path);
+            }
+            Some(FocusRequest::Clear) => {
+                focus.clear();
+            }
+            Some(FocusRequest::Next) => {
+                focus.next();
+            }
+            Some(FocusRequest::Prev) => {
+                focus.prev();
+            }
+            Some(FocusRequest::NextInScope(scope)) => {
+                focus.next_in_scope(scope.as_ref());
+            }
+            Some(FocusRequest::PrevInScope(scope)) => {
+                focus.prev_in_scope(scope.as_ref());
+            }
+            None => {}
+        }
+    }
+
+    fn dispatch_widget_event(
+        tree: &dyn Widget<M>,
+        event: &Event,
+        store: &mut WidgetStore,
+        messages: &mut MessageQueue<M>,
+        focus: &mut FocusManager,
+        geometry: &HashMap<WidgetPath, rsille_render::area::Area>,
+        hit_regions: &[HitRegion],
+        pointer_capture: Option<&WidgetPath>,
+        theme: &Theme,
+        now: Instant,
+        frame: u64,
+        visual_capabilities: TerminalVisualCapabilities,
+    ) -> bool {
+        let mut target_path = match mouse_position(event) {
+            Some(_) => mouse_target_path(event, hit_regions, pointer_capture),
+            None => focus.current_path().cloned(),
+        };
+        if let Some(modal) = focus.modal_path() {
+            if !target_path
+                .as_ref()
+                .is_some_and(|path| path.starts_with(modal))
+            {
+                target_path = Some(modal.clone());
+            }
+        }
+        store.event_target = target_path.clone();
+        let mut route = Self::build_event_route(tree, target_path.as_ref(), false);
+        if let Some(modal) = focus.modal_path() {
+            route.retain(|(path, _, _, _)| path.starts_with(modal));
+        }
+        let mut handled = false;
+        let focused_snapshot = focus.current_path().cloned();
+        let ancestor_len = route.len().saturating_sub(1);
+
+        for (path, id, stable_scope_id, widget) in route.iter().take(ancestor_len) {
+            let outcome = Self::dispatch_to_widget(
+                *widget,
+                WidgetInput::Terminal(event),
+                store,
+                messages,
+                path.clone(),
+                id.clone(),
+                stable_scope_id.clone(),
+                focused_snapshot.clone(),
+                geometry,
+                EventPhase::Capture,
+                handled,
+                theme,
+                now,
+                frame,
+                visual_capabilities,
+            );
+            handled |= outcome.handled;
+            Self::apply_focus_request(focus, outcome.focus_request);
+            if outcome.stop_propagation {
+                return handled;
+            }
+        }
+
+        if let Some((path, id, stable_scope_id, widget)) = route.last() {
+            let outcome = Self::dispatch_to_widget(
+                *widget,
+                WidgetInput::Terminal(event),
+                store,
+                messages,
+                path.clone(),
+                id.clone(),
+                stable_scope_id.clone(),
+                focused_snapshot.clone(),
+                geometry,
+                EventPhase::Target,
+                handled,
+                theme,
+                now,
+                frame,
+                visual_capabilities,
+            );
+            handled |= outcome.handled;
+            Self::apply_focus_request(focus, outcome.focus_request);
+            if outcome.stop_propagation {
+                return handled;
+            }
+        }
+
+        for (path, id, stable_scope_id, widget) in route.iter().take(ancestor_len).rev() {
+            let outcome = Self::dispatch_to_widget(
+                *widget,
+                WidgetInput::Terminal(event),
+                store,
+                messages,
+                path.clone(),
+                id.clone(),
+                stable_scope_id.clone(),
+                focused_snapshot.clone(),
+                geometry,
+                EventPhase::Bubble,
+                handled,
+                theme,
+                now,
+                frame,
+                visual_capabilities,
+            );
+            handled |= outcome.handled;
+            Self::apply_focus_request(focus, outcome.focus_request);
+            if outcome.stop_propagation {
+                return handled;
+            }
+        }
+
+        handled
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn notify_focus_enter(
+        tree: &dyn Widget<M>,
+        store: &mut WidgetStore,
+        messages: &mut MessageQueue<M>,
+        focus: &mut FocusManager,
+        geometry: &HashMap<WidgetPath, rsille_render::area::Area>,
+        theme: &Theme,
+        now: Instant,
+        frame: u64,
+        caps: TerminalVisualCapabilities,
+    ) {
+        let focused = focus.current_path().cloned();
+        let route = Self::build_event_route(tree, focused.as_ref(), false);
+        for (index, (path, id, scope, widget)) in route.iter().enumerate() {
+            let outcome = Self::dispatch_to_widget(
+                *widget,
+                WidgetInput::FocusEnter,
+                store,
+                messages,
+                path.clone(),
+                id.clone(),
+                scope.clone(),
+                focused.clone(),
+                geometry,
+                if index + 1 == route.len() {
+                    EventPhase::Target
+                } else {
+                    EventPhase::Capture
+                },
+                false,
+                theme,
+                now,
+                frame,
+                caps,
+            );
+            Self::apply_focus_request(focus, outcome.focus_request);
+        }
+    }
+
+    fn animate_widget_tree(
+        widget: &dyn Widget<M>,
+        path: &mut WidgetPath,
+        id: WidgetId,
+        stable_scope_id: WidgetId,
+        store: &mut AnimationStore,
+        focused_id: Option<WidgetId>,
+        hovered_path: Option<&WidgetPath>,
+        now: Instant,
+        motion_policy: MotionPolicy,
+        animation_theme: crate::animation::AnimationTheme,
+    ) -> Invalidation {
+        let mut requests = {
+            let mut ctx = AnimationCtx::with_identity(
+                store,
+                path.clone(),
+                id.clone(),
+                focused_id.clone(),
+                now,
+                motion_policy,
+                animation_theme,
+            )
+            .with_hovered_path(hovered_path);
+            let legacy = widget.animate(&mut ctx);
+            let mut requests = ctx.invalidation();
+            if legacy {
+                requests.request_paint();
+                requests.request_next_frame();
+            }
+            requests
+        };
+
+        for (index, child) in widget.children().iter().enumerate() {
+            let key = WidgetKey::for_child(index, child.as_ref());
+            let (child_id, child_stable_scope_id) =
+                WidgetId::for_child(&id, &stable_scope_id, &key);
+            path.push(key);
+            requests.merge(Self::animate_widget_tree(
+                child.as_ref(),
+                path,
+                child_id,
+                child_stable_scope_id,
+                store,
+                focused_id.clone(),
+                hovered_path,
+                now,
+                motion_policy,
+                animation_theme,
+            ));
+            path.pop();
+        }
+
+        requests
+    }
+
+    fn animation_time(&self) -> Instant {
+        if !self.motion_policy.deterministic {
+            return self.clock.now();
+        }
+        self.animation_epoch
+            + self
+                .motion_policy
+                .deterministic_step
+                .saturating_mul(self.animation_frame.min(u32::MAX as u64) as u32)
+    }
+
+    fn animation_now(&mut self) -> Instant {
+        let now = self.animation_time();
+        if self.motion_policy.deterministic {
+            self.animation_frame = self.animation_frame.wrapping_add(1);
+        }
+        now
+    }
+
+    fn animate_widgets(&mut self) -> Invalidation {
+        if self.cached_tree.is_none() {
+            return Invalidation::default();
+        }
+
+        let focused_id = self.focus.current_id().cloned();
+        let mut path = WidgetPath::root();
+        let now = self.animation_now();
+        let animation_theme = self.theme.animations;
+        let tree = self.cached_tree.as_ref().unwrap();
+        let mut store = self.animation_store.borrow_mut();
+        let mut requests = Self::animate_widget_tree(
+            tree.as_ref(),
+            &mut path,
+            WidgetId::root(),
+            WidgetId::root(),
+            &mut store,
+            focused_id,
+            self.store.hovered_path.as_ref(),
+            now,
+            self.motion_policy,
+            animation_theme,
+        );
+        if store.advance(now) {
+            requests.request_paint();
+            requests.request_next_frame();
+        }
+        // A completed exit still needs one frame to remove its retained pixels
+        // and resources, even if no live animation changed.
+        if !self.exiting_visuals.is_empty() {
+            requests.request_paint();
+            requests.request_next_frame();
+        }
+        requests
+    }
+
+    fn render_exiting_visuals(&self, chunk: &mut Chunk, ctx: &RenderCtx, now: Instant) {
+        let exit_geometry = RefCell::new(HashMap::new());
+        let exit_hit_regions = RefCell::new(Vec::new());
+        for visual in &self.exiting_visuals {
+            let animations = &visual.animations;
+            let exit_ctx =
+                ctx.exit_render_ctx(&visual.store, animations, &exit_geometry, &exit_hit_regions);
+            for node in &visual.nodes {
+                let frames = animations.timeline_frames(&node.path, "exit", now);
+                let display_area = exit_display_area(node.bounds, &frames);
+
+                if display_area.width() == 0 || display_area.height() == 0 {
+                    continue;
+                }
+
+                let _ = Self::render_widget_at_path(
+                    visual.root.as_ref(),
+                    node.path.as_slice(),
+                    chunk,
+                    &exit_ctx,
+                    display_area,
+                );
+            }
+        }
+    }
+
+    fn render_widget_at_path(
+        widget: &dyn Widget<M>,
+        path: &[WidgetKey],
+        chunk: &mut Chunk,
+        ctx: &RenderCtx,
+        area: rsille_render::area::Area,
+    ) -> bool {
+        let Some((key, rest)) = path.split_first() else {
+            let _ = chunk.with_clip(area, |child_chunk| {
+                widget.render(child_chunk, ctx);
+            });
+            return true;
+        };
+
+        let children = widget.children();
+        let child = match key {
+            WidgetKey::Index(index) => children.get(*index).map(|child| child.as_ref()),
+            WidgetKey::Named(name) => children
+                .iter()
+                .find(|child| child.key() == Some(name.as_str()))
+                .map(|child| child.as_ref()),
+        };
+
+        let Some(child) = child else {
+            return false;
+        };
+
+        let child_ctx = ctx.child_ctx(key.clone());
+        Self::render_widget_at_path(child, rest, chunk, &child_ctx, area)
+    }
+
+    fn prune_completed_exit_visuals(&mut self, now: Instant) {
+        for visual in &mut self.exiting_visuals {
+            visual.nodes.retain(|node| {
+                visual
+                    .animations
+                    .timeline_is_active(&node.path, "exit", now)
+            });
+            // A single previous tree can contain exits of different durations.
+            // Drop each completed subtree's resources independently.
+            let mut retained_ids = HashSet::new();
+            visit_widgets(visual.root.as_ref(), &mut |_, path, id| {
+                if visual.nodes.iter().any(|node| path.starts_with(&node.path)) {
+                    retained_ids.insert(id.clone());
+                }
+            });
+            visual.store.retain_active(|id| retained_ids.contains(id));
+            visual
+                .animations
+                .retain_active(|id| retained_ids.contains(id));
+            visual.animations.retain_timeline_paths(|path| {
+                visual.nodes.iter().any(|node| path.starts_with(&node.path))
+            });
+        }
+        self.exiting_visuals
+            .retain(|visual| !visual.nodes.is_empty());
+    }
+
+    fn queue_tick_messages(&mut self) {
+        if self.tick_handlers.is_empty() {
+            return;
+        }
+
+        let now = self.clock.now();
+
+        for tick in &mut self.tick_handlers {
+            if now < tick.next_fire_at {
+                continue;
+            }
+
+            self.messages.push_back((tick.handler)());
+
+            while tick.next_fire_at <= now {
+                tick.next_fire_at += tick.interval;
+            }
+        }
+    }
+
+    fn queue_frame_messages(&mut self) {
+        if self.frame_handlers.is_empty() {
+            return;
+        }
+
+        let now = self.clock.now();
+        if self
+            .frame_runtime
+            .last_frame_at
+            .is_some_and(|last| now < last + Self::FRAME_INTERVAL)
+        {
+            return;
+        }
+        let info = self.frame_runtime.next(now);
+        for handler in &self.frame_handlers {
+            self.messages.push_back(handler(info));
+        }
+    }
+
+    fn task_statuses(&self) -> Vec<TaskStatus> {
+        self.task_order
+            .iter()
+            .filter_map(|task_id| self.tasks.get(task_id).map(|record| record.status.clone()))
+            .collect()
+    }
+
+    fn record_task_status(&mut self, status: TaskStatus) {
+        let Some(record) = self.tasks.get_mut(&status.id) else {
+            return;
+        };
+
+        record.status = status.clone();
+
+        if let Some(handler) = record.task.status_handler.as_ref() {
+            if let Some(message) = handler(status) {
+                self.messages.push_scoped(record.lease.clone(), message);
+            }
+        }
+    }
+
+    // Each turn has a bounded ingress and update budget so a producer cannot
+    // starve terminal input or drawing. The queue itself is currently unbounded.
+    const MESSAGE_BUDGET: usize = 256;
+    const FRAME_INTERVAL: Duration = Duration::from_nanos(16_666_667);
+
+    fn drain_task_events(&mut self) {
+        for _ in 0..Self::MESSAGE_BUDGET {
+            let Ok(event) = self.task_receiver.try_recv() else {
+                return;
+            };
+            match event {
+                TaskEvent::Message(message) => self.messages.push_back(message),
+                TaskEvent::TaskMessage {
+                    id,
+                    attempt,
+                    message,
+                } => {
+                    if self.accepts_attempt(id, attempt) {
+                        self.messages.0.push_back(QueuedMessage::Task {
+                            id,
+                            attempt,
+                            message,
+                        });
+                    }
+                }
+                TaskEvent::Finished {
+                    id,
+                    attempt,
+                    mut state,
+                } => {
+                    if !self.accepts_attempt(id, attempt) {
+                        continue;
+                    }
+                    let record = self.tasks.get_mut(&id).unwrap();
+                    record.deadline = None;
+                    if state == TaskState::RetryScheduled {
+                        if record.task.retry.can_retry(attempt) {
+                            record.retry_at = Some(self.clock.now() + record.task.retry.delay());
+                        } else {
+                            state = TaskState::Failed;
+                        }
+                    }
+                    self.set_task_state(id, state);
+                }
+            }
+        }
+        self.wake.wake();
+    }
+
+    fn accepts_attempt(&self, id: TaskId, attempt: u32) -> bool {
+        self.tasks.get(&id).is_some_and(|record| {
+            record.accept_results
+                && record.status.attempt == attempt
+                && record.status.state == TaskState::Running
+                && self.lease_is_live(&record.lease)
+        })
+    }
+
+    fn accepts_task_message(&self, id: TaskId, attempt: u32) -> bool {
+        self.tasks.get(&id).is_some_and(|record| {
+            record.accept_results
+                && self.lease_is_live(&record.lease)
+                && record.status.attempt == attempt
+                && !matches!(
+                    record.status.state,
+                    TaskState::Cancelled | TaskState::Cancelling | TaskState::TimedOut
+                )
+                && record.status.key.as_ref().is_none_or(|key| {
+                    self.task_keys
+                        .get(&ResourceKey::new(record.lease.scope.clone(), key))
+                        == Some(&id)
+                })
+        })
+    }
+
+    fn take_exit(&mut self) -> AppExit<State> {
+        self.shutdown();
+        AppExit {
+            state: self.state.take().expect("runtime state"),
+            reason: self.exit_reason.expect("exit reason"),
+        }
+    }
+
+    fn shutdown(&mut self) {
+        self.should_quit = true;
+        self.exit_reason.get_or_insert(ExitReason::Shutdown);
+        if let Some(tree) = self
+            .cached_tree
+            .take()
+            .or_else(|| self.previous_tree.take())
+        {
+            unmount_widget_states(tree.as_ref(), &mut self.store);
+        }
+        self.previous_tree = None;
+        self.exiting_visuals.clear();
+        *self.animation_store.borrow_mut() = AnimationStore::new();
+        self.focus.clear();
+        self.pointer_capture = None;
+        self.store.pointer_position = None;
+        self.store.hovered_path = None;
+        self.next_animation_at = None;
+        let active: Vec<_> = self
+            .tasks
+            .iter()
+            .filter(|(_, record)| record.status.is_active())
+            .map(|(&id, _)| id)
+            .collect();
+        for id in active {
+            self.cancel_task(id);
+        }
+        self.timers.clear();
+        self.debounces.clear();
+        self.subscription_tasks.clear();
+        self.scopes.clear();
+        self.messages.0.clear();
+        self.wake.wake();
+    }
+
+    fn set_task_state(&mut self, id: TaskId, state: TaskState) {
+        let Some(record) = self.tasks.get_mut(&id) else {
+            return;
+        };
+        let mut status = record.status.clone();
+        status.state = state;
+        status.updated_at = self.clock.now();
+        if state.is_terminal() {
+            record.deadline = None;
+            record.retry_at = None;
+        }
+        self.record_task_status(status);
+    }
+
+    fn cancel_task(&mut self, id: TaskId) {
+        let Some(record) = self.tasks.get_mut(&id) else {
+            return;
+        };
+        record.accept_results = false;
+        record.cancellation.cancel();
+        if record.status.state.is_terminal() {
+            return;
+        }
+        self.set_task_state(id, TaskState::Cancelling);
+        // Cancellation stops accepting results immediately. Blocking jobs must
+        // cooperate with their token; the UI never waits for an arbitrary thread.
+        self.set_task_state(id, TaskState::Cancelled);
+    }
+
+    fn process_deadlines(&mut self) {
+        let now = self.clock.now();
+        let mut pending = Vec::new();
+        let mut waiting = Vec::new();
+        for (at, lease, message) in self.timers.drain(..) {
+            if at <= now {
+                self.messages.push_scoped(lease, message);
+            } else {
+                waiting.push((at, lease, message));
+            }
+        }
+        self.timers = waiting;
+        let keys: Vec<_> = self
+            .debounces
+            .iter()
+            .filter(|(_, (at, _, _))| *at <= now)
+            .map(|(key, _)| key.clone())
+            .collect();
+        for key in keys {
+            if let Some((_, lease, message)) = self.debounces.remove(&key) {
+                self.messages.push_scoped(lease, message);
+            }
+        }
+        for (&id, record) in &self.tasks {
+            if record.deadline.is_some_and(|at| at <= now) {
+                pending.push((id, true));
+            } else if record.retry_at.is_some_and(|at| at <= now) {
+                pending.push((id, false));
+            }
+        }
+        for (id, timed_out) in pending {
+            if timed_out {
+                self.tasks[&id].cancellation.cancel();
+                self.set_task_state(id, TaskState::TimedOut);
+            } else {
+                self.tasks.get_mut(&id).unwrap().status.attempt += 1;
+                self.start_task_attempt(id);
+            }
+        }
+    }
+
+    fn cancel_task_key(&mut self, key: &ResourceKey) {
+        if let Some(task_id) = self.task_keys.get(key).copied() {
+            self.cancel_task(task_id);
+        }
+    }
+
+    fn prune_finished_tasks(&mut self) {
+        while self.tasks.len() > Self::MAX_TRACKED_TASKS {
+            let Some(index) = self.task_order.iter().position(|task_id| {
+                self.tasks
+                    .get(task_id)
+                    .map(|record| {
+                        record.status.state.is_terminal()
+                            && !self.messages.contains_task(*task_id)
+                            && !self.subscription_tasks.values().any(|id| id == task_id)
+                    })
+                    .unwrap_or(false)
+            }) else {
+                break;
+            };
+
+            let task_id = self.task_order.remove(index);
+            if let Some(record) = self.tasks.remove(&task_id) {
+                if let Some(key) = record.status.key {
+                    let key = ResourceKey::new(record.lease.scope, key);
+                    if self.task_keys.get(&key) == Some(&task_id) {
+                        self.task_keys.remove(&key);
+                    }
+                }
+            }
+        }
+    }
+
+    fn spawn_task(&mut self, task: Task<M>, lease: ScopeLease) -> TaskId {
+        if let Some(key) = task.key.as_deref() {
+            self.cancel_task_key(&ResourceKey::new(lease.scope.clone(), key));
+        }
+        let id = TaskId(self.next_task_id);
+        self.next_task_id = self.next_task_id.wrapping_add(1);
+        let now = self.clock.now();
+        let mut status = TaskStatus::new(
+            id,
+            task.key.clone(),
+            task.label.clone(),
+            TaskState::Queued,
+            1,
+            task.retry.max_attempts(),
+            now,
+        );
+        status.updated_at = now;
+        status.scope = lease.scope.clone();
+        if let Some(key) = task.key.as_ref() {
+            self.task_keys
+                .insert(ResourceKey::new(lease.scope.clone(), key), id);
+        }
+        self.task_order.push(id);
+        self.tasks.insert(
+            id,
+            TaskRecord {
+                status: status.clone(),
+                lease,
+                accept_results: true,
+                cancellation: CancellationToken::new(),
+                task,
+                deadline: None,
+                retry_at: None,
+            },
+        );
+        self.record_task_status(status);
+        self.start_task_attempt(id);
+        self.prune_finished_tasks();
+        id
+    }
+
+    fn start_task_attempt(&mut self, id: TaskId) {
+        let record = self.tasks.get_mut(&id).unwrap();
+        record.retry_at = None;
+        record.deadline = record
+            .task
+            .timeout
+            .map(|timeout| self.clock.now() + timeout);
+        let attempt = record.status.attempt;
+        let runner = record.task.runner.clone();
+        let sender = self.task_sender.for_attempt(id, attempt);
+        let context = TaskContext::new(id, attempt, record.cancellation.clone(), sender.clone());
+        self.set_task_state(id, TaskState::Running);
+        self.executor.spawn(Box::new(move || {
+            let state = run_task_attempt(context, runner);
+            sender.send(TaskEvent::Finished { id, attempt, state });
+        }));
+    }
+
+    fn apply_effect(&mut self, effect: Effect<M>) {
+        self.apply_scoped_effect(effect, Scope::root());
+    }
+
+    fn apply_scoped_effect(&mut self, effect: Effect<M>, scope: Scope) {
+        let Some(lease) = self.lease(&scope) else {
+            return;
+        };
+        if self.pending_commit.is_some() {
+            self.deferred_effects.push((effect, lease));
+            return;
+        }
+        match effect {
+            Effect::None => {}
+            Effect::Exit => {
+                self.exit_reason = Some(ExitReason::Requested);
+                self.shutdown();
+            }
+            Effect::Message(message) => self.messages.push_scoped(lease, message),
+            Effect::CommitFrame(message) => self.pending_commit = Some((lease, message)),
+            Effect::Batch(effects) => {
+                for effect in effects {
+                    self.apply_scoped_effect(effect, scope.clone());
+                    if self.should_quit {
+                        break;
+                    }
+                }
+            }
+            Effect::Scoped(inner, effect) => self.apply_scoped_effect(*effect, scope.join(&inner)),
+            Effect::Spawn(task) => {
+                self.spawn_task(task, lease);
+            }
+            Effect::CancelTask(id) => {
+                if scope == Scope::root()
+                    || self.tasks.get(&id).is_some_and(|r| r.lease.scope == scope)
+                {
+                    self.cancel_task(id);
+                }
+            }
+            Effect::CancelTaskKey(key) => self.cancel_task_key(&ResourceKey::new(scope, key)),
+            Effect::After(duration, message) => {
+                self.timers
+                    .push((self.clock.now() + duration, lease, message))
+            }
+            Effect::Debounce {
+                key,
+                duration,
+                message,
+            } => {
+                self.debounces.insert(
+                    ResourceKey::new(scope, key),
+                    (self.clock.now() + duration, lease, message),
+                );
+            }
+            Effect::CancelDebounce(key) => {
+                self.debounces.remove(&ResourceKey::new(scope, key));
+            }
+        }
+    }
+}
+
+impl<State, U, V, M> Draw for AppRuntime<State, U, V, M>
+where
+    U: UpdateDriver<State, M>,
+    V: Fn(&State) -> Box<dyn Widget<M>>,
+    M: Send + 'static,
+{
+    fn draw(&mut self, mut chunk: Chunk) -> Result<Size, DrawErr> {
+        let size = chunk.area().size();
+
+        self.sync_theme();
+        chunk.set_text_metrics(self.theme.text_metrics);
+
+        self.ensure_tree();
+        let tree = self.cached_tree.as_ref().unwrap();
+        sync_widget_states(tree.as_ref(), &mut self.store);
+        self.focus.rebuild(tree.as_ref());
+        self.reconcile_pointer_capture();
+        if self.store.invalidation.layout {
+            self.layouts.clear();
+            self.store.invalidation.layout = false;
+        }
+        let render_now = self.animation_now();
+        self.prune_completed_exit_visuals(render_now);
+        let tree = self.cached_tree.as_ref().unwrap();
+
+        // Resolve the target tree before painting. Geometry-changing animations
+        // may refresh only the nodes whose displayed allocation differs.
+        let measure_ctx = MeasureCtx::with_runtime(
+            &self.store,
+            &self.theme,
+            render_now,
+            self.render_frame,
+            self.visual_capabilities,
+        );
+        self.layouts
+            .resolve(tree.as_ref(), chunk.area(), &measure_ctx);
+        self.focus.rebuild(tree.as_ref());
+
+        // Paint and record displayed/clipped hit geometry from those allocations.
+        self.store.layout_geometry.borrow_mut().clear();
+        self.store.rendered_ids.borrow_mut().clear();
+        let focused_path = self.focus.current_path();
+        let focused_id = self.focus.current_id().cloned();
+        self.geometry.borrow_mut().clear();
+        self.hit_regions.borrow_mut().clear();
+        let ctx = RenderCtx::with_runtime(
+            &self.store,
+            &self.animation_store,
+            &self.theme,
+            focused_path,
+            focused_id,
+            &self.geometry,
+            &self.hit_regions,
+            render_now,
+            self.render_frame,
+            self.motion_policy,
+            self.visual_capabilities,
+        )
+        .with_layouts(&self.layouts)
+        .with_viewport(chunk.area());
+        ctx.record_bounds(chunk.area());
+        ctx.record_hit_bounds(chunk.area(), chunk.area(), tree.hit_test_mode());
+        tree.render(&mut chunk, &ctx);
+        self.render_exiting_visuals(&mut chunk, &ctx, render_now);
+        self.prune_live_animations();
+        self.render_frame = self.render_frame.wrapping_add(1);
+
+        // Layout, scrolling and overlays can move the target beneath a stationary
+        // pointer. Reconcile against the displayed, clipped geometry just painted.
+        let hovered = hover_target_path(
+            &self.hit_regions.borrow(),
+            self.store.pointer_position,
+            &self.focus,
+        );
+        if self.store.hovered_path != hovered {
+            self.store.hovered_path = hovered;
+            self.store.invalidation.request_paint();
+            self.next_animation_at = Some(self.clock.now());
+        }
+
+        Ok(size)
+    }
+}
+
+impl<State, U, V, M> AppRuntime<State, U, V, M>
+where
+    U: UpdateDriver<State, M>,
+    V: Fn(&State) -> Box<dyn Widget<M>>,
+    M: Send + 'static,
+{
+    fn terminal_loop(
+        mut self,
+        mouse_capture: bool,
+        inline_mouse_mode: InlineMouseMode,
+    ) -> WidgetResult<rsille_render::event_loop::EventLoop<Self>> {
+        let (width, height) = crossterm::terminal::size()?;
+        let inline_max_height = self.inline_max_height;
+        let inline_mode = self.inline_mode;
+        let inline_available_height =
+            inline_available_height(height, inline_mouse_mode.force_follows_viewport());
+
+        let (buffer_height, initial_used_height) = if inline_mode {
+            self.sync_theme();
+            self.ensure_tree();
+            let layout = self.cached_tree.as_ref().unwrap();
+            let buffer_height = inline_max_height.min(inline_available_height);
+            let measure_ctx = MeasureCtx::with_runtime(
+                &self.store,
+                &self.theme,
+                self.clock.now(),
+                0,
+                self.visual_capabilities,
+            );
+            let required = layout
+                .measure(
+                    SizeProposal {
+                        width: AxisLimit::Exact(width),
+                        height: AxisLimit::AtMost(buffer_height),
+                    },
+                    &measure_ctx,
+                )
+                .height;
+            let used = required.min(buffer_height);
+            (buffer_height, used)
+        } else {
+            (height, height)
+        };
+
+        let mut builder = rsille_render::Builder::new();
+        builder
+            .enable_raw_mode()
+            .keyboard_mode(self.keyboard_mode)
+            .focus_events(self.focus_events)
+            .clear(false)
+            .append_newline(false)
+            .enable_hide_cursor()
+            .disable_exit_code();
+        if mouse_capture {
+            builder.enable_mouse_capture();
+        }
+
+        if inline_mode {
+            builder
+                .inline_mode(true)
+                .inline_max_height(inline_max_height)
+                .inline_mouse_mode(inline_mouse_mode)
+                .size((width, buffer_height));
+        } else {
+            builder.enable_alt_screen().size((width, height));
+        }
+
+        match self.raster_output {
+            RasterSetting::Output(output) => builder.raster_output(output),
+            RasterSetting::Backend(backend) => builder.raster_backend(backend),
+            RasterSetting::Session(session) => builder.raster_session(session),
+            RasterSetting::InlineSession(session) => builder.inline_raster_session(session),
+        };
+        let mut event_loop = builder.build_event_loop(self);
+
+        if inline_mode {
+            event_loop.set_initial_used_height(initial_used_height);
+        }
+
+        Ok(event_loop)
+    }
+
+    pub(crate) fn run_terminal(
+        self,
+        mouse: bool,
+        inline_mouse: InlineMouseMode,
+    ) -> WidgetResult<AppExit<State>> {
+        rsille_render::event_loop::EventLoop::<Self>::check_sync_runtime()
+            .map_err(|e| crate::WidgetError::render_error(e.to_string()))?;
+        let mut core = self
+            .terminal_loop(mouse, inline_mouse)?
+            .run_returning()
+            .map_err(|e| crate::WidgetError::render_error(e.to_string()))?;
+        core.exit_reason.get_or_insert(ExitReason::InputClosed);
+        Ok(core.take_exit())
+    }
+
+    pub(crate) async fn run_terminal_async(
+        self,
+        mouse: bool,
+        inline_mouse: InlineMouseMode,
+    ) -> WidgetResult<AppExit<State>> {
+        let mut core = self
+            .terminal_loop(mouse, inline_mouse)?
+            .run_async_returning()
+            .await
+            .map_err(|e| crate::WidgetError::render_error(e.to_string()))?;
+        core.exit_reason.get_or_insert(ExitReason::InputClosed);
+        Ok(core.take_exit())
+    }
+}
+
+impl<State, U, V, M> Update for AppRuntime<State, U, V, M>
+where
+    U: UpdateDriver<State, M>,
+    V: Fn(&State) -> Box<dyn Widget<M>>,
+    M: Send + 'static,
+{
+    fn on_input_capabilities(&mut self, capabilities: InputCapabilities) {
+        if let Some(message) = self
+            .input_handler
+            .as_ref()
+            .and_then(|handler| handler(InputEvent::Capabilities(capabilities)))
+        {
+            self.messages.push_back(message);
+        }
+    }
+
+    fn wake_handle(&self) -> Option<rsille_render::WakeHandle> {
+        Some(self.wake.clone())
+    }
+
+    fn on_pointer_leave(&mut self) {
+        self.store.pointer_position = None;
+        if self.store.hovered_path.take().is_some() {
+            self.store.invalidation.request_paint();
+        }
+    }
+
+    fn next_update_at(&self) -> Option<Instant> {
+        if self.should_quit {
+            return None;
+        }
+        let now = self.clock.now();
+        if !self.messages.is_empty() || self.pending_commit.is_some() {
+            return Some(now);
+        }
+        let animation = self.next_animation_at.or_else(|| {
+            self.animation_store
+                .borrow()
+                .has_active_animations()
+                .then_some(now + Self::FRAME_INTERVAL)
+        });
+        let frame = if self.frame_handlers.is_empty() {
+            None
+        } else {
+            Some(
+                self.frame_runtime
+                    .last_frame_at
+                    .map_or(now, |last| last + Self::FRAME_INTERVAL),
+            )
+        };
+        self.tick_handlers
+            .iter()
+            .map(|tick| tick.next_fire_at)
+            .chain(self.timers.iter().map(|(at, _, _)| *at))
+            .chain(self.debounces.values().map(|(at, _, _)| *at))
+            .chain(
+                self.tasks
+                    .values()
+                    .filter_map(|record| record.deadline.or(record.retry_at)),
+            )
+            .chain(animation)
+            .chain(frame)
+            .min()
+    }
+
+    fn on_events_in_viewport(
+        &mut self,
+        events: &[Event],
+        origin: (u16, u16),
+        viewport: Size,
+    ) -> Result<bool, DrawErr> {
+        if self
+            .inline_pointer_origin
+            .is_some_and(|previous| previous != origin)
+        {
+            if let Some(path) = self.pointer_capture.clone() {
+                self.store.pointer_cancel_request =
+                    Some((path, DragCancelReason::CoordinateSpaceChanged));
+            }
+        }
+        self.inline_pointer_origin = Some(origin);
+        self.input_viewport = Some((origin, viewport));
+        let result = self.on_events(events);
+        self.input_viewport = None;
+        result.map(|_| !events.is_empty())
+    }
+
+    fn on_events(&mut self, events: &[Event]) -> Result<(), DrawErr> {
+        self.ensure_tree();
+        sync_widget_states(self.cached_tree.as_ref().unwrap().as_ref(), &mut self.store);
+        self.focus
+            .rebuild(self.cached_tree.as_ref().unwrap().as_ref());
+        self.reconcile_pointer_capture();
+
+        let tree = self.cached_tree.as_ref().unwrap();
+        let geometry = self.geometry.borrow();
+        let hit_regions = self.hit_regions.borrow();
+
+        for raw_event in events {
+            self.store.event_pointer_position = None;
+            let mut outside = false;
+            let normalized;
+            let event = if let (Some((origin, viewport)), Event::Mouse(mouse)) =
+                (self.input_viewport, raw_event)
+            {
+                let x = i32::from(mouse.column) - i32::from(origin.0);
+                let y = i32::from(mouse.row) - i32::from(origin.1);
+                outside = x < 0
+                    || y < 0
+                    || x >= i32::from(viewport.width)
+                    || y >= i32::from(viewport.height);
+                if outside
+                    && !(self.pointer_capture.is_some()
+                        && matches!(mouse.kind, MouseEventKind::Drag(_) | MouseEventKind::Up(_)))
+                {
+                    self.store.pointer_position = None;
+                    if self.store.hovered_path.take().is_some() {
+                        self.store.invalidation.request_paint();
+                    }
+                    continue;
+                }
+                self.store.event_pointer_position = Some(crate::gesture::CellPoint::new(x, y));
+                let mut mouse = *mouse;
+                mouse.column = x.clamp(0, u16::MAX.into()) as u16;
+                mouse.row = y.clamp(0, u16::MAX.into()) as u16;
+                normalized = Event::Mouse(mouse);
+                &normalized
+            } else {
+                raw_event
+            };
+            let cancel = match event {
+                Event::FocusLost => Some(DragCancelReason::FocusLost),
+                Event::Resize(_, _) => Some(DragCancelReason::CoordinateSpaceChanged),
+                Event::Key(key)
+                    if key.code == KeyCode::Esc && key.kind != KeyEventKind::Release =>
+                {
+                    Some(DragCancelReason::Escape)
+                }
+                Event::Mouse(mouse)
+                    if matches!(mouse.kind, MouseEventKind::Down(_))
+                        && self.pointer_capture.is_some() =>
+                {
+                    Some(DragCancelReason::CaptureTransferred)
+                }
+                _ => None,
+            };
+            if let Some((reason, path)) =
+                cancel.and_then(|reason| Some(reason).zip(self.pointer_capture.take()))
+            {
+                self.pointer_space = None;
+                let handled = Self::cancel_capture(
+                    tree.as_ref(),
+                    &path,
+                    reason,
+                    &mut self.store,
+                    &mut self.messages,
+                    &mut self.focus,
+                    &geometry,
+                    &self.theme,
+                    self.clock.now(),
+                    self.render_frame,
+                    self.visual_capabilities,
+                );
+                if handled && reason == DragCancelReason::Escape {
+                    continue;
+                }
+            }
+            match event {
+                Event::Mouse(mouse) => {
+                    self.store.pointer_position = (!outside).then_some((mouse.column, mouse.row));
+                }
+                Event::FocusLost | Event::Resize(_, _) => {
+                    self.store.pointer_position = None;
+                }
+                _ => {}
+            }
+            let hovered = hover_target_path(&hit_regions, self.store.pointer_position, &self.focus);
+            if self.store.hovered_path != hovered {
+                self.store.hovered_path = hovered;
+                self.store.invalidation.request_paint();
+            }
+            if let Some(message) = self
+                .input_handler
+                .as_ref()
+                .and_then(|handler| handler(InputEvent::Terminal(event.clone())))
+            {
+                self.messages.push_back(message);
+            }
+            if let Event::Resize(_, _) = event {
+                continue;
+            }
+
+            let pointer_capture = self.pointer_capture.clone();
+            let mouse_target = mouse_target_path(event, &hit_regions, pointer_capture.as_ref());
+            if let Event::Mouse(mouse_event) = event {
+                match mouse_event.kind {
+                    MouseEventKind::Down(MouseButton::Left) => {
+                        self.pointer_capture = mouse_target.clone();
+                        self.pointer_space = mouse_target
+                            .as_ref()
+                            .map(|p| Self::pointer_space(&self.store, p));
+                        if let Some(path) = mouse_target.as_ref() {
+                            self.focus.request_focus(path);
+                        }
+                    }
+                    MouseEventKind::Up(_) => {
+                        self.pointer_capture = None;
+                    }
+                    _ => {}
+                }
+            }
+
+            let handled = Self::dispatch_widget_event(
+                tree.as_ref(),
+                event,
+                &mut self.store,
+                &mut self.messages,
+                &mut self.focus,
+                &geometry,
+                &hit_regions,
+                pointer_capture.as_ref(),
+                &self.theme,
+                self.clock.now(),
+                self.render_frame,
+                self.visual_capabilities,
+            );
+            if let Some((path, capture)) = self.store.pointer_request.take() {
+                if capture {
+                    if let Some(previous) = self
+                        .pointer_capture
+                        .as_ref()
+                        .filter(|previous| **previous != path)
+                    {
+                        Self::cancel_capture(
+                            tree.as_ref(),
+                            previous,
+                            DragCancelReason::CaptureTransferred,
+                            &mut self.store,
+                            &mut self.messages,
+                            &mut self.focus,
+                            &geometry,
+                            &self.theme,
+                            self.clock.now(),
+                            self.render_frame,
+                            self.visual_capabilities,
+                        );
+                    }
+                    self.pointer_space = Some(Self::pointer_space(&self.store, &path));
+                    self.pointer_capture = Some(path);
+                } else if self.pointer_capture.as_ref() == Some(&path) {
+                    self.pointer_capture = None;
+                    self.pointer_space = None;
+                }
+            }
+            if let Some((owner, reason)) = self.store.pointer_cancel_request.take() {
+                if let Some(path) = self
+                    .pointer_capture
+                    .as_ref()
+                    .filter(|p| p.starts_with(&owner))
+                {
+                    Self::cancel_capture(
+                        tree.as_ref(),
+                        path,
+                        reason,
+                        &mut self.store,
+                        &mut self.messages,
+                        &mut self.focus,
+                        &geometry,
+                        &self.theme,
+                        self.clock.now(),
+                        self.render_frame,
+                        self.visual_capabilities,
+                    );
+                    self.pointer_capture = None;
+                    self.pointer_space = None;
+                }
+            }
+            if handled {
+                if matches!(event, Event::Key(_)) {
+                    if let Some(router) = self.command_router.as_mut() {
+                        router.cancel_pending();
+                    }
+                }
+                continue;
+            }
+
+            // Only handle keyboard events after widget propagation.
+            let key_event = match event {
+                Event::Key(k) => k,
+                _ => continue,
+            };
+            if key_event.kind == KeyEventKind::Release {
+                continue;
+            }
+
+            // 1. Tab / Shift+Tab → default focus navigation
+            match key_event.code {
+                KeyCode::Tab if key_event.modifiers.contains(KeyModifiers::SHIFT) => {
+                    self.focus.prev();
+                    Self::notify_focus_enter(
+                        tree.as_ref(),
+                        &mut self.store,
+                        &mut self.messages,
+                        &mut self.focus,
+                        &geometry,
+                        &self.theme,
+                        self.clock.now(),
+                        self.render_frame,
+                        self.visual_capabilities,
+                    );
+                    if let Some(router) = self.command_router.as_mut() {
+                        router.cancel_pending();
+                    }
+                    continue;
+                }
+                KeyCode::Tab => {
+                    self.focus.next();
+                    Self::notify_focus_enter(
+                        tree.as_ref(),
+                        &mut self.store,
+                        &mut self.messages,
+                        &mut self.focus,
+                        &geometry,
+                        &self.theme,
+                        self.clock.now(),
+                        self.render_frame,
+                        self.visual_capabilities,
+                    );
+                    if let Some(router) = self.command_router.as_mut() {
+                        router.cancel_pending();
+                    }
+                    continue;
+                }
+                _ => {}
+            }
+
+            // Scoped command sequences use the runtime's injected clock.
+            if let Some(router) = self.command_router.as_mut() {
+                let modal = self
+                    .focus
+                    .modal_path()
+                    .and_then(|path| self.focus.analysis_id(path));
+                match router.handle_key_in(
+                    key_event,
+                    self.focus.current_id(),
+                    modal,
+                    self.clock.now(),
+                ) {
+                    CommandMatch::Message(message) => {
+                        self.messages.push_back(message);
+                        continue;
+                    }
+                    CommandMatch::Pending => continue,
+                    CommandMatch::Ignored => {}
+                }
+            }
+            if self.focus.modal_path().is_some() {
+                continue;
+            }
+
+            // 2. Quit key
+            let should_quit = match &self.quit_behavior {
+                QuitBehavior::Default => {
+                    key_event.code == KeyCode::Esc && key_event.modifiers.is_empty()
+                }
+                QuitBehavior::CustomKey(k) => {
+                    key_event.code == *k && key_event.modifiers.is_empty()
+                }
+                QuitBehavior::CustomKeyEvent(ke) => {
+                    key_event.code == ke.code && key_event.modifiers == ke.modifiers
+                }
+                QuitBehavior::Disabled => false,
+            };
+            if should_quit {
+                self.exit_reason = Some(ExitReason::QuitKey);
+                self.should_quit = true;
+                return Ok(());
+            }
+
+            // 4. Rich hotkey registry
+            if let Some(message) = self.hotkeys.resolve(key_event) {
+                self.messages.push_back(message);
+                continue;
+            }
+
+            // 5. Legacy global key handlers
+            if let Some(handler) = self.global_key_handlers.get(&key_event.code) {
+                self.messages.push_back(handler());
+            }
+        }
+
+        self.store.event_pointer_position = None;
+        Ok(())
+    }
+
+    fn event_frame_boundaries(&self) -> bool {
+        true
+    }
+
+    fn frame_commit_pending(&self) -> bool {
+        self.pending_commit.is_some()
+    }
+
+    fn frame_committed(&mut self) {
+        if let Some((lease, message)) = self.pending_commit.take() {
+            for (effect, scope) in self.deferred_effects.drain(..).rev() {
+                self.messages
+                    .0
+                    .push_front(QueuedMessage::Effect(effect, scope));
+            }
+            self.messages
+                .0
+                .push_front(QueuedMessage::Scoped { lease, message });
+            self.wake.wake();
+        }
+    }
+
+    fn update(&mut self) -> Result<bool, DrawErr> {
+        if self.pending_commit.is_some() {
+            return Ok(true);
+        }
+        if self.should_quit {
+            self.shutdown();
+            return Ok(false);
+        }
+        self.process_deadlines();
+        self.drain_task_events();
+        self.queue_tick_messages();
+        self.queue_frame_messages();
+
+        let mut processed_messages = false;
+
+        for _ in 0..Self::MESSAGE_BUDGET {
+            let Some(message) = self.messages.pop_front() else {
+                break;
+            };
+            let message = match message {
+                QueuedMessage::Effect(effect, lease) => {
+                    if !self.lease_is_live(&lease) {
+                        continue;
+                    }
+                    self.apply_scoped_effect(effect, lease.scope);
+                    if self.should_quit {
+                        return Ok(false);
+                    }
+                    if self.pending_commit.is_some() {
+                        break;
+                    }
+                    continue;
+                }
+                QueuedMessage::Plain(message) => message,
+                QueuedMessage::Scoped { lease, message } => {
+                    if !self.lease_is_live(&lease) {
+                        continue;
+                    }
+                    message
+                }
+                QueuedMessage::Task {
+                    id,
+                    attempt,
+                    message,
+                } => {
+                    if !self.accepts_task_message(id, attempt) {
+                        continue;
+                    }
+                    message
+                }
+            };
+            processed_messages = true;
+            let mut effects = Vec::new();
+            let statuses = self.task_statuses();
+            let task_keys = self.task_keys.clone();
+            let now = self.clock.now();
+            {
+                let mut ctx = UpdateCtx::new(&mut effects, statuses, task_keys, now);
+                self.update_fn.handle(
+                    self.state.as_mut().expect("runtime state"),
+                    message,
+                    &mut ctx,
+                );
+            }
+            // Reconcile each update before accepting the next queued result.
+            // An unmount in this batch must invalidate messages immediately.
+            if self.previous_tree.is_none() {
+                self.previous_tree = self.cached_tree.take();
+                self.previous_geometry = self.geometry.borrow().clone();
+            } else {
+                self.cached_tree = None;
+            }
+            self.ensure_tree_with_sync(false);
+            for effect in effects {
+                self.apply_effect(effect);
+                if self.should_quit {
+                    return Ok(false);
+                }
+            }
+            if self.pending_commit.is_some() {
+                break;
+            }
+        }
+        self.prune_finished_tasks();
+
+        self.sync_theme();
+        self.ensure_tree();
+        if processed_messages {
+            // Controlled values synchronize once per input batch, after its
+            // final app value is known. Mount/unmount and resource cancellation
+            // still occur between messages.
+            sync_widget_states(self.cached_tree.as_ref().unwrap().as_ref(), &mut self.store);
+        }
+        let mut requests = self.animate_widgets();
+        requests.merge(std::mem::take(&mut self.store.invalidation));
+        if requests.layout {
+            self.layouts.clear();
+        }
+        self.next_animation_at = requests
+            .next_frame
+            .then(|| self.clock.now() + Self::FRAME_INTERVAL);
+
+        Ok(processed_messages || requests.paint || requests.layout)
+    }
+
+    fn should_quit(&self) -> bool {
+        self.should_quit
+    }
+
+    fn required_size(&self, current_size: Size) -> Option<Size> {
+        if !self.inline_mode {
+            return None;
+        }
+        if let Some(ref tree) = self.cached_tree {
+            let measure_ctx = MeasureCtx::with_runtime(
+                &self.store,
+                &self.theme,
+                self.clock.now(),
+                self.render_frame,
+                self.visual_capabilities,
+            );
+            let required = tree
+                .measure(
+                    SizeProposal {
+                        width: AxisLimit::Exact(current_size.width),
+                        height: AxisLimit::AtMost(self.inline_max_height),
+                    },
+                    &measure_ctx,
+                )
+                .height;
+            let height = required.min(self.inline_max_height);
+            if height != current_size.height {
+                return Some(Size {
+                    width: current_size.width,
+                    height,
+                });
+            }
+        }
+        None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::animation::{AnimationSpec, Easing, Transition};
+
+    #[test]
+    fn ordinary_input_coalesces_headless_draws() {
+        use crate::widgets::label;
+        let mut app = App::new(0)
+            .on_key(KeyCode::Enter, || ())
+            .build(|state, ()| *state += 1, |state| label(state.to_string()));
+        app.step(&[]).unwrap();
+        let before = app.core.render_frame;
+        let enter = Event::Key(crossterm::event::KeyEvent::new(
+            KeyCode::Enter,
+            KeyModifiers::NONE,
+        ));
+        app.step(&[enter.clone(), enter.clone(), enter]).unwrap();
+        assert_eq!(*app.state(), 3);
+        assert_eq!(app.core.render_frame, before + 1);
+    }
+
+    #[test]
+    fn headless_initial_draw_failure_retains_input_across_retries() {
+        use crate::widgets::label;
+        let mut app = App::new(0)
+            .on_key(KeyCode::Enter, || ())
+            .build(|state, ()| *state += 1, |state| label(state.to_string()));
+        let enter = Event::Key(crossterm::event::KeyEvent::new(
+            KeyCode::Enter,
+            KeyModifiers::NONE,
+        ));
+        for _ in 0..2 {
+            app.fail_next_draw = true;
+            assert!(app.step(std::slice::from_ref(&enter)).is_err());
+            assert_eq!(*app.state(), 0);
+            assert!(app.needs_draw);
+            assert!(app.next_update_at().is_some());
+        }
+        app.step(&[]).unwrap();
+        assert_eq!(*app.state(), 2);
+        assert!(app.pending_events.is_empty());
+    }
+
+    #[test]
+    fn headless_commit_and_prompt_retries_precede_retained_input() {
+        use crate::widgets::label;
+        let mut app = App::new(String::new())
+            .on_key(KeyCode::Enter, || 0_u8)
+            .on_key(KeyCode::Char('x'), || 2_u8)
+            .build_with_effects(
+                |state, message, ctx| match message {
+                    0 => {
+                        *state = "result".into();
+                        ctx.commit_frame(1);
+                    }
+                    1 => *state = "prompt".into(),
+                    2 => state.push('x'),
+                    _ => unreachable!(),
+                },
+                |state| label(state.clone()),
+            );
+        app.step(&[]).unwrap();
+        let key = |code| Event::Key(crossterm::event::KeyEvent::new(code, KeyModifiers::NONE));
+        app.fail_next_draw = true;
+        assert!(app
+            .step(&[key(KeyCode::Enter), key(KeyCode::Char('x'))])
+            .is_err());
+        assert!(app.core.frame_commit_pending());
+        assert_eq!(app.state(), "result");
+        app.fail_next_draw = true;
+        assert!(app.step(&[key(KeyCode::Char('x'))]).is_err());
+        assert_eq!(app.pending_events.len(), 2);
+        assert!(app.step(&[]).unwrap().committed);
+        assert_eq!(app.state(), "result");
+        assert!(!app.core.frame_commit_pending());
+        app.fail_next_draw = true;
+        assert!(app.step(&[]).is_err());
+        assert_eq!(app.state(), "prompt");
+        assert_eq!(app.pending_events.len(), 2);
+        assert!(app.needs_draw);
+        assert!(!app.step(&[]).unwrap().committed);
+        assert_eq!(app.state(), "promptxx");
+        assert!(app.pending_events.is_empty());
+    }
+
+    #[test]
+    fn commit_frame_stops_message_batches_and_delivers_continuation_first() {
+        use crate::widgets::label;
+        let mut app = App::new(String::new())
+            .build_with_effects(
+                |state, message: u8, ctx| match message {
+                    0 => {
+                        *state = "result".into();
+                        ctx.dispatch(Effect::batch([
+                            Effect::commit_frame(1).map(|m| m),
+                            Effect::message(2),
+                        ]));
+                    }
+                    1 => *state = "prompt".into(),
+                    2 => state.push('!'),
+                    3 => {
+                        assert_eq!(state, "prompt");
+                        state.push('?');
+                    }
+                    _ => unreachable!(),
+                },
+                |state| label(state.clone()),
+            )
+            .size(12, 2);
+        app.handle().send(0).unwrap();
+        app.handle().send(3).unwrap();
+        let step = app.step(&[]).unwrap();
+        assert!(step.committed && step.rendered);
+        assert_eq!(app.state(), "result");
+        assert_eq!(app.frame().get((0, 0).into()).unwrap().symbol(), "r");
+        assert!(step.next_update_at.is_some());
+        assert!(!app.step(&[]).unwrap().committed);
+        assert_eq!(app.state(), "prompt?!");
+    }
+
+    #[test]
+    fn commit_frame_preserves_remaining_input_and_repeated_boundaries() {
+        use crate::widgets::label;
+        let mut app = App::new(0_u8)
+            .on_key(KeyCode::Enter, || true)
+            .build_with_effects(
+                |state, submit, ctx| {
+                    if submit {
+                        *state += 1;
+                        ctx.commit_frame(false);
+                    } else {
+                        *state += 10;
+                    }
+                },
+                |state| label(state.to_string()),
+            )
+            .size(8, 1);
+        let enter = Event::Key(crossterm::event::KeyEvent::new(
+            KeyCode::Enter,
+            KeyModifiers::NONE,
+        ));
+        assert!(app.step(&[enter.clone(), enter]).unwrap().committed);
+        assert_eq!(*app.state(), 1);
+        assert!(app.step(&[]).unwrap().committed);
+        assert_eq!(*app.state(), 12);
+        assert!(!app.step(&[]).unwrap().committed);
+        assert_eq!(*app.state(), 22);
+    }
+
+    #[test]
+    fn commit_frame_precedes_deferred_exit_and_preserves_raster_snapshot() {
+        use crate::widgets::raster_canvas;
+        use rsille_render::raster::{RasterCanvas, Rgb};
+        let image = Arc::new(RasterCanvas::new(2, 2, Rgb(1, 2, 3)).unwrap());
+        let mut app = App::new(false)
+            .build_with_effects(
+                |state, message, ctx| {
+                    if message {
+                        ctx.dispatch(Effect::batch([Effect::commit_frame(false), Effect::exit()]));
+                    } else {
+                        *state = true;
+                    }
+                },
+                move |_| raster_canvas(image.clone()).height(1),
+            )
+            .size(4, 2);
+        app.handle().send(true).unwrap();
+        let result = app.step(&[]).unwrap();
+        assert!(result.committed && !result.should_quit);
+        assert!(app.frame().has_raster());
+        assert!(!*app.state());
+        assert!(app.step(&[]).unwrap().should_quit);
+        assert!(*app.state());
+    }
+
+    #[test]
+    fn raster_output_defaults_and_explicit_config_reach_the_runtime() {
+        use crate::prelude::{CellPixels, RasterCapabilities, RasterOutput};
+        use crate::widgets::label;
+
+        let default = App::<(), ()>::new(());
+        let RasterSetting::Output(output) = default.raster_output else {
+            panic!()
+        };
+        assert_eq!(output, RasterOutput::default());
+        let pixels = CellPixels {
+            width: 8,
+            height: 16,
+        };
+
+        for configured in [false, true] {
+            let config = RasterOutput {
+                capabilities: RasterCapabilities {
+                    sixel: configured,
+                    reliable_erase: configured,
+                    reliable_inline_erase: false,
+                    no_scroll: configured,
+                    cell_pixels: configured.then_some(pixels),
+                },
+            };
+            let app = App::new(())
+                .raster_backend(rsille_render::RasterBackend::Auto)
+                .raster_output(config)
+                .build(|_, ()| {}, |_| label("ready"));
+            let mut requested = App::new(())
+                .raster_output(config)
+                .raster_backend(rsille_render::RasterBackend::Kitty)
+                .build(|_, ()| {}, |_| label("ready"));
+            requested.step(&[]).unwrap();
+            assert!(matches!(
+                requested.core.raster_output,
+                RasterSetting::Backend(rsille_render::RasterBackend::Kitty)
+            ));
+            assert!(
+                matches!(app.core.raster_output, RasterSetting::Output(output) if output == config)
+            );
+        }
+    }
+
+    #[test]
+    fn raster_output_headless_frames_preserve_metadata() {
+        use crate::layout::col;
+        use crate::widgets::{label, raster_canvas};
+        use rsille_render::raster::{RasterCanvas, Rgb};
+
+        let image = Arc::new(RasterCanvas::new(4, 4, Rgb(20, 40, 80)).unwrap());
+        let mut app = App::new(())
+            .build(
+                |_, ()| {},
+                move |_| {
+                    col()
+                        .child(label("中e"))
+                        .child(raster_canvas(image.clone()).height(1))
+                },
+            )
+            .size(6, 3);
+        assert!(!app.frame().has_raster());
+        app.step(&[]).unwrap();
+        assert!(app.frame().has_raster());
+        assert!(app.frame().content().iter().any(|cell| cell.is_occupied));
+        app.resize((0, 0).into());
+        assert!(app.frame().content().is_empty());
+    }
+
+    #[test]
+    fn exit_collapse_reduces_height_without_moving_origin() {
+        let area = rsille_render::area::Area::new((2, 3).into(), (10, 6).into());
+        let frame = TimelineFrame {
+            transition: Transition::new(
+                TransitionEffect::Collapse,
+                AnimationSpec::new(Duration::from_millis(100), Easing::Linear),
+            ),
+            progress: 0.5,
+            complete: false,
+        };
+
+        let display = exit_display_area(area, &[frame]);
+
+        assert_eq!(display.x(), 2);
+        assert_eq!(display.y(), 3);
+        assert_eq!(display.width(), 10);
+        assert_eq!(display.height(), 3);
+    }
+
+    #[test]
+    fn exit_scale_from_center_collapses_around_center() {
+        let area = rsille_render::area::Area::new((2, 4).into(), (10, 6).into());
+        let frame = TimelineFrame {
+            transition: Transition::new(
+                TransitionEffect::ScaleFromCenter,
+                AnimationSpec::new(Duration::from_millis(100), Easing::Linear),
+            ),
+            progress: 0.5,
+            complete: false,
+        };
+
+        let display = exit_display_area(area, &[frame]);
+
+        assert_eq!(display.x(), 4);
+        assert_eq!(display.y(), 5);
+        assert_eq!(display.width(), 5);
+        assert_eq!(display.height(), 3);
+    }
+
+    #[test]
+    fn hit_test_uses_latest_rendered_region_on_overlap() {
+        let lower = WidgetPath::root().child("lower");
+        let upper = WidgetPath::root().child("upper");
+        let regions = vec![
+            HitRegion {
+                path: lower.clone(),
+                area: rsille_render::area::Area::new((0, 0).into(), (10, 5).into()),
+            },
+            HitRegion {
+                path: upper.clone(),
+                area: rsille_render::area::Area::new((2, 1).into(), (10, 5).into()),
+            },
+        ];
+
+        assert_eq!(hit_test_path(&regions, 3, 2), Some(upper));
+        assert_eq!(hit_test_path(&regions, 1, 1), Some(lower));
+        assert_eq!(hit_test_path(&regions, 20, 20), None);
+    }
+
+    #[test]
+    fn mouse_capture_is_enabled_by_default() {
+        let app = App::<(), ()>::new(());
+
+        assert!(app.mouse_capture);
+    }
+
+    #[test]
+    fn pointer_leave_repaints_hover_without_moving_focus_or_emitting_input() {
+        use crate::prelude::*;
+
+        let green = Color::Rgb(30, 220, 120);
+        let mut rt = App::new(0)
+            .with_motion_policy(MotionPolicy::disabled())
+            .on_input(|_| Some(()))
+            .update(|count, (), _| *count += 1)
+            .view(move |_| {
+                grid()
+                    .columns("20 20")
+                    .rows("5")
+                    .child(
+                        panel()
+                            .key("card")
+                            .hover_border_style(Style::default().fg(green)),
+                    )
+                    .child(button("Anchor").key("anchor"))
+            })
+            .build()
+            .size(40, 8);
+        let border_color = |rt: &Runtime<i32, ()>| {
+            rt.frame().content()[0]
+                .content
+                .style
+                .colors
+                .and_then(|colors| colors.foreground)
+        };
+        rt.step(&[]).unwrap();
+        let base = border_color(&rt);
+        rt.step(&[Event::Mouse(MouseEvent {
+            kind: MouseEventKind::Moved,
+            column: 3,
+            row: 1,
+            modifiers: KeyModifiers::empty(),
+        })])
+        .unwrap();
+        assert_eq!(border_color(&rt), Some(green.into()));
+        assert!(rt.hovered_path().is_some());
+        assert_eq!(rt.focused_key(), Some("anchor"));
+        assert_eq!(*rt.state(), 1);
+
+        rt.core.on_pointer_leave();
+        assert!(rt.hovered_path().is_none());
+        assert!(rt.core.store.pointer_position.is_none());
+        assert!(rt.step(&[]).unwrap().rendered);
+        assert_eq!(border_color(&rt), base);
+        assert_eq!(rt.focused_key(), Some("anchor"));
+        assert_eq!(*rt.state(), 1);
+        // Repainting must not recreate hover from the old pointer position.
+        rt.step(&[]).unwrap();
+        assert!(rt.hovered_path().is_none());
+    }
+
+    #[test]
+    fn drag_events_keep_captured_target_when_pointer_leaves_hit_region() {
+        let captured = WidgetPath::root().child("slider");
+        let regions = vec![HitRegion {
+            path: captured.clone(),
+            area: rsille_render::area::Area::new((0, 0).into(), (10, 2).into()),
+        }];
+        let event = Event::Mouse(crossterm::event::MouseEvent {
+            kind: MouseEventKind::Drag(MouseButton::Left),
+            column: 40,
+            row: 20,
+            modifiers: KeyModifiers::empty(),
+        });
+
+        assert_eq!(
+            mouse_target_path(&event, &regions, Some(&captured)),
+            Some(captured)
+        );
+    }
+    #[test]
+    fn inline_capture_keeps_signed_outside_coordinates_and_origin_changes_cancel() {
+        use crate::{
+            gesture::{CellPoint, DragCancelReason, DragEvent},
+            widgets::{drag_region, label},
+        };
+        let mouse = |kind, column, row| {
+            Event::Mouse(crossterm::event::MouseEvent {
+                kind,
+                column,
+                row,
+                modifiers: KeyModifiers::empty(),
+            })
+        };
+        let mut rt = App::new(Vec::<DragEvent>::new())
+            .with_motion_policy(MotionPolicy::disabled())
+            .build(
+                |events, event| events.push(event),
+                |_| drag_region(label("handle")).key("handle").on_drag(|e| e),
+            )
+            .size(20, 6);
+        rt.step(&[]).unwrap();
+        rt.core
+            .on_events_in_viewport(
+                &[
+                    mouse(MouseEventKind::Down(MouseButton::Left), 12, 9),
+                    mouse(MouseEventKind::Drag(MouseButton::Left), 8, 5),
+                    mouse(MouseEventKind::Up(MouseButton::Left), 8, 5),
+                ],
+                (10, 8),
+                (20, 6).into(),
+            )
+            .unwrap();
+        rt.step(&[]).unwrap();
+        assert!(
+            matches!(rt.state().last(),Some(DragEvent::End(u)) if u.position==CellPoint::new(-2,-3) && u.total_delta==CellPoint::new(-4,-4))
+        );
+        assert!(rt.core.pointer_capture.is_none());
+        rt.core
+            .on_events_in_viewport(
+                &[
+                    mouse(MouseEventKind::Down(MouseButton::Left), 12, 9),
+                    mouse(MouseEventKind::Drag(MouseButton::Left), 13, 9),
+                ],
+                (10, 8),
+                (20, 6).into(),
+            )
+            .unwrap();
+        rt.step(&[]).unwrap();
+        rt.core
+            .on_events_in_viewport(&[], (10, 6), (20, 6).into())
+            .unwrap();
+        rt.step(&[]).unwrap();
+        assert!(matches!(
+            rt.state().last(),
+            Some(DragEvent::Cancel(DragCancelReason::CoordinateSpaceChanged))
+        ));
+        assert!(rt.core.pointer_capture.is_none());
+    }
+}

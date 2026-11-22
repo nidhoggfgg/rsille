@@ -22,6 +22,26 @@ use std::{cell::RefCell, collections::HashMap};
 const BG: Rgb = Rgb(255, 255, 255);
 
 #[test]
+fn facade_and_component_crates_share_types() {
+    let mut runtime = rsille_tui::app::App::new(())
+        .update(|_, (), _| {})
+        .view(|_| {
+            rsille::tui::widgets::canvas(|canvas: &mut rsille_canvas::Canvas, _| {
+                canvas.set(0.0, 0.0);
+            })
+        })
+        .build()
+        .size(1, 1);
+    runtime.step(&[]).unwrap();
+    let frame: &rsille_render::buffer::Buffer = runtime.frame();
+    let frame: &Buffer = frame;
+    assert!(matches!(
+        frame.content()[0].content.as_char(),
+        Some('⠁'..='⣿')
+    ));
+}
+
+#[test]
 fn imported_buffers_keep_identity_and_cow_contract() {
     let pixels = vec![Rgb(1, 2, 3), Rgb(4, 5, 6)];
     let pointer = pixels.as_ptr();

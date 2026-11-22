@@ -158,14 +158,16 @@ without adding Typst dependencies to the core crate.
 
 ## API and resources
 
+The `rsille` crate re-exports `rsille-tui`, `rsille-render` and `rsille-canvas`. You can also depend directly on any of the three packages.
+
 | Public module | Responsibility | Source |
 | --- | --- | --- |
-| `rsille::tui` | Applications, widgets, layout, input and effects | [src/tui](src/tui) |
-| `rsille::render` | Buffers, styled Unicode text, drawing and terminal loops | [src/render](src/render) |
-| `rsille::canvas` | Sample graphics and terminal encoding | [src/canvas](src/canvas) |
-| `rsille::raster` | RGB raster canvases, Sixel output and capability configuration | [src/render/raster](src/render/raster) |
+| `rsille::tui` | Applications, widgets, layout, input and effects | [rsille-tui](packages/rsille-tui) |
+| `rsille::render` | Buffers, styled Unicode text, drawing and terminal loops | [rsille-render](packages/rsille-render) |
+| `rsille::canvas` | Sample graphics and terminal encoding | [rsille-canvas](packages/rsille-canvas) |
+| `rsille::raster` | RGB raster canvases, Sixel output and capability configuration | [rsille-render/src/raster](packages/rsille-render/src/raster) |
 
 - [Example gallery](examples/README.md)
-- [TUI examples](packages/tui/examples/README.md)
+- [TUI examples](packages/rsille-tui/examples/README.md)
 - [Canvas debugging and raster backend comparison](examples/canvas/README.md)
 - [MIT license](LICENCE)

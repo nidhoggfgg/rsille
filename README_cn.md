@@ -151,14 +151,16 @@ inline 应用也可在读取输入前调用 `RasterBackend::Auto.negotiate_inlin
 
 ## API 与资料入口
 
+`rsille` 统一导出 `rsille-tui`、`rsille-render` 和 `rsille-canvas`。也可以根据需要单独依赖其中一个包。
+
 | 公开模块 | 职责 | 源码 |
 | --- | --- | --- |
-| `rsille::tui` | 应用、组件、布局、输入和特效 | [src/tui](src/tui) |
-| `rsille::render` | Buffer、带样式的 Unicode 文本、绘制与终端循环 | [src/render](src/render) |
-| `rsille::canvas` | 采样图形与终端编码 | [src/canvas](src/canvas) |
-| `rsille::raster` | RGB 栅格画布、Sixel 输出与能力配置 | [src/render/raster](src/render/raster) |
+| `rsille::tui` | 应用、组件、布局、输入和特效 | [rsille-tui](packages/rsille-tui) |
+| `rsille::render` | Buffer、带样式的 Unicode 文本、绘制与终端循环 | [rsille-render](packages/rsille-render) |
+| `rsille::canvas` | 采样图形与终端编码 | [rsille-canvas](packages/rsille-canvas) |
+| `rsille::raster` | RGB 栅格画布、Sixel 输出与能力配置 | [rsille-render/src/raster](packages/rsille-render/src/raster) |
 
 - [示例目录](examples/README_cn.md)
-- [TUI 小示例](packages/tui/examples/README_cn.md)
+- [TUI 小示例](packages/rsille-tui/examples/README_cn.md)
 - [Canvas 调试与图像后端对照](examples/canvas/README_cn.md)
 - [MIT 许可](LICENCE)
