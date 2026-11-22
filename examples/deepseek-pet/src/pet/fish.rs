@@ -17,9 +17,9 @@ const TILE: [&[u8; 24]; 12] = [
     b"..............kk........",
 ];
 
-fn color(ink: u8) -> u16 {
-    match ink {
-        b'.' => 256,
+fn color(ink: u8) -> [u8; 4] {
+    let index: u16 = match ink {
+        b'.' => return [0; 4],
         b'k' => 0b011_010_00, // toasted outline
         b'r' => 0b101_011_00,
         b'a' => 0b110_100_01,
@@ -27,7 +27,13 @@ fn color(ink: u8) -> u16 {
         b'c' => 0b111_111_10, // glint on the scales
         b'e' => 0b001_001_00, // eye
         _ => unreachable!("unknown fish sprite color"),
-    }
+    };
+    [
+        ((index >> 5) * 255 / 7) as u8,
+        (((index >> 2) & 7) * 255 / 7) as u8,
+        ((index & 3) * 85) as u8,
+        255,
+    ]
 }
 
 // Coordinates in the 320px snack frames, before scaling or mirroring.
@@ -50,7 +56,7 @@ impl FishBite {
         Some(Self { left, top })
     }
 
-    pub(super) fn pixel(self, x: usize, y: usize) -> Option<u16> {
+    pub(super) fn pixel(self, x: usize, y: usize) -> Option<[u8; 4]> {
         const WIDTH: usize = 64;
         const HEIGHT: usize = WIDTH / 2;
         if x < self.left
@@ -75,14 +81,20 @@ pub(super) struct FishIcon {
 }
 
 impl FishIcon {
-    pub(super) fn place((col, row): (u16, u16), cols: u16, rows: u16, cell: CellPixels) -> Self {
+    pub(super) fn place(
+        (col, row): (u16, u16),
+        cols: u16,
+        rows: u16,
+        cell: CellPixels,
+        band: usize,
+    ) -> Self {
         let span: usize = if cols >= 4 { 3 } else { 1 };
         let cw = usize::from(cell.width);
         let ch = usize::from(cell.height);
         // Even a one-pixel sprite occupies a six-row Sixel band.
-        let band_rows = 6_u16.div_ceil(cell.height);
+        let band_rows = (band as u16).div_ceil(cell.height);
         let row = row.min(rows - band_rows + 1);
-        let available = usize::from(rows - row + 1) * ch / 6 * 6;
+        let available = usize::from(rows - row + 1) * ch / band * band;
         let width = (span * cw)
             .min(2 * ch.min(available))
             .min(TILE[0].len() * 2);
@@ -108,7 +120,11 @@ impl FishIcon {
         }
     }
 
-    pub(super) fn draw(self, out: &mut Vec<u8>) {
+    pub(super) fn draw(
+        self,
+        kitty: Option<&rsille::render::raster_output::KittyImage>,
+        out: &mut Vec<u8>,
+    ) -> std::io::Result<()> {
         let mut pixels = Vec::with_capacity(self.width * self.height);
         for y in 0..self.height {
             let line = TILE[(2 * y + 1) * TILE.len() / (2 * self.height)];
@@ -117,7 +133,14 @@ impl FishIcon {
                 pixels.push(color(ink));
             }
         }
-        super::sixel::draw(self.col, self.row, self.width, &pixels, out);
+        if let Some(image) = kitty {
+            use std::io::Write;
+            write!(out, "\x1b[{};{}H", self.row, self.col)?;
+            image.draw(out, self.width as u16, self.height as u16, &pixels, 1)
+        } else {
+            super::sixel::draw(self.col, self.row, self.width, &pixels, out);
+            Ok(())
+        }
     }
 }
 
@@ -132,7 +155,7 @@ mod tests {
                 width: cw,
                 height: ch,
             };
-            let fish = FishIcon::place((cols - 1, rows), cols, rows, cell);
+            let fish = FishIcon::place((cols - 1, rows), cols, rows, cell, 6);
             assert!(
                 usize::from(fish.col - 1) * usize::from(cw) + fish.width
                     <= usize::from(cols - 1) * usize::from(cw)
@@ -142,7 +165,7 @@ mod tests {
                     <= usize::from(rows) * usize::from(ch)
             );
             let mut out = Vec::new();
-            fish.draw(&mut out);
+            fish.draw(None, &mut out).unwrap();
             let header = format!(
                 "\x1b[{};{}H\x1bP0;1q\"1;1;{};{}#",
                 fish.row, fish.col, fish.width, fish.height

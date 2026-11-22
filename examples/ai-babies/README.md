@@ -38,27 +38,29 @@ The legacy path embeds raw pixel data and needs no image decoder. No playback mo
 needs Python or network access at runtime. The GIFs above show the existing legacy
 Quadrant previews, not the new raster/Sixel output.
 
-## Raster and Sixel
+## Kitty and Sixel graphics
 
 These opt-in animation modes leave default transparent Quadrant playback, static mode
 and existing exports unchanged:
 
 ```bash
+cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --kitty
 cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --sixel
 cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --sixel --character claude
 cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --sixel --cell-pixels 8x16
 ```
 
+- `--kitty` uses inline Kitty graphics. On Unix it checks protocol support before playback. Kitty needs no bottom guard rows.
 - `--sixel` uses native inline output on the normal
   screen, with no silent fallback. No additional `--inline` argument is needed.
   Choose one rendering mode.
-- Sixel leaves the background transparent by default. Pass `--background RRGGBB`
+- Both protocols leave the background transparent by default. Pass `--background RRGGBB`
   to composite the sprite onto that opaque color instead. If you include a leading
   `#`, quote the color in shell commands.
-- `--cell-pixels WxH` is Sixel-only: supply the **actual physical character-cell size
+- `--cell-pixels WxH` sets the cell metrics for both protocols. Supply the **actual physical character-cell size
   in pixels**, not the terminal's column/row grid. Omit it to use `CellPixels::resolve`
   startup discovery. Probing happens before input handling; metric resolution failures
-  are errors. `--force-cell-pixels` is allowed only with `--sixel --cell-pixels` for a
+  are errors. `--force-cell-pixels` is allowed with `--cell-pixels` in either raster mode for a
   measured override consistent with the terminal grid. Restart after font or DPI changes.
 
 `--sixel` is your assertion that the **whole terminal/multiplexer path** supports Sixel,
@@ -78,7 +80,7 @@ Both modes use embedded PNG atlases with 320 × 320 frames for all three charact
 The existing packers generate them directly from the original 256 × 256 source cells:
 this is upscaling, not new native 320-pixel detail or enlargement of the old 128 × 64
 frames. The added `png` 0.18 decoder decodes and caches frames once at startup.
-`--height` still accepts only 24/32 (default 24) and caps content height. Native inline
+`--height` still accepts only 24/32 (default 24) and caps content height. Inline Sixel
 content is also limited to the rows needed for the 320-pixel image and the terminal
 height remaining after blank guard rows are reserved. With enough space, actual
 10×20-pixel cells use **16 content rows + 1 blank guard row**, even with `--height 24`
@@ -127,7 +129,7 @@ Snapshots accept 0–86400 seconds and explicit sizes of 1–512 columns by 1–
 Each PPM has a matching `.pgm` alpha mask. In the default legacy mode, PPM alone shows
 transparent areas as black; this black is not painted in the terminal.
 
-`--sixel` permits only `--headless`; raster image exports (`--snapshot`,
+Both native protocols permit only `--headless`; raster image exports (`--snapshot`,
 `--frames`, `--action`) are rejected rather than exporting placeholders.
 Image exports remain available in the default Canvas mode. Headless mode tests drawing without a
 terminal and does **not** certify terminal/multiplexer compatibility.

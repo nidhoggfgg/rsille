@@ -29,7 +29,7 @@ enum Experience {
     },
     /// Explore the AI Babies animation
     AiBabies,
-    /// Plot functions in a Sixel terminal
+    /// Plot functions with Kitty or Sixel graphics
     #[command(visible_alias = "draw")]
     FunctionPlotter,
     /// Watch the jellyfish swim

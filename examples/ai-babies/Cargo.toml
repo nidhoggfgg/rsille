@@ -8,6 +8,6 @@ publish = false
 
 
 [dependencies]
-rsille = { path = "../.." }
+rsille = { path = "../..", features = ["kitty"] }
 crossterm = "0.28.1"
 png = "0.18"

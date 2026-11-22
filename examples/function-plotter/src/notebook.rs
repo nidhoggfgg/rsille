@@ -602,17 +602,17 @@ impl Widget<Msg> for Graph {
     }
 }
 
-pub(crate) fn application(state: State, output: RasterOutput) -> Runtime<State, Msg> {
+pub(crate) fn application(state: State, session: Option<RasterSession>) -> Runtime<State, Msg> {
     start(
-        application_builder(state, output)
+        application_builder(state, session)
             .update(State::update)
             .view(view)
             .build(),
     )
 }
 
-fn application_builder(mut state: State, output: RasterOutput) -> App<State, Msg> {
-    if let Some(pixels) = output.capabilities.cell_pixels {
+fn application_builder(mut state: State, session: Option<RasterSession>) -> App<State, Msg> {
+    if let Some(pixels) = session.map(RasterSession::cell_pixels) {
         state.cell_pixels = (pixels.width, pixels.height);
     }
     // Unset widget styles inherit theme backgrounds, so remove the fills at
@@ -623,14 +623,17 @@ fn application_builder(mut state: State, output: RasterOutput) -> App<State, Msg
     theme.styles.interactive_focused.bg_color = None;
     theme.styles.cursor = theme.styles.text.underlined();
     theme.styles.selection_range = Style::default().underlined();
-    App::new(state)
+    let app = App::new(state)
         .with_theme(theme)
         .mode(Mode::Inline)
         .disable_mouse_capture()
         .with_motion_policy(MotionPolicy::disabled())
         .keyboard_mode(KeyboardMode::Legacy)
-        .raster_output(output)
-        .with_quit_key(KeyCode::Esc)
+        .with_quit_key(KeyCode::Esc);
+    match session {
+        Some(session) => app.raster_session(session),
+        None => app,
+    }
 }
 
 fn start(runtime: Runtime<State, Msg>) -> Runtime<State, Msg> {
@@ -645,7 +648,7 @@ fn start(runtime: Runtime<State, Msg>) -> Runtime<State, Msg> {
 
 pub(crate) fn smoke_test(state: State) -> Result<(), Box<dyn std::error::Error>> {
     let initial_expression = state.initial_expression;
-    let mut runtime = application(state, RasterOutput::default()).size(100, 32);
+    let mut runtime = application(state, None).size(100, 32);
     assert_eq!(runtime.step(&[])?.committed, initial_expression);
     if initial_expression {
         runtime.step(&[])?;
@@ -714,7 +717,7 @@ mod tests {
     fn runtime() -> Runtime<State, Msg> {
         application(
             State::new(Some("sin(x)".into()), crate::X_RANGE).unwrap(),
-            RasterOutput::default(),
+            None,
         )
         .size(100, 32)
     }
@@ -730,7 +733,7 @@ mod tests {
         let mut state = State::new(Some("sin(x)".into()), crate::X_RANGE).unwrap();
         state.cell_pixels = cell;
         let mut rt = start(
-            application_builder(state, RasterOutput::default())
+            application_builder(state, None)
                 .with_clock(clock.clone())
                 .update(State::update)
                 .view(view)
@@ -1438,11 +1441,7 @@ mod tests {
 
     #[test]
     fn one_row_editor_normalizes_paste_and_preserves_editing_and_history() {
-        let mut rt = application(
-            State::new(None, crate::X_RANGE).unwrap(),
-            RasterOutput::default(),
-        )
-        .size(100, 32);
+        let mut rt = application(State::new(None, crate::X_RANGE).unwrap(), None).size(100, 32);
         rt.step(&[]).unwrap();
         assert!(
             !rt.step(&[
@@ -1485,11 +1484,7 @@ mod tests {
 
     #[test]
     fn blank_start_has_no_commit_history_or_graph_and_focuses_editor() {
-        let mut rt = application(
-            State::new(None, [-2.0, 4.0]).unwrap(),
-            RasterOutput::default(),
-        )
-        .size(100, 32);
+        let mut rt = application(State::new(None, [-2.0, 4.0]).unwrap(), None).size(100, 32);
         assert!(!rt.step(&[]).unwrap().committed);
         assert_eq!(rt.state().number, 1);
         assert!(rt.state().history.is_empty());
@@ -1518,7 +1513,7 @@ mod tests {
     fn explicit_empty_initial_expression_still_commits_error() {
         let mut rt = application(
             State::new(Some(String::new()), crate::X_RANGE).unwrap(),
-            RasterOutput::default(),
+            None,
         );
         assert!(rt.step(&[]).unwrap().committed);
         assert!(rt.state().error.is_some());
@@ -1528,7 +1523,7 @@ mod tests {
     fn initial_invalid_expression_is_a_committed_error() {
         let mut rt = application(
             State::new(Some("bad(x)".into()), crate::X_RANGE).unwrap(),
-            RasterOutput::default(),
+            None,
         );
         assert!(rt.step(&[]).unwrap().committed);
         assert!(rt.state().error.is_some());

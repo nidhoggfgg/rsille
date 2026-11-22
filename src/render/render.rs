@@ -224,7 +224,8 @@ where
         self.raster.prepare(
             &self.buffer,
             raster_origin,
-            self.inline_mode,
+            self.inline_mode
+                .then_some(self.previous_inline_height.max(self.used_height).max(1)),
             self.append_newline,
             self.inline_mode && self.previous_inline_height > self.used_height,
         )
@@ -319,7 +320,7 @@ where
             crossterm::queue!(self.out, RestorePosition, ResetColor)?;
         }
 
-        if !raster_plan.kitty_commands().is_empty() {
+        if !inline_raster && !raster_plan.kitty_commands().is_empty() {
             self.out.write_all(raster_plan.kitty_commands())?;
         }
 
@@ -401,6 +402,7 @@ where
         }
         let uncertain = self.output_uncertain;
         self.output_uncertain = true;
+        self.raster.cleanup_kitty(&mut self.out)?;
         if uncertain {
             self.out.write_all(b"\x18\x1b\\")?;
             crossterm::queue!(self.out, EndSynchronizedUpdate, ResetColor)?;
@@ -475,7 +477,7 @@ where
         self.raster.set_output(config);
     }
 
-    /// Release this writer's Kitty resources before leaving the alternate screen.
+    /// Release this writer's active Kitty resources. Committed inline images stay in history.
     /// Managed event loops do this automatically. A later raster frame reuploads
     /// the visible resources. Call on the same writer after a known terminal cache
     /// invalidation. A failed cleanup can be retried.
@@ -625,6 +627,8 @@ where
             0
         } else if extent > previous_extent || self.used_height > displayed_height {
             displayed_height
+        } else if plan.uses_kitty() {
+            self.used_height
         } else {
             extent
         };
@@ -668,6 +672,7 @@ where
             Self::position_inline(&mut self.out, extent, *x, *y)?;
             self.out.write_all(bytes)?;
         }
+        self.out.write_all(plan.kitty_commands())?;
         crossterm::queue!(self.out, RestorePosition, ResetColor)?;
         let current_extent = self.used_height.max(1);
         if extent > current_extent {

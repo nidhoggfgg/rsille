@@ -1,11 +1,20 @@
 use super::MAX_SIDE;
 use std::io::Write;
 
+pub(super) fn index([r, g, b, a]: [u8; 4]) -> u16 {
+    if a < 128 {
+        256
+    } else {
+        u16::from((r & 224) | ((g >> 3) & 28) | (b >> 6))
+    }
+}
+
 /// Write a transparent RGB332 sprite. Palette index 256 marks unpainted pixels.
-pub(super) fn draw(col: u16, row: u16, w: usize, pixels: &[u16], out: &mut Vec<u8>) {
+pub(super) fn draw(col: u16, row: u16, w: usize, rgba: &[[u8; 4]], out: &mut Vec<u8>) {
+    let pixels: Vec<_> = rgba.iter().copied().map(index).collect();
     let h = pixels.len() / w;
     let mut palette = [false; 256];
-    for &c in pixels {
+    for &c in &pixels {
         if c != 256 {
             palette[usize::from(c)] = true;
         }

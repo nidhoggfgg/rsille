@@ -1,4 +1,4 @@
-//! Fullscreen Kitty graphics. A resource is a sampled block in target-local
+//! Kitty graphics for fullscreen and inline sessions. A resource is a sampled block in target-local
 //! coordinates. Its placements are exact, cell-aligned crops of that block.
 use super::output::CellPixels;
 use super::presenter::{check_limits, unsupported, Payload, RasterPlan, MAX_FRAME_BYTES};
@@ -117,7 +117,12 @@ impl KittyPresenter {
         }
     }
 
-    pub fn prepare(&self, buffer: &Buffer, origin: Position) -> io::Result<RasterPlan> {
+    pub fn prepare(
+        &self,
+        buffer: &Buffer,
+        origin: Position,
+        inline_extent: Option<u16>,
+    ) -> io::Result<RasterPlan> {
         if buffer.has_unsupported_raster_composition() {
             return Err(unsupported(
                 "Kitty does not support this raster composition",
@@ -158,7 +163,7 @@ impl KittyPresenter {
         for (surface, cell, id) in uploads {
             upload(&mut commands, surface.block, cell, pixels, id)?;
         }
-        place(&mut commands, &mut next, additions, pixels)?;
+        place(&mut commands, &mut next, additions, pixels, inline_extent)?;
         if commands.len() > MAX_FRAME_BYTES {
             return Err(unsupported("Kitty frame exceeds 32 MiB"));
         }
@@ -188,6 +193,11 @@ impl KittyPresenter {
         self.displayed = frame.next;
         self.uncertain_ids = None;
     }
+    // Committed inline placements now belong to terminal scrollback.
+    pub fn forget_region(&mut self) {
+        self.displayed = Display::default();
+    }
+
     pub fn uncertain(&self) -> bool {
         self.uncertain_ids.is_some()
     }
@@ -320,6 +330,7 @@ fn place(
     next: &mut Display,
     additions: Vec<Placement>,
     pixels: CellPixels,
+    inline_extent: Option<u16>,
 ) -> io::Result<()> {
     let used: HashSet<_> = next
         .placements
@@ -330,7 +341,9 @@ fn place(
     if additions.is_empty() {
         return Ok(());
     }
-    commands.extend_from_slice(b"\x1b7");
+    if inline_extent.is_none() {
+        commands.extend_from_slice(b"\x1b7");
+    }
     for p in &additions {
         let id = counters.entry(p.image).or_insert(0u32);
         loop {
@@ -340,11 +353,20 @@ fn place(
             }
         }
         let Rect { x, y, w, h } = p.screen;
+        if let Some(extent) = inline_extent {
+            // The inline renderer saved the bottom row after reserving space.
+            commands.extend_from_slice(b"\x1b8");
+            let up = extent - 1 - y;
+            if up > 0 {
+                write!(commands, "\x1b[{up}F")?;
+            }
+            write!(commands, "\x1b[{}G", x + 1)?;
+        } else {
+            write!(commands, "\x1b[{};{}H", y + 1, x + 1)?;
+        }
         write!(
             commands,
-            "\x1b[{};{}H\x1b_Ga=p,i={},p={},x={},y={},w={},h={},c={w},r={h},z={},C=1,q=2\x1b\\",
-            y + 1,
-            x + 1,
+            "\x1b_Ga=p,i={},p={},x={},y={},w={},h={},c={w},r={h},z={},C=1,q=2\x1b\\",
             p.image,
             *id,
             u32::from(p.crop_x) * u32::from(pixels.width),
@@ -416,6 +438,56 @@ fn upload(
             });
         }
     }
+    transmit(out, id, width, height, &rgba)
+}
+
+/// A single Kitty image owned by an application that manages its own terminal
+/// I/O (for example, a PTY overlay). Call [`Self::delete`] before teardown.
+#[derive(Debug)]
+pub struct KittyImage(u32);
+
+impl KittyImage {
+    /// Allocate a process-local, nonzero protocol ID.
+    pub fn new() -> io::Result<Self> {
+        image_id().map(Self)
+    }
+
+    /// Replace the image at the cursor with unscaled RGBA pixels. The cursor
+    /// stays in place. The caller owns positioning and flushing.
+    pub fn draw(
+        &self,
+        out: &mut Vec<u8>,
+        width: u16,
+        height: u16,
+        rgba: &[[u8; 4]],
+        z_index: i32,
+    ) -> io::Result<()> {
+        if width == 0 || height == 0 || rgba.len() != usize::from(width) * usize::from(height) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Kitty RGBA dimensions do not match",
+            ));
+        }
+        if rgba.len() > MAX_FRAME_BYTES / 4 {
+            return Err(unsupported("Kitty image exceeds 32 MiB"));
+        }
+        transmit(
+            out,
+            self.0,
+            width.into(),
+            height.into(),
+            rgba.as_flattened(),
+        )?;
+        write!(out, "\x1b_Ga=p,i={},p=1,z={z_index},C=1,q=2\x1b\\", self.0)
+    }
+
+    /// Remove this image's placements and pixel data from the terminal.
+    pub fn delete(&self, out: &mut impl Write) -> io::Result<()> {
+        delete_image(out, self.0)
+    }
+}
+
+fn transmit(out: &mut Vec<u8>, id: u32, width: u32, height: u32, rgba: &[u8]) -> io::Result<()> {
     write!(out, "\x1b_Ga=t,f=32,t=d,i={id},s={width},v={height},")?;
     let mut chunks = rgba.chunks(3072).peekable();
     let mut encoded = [0; 4096];
@@ -468,7 +540,7 @@ mod tests {
             let mut buffer = Buffer::new((1, 1).into());
             buffer.overlay_raster((0, 0).into(), cell.clone()).unwrap();
             let plan = KittyPresenter::new(pixels)
-                .prepare(&buffer, (0, 0).into())
+                .prepare(&buffer, (0, 0).into(), None)
                 .unwrap();
             let Payload::Kitty(frame) = plan.payload else {
                 panic!()

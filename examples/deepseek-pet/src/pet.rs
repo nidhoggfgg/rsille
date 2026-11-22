@@ -45,7 +45,7 @@ fn erase_area(
 
 /// Return (column, row, SGR-colored text) runs for a cleared viewport.
 /// Transparent cells and the rightmost column are never painted.
-#[allow(dead_code)] // Text preview; the interactive session uses Sixel.
+#[allow(dead_code)] // Text preview; the interactive session uses native graphics.
 pub fn frame(tick: u64, cols: u16, rows: u16) -> Vec<(u16, u16, String)> {
     let usable = usize::from(cols.saturating_sub(1));
     let rows = usize::from(rows);
@@ -121,7 +121,7 @@ struct Image {
     cell_w: u16,
     cell_h: u16,
     w: usize,
-    pixels: Vec<u16>,
+    pixels: Vec<[u8; 4]>,
 }
 
 impl Image {
@@ -154,7 +154,7 @@ impl Image {
             for (py, line) in band.chunks_exact(self.w).enumerate() {
                 for (px, &color) in line.iter().take(width * cw).enumerate() {
                     let dx = px / cw;
-                    if color == 256 || dirty[dx] {
+                    if color[3] < 128 || dirty[dx] {
                         continue;
                     }
                     let col = self.col + dx as u16;
@@ -164,7 +164,7 @@ impl Image {
                         }
                         let x = usize::from(col - n.col) * cw + px % cw;
                         let y = usize::from(row - n.row) * ch + py;
-                        x < n.w && y < n.w && n.pixels[y * n.w + x] != 256
+                        x < n.w && y < n.w && n.pixels[y * n.w + x][3] >= 128
                     });
                     dirty[dx] = !covered;
                 }
@@ -198,7 +198,7 @@ impl Image {
                     line[x..]
                         .iter()
                         .take(usize::from(self.cell_w))
-                        .any(|&c| c != 256)
+                        .any(|c| c[3] >= 128)
                 })
     }
 }
@@ -213,7 +213,13 @@ struct FrameKey {
     leftward: bool,
 }
 
+pub struct KittySprites {
+    pub whale: rsille::render::raster_output::KittyImage,
+    pub fish: rsille::render::raster_output::KittyImage,
+}
+
 pub struct Pet<'a> {
+    pub kitty: Option<&'a KittySprites>,
     pub(crate) screen: Option<crate::screen::Screen>,
     catalog: &'a crate::dialogue::Catalog,
     features: BTreeSet<Feature>,
@@ -244,6 +250,7 @@ impl<'a> Pet<'a> {
         let choice = std::collections::hash_map::RandomState::new().hash_one(()) as u32;
         Self {
             screen: None,
+            kitty: None,
             life: Life::new(choice, &features),
             catalog,
             speech: features.contains(&Feature::Speech).then(Speech::default),
@@ -383,7 +390,7 @@ impl<'a> Pet<'a> {
             erase_area(old.area, cols, rows, self.screen.as_ref(), out);
         }
         if let Some(old) = self.fish_icon.take() {
-            old.erase(cols, rows, self.screen.as_ref(), out);
+            self.erase_fish(old, cols, rows, out);
         }
         if let Some(old) = self.bubble.take() {
             old.erase(cols, rows, self.screen.as_ref(), out);
@@ -392,7 +399,19 @@ impl<'a> Pet<'a> {
             return;
         };
         self.last_frame = None;
-        old.clear_uncovered(None, cols, rows, self.screen.as_ref(), out);
+        if let Some(kitty) = self.kitty {
+            kitty.whale.delete(out).expect("Vec write");
+        } else {
+            old.clear_uncovered(None, cols, rows, self.screen.as_ref(), out);
+        }
+    }
+
+    fn erase_fish(&self, fish: FishIcon, cols: u16, rows: u16, out: &mut Vec<u8>) {
+        if let Some(kitty) = self.kitty {
+            kitty.fish.delete(out).expect("Vec write");
+        } else {
+            fish.erase(cols, rows, self.screen.as_ref(), out);
+        }
     }
 
     pub fn draw(
@@ -413,10 +432,11 @@ impl<'a> Pet<'a> {
         let width = usize::from(cols.saturating_sub(1)) * usize::from(cell_w);
         let height = usize::from(rows) * usize::from(cell_h);
         // Even a partial final Sixel band must fit without scrolling.
+        let band = if self.kitty.is_some() { 1 } else { 6 };
         let h = (height / 3)
             .clamp(48, MAX_SIDE)
             .min(width)
-            .min(height / 6 * 6);
+            .min(height / band * band);
         if h == 0 {
             self.cancel_mouse_interaction();
             self.hide(cols, rows, out);
@@ -429,7 +449,7 @@ impl<'a> Pet<'a> {
             height: cell_h,
         };
         let size = metrics
-            .size_for_pixels(w as u32, h.next_multiple_of(6) as u32)
+            .size_for_pixels(w as u32, h.next_multiple_of(band) as u32)
             .unwrap();
         let travel = cols - 1 - size.width;
         let rise = rows - size.height;
@@ -475,10 +495,10 @@ impl<'a> Pet<'a> {
         let fish = self
             .life
             .treat
-            .map(|t| FishIcon::place(t.cell, cols, rows, metrics));
+            .map(|t| FishIcon::place(t.cell, cols, rows, metrics, band));
         if self.fish_icon != fish {
             if let Some(old) = self.fish_icon.take() {
-                old.erase(cols, rows, self.screen.as_ref(), out);
+                self.erase_fish(old, cols, rows, out);
             }
             self.dirty = true;
         }
@@ -516,13 +536,22 @@ impl<'a> Pet<'a> {
                 let i = (sy * SIDE + sx) * 4;
                 let c = if let Some(ink) = bite.and_then(|b| b.pixel(sx, sy)) {
                     ink
-                } else if tile[i + 3] < 128 {
-                    256
                 } else {
-                    let c = (tile[i] & 224) | ((tile[i + 1] >> 3) & 28) | (tile[i + 2] >> 6);
-                    u16::from(c)
+                    tile[i..i + 4].try_into().unwrap()
                 };
                 pixels.push(c);
+            }
+        }
+        // Kitty placements sit above terminal text. Leave room for the menu
+        // when a small window forces it to overlap the whale.
+        if let Some(menu) = menu.filter(|m| self.kitty.is_some() && whale.intersects(&m.area)) {
+            let left = usize::from(menu.area.x().saturating_sub(whale.x())) * usize::from(cell_w);
+            let right = usize::from(menu.area.real_size().width - whale.x()) * usize::from(cell_w);
+            let top = usize::from(menu.area.y().saturating_sub(whale.y())) * usize::from(cell_h);
+            let bottom =
+                usize::from(menu.area.real_size().height - whale.y()) * usize::from(cell_h);
+            for line in pixels.chunks_exact_mut(w).take(bottom).skip(top) {
+                line[left.min(w)..right.min(w)].fill([0; 4]);
             }
         }
         let image = Image {
@@ -537,17 +566,24 @@ impl<'a> Pet<'a> {
             return Ok(());
         }
         self.dirty = false;
-        if let Some(old) = &self.previous {
-            old.clear_uncovered(Some(&image), cols, rows, self.screen.as_ref(), out);
+        if let Some(kitty) = self.kitty {
+            write!(out, "\x1b[{row};{col}H")?;
+            kitty
+                .whale
+                .draw(out, w as u16, h as u16, &image.pixels, 0)?;
+        } else {
+            if let Some(old) = &self.previous {
+                old.clear_uncovered(Some(&image), cols, rows, self.screen.as_ref(), out);
+            }
+            sixel::draw(col, row, w, &image.pixels, out);
         }
-        sixel::draw(col, row, w, &image.pixels, out);
         self.previous = Some(image);
         if let Some(b) = bubble {
             b.render(out)?;
         }
         self.bubble = bubble;
         if let Some(icon) = fish {
-            icon.draw(out);
+            icon.draw(self.kitty.map(|k| &k.fish), out)?;
         }
         self.fish_icon = fish;
         if let Some(menu) = menu {
@@ -596,6 +632,34 @@ fn sixel_redraw_contract() {
 mod tests {
     use super::*;
     use std::time::Instant;
+
+    #[test]
+    fn kitty_pet_and_treat_use_independent_images_and_hide_without_erasing_text() {
+        use rsille::render::raster_output::KittyImage;
+        let kitty = KittySprites {
+            whale: KittyImage::new().unwrap(),
+            fish: KittyImage::new().unwrap(),
+        };
+        let catalog = crate::dialogue::Catalog::default();
+        let mut pet = Pet::new(&catalog, [Feature::Mouse].into());
+        pet.kitty = Some(&kitty);
+        let mut bytes = Vec::new();
+        pet.draw(0, 80, 24, 10, 20, &mut bytes).unwrap();
+        assert!(std::str::from_utf8(&bytes).unwrap().contains("f=32"));
+        bytes.clear();
+        choose_fish(&mut pet, 1);
+        pet.mouse_event(MouseKind::Motion, 2, 2);
+        pet.draw(1, 80, 24, 10, 20, &mut bytes).unwrap();
+        let output = std::str::from_utf8(&bytes).unwrap();
+        assert_eq!(output.matches("\x1b_Ga=p,").count(), 2);
+        assert!(!output.contains("\x1bP"));
+        bytes.clear();
+        pet.hide(80, 24, &mut bytes);
+        let mut expected = Vec::new();
+        kitty.fish.delete(&mut expected).unwrap();
+        kitty.whale.delete(&mut expected).unwrap();
+        assert_eq!(bytes, expected);
+    }
 
     #[test]
     fn moving_and_hiding_the_pet_and_bubble_restores_shell_text() {
@@ -880,7 +944,7 @@ mod tests {
                 .unwrap()
                 .pixels
                 .iter()
-                .filter(|&&c| c == 0b111_101_01)
+                .filter(|&&c| sixel::index(c) == 0b111_101_01)
                 .count()
         };
         let whole_fish = gold_pixels(&pet);
@@ -1063,7 +1127,7 @@ mod tests {
                     let px = (2 * x + 1) * image.w / (2 * 96);
                     let px = if leftward { image.w - 1 - px } else { px };
                     let py = (2 * y + 1) * image.w / (2 * 48);
-                    image.pixels[py * image.w + px] == 0b100_111_11
+                    sixel::index(image.pixels[py * image.w + px]) == 0b100_111_11
                 };
                 assert!(ink(8, 7) && !ink(0, 7));
                 assert!(!ink(4, 10) && ink(4, 11));

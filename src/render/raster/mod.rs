@@ -2,7 +2,7 @@
 //!
 //! Pixel storage and sampling are independent of the output protocol.
 //! Use [`output::RasterBackend`] for startup selection or [`output::RasterSession`]
-//! for host-verified fullscreen output. Inline Sixel uses [`output::RasterOutput`].
+//! for host-verified fullscreen or inline output. Inline Sixel also accepts [`output::RasterOutput`].
 //!
 //! # Drawing and presentation
 //!

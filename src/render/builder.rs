@@ -140,23 +140,23 @@ impl Builder {
         self
     }
 
-    /// Select a native backend at managed startup. Fullscreen requires an
-    /// alternate screen and the host guarantees on [`RasterSession`]. For
-    /// inline Sixel, supply verified capabilities with [`Self::raster_output`].
+    /// Select a native backend at managed fullscreen startup. For inline graphics,
+    /// pass a [`RasterBackend::negotiate_inline`] snapshot to [`Self::raster_session`].
     /// The last raster setting wins. Building a renderer never probes a TTY.
     ///
     /// Probing must precede the first managed input reader in this process,
     /// including one started by a text-only session. For successive sessions,
-    /// call [`RasterBackend::negotiate_fullscreen`] before the first run and pass
+    /// use [`RasterBackend::negotiate_fullscreen`] or [`RasterBackend::negotiate_inline`]
+    /// before the first run and pass
     /// the snapshot to [`Self::raster_session`] on subsequent graphics runs
-    /// while the terminal, fullscreen mode and physical cell size still match.
+    /// while the terminal, presentation mode and physical cell size still match.
     pub fn raster_backend(&mut self, backend: RasterBackend) -> &mut Self {
         self.raster_config = RasterConfig::Request(backend);
         self
     }
 
     /// Use a host-verified snapshot without probing or taking input ownership.
-    /// A standalone host enters the alternate screen before rendering and calls
+    /// A standalone fullscreen host enters the alternate screen before rendering and calls
     /// [`Render::release_raster_resources`] before leaving it.
     pub fn raster_session(&mut self, session: RasterSession) -> &mut Self {
         self.raster_config = RasterConfig::Session(session);

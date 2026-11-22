@@ -1,4 +1,4 @@
-//! The shell's visible text, independent of the Sixel overlay.
+//! The shell's visible text, independent of the pet overlay.
 use std::{io::Write, num::NonZeroU16};
 use vt100::{Cell, Color, Parser};
 

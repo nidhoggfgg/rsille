@@ -39,6 +39,9 @@ pub fn run_with_mouse_capture(capture_mouse: bool) -> std::io::Result<()> {
 
 #[derive(Clone, clap::Parser)]
 pub struct Options {
+    /// Graphics backend (auto prefers Kitty, then Sixel)
+    #[arg(long, default_value = "auto", value_name = "auto|kitty|sixel")]
+    pub backend: rsille::render::RasterBackend,
     /// Enable only the listed behaviors (comma-separated). An empty list keeps the idle pet.
     #[arg(long, value_enum, value_delimiter = ',', num_args = 0..=1)]
     pub features: Option<Vec<Feature>>,
@@ -59,6 +62,7 @@ pub struct Options {
 impl Default for Options {
     fn default() -> Self {
         Self {
+            backend: rsille::render::RasterBackend::Auto,
             features: None,
             no_restore: false,
             capture_mouse: true,

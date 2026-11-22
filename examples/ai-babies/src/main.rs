@@ -12,7 +12,7 @@ use rsille::{
     render::{
         area::Size,
         chunk::Chunk,
-        raster_output::{CellPixels, RasterOutput},
+        raster_output::{CellPixels, RasterSession},
         Builder, Draw, DrawErr, Update,
     },
 };
@@ -196,13 +196,12 @@ impl Draw for Nursery {
     }
 }
 
-fn playback_builder(options: Options, grid: (u16, u16), output: RasterOutput) -> Builder {
+fn playback_builder(options: Options, grid: (u16, u16), session: Option<RasterSession>) -> Builder {
     // Native pixels need fewer rows than the character preview. Reserve only
     // the image's height, rather than centering it inside a screen-sized region.
-    let max_height = if options.output == Output::Sixel {
-        output
-            .capabilities
-            .cell_pixels
+    let max_height = if options.output != Output::Quadrant {
+        session
+            .map(RasterSession::cell_pixels)
             .map_or(options.height, |pixels| {
                 options
                     .height
@@ -216,10 +215,12 @@ fn playback_builder(options: Options, grid: (u16, u16), output: RasterOutput) ->
         .inline_mode(true)
         .size((grid.0, grid.1.min(max_height)))
         .inline_max_height(max_height)
-        .raster_output(output)
         .enable_raw_mode()
         .enable_hide_cursor()
         .frame_limit(24);
+    if let Some(session) = session {
+        builder.raster_session(session);
+    }
     builder
 }
 
@@ -235,10 +236,10 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let (width, height) = crossterm::terminal::size()?;
     // Resolve metrics before any input reader starts, and retain this snapshot.
-    let output = options.native_config((width, height))?;
-    options.pixels = output.capabilities.cell_pixels;
+    let session = options.session((width, height))?;
+    options.pixels = session.map(RasterSession::cell_pixels);
     let nursery = Nursery::new(options)?;
-    playback_builder(options, (width, height), output)
+    playback_builder(options, (width, height), session)
         .build_event_loop(nursery)
         .run()?;
     println!();

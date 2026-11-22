@@ -323,10 +323,10 @@ fn view(state: &State) -> impl Widget<Msg> {
     let source = Arc::clone(&state.image);
 
     let backend = match state.session {
-        Some(RasterSession::KittyFullscreen(p)) => {
+        Some(RasterSession::KittyFullscreen(p) | RasterSession::KittyInline(p)) => {
             format!("Kitty | {}x{} px/cell", p.width, p.height)
         }
-        Some(RasterSession::SixelFullscreen(p)) => {
+        Some(RasterSession::SixelFullscreen(p) | RasterSession::SixelInline(p)) => {
             format!("Sixel | {}x{} px/cell", p.width, p.height)
         }
         None => "headless".to_owned(),

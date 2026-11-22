@@ -6,7 +6,7 @@ publish = false
 
 
 [dependencies]
-rsille = { path = "../.." }
+rsille = { path = "../..", features = ["kitty"] }
 meval = "0.2"
 rsille-typst = { path = "../../packages/rsille-typst" }
 typst-assets = { version = "=0.13.1", features = ["fonts"] }

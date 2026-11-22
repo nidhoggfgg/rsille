@@ -1,5 +1,5 @@
 use super::*;
-use rsille::{raster::Rgb, render::raster_output::RasterOutput};
+use rsille::raster::Rgb;
 
 fn parse(args: &[&str]) -> Result<Options, Box<dyn Error>> {
     Ok(animation_args(&args.iter().map(|s| s.to_string()).collect::<Vec<_>>())?.0)
@@ -8,6 +8,13 @@ fn parse(args: &[&str]) -> Result<Options, Box<dyn Error>> {
 #[test]
 fn rendering_options_validate_modes_colors_and_physical_metrics() {
     assert_eq!(parse(&["--sixel"]).unwrap().background, None);
+    assert_eq!(
+        parse(&["--kitty", "--background", "ffffff"])
+            .unwrap()
+            .output,
+        Output::Kitty
+    );
+    assert!(parse(&["--kitty", "--sixel"]).is_err());
     for args in [
         vec![
             "--sixel",
@@ -73,46 +80,39 @@ fn text_output_never_probes_and_native_output_never_silently_falls_back() {
         };
         assert_eq!(
             options
-                .native_config_with((80, 24), |_| panic!("text must not probe"))
+                .session_with((80, 24), |_, _| panic!("text must not probe"))
                 .unwrap(),
-            RasterOutput::default()
+            None
         );
     }
     let options = parse(&["--sixel", "--cell-pixels", "10x20"]).unwrap();
 
-    let config = options.native_config((80, 24)).unwrap();
-    assert_eq!(config.capabilities.cell_pixels, options.pixels);
-    assert!(
-        config.capabilities.sixel
-            && config.capabilities.reliable_inline_erase
-            && !config.capabilities.reliable_erase
-            && config.capabilities.no_scroll
-    );
-    assert!(options.native_config((10, 20)).is_err());
+    let config = options.session((80, 24)).unwrap();
+    assert_eq!(config, options.pixels.map(RasterSession::SixelInline));
+    assert!(options.session((10, 20)).is_err());
     let forced = Options {
         force_cell_pixels: true,
         ..options
     };
-    assert!(forced.native_config((10, 20)).is_ok());
+    assert!(forced.session((10, 20)).is_ok());
     let automatic = parse(&["--sixel"]).unwrap();
     assert!(automatic
-        .native_config_with((80, 24), |pixels| {
+        .session_with((80, 24), |_, pixels| {
             assert!(pixels.is_none());
             Err(std::io::Error::other("no measured cell pixels"))
         })
         .is_err());
     assert_eq!(
         automatic
-            .native_config_with((80, 24), |pixels| {
+            .session_with((80, 24), |_, pixels| {
                 assert!(pixels.is_none());
-                Ok(CellPixels {
+                Ok(RasterSession::SixelInline(CellPixels {
                     width: 10,
                     height: 20,
-                })
+                }))
             })
             .unwrap()
-            .capabilities
-            .cell_pixels,
+            .map(RasterSession::cell_pixels),
         options.pixels
     );
 }
@@ -216,9 +216,8 @@ fn native_inline_playback_is_compact_and_reuses_unchanged_frames() {
     let nursery = Nursery::new(options).unwrap();
     let mut bytes = Vec::new();
     {
-        let mut renderer =
-            playback_builder(options, (80, 40), options.native_config((80, 40)).unwrap())
-                .build_render(nursery, &mut bytes);
+        let mut renderer = playback_builder(options, (80, 40), options.session((80, 40)).unwrap())
+            .build_render(nursery, &mut bytes);
         assert_eq!(renderer.size(), (80, 16).into());
         renderer.render().unwrap();
         let stats = renderer.raster_stats();
@@ -238,7 +237,7 @@ fn native_inline_playback_is_compact_and_reuses_unchanged_frames() {
 
 #[test]
 fn playback_height_is_bounded_for_native_and_character_modes() {
-    for output in [Output::Quadrant, Output::Sixel] {
+    for output in [Output::Quadrant, Output::Sixel, Output::Kitty] {
         for height in [24, 32] {
             let options = Options {
                 output,
@@ -250,12 +249,19 @@ fn playback_height_is_bounded_for_native_and_character_modes() {
                 ..Options::default()
             };
             // Geometry is independent of the encoder feature and terminal queries.
-            let mut config = RasterOutput::default();
-            config.capabilities.cell_pixels = options.pixels;
+            let config = match output {
+                Output::Kitty => options.pixels.map(RasterSession::KittyInline),
+                Output::Sixel => options.pixels.map(RasterSession::SixelInline),
+                Output::Quadrant => None,
+            };
             for grid in [(80, 40), (80, 12), (1, 1)] {
                 let renderer = playback_builder(options, grid, config)
                     .build_render(Nursery::default(), Vec::new());
-                let expected = if output == Output::Sixel { 16 } else { height };
+                let expected = if output != Output::Quadrant {
+                    16
+                } else {
+                    height
+                };
                 assert_eq!(renderer.size(), (grid.0, grid.1.min(expected)).into());
             }
         }

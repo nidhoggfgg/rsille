@@ -16,7 +16,7 @@ const X_RANGE: [f64; 2] = [-10.0, 10.0];
 const BOUNDS: [f64; 4] = [-10.0, 10.0, -3.0, 3.0];
 const HELP: &str = "Function plotter — 2D curves and shaded 3D surfaces
 
-Normal invocation uses native Sixel via rsille's default features.
+On Unix, inline plots automatically prefer Kitty graphics, then Sixel.
 
   --expr 'sin(x); x^2/8'   Initial functions (up to six)
   --grid                  Independent demo panels; no expr: four presets
@@ -25,6 +25,7 @@ Normal invocation uses native Sixel via rsille's default features.
                           Live preview; Enter/F5 freezes, commits and exits.
                           Responsive 1–2 columns; no grid editor or history.
   --x-range MIN MAX      Finite increasing x domain (default -10 10)
+  --backend auto|kitty|sixel  Select native graphics (default on native Windows: sixel)
   --cell-pixels WxH       Actual pixels per character cell, NOT terminal size
   --frames DIRECTORY      Export 90 RGB preview frames (15 FPS); new directory
   --snapshot FILE.ppm     Export a static RGB preview; new file
@@ -69,15 +70,16 @@ Polar/parametric ranges are required, finite and increasing; endpoints may use p
 Live 3D previews rotate around vertical z; submission freezes the displayed angle.
 Explicit ranges override --x-range. Fixed sampling can miss narrow features/poles.
 
-Normal invocation requires that your terminal/multiplexer supports Sixel, ED 2 and EL2
+Inline Sixel requires that your terminal/multiplexer supports Sixel and EL2
  graphics erase, graphics following text scroll, stable palettes and non-scrolling
  positioned output. Image scrollback retention is terminal dependent. No capability
- detection is performed. Cell metrics are resolved before input starts; restart
+ detection can verify those erasure and scrolling properties. Cell metrics are resolved before input starts; restart
  after font/DPI changes. If automatic measurement fails, supply measured cell
  pixels (native Windows has no query fallback). Never guess the dimensions.";
 
 #[derive(Default)]
 struct Options {
+    backend: Option<RasterBackend>,
     pixels: Option<CellPixels>,
     expr: Option<String>,
     panels: Vec<String>,
@@ -108,6 +110,13 @@ impl Options {
                         return Err("--x-range needs finite MIN < MAX with a finite span".into());
                     }
                     result.x_range = Some(range);
+                }
+                "--backend" => {
+                    result.backend = Some(
+                        args.next()
+                            .ok_or("--backend needs auto, kitty or sixel")?
+                            .parse()?,
+                    )
                 }
                 "--grid" => result.grid = true,
                 "--expr" => {
@@ -172,19 +181,23 @@ fn run_options(options: Options) -> Result<(), Box<dyn Error>> {
     if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
         return Err("interactive plotting requires a TTY on both stdin and stdout".into());
     }
-    let output = RasterOutput {
-        capabilities: RasterCapabilities {
-            sixel: true,
-            reliable_erase: true,
-            reliable_inline_erase: true,
-            no_scroll: true,
-            cell_pixels: Some(CellPixels::resolve(options.pixels)?),
-        },
+    let backend = options.backend.unwrap_or(if cfg!(unix) {
+        RasterBackend::Auto
+    } else {
+        RasterBackend::Sixel
+    });
+    let session = match backend {
+        // Explicit Sixel retains the original host-asserted inline path.
+        RasterBackend::Sixel => RasterSession::SixelInline(CellPixels::resolve(options.pixels)?),
+        RasterBackend::Kitty if !cfg!(unix) => {
+            RasterSession::KittyInline(CellPixels::resolve(options.pixels)?)
+        }
+        _ => backend.negotiate_inline(options.pixels, std::time::Duration::from_millis(500))?,
     };
     if options.grid {
-        grid::application(grid::State::new(options.panels, x_range)?, output).run()?;
+        grid::application(grid::State::new(options.panels, x_range)?, Some(session)).run()?;
     } else {
-        application(State::new(options.expr, x_range)?, output).run()?;
+        application(State::new(options.expr, x_range)?, Some(session)).run()?;
     }
     Ok(())
 }
@@ -246,7 +259,7 @@ mod tests {
         assert!(Options::parse(["--headless".to_owned()]).unwrap().headless);
         assert!(!HELP.contains("--sixel"));
         assert!(!HELP.contains("--features"));
-        assert!(HELP.contains("Sixel via rsille's default features"));
+        assert!(HELP.contains("--backend auto|kitty|sixel"));
     }
 
     #[test]

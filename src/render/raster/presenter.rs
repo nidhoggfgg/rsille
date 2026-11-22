@@ -107,7 +107,7 @@ enum Backend {
 pub(in crate::render) struct RasterPresenter {
     backend: Backend,
     pub alternate_screen: bool,
-    fullscreen_session: bool,
+    session: Option<RasterSession>,
 }
 impl Default for RasterPresenter {
     fn default() -> Self {
@@ -122,33 +122,37 @@ impl RasterPresenter {
                 Backend::Sixel(SixelPresenter::new(output, alternate_screen))
             }
             RasterConfig::Request(request) => Backend::Pending(request),
-            RasterConfig::Session(RasterSession::SixelFullscreen(pixels)) => {
-                Backend::Sixel(SixelPresenter::new(
-                    RasterOutput {
-                        capabilities: RasterCapabilities {
-                            sixel: true,
-                            reliable_erase: true,
-                            reliable_inline_erase: false,
-                            no_scroll: true,
-                            cell_pixels: Some(pixels),
-                        },
+            RasterConfig::Session(
+                session @ (RasterSession::SixelFullscreen(pixels)
+                | RasterSession::SixelInline(pixels)),
+            ) => Backend::Sixel(SixelPresenter::new(
+                RasterOutput {
+                    capabilities: RasterCapabilities {
+                        sixel: true,
+                        reliable_erase: matches!(session, RasterSession::SixelFullscreen(_)),
+                        reliable_inline_erase: matches!(session, RasterSession::SixelInline(_)),
+                        no_scroll: true,
+                        cell_pixels: Some(pixels),
                     },
-                    alternate_screen,
-                ))
-            }
+                },
+                alternate_screen,
+            )),
             #[cfg(feature = "kitty")]
-            RasterConfig::Session(RasterSession::KittyFullscreen(pixels)) => {
-                Backend::Kitty(KittyPresenter::new(pixels))
-            }
+            RasterConfig::Session(
+                RasterSession::KittyFullscreen(pixels) | RasterSession::KittyInline(pixels),
+            ) => Backend::Kitty(KittyPresenter::new(pixels)),
             #[cfg(not(feature = "kitty"))]
-            RasterConfig::Session(RasterSession::KittyFullscreen(_)) => {
-                Backend::Unavailable(Arc::new(unsupported("the kitty Cargo feature is disabled")))
-            }
+            RasterConfig::Session(
+                RasterSession::KittyFullscreen(_) | RasterSession::KittyInline(_),
+            ) => Backend::Unavailable(Arc::new(unsupported("the kitty Cargo feature is disabled"))),
         };
         Self {
             backend,
             alternate_screen,
-            fullscreen_session: matches!(config, RasterConfig::Session(_)),
+            session: match config {
+                RasterConfig::Session(session) => Some(session),
+                _ => None,
+            },
         }
     }
 
@@ -171,7 +175,9 @@ impl RasterPresenter {
 
     fn fullscreen(&self, inline: bool, newline: bool) -> io::Result<()> {
         if inline {
-            return Err(unsupported("backend negotiation and fullscreen snapshots do not support inline output; inline Sixel requires raster_output with verified erasure and scrolling"));
+            return Err(unsupported(
+                "fullscreen snapshots do not support inline output; use an inline raster session",
+            ));
         }
         if !self.alternate_screen || newline {
             return Err(unsupported(
@@ -182,7 +188,7 @@ impl RasterPresenter {
     }
 
     pub fn set_output(&mut self, config: RasterOutput) {
-        if !self.fullscreen_session {
+        if self.session.is_none() {
             if let Backend::Sixel(s) = &mut self.backend {
                 s.config = config;
             }
@@ -198,8 +204,19 @@ impl RasterPresenter {
                 Backend::Unavailable(e) => {
                     return Err(io::Error::new(io::ErrorKind::Unsupported, e.clone()))
                 }
-                _ if self.fullscreen_session => self.fullscreen(inline, newline)?,
-                _ => {}
+                _ => match self.session {
+                    Some(RasterSession::KittyInline(_) | RasterSession::SixelInline(_))
+                        if !inline || newline =>
+                    {
+                        return Err(unsupported(
+                            "inline graphics require inline mode without appended newlines",
+                        ))
+                    }
+                    Some(RasterSession::KittyFullscreen(_) | RasterSession::SixelFullscreen(_)) => {
+                        self.fullscreen(inline, newline)?
+                    }
+                    _ => {}
+                },
             }
         }
         Ok(())
@@ -217,10 +234,11 @@ impl RasterPresenter {
         &mut self,
         buffer: &Buffer,
         origin: Position,
-        inline: bool,
+        inline_extent: Option<u16>,
         append_newline: bool,
         inline_shrank: bool,
     ) -> io::Result<RasterPlan> {
+        let inline = inline_extent.is_some();
         self.validate(buffer, inline, append_newline)?;
         match &mut self.backend {
             Backend::Sixel(s) => {
@@ -228,7 +246,7 @@ impl RasterPresenter {
                 s.prepare(buffer, origin, inline, append_newline, inline_shrank)
             }
             #[cfg(feature = "kitty")]
-            Backend::Kitty(k) => k.prepare(buffer, origin),
+            Backend::Kitty(k) => k.prepare(buffer, origin, inline_extent),
             _ => Ok(RasterPlan {
                 native: false,
                 overlay_frame: false,
@@ -279,6 +297,10 @@ impl RasterPresenter {
         Ok(())
     }
     pub fn forget_region(&mut self) {
+        #[cfg(feature = "kitty")]
+        if let Backend::Kitty(k) = &mut self.backend {
+            k.forget_region();
+        }
         if let Backend::Sixel(s) = &mut self.backend {
             s.forget_region();
         }

@@ -21,7 +21,7 @@ cargo run --release --manifest-path examples/lumen/Cargo.toml
 | 示例 | 文件 / 目录 | 展示内容 |
 | --- | --- | --- |
 | [Canvas 调试](canvas/README_cn.md) | `canvas` | 在同一场景中检查 Kitty 和 Sixel 的窗口移动、遮挡、置前、缩放与重绘。 |
-| [函数绘图](function-plotter/README_cn.md) | `function-plotter` | Mathematica 风格输入/输出单元、紧凑 Sixel 函数图像、重新执行与滚动历史。 |
+| [函数绘图](function-plotter/README_cn.md) | `function-plotter` | Mathematica 风格输入/输出单元、Kitty 或 Sixel 函数图像、重新执行与滚动历史。 |
 | [TUI showcase](tui-showcase/README_cn.md) | `tui-showcase` | 七页组件展厅：表单、数据、内容、布局、动画和主题。 |
 | [Lumen](lumen/README_cn.md) | `lumen` | 包含流程、笔记和浮动桌面的交互工作台。 |
 | [Orbit Files](orbit-files/README_cn.md) | `orbit-files` | 支持框选、拖放、预览和撤销的文件管理器。 |
@@ -45,9 +45,7 @@ cargo run --release --manifest-path examples/function-plotter/Cargo.toml
 cargo run --manifest-path examples/function-plotter/Cargo.toml -- --help
 ```
 
-不带参数启动交互式 Sixel REPL，`--help` 显示帮助。
-终端及复用器必须支持 Sixel、ED 2 和局部 EL 2 图形擦除、图形随文字滚动、
-稳定调色板及无滚屏的定位输出。这些能力不会自动检测。
+Unix 下交互式 REPL 优先选用 Kitty，其次是 Sixel。可用 `--backend kitty` 或 `--backend sixel` 指定协议。
 操作方式、实际字符格像素覆盖值和 headless 检查见[函数绘图指南](function-plotter/README_cn.md)。
 
 ## 无终端验证

@@ -275,19 +275,22 @@ pub(crate) fn panels_view<M: 'static>(
         submit: None,
     }
 }
-fn builder(mut state: State, output: RasterOutput) -> App<State, Msg> {
-    if let Some(pixels) = output.capabilities.cell_pixels {
+fn builder(mut state: State, session: Option<RasterSession>) -> App<State, Msg> {
+    if let Some(pixels) = session.map(RasterSession::cell_pixels) {
         state.pixels = (pixels.width, pixels.height);
     }
-    App::new(state)
+    let app = App::new(state)
         .mode(Mode::Inline)
         .disable_mouse_capture()
         .with_motion_policy(MotionPolicy::disabled())
-        .raster_output(output)
-        .with_quit_key(KeyCode::Esc)
+        .with_quit_key(KeyCode::Esc);
+    match session {
+        Some(session) => app.raster_session(session),
+        None => app,
+    }
 }
-pub(crate) fn application(state: State, output: RasterOutput) -> Runtime<State, Msg> {
-    let runtime = builder(state, output)
+pub(crate) fn application(state: State, session: Option<RasterSession>) -> Runtime<State, Msg> {
+    let runtime = builder(state, session)
         .update(State::update)
         .view(view)
         .build();
@@ -295,7 +298,7 @@ pub(crate) fn application(state: State, output: RasterOutput) -> Runtime<State, 
     runtime
 }
 pub(crate) fn smoke_test(state: State) -> Result<(), Box<dyn std::error::Error>> {
-    let mut runtime = application(state, RasterOutput::default()).size(100, 32);
+    let mut runtime = application(state, None).size(100, 32);
     runtime.step(&[])?;
     assert!(runtime.frame().has_raster());
     runtime.handle().send(Msg::Submit)?;
@@ -383,7 +386,7 @@ mod tests {
         for (width, height) in [(100, 32), (160, 32), (30, 20), (100, 10)] {
             let mut state = State::new(Vec::new(), crate::X_RANGE).unwrap();
             state.pixels = (8, 16);
-            let mut rt = builder(state, RasterOutput::default())
+            let mut rt = builder(state, None)
                 .update(State::update)
                 .view(view)
                 .build()
@@ -435,7 +438,7 @@ mod tests {
             let clock = rsille::tui::runtime::ManualClock::default();
             let mut state = State::new(Vec::new(), crate::X_RANGE).unwrap();
             state.pixels = pixels;
-            let mut rt = builder(state, RasterOutput::default())
+            let mut rt = builder(state, None)
                 .with_clock(clock.clone())
                 .update(State::update)
                 .view(view)

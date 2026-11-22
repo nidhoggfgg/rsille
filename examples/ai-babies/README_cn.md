@@ -33,22 +33,24 @@ cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --character
 所有播放模式在运行时均无需 Python 或网络。上方 GIF 是现有的旧版 Quadrant 预览，
 不是新的 raster/Sixel 输出。
 
-## Raster 与 Sixel
+## Kitty 与 Sixel 图形
 
 以下可选动画模式不改变默认的透明 Quadrant 播放、静态模式及现有导出行为：
 
 ```bash
+cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --kitty
 cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --sixel --character claude
 cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --sixel --cell-pixels 8x16
 ```
 
+- `--kitty` 使用 inline Kitty 图形。在 Unix 上，程序先验证协议支持再开始播放。Kitty 无需底部保护行。
 - `--sixel` 使用 inline 动画，不会静默回退。无需额外的 `--inline` 参数。
   所有动画模式都不进入备用屏幕，也不捕获鼠标事件。渲染模式择一使用。
-- Sixel 默认保留透明背景。显式传入 `--background RRGGBB` 时，角色图像会合成到指定的
+- 两种协议默认保留透明背景。显式传入 `--background RRGGBB` 时，角色图像会合成到指定的
   不透明底色上。颜色值可带前导 `#`，此时请在 shell 命令中用引号括起颜色值。
-- `--cell-pixels WxH` 仅用于 Sixel，指定**实际物理字符格的像素尺寸**，不是终端的列数和行数。
+- `--cell-pixels WxH` 适用于两种图形协议，指定**实际物理字符格的像素尺寸**，不是终端的列数和行数。
   省略时通过 `CellPixels::resolve` 在启动时探测。探测先于输入处理，尺寸解析失败会报错。
-  `--force-cell-pixels` 只能与 `--sixel --cell-pixels` 同用，允许使用与终端网格一致的实测尺寸覆盖。
+  `--force-cell-pixels` 可在任一原生图形模式下与 `--cell-pixels` 同用，允许使用与终端网格一致的实测尺寸覆盖。
   字体或 DPI 改变后需重启。
 
 选择 `--sixel` 表示你确认**整个终端/复用器链路**支持 Sixel、稳定调色板、EL 2 局部清行时
@@ -108,7 +110,7 @@ cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --sixel --h
 每张 PPM 配套同名 `.pgm` 透明度掩码。默认旧模式下，单独打开 PPM 时透明区域显示为黑色，
 该黑色不会用于终端绘制。
 
-`--sixel` 仅允许 `--headless`；拒绝 Raster 的 `--snapshot`、`--frames`、`--action` 图片导出，
+两种原生图形模式均仅允许 `--headless`；拒绝 Raster 的 `--snapshot`、`--frames`、`--action` 图片导出，
 避免把占位字符当作图像。默认 Canvas 模式继续支持图片导出。
 无终端模式测试绘制，但**不能**证明终端/复用器兼容。
 

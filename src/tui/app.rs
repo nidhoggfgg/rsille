@@ -271,20 +271,21 @@ impl<State, M> App<State, M> {
     }
 
     /// Negotiate native fullscreen graphics when the managed terminal starts.
-    /// Auto prefers Kitty. Inline Sixel requires explicit `raster_output`
-    /// capabilities. The last raster setting wins, including in headless apps.
+    /// Auto prefers Kitty. For inline graphics, pass a [`RasterBackend::negotiate_inline`]
+    /// snapshot to [`Self::raster_session`]. The last raster setting wins, including in headless apps.
     ///
     /// Probing must precede the first managed input reader in this process,
     /// including one started by a text-only session. For successive sessions,
-    /// call [`RasterBackend::negotiate_fullscreen`] before the first run and pass
+    /// use [`RasterBackend::negotiate_fullscreen`] or [`RasterBackend::negotiate_inline`]
+    /// before the first run and pass
     /// the snapshot to [`Self::raster_session`] on subsequent graphics runs
-    /// while the terminal, fullscreen mode and physical cell size still match.
+    /// while the terminal, presentation mode and physical cell size still match.
     pub fn raster_backend(mut self, backend: RasterBackend) -> Self {
         self.raster_output = RasterSetting::Backend(backend);
         self
     }
 
-    /// Use verified fullscreen capabilities and physical metrics without querying input.
+    /// Use a verified presentation mode and physical metrics without querying input.
     pub fn raster_session(mut self, session: RasterSession) -> Self {
         self.raster_output = RasterSetting::Session(session);
         self

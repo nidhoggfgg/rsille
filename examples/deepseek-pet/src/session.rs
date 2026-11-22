@@ -1,6 +1,6 @@
 //! Local interactive PTY session for an ANSI-compatible terminal.
 use crate::Feature;
-use rsille::render::raster_output::CellPixels;
+use rsille::render::raster_output::{CellPixels, RasterSession};
 use std::{
     ffi::CString,
     fs::File,
@@ -28,21 +28,6 @@ fn size(fd: i32) -> io::Result<libc::winsize> {
     }
 }
 
-// Primary device attributes advertise Sixel with a standalone parameter 4.
-fn advertises_sixel(reply: &[u8]) -> bool {
-    let Some(start) = reply.windows(3).rposition(|w| w == b"\x1b[?") else {
-        return false;
-    };
-    let Some(params) = reply[start + 3..]
-        .split_inclusive(|&b| b == b'c')
-        .next()
-        .and_then(|s| s.strip_suffix(b"c"))
-    else {
-        return false;
-    };
-    params.split(|&b| b == b';').skip(1).any(|p| p == b"4")
-}
-
 fn cursor_position(reply: &[u8]) -> Option<(u16, u16)> {
     reply
         .windows(2)
@@ -59,16 +44,13 @@ fn cursor_position(reply: &[u8]) -> Option<(u16, u16)> {
         })
 }
 
-fn probe_terminal(original: &libc::termios, query_cursor: bool) -> io::Result<Option<(u16, u16)>> {
+fn probe_cursor(original: &libc::termios) -> io::Result<Option<(u16, u16)>> {
     let mut raw = *original;
     unsafe { libc::cfmakeraw(&mut raw) };
     check(unsafe { libc::tcsetattr(0, libc::TCSANOW, &raw) })?;
     let result = (|| {
         let mut out = io::stdout().lock();
-        if query_cursor {
-            out.write_all(b"\x1b[6n")?;
-        }
-        out.write_all(b"\x1b[c")?;
+        out.write_all(b"\x1b[6n")?;
         out.flush()?;
         let deadline = Instant::now() + Duration::from_millis(500);
         let mut reply = [0u8; 256];
@@ -94,37 +76,31 @@ fn probe_terminal(original: &libc::termios, query_cursor: bool) -> io::Result<Op
                 break;
             }
             used += n as usize;
-            if advertises_sixel(&reply[..used]) {
-                if !query_cursor {
-                    return Ok(None);
-                }
-                if let Some(cursor) = cursor_position(&reply[..used]) {
-                    return Ok(Some(cursor));
-                }
+            if let Some(cursor) = cursor_position(&reply[..used]) {
+                return Ok(Some(cursor));
             }
         }
-        if advertises_sixel(&reply[..used]) {
-            return Ok(None);
-        }
-        Err(io::Error::new(
-            io::ErrorKind::Unsupported,
-            "未收到声明支持 Sixel 的终端响应",
-        ))
+        Ok(None)
     })();
     check(unsafe { libc::tcsetattr(0, libc::TCSANOW, original) })?;
     result
 }
 
-struct Terminal {
+struct Terminal<'a> {
+    kitty: Option<&'a crate::pet::KittySprites>,
     original: libc::termios,
     alt_screen: bool,
     child_alternate: bool,
 }
-impl Drop for Terminal {
+impl Drop for Terminal<'_> {
     fn drop(&mut self) {
         // Ctrl+] can also interrupt a child application that enabled mouse tracking.
         let _ = io::stdout().write_all(b"\x18\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l");
         let mut out = io::stdout().lock();
+        if let Some(kitty) = self.kitty {
+            let _ = kitty.whale.delete(&mut out);
+            let _ = kitty.fish.delete(&mut out);
+        }
         let _ = out.write_all(b"\x1b[0m");
         if self.alt_screen || self.child_alternate {
             let _ = out.write_all(b"\x1b[?1049l");
@@ -194,25 +170,34 @@ pub fn run(options: crate::Options) -> io::Result<()> {
         args.extend([b"-C\0".as_ptr().cast(), init.as_ptr()]);
     }
     args.push(std::ptr::null());
-    let mut pixels = CellPixels::resolve(None).map_err(|e| {
-        io::Error::new(
-            e.kind(),
-            format!("无法测量终端字符单元的像素尺寸，未启动 shell：{e}"),
-        )
-    })?;
+    let session = options
+        .backend
+        .negotiate_inline(None, Duration::from_millis(500))
+        .map_err(|e| {
+            io::Error::new(
+                e.kind(),
+                format!("无法确认终端图形协议或字符格像素尺寸，未启动 shell：{e}"),
+            )
+        })?;
+    let mut pixels = session.cell_pixels();
+    let kitty = if matches!(session, RasterSession::KittyInline(_)) {
+        use rsille::render::raster_output::KittyImage;
+        Some(crate::pet::KittySprites {
+            whale: KittyImage::new()?,
+            fish: KittyImage::new()?,
+        })
+    } else {
+        None
+    };
+    pet.kitty = kitty.as_ref();
     let mut s = size(1)?;
     let mut original = unsafe { std::mem::zeroed() };
     check(unsafe { libc::tcgetattr(0, &mut original) })?;
-    let cursor = probe_terminal(
-        &original,
-        (forage || !options.no_restore) && !options.alt_screen,
-    )
-    .map_err(|e| {
-        io::Error::new(
-            e.kind(),
-            format!("无法确认终端支持 Sixel，未启动 shell：{e}"),
-        )
-    })?;
+    let cursor = if (forage || !options.no_restore) && !options.alt_screen {
+        probe_cursor(&original)?
+    } else {
+        None
+    };
     let mut fd = -1;
     let pid =
         check(unsafe { libc::forkpty(&mut fd, std::ptr::null_mut(), &mut original, &mut s) })?;
@@ -246,6 +231,7 @@ pub fn run(options: crate::Options) -> io::Result<()> {
     }
     check(unsafe { libc::tcsetattr(0, libc::TCSANOW, &raw) })?;
     let mut terminal = Terminal {
+        kitty: kitty.as_ref(),
         original,
         alt_screen: options.alt_screen,
         child_alternate: false,
@@ -574,13 +560,6 @@ mod tests {
         assert_eq!(cursor_position(b"\x1b[21;7R\x1b[?62;4c"), Some((7, 21)));
         assert_eq!(cursor_position(b"\x1b[0;7R"), None);
         assert_eq!(cursor_position(b"\x1b[21;7"), None);
-    }
-
-    #[test]
-    fn requires_sixel_in_a_complete_device_attributes_reply() {
-        assert!(advertises_sixel(b"\x1b[?62;4;22c"));
-        assert!(!advertises_sixel(b"\x1b[?62;4"));
-        assert!(!advertises_sixel(b"\x1b[?4;42c"));
     }
 
     #[test]

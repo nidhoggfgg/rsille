@@ -1,6 +1,6 @@
 # rsille Playground
 
-`rsille` 是一个交互式终端游乐场。不带参数运行即可打开菜单，启动仓库 `examples/` 下的示例：`function-plotter`（别名 `draw`）、`pet`（默认形象为 `deepseek`）、`ai-babies`或 `jellyfish`。绘图需要支持 Sixel 的终端，终端宠物需要支持 Sixel 的 Unix 交互终端。
+`rsille` 是一个交互式终端游乐场。不带参数运行即可打开菜单，启动仓库 `examples/` 下的示例：`function-plotter`（别名 `draw`）、`pet`（默认形象为 `deepseek`）、`ai-babies`或 `jellyfish`。绘图和终端宠物都支持 Kitty 和 Sixel。终端宠物需要 Unix 交互终端。
 
 ## 从源码运行
 

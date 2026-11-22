@@ -2961,6 +2961,36 @@ mod kitty {
     }
 
     #[test]
+    fn inline_kitty_anchors_after_reservation_and_keeps_committed_images() {
+        let pixels = CellPixels {
+            width: 8,
+            height: 16,
+        };
+        let mut render = Builder::new()
+            .size((6, 3))
+            .inline_mode(true)
+            .raster_session(RasterSession::KittyInline(pixels))
+            .build_render(Scene::default(), Vec::new());
+        render.set_inline_viewport_height(3);
+        render.thing.origin = (1, 0).into();
+        let first = frame(&mut render);
+        let text = std::str::from_utf8(&first).unwrap();
+        assert!(text.contains("\x1b8\x1b[2F\x1b[2G\x1b_Ga=p"));
+        let committed = image_id(commands(&first)[0]);
+        assert!(frame(&mut render).is_empty());
+        render.commit_frame().unwrap();
+        let next = frame(&mut render);
+        let active = image_id(commands(&next)[0]);
+        assert_ne!(active, committed);
+        assert!(commands(&next).iter().all(|cmd| !cmd.starts_with("a=d")));
+        render.clear_inline().unwrap();
+        let cleanup = commands(&render.out);
+        assert_eq!(cleanup.len(), 1);
+        assert!(cleanup[0].starts_with("a=d,d=I"));
+        assert_eq!(image_id(cleanup[0]), active);
+    }
+
+    #[test]
     fn shared_surface_moves_splits_and_releases_after_the_last_placement() {
         let pixels = CellPixels {
             width: 10,

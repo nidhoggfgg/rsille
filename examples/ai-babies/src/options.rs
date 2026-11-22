@@ -2,7 +2,7 @@ use std::error::Error;
 
 use rsille::{
     raster::Rgb,
-    render::raster_output::{CellPixels, RasterCapabilities, RasterOutput},
+    render::raster_output::{CellPixels, RasterBackend, RasterSession},
 };
 
 use crate::{scene::Character, INLINE_HEIGHT};
@@ -12,6 +12,7 @@ pub enum Output {
     #[default]
     Quadrant,
     Sixel,
+    Kitty,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -59,10 +60,18 @@ pub fn animation_args(mut args: &[String]) -> Result<(Options, &[String]), Box<d
                 }
             }
             "--raster" | "--text-only" => {
-                return Err("Raster character previews were removed; use --sixel".into())
+                return Err("Raster character previews were removed; use --kitty or --sixel".into())
             }
-            "--sixel" => {
-                options.output = Output::Sixel;
+            "--sixel" | "--kitty" => {
+                let requested = if arg == "--kitty" {
+                    Output::Kitty
+                } else {
+                    Output::Sixel
+                };
+                if options.output != Output::Quadrant && options.output != requested {
+                    return Err("choose either --kitty or --sixel".into());
+                }
+                options.output = requested;
                 consumed = 1;
             }
             "--background" => {
@@ -91,46 +100,39 @@ pub fn animation_args(mut args: &[String]) -> Result<(Options, &[String]), Box<d
         args = &args[consumed..];
     }
     if options.background.is_some() && options.output == Output::Quadrant {
-        return Err("--background requires --sixel".into());
+        return Err("--background requires --kitty or --sixel".into());
     }
-    if options.pixels.is_some() && options.output != Output::Sixel {
-        return Err("--cell-pixels requires --sixel".into());
+    if options.pixels.is_some() && options.output == Output::Quadrant {
+        return Err("--cell-pixels requires --kitty or --sixel".into());
     }
     if options.force_cell_pixels && options.pixels.is_none() {
-        return Err("--force-cell-pixels requires --sixel --cell-pixels WxH".into());
+        return Err("--force-cell-pixels requires --kitty or --sixel --cell-pixels WxH".into());
     }
     Ok((options, args))
 }
 
 impl Options {
-    pub fn native_config(&self, grid: (u16, u16)) -> Result<RasterOutput, Box<dyn Error>> {
-        self.native_config_with(grid, CellPixels::resolve)
+    pub fn session(&self, grid: (u16, u16)) -> Result<Option<RasterSession>, Box<dyn Error>> {
+        self.session_with(grid, |output, explicit| match output {
+            Output::Kitty if cfg!(unix) => RasterBackend::Kitty
+                .negotiate_inline(explicit, std::time::Duration::from_millis(500)),
+            Output::Kitty => CellPixels::resolve(explicit).map(RasterSession::KittyInline),
+            Output::Sixel => CellPixels::resolve(explicit).map(RasterSession::SixelInline),
+            Output::Quadrant => unreachable!(),
+        })
     }
 
-    pub fn native_config_with(
+    pub fn session_with(
         &self,
         grid: (u16, u16),
-        resolve: impl FnOnce(Option<CellPixels>) -> std::io::Result<CellPixels>,
-    ) -> Result<RasterOutput, Box<dyn Error>> {
-        if self.output != Output::Sixel {
-            return Ok(RasterOutput::default());
+        resolve: impl FnOnce(Output, Option<CellPixels>) -> std::io::Result<RasterSession>,
+    ) -> Result<Option<RasterSession>, Box<dyn Error>> {
+        if self.output == Output::Quadrant {
+            return Ok(None);
         }
-
-        let pixels = resolve(self.pixels)?;
-        if self.pixels.is_some() && (pixels.width, pixels.height) == grid && !self.force_cell_pixels
-        {
+        if self.pixels.is_some_and(|p| (p.width, p.height) == grid) && !self.force_cell_pixels {
             return Err("--cell-pixels matches terminal columns x rows; supply measured physical pixels per character cell, or confirm with --force-cell-pixels".into());
         }
-        Ok(RasterOutput {
-            capabilities: RasterCapabilities {
-                // --sixel asserts local EL 2 graphics erasure and images following
-                // text scrolling on the normal screen; this is not detection.
-                sixel: true,
-                reliable_erase: false,
-                reliable_inline_erase: true,
-                no_scroll: true,
-                cell_pixels: Some(pixels),
-            },
-        })
+        Ok(Some(resolve(self.output, self.pixels)?))
     }
 }

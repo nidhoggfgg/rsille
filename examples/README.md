@@ -22,7 +22,7 @@ directory name in the table. Prefer release builds for animations and 3D scenes.
 | Example | File / directory | What it demonstrates |
 | --- | --- | --- |
 | [Canvas debugging](canvas/README.md) | `canvas` | Check movement, occlusion, stacking, resizing and repainting with Kitty and Sixel in the same scene. |
-| [Function Plotter](function-plotter/README.md) | `function-plotter` | Mathematica-style input/output cells, compact Sixel function graphs, reevaluation and scrollable history. |
+| [Function Plotter](function-plotter/README.md) | `function-plotter` | Mathematica-style input/output cells, inline Kitty or Sixel function graphs, reevaluation and scrollable history. |
 | [TUI showcase](tui-showcase/README.md) | `tui-showcase` | Seven pages of controls, data, content, layout, motion and themes. |
 | [Lumen](lumen/README.md) | `lumen` | Interactive workspace with flows, a notebook and floating windows. |
 | [Orbit Files](orbit-files/README.md) | `orbit-files` | File manager with selection, drag and drop, previews and undo. |
@@ -47,11 +47,8 @@ cargo run --release --manifest-path examples/function-plotter/Cargo.toml
 cargo run --manifest-path examples/function-plotter/Cargo.toml -- --help
 ```
 
-No arguments starts the interactive Sixel REPL; `--help` shows help.
-The terminal and any multiplexer must support Sixel,
-ED 2 and local EL 2 graphics erasure, graphics following text scrolling, stable
-palettes and non-scrolling positioned output. These capabilities are not
-automatically detected. See the [Function Plotter guide](function-plotter/README.md)
+On Unix the interactive REPL prefers Kitty graphics and falls back to Sixel.
+Use `--backend kitty` or `--backend sixel` to select a protocol. See the [Function Plotter guide](function-plotter/README.md)
 for controls, measured cell-pixel overrides and headless checks.
 
 ## Validate without a terminal

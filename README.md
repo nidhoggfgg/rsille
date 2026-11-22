@@ -143,7 +143,9 @@ Negotiation uses the controlling terminal on Unix, including macOS and WSL.
 Native Windows and custom writers can pass a verified `RasterSession`. Fullscreen
 Sixel requires graphics erasure with ED 2, stable palettes, transparent padding
 and positioned output without scrolling. Inline Sixel uses `.raster_output(...)`
-with explicit row-erasure and scrolling capabilities.
+with explicit row-erasure and scrolling capabilities. Inline apps can also use
+`RasterBackend::Auto.negotiate_inline(...)` before input starts and pass the
+result to `.raster_session(...)`. Kitty places images relative to the inline region.
 
 ## Extension: Typst math
 
