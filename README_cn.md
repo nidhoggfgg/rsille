@@ -71,7 +71,7 @@ npx skills add nidhoggfgg/rsille.skills --skill rsille
 
 ```toml
 [dependencies]
-rsille = "3.1.0"
+rsille = "3.2.0"
 ```
 
 默认启用 `sixel` feature，

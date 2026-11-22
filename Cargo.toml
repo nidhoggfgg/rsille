@@ -1,9 +1,9 @@
 [package]
 name = "rsille"
-version = "3.1.1"
+version = "3.2.0"
 edition = "2021"
 authors = ["nidhoggfgg <nidhoggfgg@gmail.com>"]
-description = "A terminal UI framework with widgets, layouts, animation, and Unicode/Sixel graphics"
+description = "A terminal UI framework with widgets, layouts, animation, and Unicode, Sixel, and Kitty graphics"
 keywords = ["terminal", "tui", "graphics", "animation", "braille"]
 categories = ["command-line-interface", "graphics"]
 readme = "README.md"

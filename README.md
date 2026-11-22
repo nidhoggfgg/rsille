@@ -73,7 +73,7 @@ Run `cargo run -p rsille-playground` from the repository root to open the menu. 
 
 ```toml
 [dependencies]
-rsille = "3.1.0"
+rsille = "3.2.0"
 ```
 
 The `sixel` feature is enabled by default; optional `syntax-highlighting` adds
