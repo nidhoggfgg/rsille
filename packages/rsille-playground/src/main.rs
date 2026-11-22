@@ -1,3 +1,8 @@
+mod ai_babies;
+mod deepseek_pet;
+mod function_plotter;
+mod jellyfish;
+
 use clap::{Parser, Subcommand};
 use std::error::Error;
 use std::io::{self, IsTerminal, Write};
@@ -28,29 +33,47 @@ enum Experience {
         options: deepseek_pet::Options,
     },
     /// Explore the AI Babies animation
-    AiBabies,
+    #[command(disable_help_flag = true)]
+    AiBabies {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
     /// Plot functions with Kitty or Sixel graphics
-    #[command(visible_alias = "draw")]
-    FunctionPlotter,
+    #[command(visible_alias = "draw", disable_help_flag = true)]
+    FunctionPlotter {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
     /// Watch the jellyfish swim
-    Jellyfish,
+    #[command(disable_help_flag = true)]
+    Jellyfish {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
 }
 
 impl Experience {
     fn run(self) -> Result<(), Box<dyn Error>> {
         match self {
-            _ if !io::stdin().is_terminal() || !io::stdout().is_terminal() => {
-                Err("This experience needs an interactive terminal.".into())
-            }
             Self::Pet {
                 character: PetCharacter::Deepseek,
                 options,
-            } => Ok(options.run()?),
-            Self::AiBabies => ai_babies::run(),
-            Self::FunctionPlotter => rsille_function_plotter::run(),
-            Self::Jellyfish => rsille_jellyfish::run(),
+            } => {
+                require_terminal()?;
+                Ok(options.run()?)
+            }
+            Self::AiBabies { args } => ai_babies::run(&args),
+            Self::FunctionPlotter { args } => function_plotter::run(args),
+            Self::Jellyfish { args } => jellyfish::run(&args),
         }
     }
+}
+
+fn require_terminal() -> Result<(), Box<dyn Error>> {
+    if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
+        return Err("This experience needs an interactive terminal.".into());
+    }
+    Ok(())
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -66,13 +89,15 @@ fn main() -> Result<(), Box<dyn Error>> {
             return Ok(());
         }
         match choice.trim() {
-            "1" | "4" | "draw" | "function-plotter" => Experience::FunctionPlotter,
+            "1" | "4" | "draw" | "function-plotter" => {
+                Experience::FunctionPlotter { args: Vec::new() }
+            }
             "2" | "pet" => Experience::Pet {
                 character: PetCharacter::Deepseek,
                 options: deepseek_pet::Options::default(),
             },
-            "3" | "ai-babies" => Experience::AiBabies,
-            "5" | "jellyfish" => Experience::Jellyfish,
+            "3" | "ai-babies" => Experience::AiBabies { args: Vec::new() },
+            "5" | "jellyfish" => Experience::Jellyfish { args: Vec::new() },
             "q" | "quit" => return Ok(()),
             _ => {
                 println!("Choose one of the listed experiences.");

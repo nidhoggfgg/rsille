@@ -22,7 +22,6 @@ directory name in the table. Prefer release builds for animations and 3D scenes.
 | Example | File / directory | What it demonstrates |
 | --- | --- | --- |
 | [Canvas debugging](canvas/README.md) | `canvas` | Check movement, occlusion, stacking, resizing and repainting with Kitty and Sixel in the same scene. |
-| [Function Plotter](function-plotter/README.md) | `function-plotter` | Mathematica-style input/output cells, inline Kitty or Sixel function graphs, reevaluation and scrollable history. |
 | [TUI showcase](tui-showcase/README.md) | `tui-showcase` | Seven pages of controls, data, content, layout, motion and themes. |
 | [Lumen](lumen/README.md) | `lumen` | Interactive workspace with flows, a notebook and floating windows. |
 | [Orbit Files](orbit-files/README.md) | `orbit-files` | File manager with selection, drag and drop, previews and undo. |
@@ -32,24 +31,11 @@ directory name in the table. Prefer release builds for animations and 3D scenes.
 | [Minecraft](minecraft/README.md) | `minecraft` | A first-person voxel sandbox with mining, building and flight. |
 | [Clockwork](clockwork/README.md) | `clockwork` | 132 parts assemble into three animated mechanical creatures. |
 | [Pokémon Battle](pokemon-battle/README.md) | `pokemon-battle` | Pikachu versus Blastoise in an interactive 3D turn-based battle. |
-| [Jellyfish](jellyfish/README.md) | `jellyfish` | A self-playing inline aquarium with two luminous jellyfish. |
-| [AI Babies](ai-babies/README.md) | `ai-babies` | Three selectable sprite characters, each with six actions. |
 
 Interactive demos need a TTY. Use a True Color terminal and a Unicode monospace font;
 mouse support is needed for pointer interactions. See each guide for window sizes,
 keys, data persistence and export options. Orbit Files' complete filesystem operations
 require Linux; it starts in a disposable demo directory unless given `--path`.
-
-## Function Plotter
-
-```sh
-cargo run --release --manifest-path examples/function-plotter/Cargo.toml
-cargo run --manifest-path examples/function-plotter/Cargo.toml -- --help
-```
-
-On Unix the interactive REPL uses Kitty by default. Use `--backend sixel` to confirm
-that the terminal supports row-local graphics erasure and images following text scrolling. See the [Function Plotter guide](function-plotter/README.md)
-for controls, measured cell-pixel overrides and headless checks.
 
 ## Validate without a terminal
 

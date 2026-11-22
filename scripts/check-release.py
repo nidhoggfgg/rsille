@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify the four core crate archives and a downstream application.
+"""Verify the core crate archives, playground installation and a downstream application.
 
 Requires Python 3.12+ and Cargo. Nothing is uploaded. Pass --offline to use cached
 third-party dependencies; first-time checks may need network access.
@@ -24,7 +24,8 @@ def main():
     packages = {package["name"]: package for package in metadata["packages"]}
     core = ("rsille-render", "rsille-canvas", "rsille-tui", "rsille")
     selection = [arg for name in core for arg in ("-p", name)]
-    for name in core:
+    release_packages = (*core, "rsille-playground")
+    for name in release_packages:
         registries = packages[name]["publish"]
         assert registries is None or "crates-io" in registries, f"{name} must be publishable"
 
@@ -41,7 +42,7 @@ def main():
         patches = []
         members = []
         config = extracted / "archives.toml"
-        for name in core:
+        for name in release_packages:
             # Resolve unpublished dependencies from the archives already verified.
             config.write_text("[patch.crates-io]\n" + "\n".join(patches))
             cargo("package", "-p", name, "--allow-dirty", "--all-features",
@@ -53,12 +54,21 @@ def main():
             manifest = source / "Cargo.toml"
             data = tomllib.loads(manifest.read_text())
             assert set(source.rglob("Cargo.toml")) == {manifest}
-            assert (source / "src/lib.rs").is_file()
+            entry = "main.rs" if name == "rsille-playground" else "lib.rs"
+            assert (source / "src" / entry).is_file()
             assert data["package"]["name"] == name
             for table in (data, *data.get("target", {}).values()):
                 for kind in ("dependencies", "dev-dependencies", "build-dependencies"):
                     for dep in table.get(kind, {}).values():
                         assert "path" not in dep and "git" not in dep, (name, dep)
+            if name == "rsille-playground":
+                install_root = extracted / "install"
+                cargo("install", "--path", str(source), "--root", str(install_root),
+                      "--debug", "--locked", "--config", str(config),
+                      "--target-dir", str(target / "release-check-build"), cwd=extracted)
+                subprocess.run([install_root / "bin/rsille", "draw", "--headless"],
+                               cwd=extracted, check=True)
+                continue
             members.append(directory)
             patches.append(f'{name} = {{ path = {json.dumps(str(source))} }}')
 
@@ -117,7 +127,7 @@ fn check_canvas() {
             for example in (program, extensions):
                 main_rs.write_text(example)
                 cargo("run", *build_args, *features, cwd=consumer, program_args=["--headless"])
-    print("Verified all four core archives and the headless consumer.")
+    print("Verified all four core archives, playground installation and the headless consumer.")
 
 
 if __name__ == "__main__":

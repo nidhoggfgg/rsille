@@ -2,7 +2,7 @@
 
 English · [中文](README_cn.md)
 
-<img align="right" src="examples/ai-babies/preview-deepseek.gif" width="96" alt="">
+<img align="right" src="packages/rsille-playground/ai-babies/preview-deepseek.gif" width="96" alt="">
 
 **Make your terminal come alive.**
 
@@ -17,7 +17,7 @@ separate rendering and event loops.
 
 | Pixel-level graphics · Sixel | Desktop-style layouts · TUI |
 | --- | --- |
-| [![Offline RGB preview of function plots: surfaces, a helix and a trefoil knot](examples/function-plotter/preview.gif)](examples/function-plotter/README.md) | [![Lumen's 3D canvas, live curves and draggable floating windows](examples/lumen/preview-desk.png)](examples/lumen/README.md) |
+| [![Offline RGB preview of function plots: surfaces, a helix and a trefoil knot](packages/rsille-playground/function-plotter/preview.gif)](packages/rsille-playground/function-plotter/README.md) | [![Lumen's 3D canvas, live curves and draggable floating windows](examples/lumen/preview-desk.png)](examples/lumen/README.md) |
 | **Graphics beyond character shapes.** RGB pixel canvases output through Sixel, with layout, clipping, scrolling and opaque coverage. Embed fine curves, images and custom visualizations in your UI on compatible terminals. | **More than fixed panels.** Compose editors, tables and canvases with Flex/Grid layouts. Draggable, resizable, collapsible windows, focus management and command palettes let you build multi-pane workspaces. |
 
 | Continuous animation · Unicode Canvas | Graphics and widgets · Shared interaction |
@@ -33,7 +33,7 @@ encoding, widgets, rendering and event loop.
 
 ## Big visuals. Small building blocks.
 
-<img align="right" src="examples/ai-babies/preview-pet.gif" width="96" alt="">
+<img align="right" src="packages/rsille-playground/ai-babies/preview-pet.gif" width="96" alt="">
 
 - **Describe the UI, not the event loop.** `view` describes widgets; `update` handles
   messages and state. The runtime manages focus, input, background tasks and cleanup.
@@ -47,8 +47,7 @@ encoding, widgets, rendering and event loop.
   rendered frames in memory. Control timers and background tasks with a manual
   clock and executor.
 
-The **[example gallery](examples/README.md)** includes
-[glowing jellyfish](examples/jellyfish/README.md), a
+The **[example gallery](examples/README.md)** includes a
 [voxel sandbox](examples/minecraft/README.md),
 [a file manager with drag and drop](examples/orbit-files/README.md) and
 [a seven-page widget showcase](examples/tui-showcase/README.md).
@@ -119,9 +118,9 @@ graphics, either on its own or embedded in TUI layouts. Quadrant encoding divide
 each cell into **2 × 2 sample positions**, combining foreground and background
 colors for finer shapes: 120 × 20 cells provide a 240 × 40 sample grid.
 
-[![Pixel characters rendered with 2 × 2 quadrant encoding in 120 × 20 terminal cells](imgs/readme-canvas-quadrant.png)](examples/ai-babies/README.md)
+[![Pixel characters rendered with 2 × 2 quadrant encoding in 120 × 20 terminal cells](imgs/readme-canvas-quadrant.png)](packages/rsille-playground/ai-babies/README.md)
 
-Actual Canvas output from [AI Babies' static mode](examples/ai-babies/README.md),
+Actual Canvas output from [AI Babies' static mode](packages/rsille-playground/ai-babies/README.md),
 using just **20 terminal rows**. The enlarged preview preserves terminal cell proportions.
 
 | Encoding | Samples per terminal cell | Use |

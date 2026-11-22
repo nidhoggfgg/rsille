@@ -2,7 +2,7 @@
 
 [English](README.md) · 中文
 
-<img align="right" src="examples/ai-babies/preview-deepseek.gif" width="96" alt="">
+<img align="right" src="packages/rsille-playground/ai-babies/preview-deepseek.gif" width="96" alt="">
 
 **让终端，惊艳起来。**
 
@@ -17,7 +17,7 @@
 
 | 像素级绘图 · Sixel | 桌面式布局 · TUI |
 | --- | --- |
-| [![函数绘图的离线 RGB 预览：曲面、螺旋线和三叶结](examples/function-plotter/preview.gif)](examples/function-plotter/README_cn.md) | [![Lumen 的三维画布、实时曲线和可拖动浮窗](examples/lumen/preview-desk.png)](examples/lumen/README_cn.md) |
+| [![函数绘图的离线 RGB 预览：曲面、螺旋线和三叶结](packages/rsille-playground/function-plotter/preview.gif)](packages/rsille-playground/function-plotter/README_cn.md) | [![Lumen 的三维画布、实时曲线和可拖动浮窗](examples/lumen/preview-desk.png)](examples/lumen/README_cn.md) |
 | **图形不再受字符形状限制。** RGB 像素画布通过 Sixel 输出，支持布局、裁剪、滚动与不透明遮挡；在兼容终端中，将精细曲线、图像和自定义可视化嵌入界面。 | **终端界面不必只有固定面板。** Flex/Grid 布局组合编辑器、表格和画布；浮窗支持拖动、调整大小、收起和恢复，配合焦点管理与命令面板，构建多区域工作台。 |
 
 | 连续动画 · Unicode Canvas | 图形与组件 · 同一套交互 |
@@ -32,7 +32,7 @@ Function Plotter 为离线 RGB 预览，非终端录屏，
 
 ## 效果惊艳，写起来也顺手
 
-<img align="right" src="examples/ai-babies/preview-pet.gif" width="96" alt="">
+<img align="right" src="packages/rsille-playground/ai-babies/preview-pet.gif" width="96" alt="">
 
 - **声明界面，不手写事件循环。** `view` 描述组件，`update` 处理消息与状态；
   运行时统一处理焦点、输入、后台任务和退出清理。
@@ -44,7 +44,6 @@ Function Plotter 为离线 RGB 预览，非终端录屏，
   用手动时钟和执行器控制计时器与后台任务。
 
 **更多示例**：
-[发光水母](examples/jellyfish/README_cn.md)、
 [方块沙盒](examples/minecraft/README_cn.md)、
 [拖放文件管理器](examples/orbit-files/README_cn.md)、
 [七页组件展厅](examples/tui-showcase/README_cn.md)。
@@ -118,9 +117,9 @@ fn main() -> WidgetResult<()> {
 在有限的行列里表现更细的轮廓。
 120 × 20 个字符格，对应 240 × 40 的采样网格。
 
-[![120 × 20 字符格中使用 2 × 2 四分块编码渲染的像素角色](imgs/readme-canvas-quadrant.png)](examples/ai-babies/README_cn.md)
+[![120 × 20 字符格中使用 2 × 2 四分块编码渲染的像素角色](imgs/readme-canvas-quadrant.png)](packages/rsille-playground/ai-babies/README_cn.md)
 
-上图是 [AI Babies 静态模式](examples/ai-babies/README_cn.md) 的实际 Canvas 输出，
+上图是 [AI Babies 静态模式](packages/rsille-playground/ai-babies/README_cn.md) 的实际 Canvas 输出，
 仅占 **20 行**；预览按字符格比例放大，便于查看细节。
 
 | 编码 | 每个字符格的采样数 | 用途 |

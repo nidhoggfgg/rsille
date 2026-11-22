@@ -21,7 +21,6 @@ cargo run --release --manifest-path examples/lumen/Cargo.toml
 | 示例 | 文件 / 目录 | 展示内容 |
 | --- | --- | --- |
 | [Canvas 调试](canvas/README_cn.md) | `canvas` | 在同一场景中检查 Kitty 和 Sixel 的窗口移动、遮挡、置前、缩放与重绘。 |
-| [函数绘图](function-plotter/README_cn.md) | `function-plotter` | Mathematica 风格输入/输出单元、Kitty 或 Sixel 函数图像、重新执行与滚动历史。 |
 | [TUI showcase](tui-showcase/README_cn.md) | `tui-showcase` | 七页组件展厅：表单、数据、内容、布局、动画和主题。 |
 | [Lumen](lumen/README_cn.md) | `lumen` | 包含流程、笔记和浮动桌面的交互工作台。 |
 | [Orbit Files](orbit-files/README_cn.md) | `orbit-files` | 支持框选、拖放、预览和撤销的文件管理器。 |
@@ -31,22 +30,10 @@ cargo run --release --manifest-path examples/lumen/Cargo.toml
 | [Minecraft](minecraft/README_cn.md) | `minecraft` | 支持挖掘、搭建和飞行的第一人称方块沙盒。 |
 | [Clockwork](clockwork/README_cn.md) | `clockwork` | 132 个零件自动组装成三种机械生物。 |
 | [Pokémon Battle](pokemon-battle/README_cn.md) | `pokemon-battle` | 皮卡丘对战水箭龟的 3D 回合制游戏。 |
-| [Jellyfish](jellyfish/README_cn.md) | `jellyfish` | 两只发光水母自动游动的 inline 水族箱。 |
-| [AI Babies](ai-babies/README_cn.md) | `ai-babies` | 三个可切换的像素角色，每个角色有六组动作。 |
 
 交互演示需要 TTY。建议使用支持 True Color 的终端和 Unicode 等宽字体；鼠标交互需要
 终端支持鼠标事件。窗口尺寸、按键、数据持久化和导出选项见各示例文档。
 Orbit Files 的完整文件操作需要 Linux；不传 `--path` 时使用一次性演示目录。
-
-## 函数绘图
-
-```sh
-cargo run --release --manifest-path examples/function-plotter/Cargo.toml
-cargo run --manifest-path examples/function-plotter/Cargo.toml -- --help
-```
-
-Unix 下交互式 REPL 默认选用 Kitty。确认终端支持逐行擦除图像、图像随文字滚动后，可用 `--backend sixel` 启用 Sixel。
-操作方式、实际字符格像素覆盖值和 headless 检查见[函数绘图指南](function-plotter/README_cn.md)。
 
 ## 无终端验证
 

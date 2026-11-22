@@ -1,0 +1,266 @@
+//! Three selectable raster pets, playing embedded, pre-drawn animation clips.
+mod export;
+mod options;
+mod raster;
+mod scene;
+mod static_image;
+
+use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
+use options::{animation_args, Options, Output};
+use rsille::{
+    canvas::{Canvas, Encoding},
+    raster::{RasterAlign, RasterOptions},
+    render::{
+        area::Size,
+        chunk::Chunk,
+        raster_output::{CellPixels, InlineRasterSession},
+        Builder, Draw, DrawErr, Update,
+    },
+};
+use std::{error::Error, time::Instant};
+
+const INLINE_HEIGHT: u16 = 24;
+const PREVIEW_WIDTH: u16 = 80;
+
+struct Nursery {
+    time: f64,
+    last: Option<Instant>,
+    quit: bool,
+    paused: bool,
+    action: Option<scene::Action>,
+    character: scene::Character,
+    canvas: Canvas,
+    raster: Option<[raster::Frames; 3]>,
+    options: Options,
+}
+
+impl Default for Nursery {
+    fn default() -> Self {
+        Self {
+            time: 0.0,
+            last: None,
+            quit: false,
+            paused: false,
+            action: None,
+            character: scene::Character::default(),
+            canvas: Canvas::with_encoding(Encoding::Quadrant),
+            raster: None,
+            options: Options::default(),
+        }
+    }
+}
+
+impl Nursery {
+    fn new(options: Options) -> Result<Self, Box<dyn Error>> {
+        let raster = if options.output == Output::Quadrant {
+            None
+        } else {
+            // Decode before entering terminal modes; switching pets only selects cached frames.
+            Some([
+                raster::Frames::new(scene::Character::ChatGpt, options.background)?,
+                raster::Frames::new(scene::Character::DeepSeek, options.background)?,
+                raster::Frames::new(scene::Character::Claude, options.background)?,
+            ])
+        };
+        Ok(Self {
+            character: options.character,
+            raster,
+            options,
+            ..Self::default()
+        })
+    }
+}
+
+impl Update for Nursery {
+    fn on_events(&mut self, events: &[Event]) -> Result<(), DrawErr> {
+        for event in events {
+            if let Event::Key(key) = event {
+                if key.kind != KeyEventKind::Press {
+                    continue;
+                }
+                match key.code {
+                    KeyCode::Esc | KeyCode::Char('q') => self.quit = true,
+                    KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        self.quit = true
+                    }
+                    KeyCode::Tab | KeyCode::Char('g' | 'd' | 'c') => {
+                        self.character = match key.code {
+                            KeyCode::Char('g') => scene::Character::ChatGpt,
+                            KeyCode::Char('d') => scene::Character::DeepSeek,
+                            KeyCode::Char('c') => scene::Character::Claude,
+                            _ => self.character.next(),
+                        };
+                        self.time = 0.0;
+                        self.last = None;
+                    }
+                    KeyCode::Char(' ') => {
+                        self.paused = !self.paused;
+                        self.last = None;
+                    }
+                    KeyCode::Char(n @ '0'..='6') => {
+                        self.action = n
+                            .to_digit(10)
+                            .and_then(|n| n.checked_sub(1).map(|i| scene::Action::ALL[i as usize]));
+                        self.time = 0.0;
+                        self.last = None;
+                    }
+                    _ => {}
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn update(&mut self) -> Result<bool, DrawErr> {
+        let now = Instant::now();
+        if !self.paused {
+            if let Some(last) = self.last {
+                let period = self.action.map_or(scene::PERIOD, scene::Action::duration);
+                self.time = (self.time + now.duration_since(last).as_secs_f64().min(0.1))
+                    .rem_euclid(period);
+            }
+        }
+        self.last = Some(now);
+        Ok(true)
+    }
+
+    fn should_quit(&self) -> bool {
+        self.quit
+    }
+}
+
+impl Draw for Nursery {
+    fn draw(&mut self, mut chunk: Chunk) -> Result<Size, DrawErr> {
+        let size = chunk.area().size();
+        if size.width == 0 || size.height == 0 {
+            return Ok(size);
+        }
+        if let Some(frames) = &self.raster {
+            let index = scene::current_frame(self.time, self.action);
+            let character = match self.character {
+                scene::Character::ChatGpt => 0,
+                scene::Character::DeepSeek => 1,
+                scene::Character::Claude => 2,
+            };
+            // Bound native output to roughly 320 physical pixels per axis; Fit
+            // preserves square proportions when the viewport is smaller.
+            // Only headless metadata checks omit metrics; real startup resolves them.
+            let pixels = self.options.pixels.unwrap_or(CellPixels {
+                width: 10,
+                height: 20,
+            });
+            let width = size
+                .width
+                .min(raster::SIDE.div_ceil(u32::from(pixels.width)) as u16);
+            let height = size
+                .height
+                .min(self.options.height)
+                .min(raster::SIDE.div_ceil(u32::from(pixels.height)) as u16);
+            let dx = size.width - width;
+            let dy = size.height - height;
+            let mut target = chunk.shrink(dy / 2, dy - dy / 2, 0, dx)?;
+            let frame = frames[character].frame(index);
+            let options = RasterOptions {
+                align_x: RasterAlign::Start,
+                ..RasterOptions::default()
+            };
+            if let Some(background) = self.options.background {
+                target.raster(
+                    frame,
+                    RasterOptions {
+                        background,
+                        ..options
+                    },
+                )?;
+            } else {
+                target.raster_overlay(frame, options)?;
+            }
+            return Ok(size);
+        }
+        let w = size.width as usize * 2;
+        let h = size.height as usize * 2;
+        let pixels = scene::render(w, h, self.time, self.action, self.character);
+        self.canvas.clear();
+        self.canvas.clear_background();
+        self.canvas
+            .set_bound((0, size.width as i32 - 1), (0, size.height as i32 - 1));
+        for y in 0..h {
+            for x in 0..w {
+                if let Some(rgb) = pixels[y * w + x] {
+                    self.canvas
+                        .set_color(x as f64, (h - 1 - y) as f64, scene::color(rgb));
+                }
+            }
+        }
+        self.canvas.draw(chunk)?;
+        Ok(size)
+    }
+}
+
+fn playback_builder(
+    options: Options,
+    grid: (u16, u16),
+    session: Option<InlineRasterSession>,
+) -> Builder {
+    // Native pixels need fewer rows than the character preview. Reserve only
+    // the image's height, rather than centering it inside a screen-sized region.
+    let max_height = if options.output != Output::Quadrant {
+        session
+            .map(InlineRasterSession::cell_pixels)
+            .map_or(options.height, |pixels| {
+                options
+                    .height
+                    .min(raster::SIDE.div_ceil(u32::from(pixels.height)) as u16)
+            })
+    } else {
+        options.height
+    };
+    let mut builder = Builder::new();
+    builder
+        .inline_mode(true)
+        .size((grid.0, grid.1.min(max_height)))
+        .inline_max_height(max_height)
+        .enable_raw_mode()
+        .enable_hide_cursor()
+        .frame_limit(24);
+    if let Some(session) = session {
+        builder.inline_raster_session(session);
+    }
+    builder
+}
+
+pub fn run(args: &[String]) -> Result<(), Box<dyn Error>> {
+    if args.is_empty() {
+        crate::require_terminal()?;
+        let (width, height) = crossterm::terminal::size()?;
+        let rows = (width / 6).min(height).min(24);
+        if rows > 0 {
+            static_image::render(rows)?;
+        }
+        return Ok(());
+    }
+    if args.first().is_some_and(|arg| arg == "--static") {
+        return static_image::command(&args[1..]);
+    }
+    let (mut options, args) = animation_args(args)?;
+    if !args.is_empty() {
+        return export::command(args, options);
+    }
+
+    crate::require_terminal()?;
+    let (width, height) = crossterm::terminal::size()?;
+    // Resolve metrics before any input reader starts, and retain this snapshot.
+    let session = options.session((width, height))?;
+    options.pixels = session.map(InlineRasterSession::cell_pixels);
+    let nursery = Nursery::new(options)?;
+    playback_builder(options, (width, height), session)
+        .build_event_loop(nursery)
+        .run()?;
+    println!();
+    Ok(())
+}
+
+#[cfg(test)]
+mod raster_tests;
+#[cfg(test)]
+mod tests;

@@ -6,14 +6,33 @@ description = "An interactive playground for rsille terminal graphics"
 license = "MIT"
 repository = "https://github.com/nidhoggfgg/rsille"
 readme = "README.md"
+include = [
+    "/Cargo.toml", "/README.md", "/build.rs", "/src/**", "/tests/**",
+    "/ai-babies/assets/*.rgb", "/ai-babies/assets/*.rgba", "/ai-babies/assets/*-320x320.png",
+    "/deepseek-pet/assets/animations/**", "/deepseek-pet/assets/commands.yaml",
+]
 
 [[bin]]
 name = "rsille"
 path = "src/main.rs"
 
 [dependencies]
-deepseek-pet = { path = "../../examples/deepseek-pet" }
-ai-babies = { path = "../../examples/ai-babies", version = "0.1.0" }
-rsille-function-plotter = { path = "../../examples/function-plotter", version = "0.1.0" }
-rsille-jellyfish = { path = "../../examples/jellyfish", version = "0.1.0" }
 clap = { version = "4.5", features = ["derive"] }
+crossterm.workspace = true
+meval = "0.2"
+png = "0.18"
+rsille = { version = "3.3.0", path = "../..", features = ["kitty"] }
+rsille-typst = { version = "0.1.0", path = "../rsille-typst" }
+typst-assets = { version = "=0.13.1", features = ["fonts"] }
+
+[target.'cfg(unix)'.dependencies]
+fastrand = "2"
+libc.workspace = true
+serde = { version = "1", features = ["derive"] }
+tempfile = "3"
+vt100 = "0.18.1"
+yaml_serde = "0.10"
+
+[build-dependencies]
+png = "0.18"
+yaml_serde = "0.10"

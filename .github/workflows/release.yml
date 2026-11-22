@@ -71,12 +71,12 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
           if [ -z "$CARGO_REGISTRY_TOKEN" ]; then
-            echo "::error::Set the CARGO_REGISTRY_TOKEN repository secret to a crates.io API token with publish access to the four core crates."
+            echo "::error::Set the CARGO_REGISTRY_TOKEN repository secret to a crates.io API token with publish access to the core crates and rsille-playground."
             exit 1
           fi
           packages=(-p rsille)
           metadata=$(cargo metadata --no-deps --format-version 1)
-          for name in rsille-render rsille-canvas rsille-tui; do
+          for name in rsille-render rsille-canvas rsille-tui rsille-playground; do
             version=$(jq -er --arg name "$name" '.packages[] | select(.name == $name).version' <<< "$metadata")
             status=$(curl -sS --retry 3 -A "rsille release ($GITHUB_SERVER_URL/$GITHUB_REPOSITORY)" \
               -o /dev/null -w '%{http_code}' "https://crates.io/api/v1/crates/$name/$version")

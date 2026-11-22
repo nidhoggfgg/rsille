@@ -1,22 +1,31 @@
 # rsille Playground
 
-`rsille` 是一个交互式终端游乐场。不带参数运行即可打开菜单，启动仓库 `examples/` 下的示例：`function-plotter`（别名 `draw`）、`pet`（默认形象为 `deepseek`）、`ai-babies`或 `jellyfish`。绘图和终端宠物都支持 Kitty 和 Sixel。终端宠物需要 Unix 交互终端。
+在交互终端运行 `rsille` 打开菜单，也可以用子命令直接启动内置模式。
 
-## 从源码运行
+| 命令 | 功能 |
+| --- | --- |
+| [`rsille draw`](function-plotter/README_cn.md) | 打开函数绘图器，支持 Kitty 和 Sixel。`draw` 是 `function-plotter` 的别名。 |
+| [`rsille pet`](deepseek-pet/README.md) | 在 Unix 交互终端启动 DeepSeek 宠物。 |
+| [`rsille ai-babies`](ai-babies/README_cn.md) | 显示三位像素角色，加 `--animate` 播放动画。 |
+| [`rsille jellyfish`](jellyfish/README_cn.md) | 在终端观看水母游动。 |
 
-在仓库根目录的交互终端运行：
+## 安装
+
+发布到 crates.io 后可按包名安装，可执行文件名为 `rsille`。
 
 ```sh
-cargo run -p rsille-playground
-```
-
-也可以跳过菜单，见[直接启动示例](examples/README.md)。
-
-## 安装并查看帮助
-
-```sh
-cargo install --path packages/rsille-playground
+cargo install rsille-playground
 rsille --help
 ```
 
-安装后的可执行文件名为 `rsille`。运行 `rsille` 打开菜单，或运行 `rsille draw`、`rsille pet` 直接进入对应模式。使用 `rsille draw --help` 或 `rsille pet --help` 查看各命令的用法。
+## 从源码运行
+
+在仓库根目录运行以下命令。省略子命令时打开菜单。
+
+```sh
+cargo run -p rsille-playground
+cargo run -p rsille-playground -- draw
+cargo run -p rsille-playground -- pet --help
+```
+
+从当前工作区安装可使用 `cargo install --path packages/rsille-playground`。
