@@ -2462,6 +2462,7 @@ where
             RasterSetting::Output(output) => builder.raster_output(output),
             RasterSetting::Backend(backend) => builder.raster_backend(backend),
             RasterSetting::Session(session) => builder.raster_session(session),
+            RasterSetting::InlineSession(session) => builder.inline_raster_session(session),
         };
         let mut event_loop = builder.build_event_loop(self);
 

@@ -1,6 +1,6 @@
 //! Configuration shared by standalone renderers and terminal event loops.
 
-use super::raster_output::{RasterBackend, RasterConfig, RasterSession};
+use super::raster_output::{InlineRasterSession, RasterBackend, RasterConfig, RasterSession};
 use crossterm::event::{KeyCode, KeyEvent};
 use log::info;
 
@@ -141,14 +141,13 @@ impl Builder {
     }
 
     /// Select a native backend at managed fullscreen startup. For inline graphics,
-    /// pass a [`RasterBackend::negotiate_inline`] snapshot to [`Self::raster_session`].
+    /// pass a [`RasterBackend::negotiate_inline`] snapshot to [`Self::inline_raster_session`].
     /// The last raster setting wins. Building a renderer never probes a TTY.
     ///
     /// Probing must precede the first managed input reader in this process,
     /// including one started by a text-only session. For successive sessions,
     /// use [`RasterBackend::negotiate_fullscreen`] or [`RasterBackend::negotiate_inline`]
-    /// before the first run and pass
-    /// the snapshot to [`Self::raster_session`] on subsequent graphics runs
+    /// before the first run and reuse the snapshot on subsequent graphics runs
     /// while the terminal, presentation mode and physical cell size still match.
     pub fn raster_backend(&mut self, backend: RasterBackend) -> &mut Self {
         self.raster_config = RasterConfig::Request(backend);
@@ -160,6 +159,12 @@ impl Builder {
     /// [`Render::release_raster_resources`] before leaving it.
     pub fn raster_session(&mut self, session: RasterSession) -> &mut Self {
         self.raster_config = RasterConfig::Session(session);
+        self
+    }
+
+    /// Use a host-verified inline session without querying terminal input.
+    pub fn inline_raster_session(&mut self, session: InlineRasterSession) -> &mut Self {
+        self.raster_config = RasterConfig::InlineSession(session);
         self
     }
 

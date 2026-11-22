@@ -39,7 +39,7 @@ pub fn run_with_mouse_capture(capture_mouse: bool) -> std::io::Result<()> {
 
 #[derive(Clone, clap::Parser)]
 pub struct Options {
-    /// Graphics backend (auto prefers Kitty, then Sixel)
+    /// Graphics backend. Select sixel explicitly to confirm inline erase and scroll support.
     #[arg(long, default_value = "auto", value_name = "auto|kitty|sixel")]
     pub backend: rsille::render::RasterBackend,
     /// Enable only the listed behaviors (comma-separated). An empty list keeps the idle pet.

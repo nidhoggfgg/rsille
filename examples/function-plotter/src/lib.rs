@@ -16,7 +16,7 @@ const X_RANGE: [f64; 2] = [-10.0, 10.0];
 const BOUNDS: [f64; 4] = [-10.0, 10.0, -3.0, 3.0];
 const HELP: &str = "Function plotter — 2D curves and shaded 3D surfaces
 
-On Unix, inline plots automatically prefer Kitty graphics, then Sixel.
+Unix selects Kitty automatically. On native Windows, specify a backend.
 
   --expr 'sin(x); x^2/8'   Initial functions (up to six)
   --grid                  Independent demo panels; no expr: four presets
@@ -25,7 +25,7 @@ On Unix, inline plots automatically prefer Kitty graphics, then Sixel.
                           Live preview; Enter/F5 freezes, commits and exits.
                           Responsive 1–2 columns; no grid editor or history.
   --x-range MIN MAX      Finite increasing x domain (default -10 10)
-  --backend auto|kitty|sixel  Select native graphics (default on native Windows: sixel)
+  --backend auto|kitty|sixel  Select native graphics; sixel confirms inline erase and scroll support
   --cell-pixels WxH       Actual pixels per character cell, NOT terminal size
   --frames DIRECTORY      Export 90 RGB preview frames (15 FPS); new directory
   --snapshot FILE.ppm     Export a static RGB preview; new file
@@ -181,16 +181,15 @@ fn run_options(options: Options) -> Result<(), Box<dyn Error>> {
     if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
         return Err("interactive plotting requires a TTY on both stdin and stdout".into());
     }
-    let backend = options.backend.unwrap_or(if cfg!(unix) {
-        RasterBackend::Auto
-    } else {
-        RasterBackend::Sixel
-    });
+    let backend = options.backend.unwrap_or(RasterBackend::Auto);
     let session = match backend {
+        RasterBackend::Auto if !cfg!(unix) => {
+            return Err("select --backend kitty or --backend sixel for a verified terminal".into())
+        }
         // Explicit Sixel retains the original host-asserted inline path.
-        RasterBackend::Sixel => RasterSession::SixelInline(CellPixels::resolve(options.pixels)?),
+        RasterBackend::Sixel => InlineRasterSession::Sixel(CellPixels::resolve(options.pixels)?),
         RasterBackend::Kitty if !cfg!(unix) => {
-            RasterSession::KittyInline(CellPixels::resolve(options.pixels)?)
+            InlineRasterSession::Kitty(CellPixels::resolve(options.pixels)?)
         }
         _ => backend.negotiate_inline(options.pixels, std::time::Duration::from_millis(500))?,
     };

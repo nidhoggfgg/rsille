@@ -21,6 +21,6 @@ pub use draw_update::*;
 pub use input::{InputCapabilities, KeyboardMode};
 /// Compatibility path for raster output configuration; see [`raster::output`].
 pub use raster::output as raster_output;
-pub use raster_output::{RasterBackend, RasterSession};
+pub use raster_output::{InlineRasterSession, RasterBackend, RasterSession};
 pub use renderer::Render;
 pub use wake::WakeHandle;

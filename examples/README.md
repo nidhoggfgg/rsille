@@ -47,8 +47,8 @@ cargo run --release --manifest-path examples/function-plotter/Cargo.toml
 cargo run --manifest-path examples/function-plotter/Cargo.toml -- --help
 ```
 
-On Unix the interactive REPL prefers Kitty graphics and falls back to Sixel.
-Use `--backend kitty` or `--backend sixel` to select a protocol. See the [Function Plotter guide](function-plotter/README.md)
+On Unix the interactive REPL uses Kitty by default. Use `--backend sixel` to confirm
+that the terminal supports row-local graphics erasure and images following text scrolling. See the [Function Plotter guide](function-plotter/README.md)
 for controls, measured cell-pixel overrides and headless checks.
 
 ## Validate without a terminal

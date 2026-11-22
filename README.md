@@ -145,7 +145,9 @@ Sixel requires graphics erasure with ED 2, stable palettes, transparent padding
 and positioned output without scrolling. Inline Sixel uses `.raster_output(...)`
 with explicit row-erasure and scrolling capabilities. Inline apps can also use
 `RasterBackend::Auto.negotiate_inline(...)` before input starts and pass the
-result to `.raster_session(...)`. Kitty places images relative to the inline region.
+result to `.inline_raster_session(...)`. Inline Auto selects Kitty. On a Sixel-only
+terminal, explicitly select `RasterBackend::Sixel` after confirming row-local
+graphics erasure, image scrolling and safe positioned output.
 
 ## Extension: Typst math
 

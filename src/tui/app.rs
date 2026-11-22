@@ -30,7 +30,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crate::render::raster_output::{RasterBackend, RasterOutput, RasterSession};
+use crate::render::raster_output::{
+    InlineRasterSession, RasterBackend, RasterOutput, RasterSession,
+};
 
 use crate::render::InlineMouseMode;
 
@@ -52,6 +54,7 @@ pub(crate) enum RasterSetting {
     Output(RasterOutput),
     Backend(RasterBackend),
     Session(RasterSession),
+    InlineSession(InlineRasterSession),
 }
 
 /// Callback producing an application message without an input payload.
@@ -272,13 +275,12 @@ impl<State, M> App<State, M> {
 
     /// Negotiate native fullscreen graphics when the managed terminal starts.
     /// Auto prefers Kitty. For inline graphics, pass a [`RasterBackend::negotiate_inline`]
-    /// snapshot to [`Self::raster_session`]. The last raster setting wins, including in headless apps.
+    /// snapshot to [`Self::inline_raster_session`]. The last raster setting wins, including in headless apps.
     ///
     /// Probing must precede the first managed input reader in this process,
     /// including one started by a text-only session. For successive sessions,
     /// use [`RasterBackend::negotiate_fullscreen`] or [`RasterBackend::negotiate_inline`]
-    /// before the first run and pass
-    /// the snapshot to [`Self::raster_session`] on subsequent graphics runs
+    /// before the first run and reuse the snapshot on subsequent graphics runs
     /// while the terminal, presentation mode and physical cell size still match.
     pub fn raster_backend(mut self, backend: RasterBackend) -> Self {
         self.raster_output = RasterSetting::Backend(backend);
@@ -288,6 +290,12 @@ impl<State, M> App<State, M> {
     /// Use a verified presentation mode and physical metrics without querying input.
     pub fn raster_session(mut self, session: RasterSession) -> Self {
         self.raster_output = RasterSetting::Session(session);
+        self
+    }
+
+    /// Use a host-verified inline session without querying terminal input.
+    pub fn inline_raster_session(mut self, session: InlineRasterSession) -> Self {
+        self.raster_output = RasterSetting::InlineSession(session);
         self
     }
 

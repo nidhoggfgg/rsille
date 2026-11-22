@@ -5,7 +5,7 @@ pub use crate::render::raster::{
     RasterAlign, RasterCanvas, RasterError, RasterOptions, RasterScale, Rgb,
 };
 pub use crate::render::raster_output::{
-    CellPixels, RasterBackend, RasterCapabilities, RasterOutput, RasterSession,
+    CellPixels, InlineRasterSession, RasterBackend, RasterCapabilities, RasterOutput, RasterSession,
 };
 
 pub use crate::tui::animation::{

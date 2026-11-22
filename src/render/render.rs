@@ -453,14 +453,14 @@ where
         let mut style = TerminalStyleState::default();
         if let Some(diff) = self.buffer.native_diff(plan.damage_pixels) {
             for (x, y, cell) in diff {
-                if self.buffer.raster_at((x, y).into()).is_none() {
+                if plan.paints_text_at(&self.buffer, (x, y).into()) {
                     crossterm::queue!(self.out, MoveTo(self.pos.x + x, self.pos.y + y))?;
                     style.queue(&cell.content, &mut self.out)?;
                 }
             }
         } else {
             for (x, y, cell) in self.buffer.all_cells() {
-                if self.buffer.raster_at((x, y).into()).is_none() {
+                if plan.paints_text_at(&self.buffer, (x, y).into()) {
                     crossterm::queue!(self.out, MoveTo(self.pos.x + x, self.pos.y + y))?;
                     style.queue(&cell.content, &mut self.out)?;
                 }
@@ -639,9 +639,7 @@ where
 
         let mut style = TerminalStyleState::default();
         let mut paint = |x, y, cell: &crate::render::buffer::Cell| -> std::io::Result<()> {
-            if y < self.used_height
-                && !(plan.native && self.buffer.raster_at((x, y).into()).is_some())
-            {
+            if y < self.used_height && plan.paints_text_at(&self.buffer, (x, y).into()) {
                 Self::position_inline(&mut self.out, extent, x, y)?;
                 // DECRC may restore SGR as well as the cursor, so each restore
                 // invalidates the style cache. Do not leak a previous cell's style.

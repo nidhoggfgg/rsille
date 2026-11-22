@@ -1,6 +1,6 @@
 //! Local interactive PTY session for an ANSI-compatible terminal.
 use crate::Feature;
-use rsille::render::raster_output::{CellPixels, RasterSession};
+use rsille::render::raster_output::{CellPixels, InlineRasterSession};
 use std::{
     ffi::CString,
     fs::File,
@@ -180,7 +180,7 @@ pub fn run(options: crate::Options) -> io::Result<()> {
             )
         })?;
     let mut pixels = session.cell_pixels();
-    let kitty = if matches!(session, RasterSession::KittyInline(_)) {
+    let kitty = if matches!(session, InlineRasterSession::Kitty(_)) {
         use rsille::render::raster_output::KittyImage;
         Some(crate::pet::KittySprites {
             whale: KittyImage::new()?,

@@ -2,7 +2,7 @@ use std::error::Error;
 
 use rsille::{
     raster::Rgb,
-    render::raster_output::{CellPixels, RasterBackend, RasterSession},
+    render::raster_output::{CellPixels, InlineRasterSession, RasterBackend},
 };
 
 use crate::{scene::Character, INLINE_HEIGHT};
@@ -112,12 +112,12 @@ pub fn animation_args(mut args: &[String]) -> Result<(Options, &[String]), Box<d
 }
 
 impl Options {
-    pub fn session(&self, grid: (u16, u16)) -> Result<Option<RasterSession>, Box<dyn Error>> {
+    pub fn session(&self, grid: (u16, u16)) -> Result<Option<InlineRasterSession>, Box<dyn Error>> {
         self.session_with(grid, |output, explicit| match output {
             Output::Kitty if cfg!(unix) => RasterBackend::Kitty
                 .negotiate_inline(explicit, std::time::Duration::from_millis(500)),
-            Output::Kitty => CellPixels::resolve(explicit).map(RasterSession::KittyInline),
-            Output::Sixel => CellPixels::resolve(explicit).map(RasterSession::SixelInline),
+            Output::Kitty => CellPixels::resolve(explicit).map(InlineRasterSession::Kitty),
+            Output::Sixel => CellPixels::resolve(explicit).map(InlineRasterSession::Sixel),
             Output::Quadrant => unreachable!(),
         })
     }
@@ -125,8 +125,8 @@ impl Options {
     pub fn session_with(
         &self,
         grid: (u16, u16),
-        resolve: impl FnOnce(Output, Option<CellPixels>) -> std::io::Result<RasterSession>,
-    ) -> Result<Option<RasterSession>, Box<dyn Error>> {
+        resolve: impl FnOnce(Output, Option<CellPixels>) -> std::io::Result<InlineRasterSession>,
+    ) -> Result<Option<InlineRasterSession>, Box<dyn Error>> {
         if self.output == Output::Quadrant {
             return Ok(None);
         }

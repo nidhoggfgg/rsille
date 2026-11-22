@@ -140,6 +140,98 @@ fn frame(render: &mut Render<Vec<u8>, Scene>) -> Vec<u8> {
     std::mem::take(&mut render.out)
 }
 
+#[cfg(any(feature = "kitty", feature = "sixel"))]
+#[test]
+fn transparent_replacement_and_overlay_preserve_their_distinct_backgrounds() {
+    use crate::render::{InlineRasterSession, RasterSession};
+
+    enum Layer {
+        Text,
+        Base,
+        Overlay,
+    }
+    struct Sample {
+        layer: Layer,
+        canvas: RasterCanvas,
+    }
+    impl Draw for Sample {
+        fn draw(&mut self, mut chunk: Chunk) -> Result<Size, DrawErr> {
+            let options = RasterOptions {
+                scale: RasterScale::Stretch,
+                background: Rgb(100, 50, 25),
+                ..Default::default()
+            };
+            match self.layer {
+                Layer::Text => {
+                    chunk.set(0, 0, Stylized::plain('X'))?;
+                }
+                Layer::Base => chunk.raster(&self.canvas, options)?,
+                Layer::Overlay => {
+                    chunk.set(0, 0, Stylized::plain('Y'))?;
+                    chunk.raster_overlay(&self.canvas, options)?;
+                }
+            }
+            Ok((1, 1).into())
+        }
+    }
+    crossterm::style::force_color_output(true);
+    let pixels = CellPixels {
+        width: 1,
+        height: 6,
+    };
+    for kitty in [false, true] {
+        if (kitty && !cfg!(feature = "kitty")) || (!kitty && !cfg!(feature = "sixel")) {
+            continue;
+        }
+        for inline in [false, true] {
+            let mut builder = Builder::new();
+            builder.size((1, 1)).clear(false);
+            if inline {
+                builder.inline_mode(true).inline_raster_session(if kitty {
+                    InlineRasterSession::Kitty(pixels)
+                } else {
+                    InlineRasterSession::Sixel(pixels)
+                });
+            } else {
+                builder.enable_alt_screen().raster_session(if kitty {
+                    RasterSession::KittyFullscreen(pixels)
+                } else {
+                    RasterSession::SixelFullscreen(pixels)
+                });
+            }
+            let mut render = builder.build_render(
+                Sample {
+                    layer: Layer::Text,
+                    canvas: RasterCanvas::new_transparent(1, 1).unwrap(),
+                },
+                Vec::new(),
+            );
+            render.render().unwrap();
+            assert!(render.out.contains(&b'X'));
+            render.out.clear();
+            render.thing.layer = Layer::Base;
+            render.render().unwrap();
+            if kitty {
+                let output = std::str::from_utf8(&render.out).unwrap();
+                let (text, image) = output.split_once("\x1b_Ga=t").unwrap();
+                assert!(text.contains("48;2;100;50;25m "));
+                assert!(image.contains(";AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\x1b\\"));
+            } else {
+                // RGB332 index 100, one column of six background pixels.
+                assert!(contains(&render.out, b"#100;2;43;14;0#100~"));
+            }
+            render.out.clear();
+            render.thing.layer = Layer::Overlay;
+            render.render().unwrap();
+            assert!(render.out.contains(&b'Y'));
+            if !kitty {
+                // Same cached source, this time with no ink in the overlay tile.
+                assert!(contains(&render.out, b"\x1bP7;1;0q\"1;1;1;6\x1b\\"));
+            }
+        }
+    }
+}
+
 #[test]
 fn frames_without_raster_work_with_unknown_capabilities() {
     for inline in [false, true] {
@@ -2931,7 +3023,7 @@ fn auto_defers_an_unavailable_mode_while_explicit_selection_fails_at_startup() {
 #[cfg(feature = "kitty")]
 mod kitty {
     use super::*;
-    use crate::render::RasterSession;
+    use crate::render::{InlineRasterSession, RasterSession};
     use base64::{engine::general_purpose::STANDARD, Engine};
 
     fn build<W: Write>(pixels: CellPixels, writer: W) -> Render<W, Scene> {
@@ -2969,7 +3061,7 @@ mod kitty {
         let mut render = Builder::new()
             .size((6, 3))
             .inline_mode(true)
-            .raster_session(RasterSession::KittyInline(pixels))
+            .inline_raster_session(InlineRasterSession::Kitty(pixels))
             .build_render(Scene::default(), Vec::new());
         render.set_inline_viewport_height(3);
         render.thing.origin = (1, 0).into();

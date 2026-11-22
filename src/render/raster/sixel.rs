@@ -40,6 +40,7 @@ struct Key {
     cell_width: u16,
     cell_height: u16,
     top_padding: u16,
+    fill_holes: Option<Rgb>,
 }
 
 impl Key {
@@ -55,6 +56,7 @@ impl Key {
             cell_width,
             cell_height,
             top_padding: 0,
+            fill_holes: None,
         }
     }
 }
@@ -92,7 +94,7 @@ impl SixelCache {
         cell_width: u16,
         cell_height: u16,
     ) -> io::Result<Arc<[u8]>> {
-        self.encode_padded(cell, cell_width, cell_height, 0)
+        self.encode_padded(cell, cell_width, cell_height, 0, None)
     }
 
     pub(super) fn encode_padded(
@@ -101,6 +103,7 @@ impl SixelCache {
         cell_width: u16,
         cell_height: u16,
         top_padding: u16,
+        fill_holes: Option<Rgb>,
     ) -> io::Result<Arc<[u8]>> {
         validate_dimensions(cell_width, cell_height)?;
         if u32::from(top_padding) > 5 * u32::from(cell_height) {
@@ -108,6 +111,7 @@ impl SixelCache {
         }
         let mut key = Key::new(cell, cell_width, cell_height);
         key.top_padding = top_padding;
+        key.fill_holes = fill_holes;
         if let Some(index) = self.entries.iter().position(|entry| entry.key == key) {
             let entry = self.entries.remove(index).expect("existing cache entry");
             let encoded = Arc::clone(&entry.encoded);
@@ -117,7 +121,7 @@ impl SixelCache {
         }
 
         let encoded: Arc<[u8]> =
-            encode_tile_padded(cell, cell_width, cell_height, top_padding)?.into();
+            encode_tile_padded(cell, cell_width, cell_height, top_padding, fill_holes)?.into();
         self.insert(key, Arc::clone(&encoded))?;
         self.encodes = self.encodes.saturating_add(1);
         Ok(encoded)
@@ -239,6 +243,7 @@ fn encode_tile_padded(
     cell_width: u16,
     cell_height: u16,
     top_padding: u16,
+    fill_holes: Option<Rgb>,
 ) -> io::Result<Vec<u8>> {
     let width = usize::from(cell_width);
     let height = usize::from(cell_height);
@@ -255,6 +260,7 @@ fn encode_tile_padded(
                 cell_width,
                 cell_height,
             )
+            .or(fill_holes)
             .map(palette_index);
         if let Some(index) = pixel {
             used[usize::from(index)] = true;
@@ -586,19 +592,19 @@ mod tests {
         let plain = cache.encode(&cell, 10, 20).unwrap();
         let reference = decode(&plain);
         for padding in [20, 40, 100] {
-            let bytes = cache.encode_padded(&cell, 10, 20, padding).unwrap();
+            let bytes = cache.encode_padded(&cell, 10, 20, padding, None).unwrap();
             let decoded = decode(&bytes);
             let prefix = usize::from(padding) * 10;
             assert!(decoded.pixels[..prefix].iter().all(Option::is_none));
             assert_eq!(&decoded.pixels[prefix..], &reference.pixels);
             assert!(Arc::ptr_eq(
                 &bytes,
-                &cache.encode_padded(&cell, 10, 20, padding).unwrap()
+                &cache.encode_padded(&cell, 10, 20, padding, None).unwrap()
             ));
         }
         assert!(Arc::ptr_eq(&plain, &cache.encode(&cell, 10, 20).unwrap()));
         assert_eq!(cache.encodes(), 4);
-        assert!(cache.encode_padded(&cell, 10, 20, 101).is_err());
+        assert!(cache.encode_padded(&cell, 10, 20, 101, None).is_err());
         assert_eq!(cache.encodes(), 4);
     }
 

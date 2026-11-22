@@ -10,7 +10,8 @@ use std::{io, time::Duration};
 /// Native graphics protocol requested for a managed terminal session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum RasterBackend {
-    /// Prefer Kitty, then Sixel. Defer negotiation errors until a raster frame.
+    /// Prefer Kitty. Managed fullscreen sessions fall back to Sixel and defer
+    /// negotiation errors until a raster frame. Inline Sixel requires explicit selection.
     Auto,
     /// Require Sixel at startup.
     Sixel,
@@ -34,7 +35,7 @@ impl std::str::FromStr for RasterBackend {
 #[cfg(feature = "kitty")]
 pub use super::kitty::KittyImage;
 
-/// Verified protocol, presentation mode and physical cell metrics for one terminal.
+/// Verified fullscreen protocol and physical cell metrics for one terminal.
 /// For fullscreen sessions a custom writer must establish the alternate screen.
 /// Fullscreen Sixel additionally requires ED 2 graphics erasure, stable palette colors,
 /// transparent band padding and safe positioned output even on the bottom row.
@@ -44,21 +45,33 @@ pub enum RasterSession {
     KittyFullscreen(CellPixels),
     /// Positioned Sixel tiles on a host satisfying the fullscreen requirements.
     SixelFullscreen(CellPixels),
-    /// Cursor-relative Kitty placements on the normal screen.
-    KittyInline(CellPixels),
-    /// Inline Sixel on a host with local EL 2 graphics erasure, scrolling images
-    /// and transparent band padding. Protocol detection cannot verify those properties.
-    SixelInline(CellPixels),
 }
 
 impl RasterSession {
     /// Physical cell dimensions measured or supplied at startup.
     pub fn cell_pixels(self) -> CellPixels {
         match self {
-            Self::KittyFullscreen(p)
-            | Self::SixelFullscreen(p)
-            | Self::KittyInline(p)
-            | Self::SixelInline(p) => p,
+            Self::KittyFullscreen(p) | Self::SixelFullscreen(p) => p,
+        }
+    }
+}
+
+/// Graphics on the normal screen, positioned relative to the inline region.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum InlineRasterSession {
+    /// Cursor-relative Kitty placements.
+    Kitty(CellPixels),
+    /// The host confirms local EL 2 graphics erasure, images following text scroll,
+    /// stable palettes, transparent band padding and safe positioned Sixel output.
+    Sixel(CellPixels),
+}
+
+impl InlineRasterSession {
+    /// Physical cell dimensions measured or supplied at startup.
+    pub fn cell_pixels(self) -> CellPixels {
+        match self {
+            Self::Kitty(p) | Self::Sixel(p) => p,
         }
     }
 }
@@ -74,26 +87,38 @@ impl RasterBackend {
         pixels: Option<CellPixels>,
         timeout: Duration,
     ) -> io::Result<RasterSession> {
-        self.negotiate(pixels, timeout, false)
+        self.negotiate(
+            pixels,
+            timeout,
+            RasterSession::KittyFullscreen,
+            Some(RasterSession::SixelFullscreen),
+        )
     }
 
-    /// Select a protocol before starting inline output. When Sixel is selected,
-    /// the host must also satisfy the erasure and scrolling requirements of
-    /// [`RasterSession::SixelInline`]. Probe restrictions match [`Self::negotiate_fullscreen`].
+    /// Select a protocol before starting inline output. Auto selects Kitty when
+    /// available. If only Sixel is advertised, the caller must explicitly select
+    /// [`RasterBackend::Sixel`] to confirm the host requirements of
+    /// [`InlineRasterSession::Sixel`]. Probing follows [`Self::negotiate_fullscreen`].
     pub fn negotiate_inline(
         self,
         pixels: Option<CellPixels>,
         timeout: Duration,
-    ) -> io::Result<RasterSession> {
-        self.negotiate(pixels, timeout, true)
+    ) -> io::Result<InlineRasterSession> {
+        self.negotiate(
+            pixels,
+            timeout,
+            InlineRasterSession::Kitty,
+            (self == Self::Sixel).then_some(InlineRasterSession::Sixel),
+        )
     }
 
-    fn negotiate(
+    fn negotiate<T>(
         self,
         pixels: Option<CellPixels>,
         timeout: Duration,
-        inline: bool,
-    ) -> io::Result<RasterSession> {
+        kitty_session: fn(CellPixels) -> T,
+        sixel_session: Option<fn(CellPixels) -> T>,
+    ) -> io::Result<T> {
         let kitty = self != Self::Sixel && cfg!(feature = "kitty");
         let sixel = self != Self::Kitty && cfg!(feature = "sixel");
         if !kitty && !sixel {
@@ -115,13 +140,19 @@ impl RasterBackend {
                     },
                 ));
             }
+            let session = if has_kitty {
+                kitty_session
+            } else {
+                sixel_session.ok_or_else(|| {
+                    io::Error::new(
+                        io::ErrorKind::Unsupported,
+                        "inline Sixel requires host confirmation of row-local graphics erasure \
+                         and scrolling. Select Sixel explicitly (--backend sixel) on a verified terminal",
+                    )
+                })?
+            };
             let pixels = CellPixels::resolve_with(pixels, || CellPixels::probe_locked(timeout))?;
-            Ok(match (has_kitty, inline) {
-                (true, true) => RasterSession::KittyInline(pixels),
-                (false, true) => RasterSession::SixelInline(pixels),
-                (true, false) => RasterSession::KittyFullscreen(pixels),
-                (false, false) => RasterSession::SixelFullscreen(pixels),
-            })
+            Ok(session(pixels))
         })
     }
 }
@@ -131,6 +162,7 @@ pub(crate) enum RasterConfig {
     Output(RasterOutput),
     Request(RasterBackend),
     Session(RasterSession),
+    InlineSession(InlineRasterSession),
 }
 
 /// Actual terminal-cell pixel dimensions, not Canvas samples per cell.

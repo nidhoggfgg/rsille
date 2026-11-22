@@ -1,8 +1,8 @@
 //! RGB drawing with optional pixel transparency and terminal presentation.
 //!
 //! Pixel storage and sampling are independent of the output protocol.
-//! Use [`output::RasterBackend`] for startup selection or [`output::RasterSession`]
-//! for host-verified fullscreen or inline output. Inline Sixel also accepts [`output::RasterOutput`].
+//! Use [`output::RasterBackend`] for startup selection or pass a verified [`RasterSession`]
+//! or [`InlineRasterSession`] for the corresponding mode. Inline Sixel also accepts [`output::RasterOutput`].
 //!
 //! # Drawing and presentation
 //!
@@ -27,8 +27,8 @@
 //!
 //! Sixel uses one positioned tile per visible terminal cell.
 //! Colors use a fixed RGB332 palette (3 red, 3 green, 2 blue bits), not lossless
-//! 24-bit output or adaptive quantization. Transparent pixels leave existing
-//! terminal content untouched; they do not erase previously drawn graphics. Source pixels remain unchanged.
+//! 24-bit output or adaptive quantization. Transparent source pixels in base tiles use the presentation background.
+//! Transparent overlay pixels preserve the underlying content. Source pixels remain unchanged.
 //!
 //! # Example
 //!
@@ -66,5 +66,5 @@ mod sixel;
 mod sixel_presenter;
 
 pub use canvas::*;
-pub use output::{RasterBackend, RasterSession};
+pub use output::{InlineRasterSession, RasterBackend, RasterSession};
 pub(super) use presenter::{RasterPlan, RasterPresenter};

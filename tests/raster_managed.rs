@@ -55,3 +55,27 @@ fn successive_sessions() -> Result<(), Box<dyn std::error::Error>> {
     graphics(App::new(false).raster_session(session)).run()?;
     Ok(())
 }
+
+#[test]
+#[ignore = "requires the raster PTY driver"]
+fn inline_auto_sixel_requires_confirmation() {
+    let error = RasterBackend::Auto
+        .negotiate_inline(None, Duration::from_millis(500))
+        .unwrap_err();
+    assert_eq!(error.kind(), std::io::ErrorKind::Unsupported);
+    assert!(error.to_string().contains("host confirmation"));
+}
+
+#[test]
+#[ignore = "requires the raster PTY driver"]
+fn inline_confirmed_sixel() -> std::io::Result<()> {
+    let session = RasterBackend::Sixel.negotiate_inline(None, Duration::from_millis(500))?;
+    assert_eq!(
+        session,
+        InlineRasterSession::Sixel(CellPixels {
+            width: 10,
+            height: 20
+        })
+    );
+    Ok(())
+}

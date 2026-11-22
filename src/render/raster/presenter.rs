@@ -2,8 +2,8 @@
 #[cfg(feature = "kitty")]
 use super::kitty::{KittyFrame, KittyPresenter};
 use super::output::{
-    CellPixels, RasterBackend, RasterCapabilities, RasterConfig, RasterOutput, RasterSession,
-    RasterStats,
+    CellPixels, InlineRasterSession, RasterBackend, RasterCapabilities, RasterConfig, RasterOutput,
+    RasterSession, RasterStats,
 };
 use super::sixel_presenter::{SixelFrame, SixelPresenter};
 use crate::render::{area::Position, buffer::Buffer};
@@ -59,6 +59,12 @@ pub(super) enum Payload {
 }
 
 impl RasterPlan {
+    /// Sixel paints a base raster cell's background into its tile. Kitty places
+    /// RGBA above the text plane, which still needs the Buffer's placeholder.
+    pub fn paints_text_at(&self, buffer: &Buffer, pos: Position) -> bool {
+        !matches!(self.payload, Payload::Sixel(_)) || buffer.raster_at(pos).is_none()
+    }
+
     pub fn sixel_tiles(&self) -> &[EncodedCell] {
         match &self.payload {
             Payload::Text => &[],
@@ -103,11 +109,17 @@ enum Backend {
     Unavailable(Arc<io::Error>),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SessionMode {
+    Fullscreen,
+    Inline,
+}
+
 #[derive(Debug, Clone)]
 pub(in crate::render) struct RasterPresenter {
     backend: Backend,
     pub alternate_screen: bool,
-    session: Option<RasterSession>,
+    mode: Option<SessionMode>,
 }
 impl Default for RasterPresenter {
     fn default() -> Self {
@@ -117,42 +129,46 @@ impl Default for RasterPresenter {
 
 impl RasterPresenter {
     pub fn new(config: RasterConfig, alternate_screen: bool) -> Self {
+        let mode = match config {
+            RasterConfig::Session(_) => Some(SessionMode::Fullscreen),
+            RasterConfig::InlineSession(_) => Some(SessionMode::Inline),
+            RasterConfig::Output(_) | RasterConfig::Request(_) => None,
+        };
         let backend = match config {
             RasterConfig::Output(output) => {
                 Backend::Sixel(SixelPresenter::new(output, alternate_screen))
             }
             RasterConfig::Request(request) => Backend::Pending(request),
-            RasterConfig::Session(
-                session @ (RasterSession::SixelFullscreen(pixels)
-                | RasterSession::SixelInline(pixels)),
-            ) => Backend::Sixel(SixelPresenter::new(
-                RasterOutput {
-                    capabilities: RasterCapabilities {
-                        sixel: true,
-                        reliable_erase: matches!(session, RasterSession::SixelFullscreen(_)),
-                        reliable_inline_erase: matches!(session, RasterSession::SixelInline(_)),
-                        no_scroll: true,
-                        cell_pixels: Some(pixels),
+            RasterConfig::Session(RasterSession::SixelFullscreen(pixels))
+            | RasterConfig::InlineSession(InlineRasterSession::Sixel(pixels)) => {
+                Backend::Sixel(SixelPresenter::new(
+                    RasterOutput {
+                        capabilities: RasterCapabilities {
+                            sixel: true,
+                            reliable_erase: mode == Some(SessionMode::Fullscreen),
+                            reliable_inline_erase: mode == Some(SessionMode::Inline),
+                            no_scroll: true,
+                            cell_pixels: Some(pixels),
+                        },
                     },
-                },
-                alternate_screen,
-            )),
+                    alternate_screen,
+                ))
+            }
             #[cfg(feature = "kitty")]
-            RasterConfig::Session(
-                RasterSession::KittyFullscreen(pixels) | RasterSession::KittyInline(pixels),
-            ) => Backend::Kitty(KittyPresenter::new(pixels)),
+            RasterConfig::Session(RasterSession::KittyFullscreen(pixels))
+            | RasterConfig::InlineSession(InlineRasterSession::Kitty(pixels)) => {
+                Backend::Kitty(KittyPresenter::new(pixels))
+            }
             #[cfg(not(feature = "kitty"))]
-            RasterConfig::Session(
-                RasterSession::KittyFullscreen(_) | RasterSession::KittyInline(_),
-            ) => Backend::Unavailable(Arc::new(unsupported("the kitty Cargo feature is disabled"))),
+            RasterConfig::Session(RasterSession::KittyFullscreen(_))
+            | RasterConfig::InlineSession(InlineRasterSession::Kitty(_)) => {
+                Backend::Unavailable(Arc::new(unsupported("the kitty Cargo feature is disabled")))
+            }
         };
         Self {
             backend,
             alternate_screen,
-            session: match config {
-                RasterConfig::Session(session) => Some(session),
-                _ => None,
-            },
+            mode,
         }
     }
 
@@ -188,7 +204,7 @@ impl RasterPresenter {
     }
 
     pub fn set_output(&mut self, config: RasterOutput) {
-        if self.session.is_none() {
+        if self.mode.is_none() {
             if let Backend::Sixel(s) = &mut self.backend {
                 s.config = config;
             }
@@ -204,17 +220,13 @@ impl RasterPresenter {
                 Backend::Unavailable(e) => {
                     return Err(io::Error::new(io::ErrorKind::Unsupported, e.clone()))
                 }
-                _ => match self.session {
-                    Some(RasterSession::KittyInline(_) | RasterSession::SixelInline(_))
-                        if !inline || newline =>
-                    {
+                _ => match self.mode {
+                    Some(SessionMode::Inline) if !inline || newline => {
                         return Err(unsupported(
                             "inline graphics require inline mode without appended newlines",
                         ))
                     }
-                    Some(RasterSession::KittyFullscreen(_) | RasterSession::SixelFullscreen(_)) => {
-                        self.fullscreen(inline, newline)?
-                    }
+                    Some(SessionMode::Fullscreen) => self.fullscreen(inline, newline)?,
                     _ => {}
                 },
             }

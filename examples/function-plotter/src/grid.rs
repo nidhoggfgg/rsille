@@ -275,8 +275,8 @@ pub(crate) fn panels_view<M: 'static>(
         submit: None,
     }
 }
-fn builder(mut state: State, session: Option<RasterSession>) -> App<State, Msg> {
-    if let Some(pixels) = session.map(RasterSession::cell_pixels) {
+fn builder(mut state: State, session: Option<InlineRasterSession>) -> App<State, Msg> {
+    if let Some(pixels) = session.map(InlineRasterSession::cell_pixels) {
         state.pixels = (pixels.width, pixels.height);
     }
     let app = App::new(state)
@@ -285,11 +285,14 @@ fn builder(mut state: State, session: Option<RasterSession>) -> App<State, Msg> 
         .with_motion_policy(MotionPolicy::disabled())
         .with_quit_key(KeyCode::Esc);
     match session {
-        Some(session) => app.raster_session(session),
+        Some(session) => app.inline_raster_session(session),
         None => app,
     }
 }
-pub(crate) fn application(state: State, session: Option<RasterSession>) -> Runtime<State, Msg> {
+pub(crate) fn application(
+    state: State,
+    session: Option<InlineRasterSession>,
+) -> Runtime<State, Msg> {
     let runtime = builder(state, session)
         .update(State::update)
         .view(view)

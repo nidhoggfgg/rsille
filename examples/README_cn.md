@@ -45,7 +45,7 @@ cargo run --release --manifest-path examples/function-plotter/Cargo.toml
 cargo run --manifest-path examples/function-plotter/Cargo.toml -- --help
 ```
 
-Unix 下交互式 REPL 优先选用 Kitty，其次是 Sixel。可用 `--backend kitty` 或 `--backend sixel` 指定协议。
+Unix 下交互式 REPL 默认选用 Kitty。确认终端支持逐行擦除图像、图像随文字滚动后，可用 `--backend sixel` 启用 Sixel。
 操作方式、实际字符格像素覆盖值和 headless 检查见[函数绘图指南](function-plotter/README_cn.md)。
 
 ## 无终端验证

@@ -212,6 +212,7 @@ impl SixelPresenter {
                     pixels.width,
                     pixels.height,
                     shift * pixels.height,
+                    (!overlay).then_some(cell.options.background),
                 )?;
                 bytes = bytes.saturating_add(data.len());
                 if bytes > MAX_FRAME_BYTES {

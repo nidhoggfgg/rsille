@@ -158,6 +158,14 @@ sys.exit(child.returncode if restored else 1)
                 print(f"PASS {mode}: rejected before measuring cells or sending Sixel")
                 return
 
+        if managed in ("inline_auto_sixel_requires_confirmation", "inline_confirmed_sixel"):
+            wait_until(lambda: process.poll() is not None, "inline negotiation")
+            while pump():
+                pass
+            assert process.returncode == 0 and b"1 passed" in screen, bytes(screen[-1000:])
+            assert b"RSILLE_TTY_RESTORED=True" in screen
+            print(f"PASS {managed}: Sixel-only advertisement")
+            return
         if managed:
             if managed == "successive_sessions":
                 wait_until(lambda: b"First text session" in plain_text(), "first text session")
@@ -377,6 +385,8 @@ def main():
                 for mode in ("auto-both", "auto-sixel", "auto-none"):
                     check(managed, mode, managed=entry)
             check(managed, "kitty", managed="successive_sessions")
+            check(managed, "auto-sixel", managed="inline_auto_sixel_requires_confirmation")
+            check(managed, "explicit", managed="inline_confirmed_sixel")
     if args.formula is None:
         drawing = subprocess.check_output([binary.resolve(), "--basic"], stdin=subprocess.DEVNULL, timeout=5)
         assert any(0x2801 <= ord(char) <= 0x28ff for char in drawing.decode())

@@ -418,9 +418,6 @@ fn upload(
     let width = u32::from(block.w) * u32::from(pixels.width);
     let height = u32::from(block.h) * u32::from(pixels.height);
     let len = width as usize * height as usize * 4;
-    if out.len() + len.div_ceil(3) * 4 + len.div_ceil(3072) * 32 + 80 > MAX_FRAME_BYTES {
-        return Err(unsupported("encoded Kitty frame exceeds 32 MiB"));
-    }
     let mut rgba = Vec::with_capacity(len);
     for y in 0..height {
         cell.y = block.y + (y / u32::from(pixels.height)) as u16;
@@ -438,7 +435,7 @@ fn upload(
             });
         }
     }
-    transmit(out, id, width, height, &rgba)
+    transmit(out, id, width, height, &rgba, b"")
 }
 
 /// A single Kitty image owned by an application that manages its own terminal
@@ -453,7 +450,9 @@ impl KittyImage {
     }
 
     /// Replace the image at the cursor with unscaled RGBA pixels. The cursor
-    /// stays in place. The caller owns positioning and flushing.
+    /// stays in place. The caller owns positioning and flushing. The existing
+    /// buffer, encoded upload and placement together must fit within 32 MiB.
+    /// A rejected draw leaves the buffer intact.
     pub fn draw(
         &self,
         out: &mut Vec<u8>,
@@ -468,17 +467,15 @@ impl KittyImage {
                 "Kitty RGBA dimensions do not match",
             ));
         }
-        if rgba.len() > MAX_FRAME_BYTES / 4 {
-            return Err(unsupported("Kitty image exceeds 32 MiB"));
-        }
+        let placement = format!("\x1b_Ga=p,i={},p=1,z={z_index},C=1,q=2\x1b\\", self.0);
         transmit(
             out,
             self.0,
             width.into(),
             height.into(),
             rgba.as_flattened(),
-        )?;
-        write!(out, "\x1b_Ga=p,i={},p=1,z={z_index},C=1,q=2\x1b\\", self.0)
+            placement.as_bytes(),
+        )
     }
 
     /// Remove this image's placements and pixel data from the terminal.
@@ -487,22 +484,54 @@ impl KittyImage {
     }
 }
 
-fn transmit(out: &mut Vec<u8>, id: u32, width: u32, height: u32, rgba: &[u8]) -> io::Result<()> {
-    write!(out, "\x1b_Ga=t,f=32,t=d,i={id},s={width},v={height},")?;
-    let mut chunks = rgba.chunks(3072).peekable();
+const CHUNK_BYTES: usize = 3072;
+const MORE: &[u8] = b"q=2,m=1;";
+const LAST: &[u8] = b"q=2,m=0;";
+const END: &[u8] = b"\x1b\\";
+const CONTINUE: &[u8] = b"\x1b_G";
+
+fn transmit(
+    out: &mut Vec<u8>,
+    id: u32,
+    width: u32,
+    height: u32,
+    rgba: &[u8],
+    placement: &[u8],
+) -> io::Result<()> {
+    if rgba.len() > MAX_FRAME_BYTES {
+        return Err(unsupported("Kitty image exceeds 32 MiB"));
+    }
+    let header = format!("\x1b_Ga=t,f=32,t=d,i={id},s={width},v={height},");
+    // CHUNK_BYTES is divisible by three, so only the final chunk can need padding.
+    let chunks = rgba.len().div_ceil(CHUNK_BYTES);
+    let encoded = rgba.len().div_ceil(3) * 4;
+    let total = header.len()
+        + chunks.saturating_sub(1) * (CONTINUE.len() + MORE.len() + END.len())
+        + LAST.len()
+        + END.len()
+        + encoded
+        + placement.len();
+    if total > MAX_FRAME_BYTES.saturating_sub(out.len()) {
+        return Err(unsupported("encoded Kitty frame exceeds 32 MiB"));
+    }
+    out.try_reserve(total)
+        .map_err(|e| io::Error::new(io::ErrorKind::OutOfMemory, e))?;
+    out.extend_from_slice(header.as_bytes());
+    let mut chunks = rgba.chunks(CHUNK_BYTES).peekable();
     let mut encoded = [0; 4096];
     while let Some(chunk) = chunks.next() {
         let more = chunks.peek().is_some();
-        write!(out, "q=2,m={};", u8::from(more))?;
+        out.extend_from_slice(if more { MORE } else { LAST });
         let n = STANDARD
             .encode_slice(chunk, &mut encoded)
             .expect("4096 bytes fit a 3072 byte chunk");
         out.extend_from_slice(&encoded[..n]);
-        out.extend_from_slice(b"\x1b\\");
+        out.extend_from_slice(END);
         if more {
-            out.extend_from_slice(b"\x1b_G");
+            out.extend_from_slice(CONTINUE);
         }
     }
+    out.extend_from_slice(placement);
     Ok(())
 }
 
@@ -510,6 +539,34 @@ fn transmit(out: &mut Vec<u8>, id: u32, width: u32, height: u32, rgba: &[u8]) ->
 mod tests {
     use super::*;
     use crate::render::raster::{RasterAlign, RasterCanvas, RasterScale};
+
+    #[test]
+    fn direct_draw_preflights_encoded_chunks_and_placement_before_appending() {
+        let image = KittyImage::new().unwrap();
+        let mut out = b"previous commands".to_vec();
+        let large = vec![[0; 4]; 4096 * 2048];
+        let error = image.draw(&mut out, 4096, 2048, &large, 0).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::Unsupported);
+        assert_eq!(out, b"previous commands");
+        drop(large);
+
+        // Cross a chunk boundary and include the longest signed z-index.
+        let pixels = [[0; 4]; 769];
+        let mut commands = Vec::new();
+        image
+            .draw(&mut commands, 769, 1, &pixels, i32::MIN)
+            .unwrap();
+        let prefix_len = MAX_FRAME_BYTES - commands.len();
+        out.resize(prefix_len + 1, 7);
+        assert!(image.draw(&mut out, 769, 1, &pixels, i32::MIN).is_err());
+        assert_eq!(out.len(), prefix_len + 1);
+        assert!(out.starts_with(b"previous commands"));
+        assert!(out[b"previous commands".len()..].iter().all(|&c| c == 7));
+        out.pop();
+        image.draw(&mut out, 769, 1, &pixels, i32::MIN).unwrap();
+        assert_eq!(out.len(), MAX_FRAME_BYTES);
+        assert_eq!(&out[prefix_len..], commands);
+    }
 
     #[test]
     fn clipped_surfaces_sample_the_original_target_including_alpha_and_fit_padding() {

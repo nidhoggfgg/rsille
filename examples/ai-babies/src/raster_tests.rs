@@ -88,7 +88,7 @@ fn text_output_never_probes_and_native_output_never_silently_falls_back() {
     let options = parse(&["--sixel", "--cell-pixels", "10x20"]).unwrap();
 
     let config = options.session((80, 24)).unwrap();
-    assert_eq!(config, options.pixels.map(RasterSession::SixelInline));
+    assert_eq!(config, options.pixels.map(InlineRasterSession::Sixel));
     assert!(options.session((10, 20)).is_err());
     let forced = Options {
         force_cell_pixels: true,
@@ -106,13 +106,13 @@ fn text_output_never_probes_and_native_output_never_silently_falls_back() {
         automatic
             .session_with((80, 24), |_, pixels| {
                 assert!(pixels.is_none());
-                Ok(RasterSession::SixelInline(CellPixels {
+                Ok(InlineRasterSession::Sixel(CellPixels {
                     width: 10,
                     height: 20,
                 }))
             })
             .unwrap()
-            .map(RasterSession::cell_pixels),
+            .map(InlineRasterSession::cell_pixels),
         options.pixels
     );
 }
@@ -250,8 +250,8 @@ fn playback_height_is_bounded_for_native_and_character_modes() {
             };
             // Geometry is independent of the encoder feature and terminal queries.
             let config = match output {
-                Output::Kitty => options.pixels.map(RasterSession::KittyInline),
-                Output::Sixel => options.pixels.map(RasterSession::SixelInline),
+                Output::Kitty => options.pixels.map(InlineRasterSession::Kitty),
+                Output::Sixel => options.pixels.map(InlineRasterSession::Sixel),
                 Output::Quadrant => None,
             };
             for grid in [(80, 40), (80, 12), (1, 1)] {

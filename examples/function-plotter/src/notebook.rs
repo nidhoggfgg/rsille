@@ -602,7 +602,10 @@ impl Widget<Msg> for Graph {
     }
 }
 
-pub(crate) fn application(state: State, session: Option<RasterSession>) -> Runtime<State, Msg> {
+pub(crate) fn application(
+    state: State,
+    session: Option<InlineRasterSession>,
+) -> Runtime<State, Msg> {
     start(
         application_builder(state, session)
             .update(State::update)
@@ -611,8 +614,8 @@ pub(crate) fn application(state: State, session: Option<RasterSession>) -> Runti
     )
 }
 
-fn application_builder(mut state: State, session: Option<RasterSession>) -> App<State, Msg> {
-    if let Some(pixels) = session.map(RasterSession::cell_pixels) {
+fn application_builder(mut state: State, session: Option<InlineRasterSession>) -> App<State, Msg> {
+    if let Some(pixels) = session.map(InlineRasterSession::cell_pixels) {
         state.cell_pixels = (pixels.width, pixels.height);
     }
     // Unset widget styles inherit theme backgrounds, so remove the fills at
@@ -631,7 +634,7 @@ fn application_builder(mut state: State, session: Option<RasterSession>) -> App<
         .keyboard_mode(KeyboardMode::Legacy)
         .with_quit_key(KeyCode::Esc);
     match session {
-        Some(session) => app.raster_session(session),
+        Some(session) => app.inline_raster_session(session),
         None => app,
     }
 }
