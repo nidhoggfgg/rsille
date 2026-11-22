@@ -163,5 +163,5 @@ without adding Typst dependencies to the core crate.
 
 - [Example gallery](examples/README.md)
 - [TUI examples](packages/tui/examples/README.md)
-- [Raster backend and window compatibility test](examples/raster.rs)
+- [Canvas debugging and raster backend comparison](examples/canvas/README.md)
 - [MIT license](LICENCE)

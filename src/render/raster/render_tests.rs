@@ -1072,7 +1072,8 @@ mod native {
             io::ErrorKind::Unsupported
         );
         assert!(render.out.is_empty());
-        assert_no_raster_commit(&render, before);
+        assert!(render.buffer.previous().is_some());
+        assert!(!render.buffer.has_raster());
         assert_eq!(render.raster_stats(), before);
     }
 
@@ -1111,7 +1112,8 @@ mod native {
             io::ErrorKind::Unsupported
         );
         assert!(render.out.is_empty());
-        assert_no_raster_commit(&render, before);
+        assert!(render.buffer.previous().is_some());
+        assert!(!render.buffer.has_raster());
         assert_eq!(render.raster_stats(), before);
         render.thing.visible = false;
         let cleanup = events(&frame(&mut render));
@@ -3050,6 +3052,49 @@ mod kitty {
     }
 
     #[test]
+    fn preflight_rejection_preserves_other_kitty_images_on_retry() {
+        let pixels = CellPixels {
+            width: 10,
+            height: 20,
+        };
+        let mut render = build(pixels, Vec::new());
+        render.render().unwrap();
+        let own_id = image_id(commands(&render.out)[0]);
+
+        // Both sessions write to the same screen. Add the foreign placement
+        // outside this renderer's area after its default first-frame clear.
+        let start = render.out.len();
+        let mut other = build(pixels, &mut render.out);
+        other.clear = false;
+        other.pos = (10, 0).into();
+        other.render().unwrap();
+        let other_commands = commands(&render.out[start..]);
+        let external_id = image_id(other_commands[0]);
+        assert_ne!(own_id, external_id);
+        assert!(other_commands.iter().any(|c| c.starts_with("a=p,")));
+
+        let start = render.out.len();
+        render.thing.origin = (1, 1).into();
+        render.buffer.mark_unsupported_raster_composition();
+        assert_eq!(
+            render.render().unwrap_err().kind(),
+            io::ErrorKind::Unsupported
+        );
+        assert_eq!(render.out.len(), start);
+
+        render.render().unwrap();
+        let retry = &render.out[start..];
+        assert!(!contains(retry, b"\x1b[2J"));
+        assert!(contains(retry, b"\x1b[2;2H\x1b_Ga=p,"));
+        let cmds = commands(retry);
+        assert_eq!(cmds.len(), 2);
+        assert!(cmds[0].starts_with("a=d,d=i,"));
+        assert!(cmds[1].starts_with("a=p,"));
+        assert!(cmds.iter().all(|cmd| image_id(cmd) == own_id));
+        assert!(frame(&mut render).is_empty());
+    }
+
+    #[test]
     fn failed_upload_placement_delete_and_flush_recover_owned_ids_only() {
         let pixels = CellPixels {
             width: 32,
@@ -3084,6 +3129,15 @@ mod kitty {
             let attempted = partial.split("a=t,").nth(1).map(image_id);
             render.out.bytes.clear();
             render.out.remaining = None;
+            // Even with recovery pending, a rejected retry must write nothing.
+            render.buffer.mark_unsupported_raster_composition();
+            assert_eq!(
+                render.render().unwrap_err().kind(),
+                io::ErrorKind::Unsupported
+            );
+            assert!(render.out.bytes.is_empty());
+            assert!(render.raster.needs_protocol_recovery());
+
             render.render().unwrap();
             assert!(render.out.bytes.starts_with(b"\x18\x1b\\"));
             assert!(!contains(&render.out.bytes, b"\x1b[2J"));

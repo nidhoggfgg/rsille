@@ -144,6 +144,12 @@ impl Builder {
     /// alternate screen and the host guarantees on [`RasterSession`]. For
     /// inline Sixel, supply verified capabilities with [`Self::raster_output`].
     /// The last raster setting wins. Building a renderer never probes a TTY.
+    ///
+    /// Probing must precede the first managed input reader in this process,
+    /// including one started by a text-only session. For successive sessions,
+    /// call [`RasterBackend::negotiate_fullscreen`] before the first run and pass
+    /// the snapshot to [`Self::raster_session`] on subsequent graphics runs
+    /// while the terminal, fullscreen mode and physical cell size still match.
     pub fn raster_backend(&mut self, backend: RasterBackend) -> &mut Self {
         self.raster_config = RasterConfig::Request(backend);
         self

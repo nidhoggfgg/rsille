@@ -9,7 +9,7 @@ categories = ["command-line-interface", "graphics"]
 readme = "README.md"
 license = "MIT"
 repository = "https://github.com/nidhoggfgg/rsille.git"
-include = ["src/**", "examples/basic_canvas.rs", "examples/raster.rs", "/README.md", "/README_cn.md", "LICENCE", "Cargo.toml"]
+include = ["src/**", "/README.md", "/README_cn.md", "LICENCE", "Cargo.toml"]
 
 [dependencies]
 base64 = { workspace = true, optional = true }

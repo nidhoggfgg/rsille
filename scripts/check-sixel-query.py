@@ -8,8 +8,10 @@ Run from any directory; --binary skips the debug example build.
 import argparse
 import errno
 import fcntl
+import json
 import os
 from pathlib import Path
+import platform
 import pty
 import re
 import select
@@ -27,10 +29,10 @@ FRAME_END = b"\x1b[?2026l"
 TILE = b'\x1bP7;1;0q"1;1;10;20'
 
 
-def check(binary, mode, formula=None):
+def check(binary, mode, formula=None, managed=None):
     master, slave = pty.openpty()
     os.set_blocking(master, False)
-    pixels = (1100, 720) if mode == "os" else (0, 0)
+    pixels = (1100, 720) if mode == "os" or managed else (0, 0)
     if mode == "query":
         pixels = (1103, 727)  # Window padding prevents exact division by the grid.
     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 36, 110, *pixels))
@@ -57,9 +59,12 @@ sys.exit(child.returncode if restored else 1)
 """
     args = [str(binary)]
     expect_kitty = mode in ("kitty", "auto-both")
-    if formula is None and not mode.startswith("auto-"):
+    if managed:
+        args += ["--ignored", "--exact", managed, "--nocapture"]
+    elif formula is None and not mode.startswith("auto-"):
         args += ["--backend", "kitty" if expect_kitty else "sixel"]
-    if mode in ("explicit", "no-sixel", "kitty", "auto-both", "auto-sixel"):
+    if not managed and mode in ("explicit", "no-sixel", "kitty", "auto-both", "auto-sixel",
+                                "signed-only", "signed-then-valid"):
         args += ["--cell-pixels", "10x20"]
     if formula:
         args += ["--", formula]
@@ -125,7 +130,7 @@ sys.exit(child.returncode if restored else 1)
 
     try:
         if formula is None and mode != "mismatched-tty":
-            if expect_kitty or mode == "auto-sixel":
+            if expect_kitty or mode in ("auto-sixel", "auto-none"):
                 query = rb"\x1b_Ga=q,i=(\d+),[^;]*;[^\x1b]*\x1b\\"
                 wait_until(lambda: re.search(query, screen), "Kitty capability query")
                 if expect_kitty:
@@ -133,19 +138,58 @@ sys.exit(child.returncode if restored else 1)
                     send_input(b"\x1b_Gi=" + request_id + b";OK\x1b\\")
             if mode != "kitty":
                 wait_until(lambda: DA1 in screen, "Sixel capability query")
-                if mode != "silent-da1":
+                if mode.startswith("signed-"):
+                    send_input(b"\x1b[?65;+4c")
+                if mode == "signed-then-valid":
+                    send_input(b"\x1b[?65;4c")
+                elif mode not in ("silent-da1", "signed-only"):
                     # Ignore a secondary DA and malformed primary DA before the valid reply.
                     send_input(b"\x1b[>1;4c\x1b[?62;4;?c\x1b[?")
-                    send_input(b"62;14;24c" if mode == "no-sixel" else b"65;4;22c")
-            if mode in ("no-sixel", "silent-da1"):
+                    send_input(b"62;14;24c" if mode in ("no-sixel", "auto-none") else b"65;4;22c")
+            if mode in ("no-sixel", "silent-da1", "signed-only"):
                 wait_until(lambda: process.poll() is not None, "unsupported terminal exit")
                 while pump():
                     pass
                 assert process.returncode != 0 and b"Sixel" in screen
+                if mode == "signed-only":
+                    assert b"timed out" in screen
                 assert QUERY not in screen and b"\x1bP" not in screen
                 assert b"\x1b[?1049h" not in screen and b"RSILLE_TTY_RESTORED=True" in screen
                 print(f"PASS {mode}: rejected before measuring cells or sending Sixel")
                 return
+
+        if managed:
+            if managed == "successive_sessions":
+                wait_until(lambda: b"First text session" in plain_text(), "first text session")
+                send_input(b"q")
+            wait_until(lambda: b"Press i for graphics" in plain_text(), "text before first image")
+            upload, placement, sixel = b"\x1b_Ga=t,", b"\x1b_Ga=p,", b"\x1bP"
+            enter_screen = screen.index(b"\x1b[?1049h")
+            assert screen.index(b"\x1b_Ga=q,") < enter_screen
+            if managed != "successive_sessions":
+                assert screen.index(DA1) < enter_screen
+            assert all(cmd not in screen for cmd in (upload, placement, sixel))
+            send_input(b"i")
+            if mode != "auto-none":
+                expected = placement if expect_kitty else TILE
+                wait_until(lambda: expected in screen and FRAME_END in screen, "image after keypress")
+                send_input(b"q")
+            wait_until(lambda: process.poll() is not None, "managed exit")
+            while pump():
+                pass
+            assert b"RSILLE_TTY_RESTORED=True" in screen
+            assert screen.count(b"\x1b[?1049h") == screen.count(b"\x1b[?1049l") == (
+                2 if managed == "successive_sessions" else 1)
+            assert screen.count(b"\x1b_Ga=q,") == 1
+            assert screen.count(DA1) == (0 if managed == "successive_sessions" else 1)
+            assert (upload in screen) == (placement in screen) == expect_kitty
+            assert (sixel in screen) == (mode == "auto-sixel")
+            if mode == "auto-none":
+                assert process.returncode != 0 and b"neither Kitty graphics nor Sixel" in screen
+            else:
+                assert process.returncode == 0, bytes(screen[-1000:])
+            print(f"PASS {managed} {mode}: text, key-triggered graphics and restoration")
+            return
 
         if mode in ("query", "resize", "timeout", "noise", "invalid"):
             wait_until(lambda: QUERY in screen, "startup cell-size query", timeout=3)
@@ -258,6 +302,8 @@ sys.exit(child.returncode if restored else 1)
             for forbidden in (b"\x1b[?1049h", b"\x1b[?1049l", b"\x1b[?1000h", b"\x1b[?1002h", b"\x1b[?1003h", b"\x1b[2J"):
                 assert forbidden not in screen, ("not normal-screen keyboard-only output", forbidden)
             assert b"\x1b[?25h" in screen, "cursor was not restored"
+        if formula is None and mode == "explicit":
+            assert screen.count(DA1) == 1 and b"\x1b_G" not in screen
         print(f"PASS {mode}: startup snapshot, native input and terminal restoration")
     finally:
         if process.poll() is None:
@@ -298,30 +344,49 @@ def check_formula_frame(data, rows, columns):
     print(f"PASS formula bytes: {len(tiles)} relative DCS, {content_rows} content rows + guard, viewport {columns}x{rows}")
 
 
+def build_binary(*args):
+    output = subprocess.check_output(
+        ["cargo", "build", *args, "--message-format=json-render-diagnostics"],
+        cwd=ROOT, timeout=120,
+    )
+    executable, = (item["executable"] for item in map(json.loads, output.splitlines())
+                   if item.get("executable"))
+    return Path(executable)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--binary", type=Path, help="Use an already built example (raster, or formula with --formula)")
+    parser.add_argument("--binary", type=Path, help="Use an already built example (canvas, or formula with --formula)")
     modes = parser.add_mutually_exclusive_group()
-    modes.add_argument("--both-backends", action="store_true", help="Also test explicit Kitty, Auto preference and Sixel fallback in the raster example")
+    modes.add_argument("--both-backends", action="store_true", help="Test dual-backend negotiation. When building, also exercise the managed sync/async and successive-session entry points")
     modes.add_argument(
         "--formula", nargs="?", const="",
         help="Check formula example instead (optional quoted Typst source; default formula if omitted)",
     )
     args = parser.parse_args()
+    print(f"PTY transport: {platform.platform()}", flush=True)
     binary = args.binary
     if binary is None:
-        example = "raster" if args.formula is None else "formula"
-        package = [] if args.formula is None else ["-p", "rsille-typst"]
-        subprocess.run(
-            ["cargo", "build", *package, "--example", example, *(["--features", "kitty"] if args.both_backends else [])],
-            cwd=ROOT, check=True, timeout=120,
-        )
-        binary = ROOT / "target/debug/examples" / example
+        if args.formula is None:
+            binary = build_binary("--manifest-path", "examples/canvas/Cargo.toml")
+        else:
+            binary = build_binary("-p", "rsille-typst", "--example", "formula")
+        if args.both_backends:
+            managed = build_binary("-p", "rsille", "--test", "raster_managed", "--features", "sixel,kitty")
+            for entry in ("managed_sync", "managed_async"):
+                for mode in ("auto-both", "auto-sixel", "auto-none"):
+                    check(managed, mode, managed=entry)
+            check(managed, "kitty", managed="successive_sessions")
+    if args.formula is None:
+        drawing = subprocess.check_output([binary.resolve(), "--basic"], stdin=subprocess.DEVNULL, timeout=5)
+        assert any(0x2801 <= ord(char) <= 0x28ff for char in drawing.decode())
+        assert all(query not in drawing for query in (DA1, QUERY, b"\x1b_G", b"\x1bP"))
+        print("PASS basic: character Canvas draws without a terminal")
     if args.both_backends:
         for mode in ("kitty", "auto-both", "auto-sixel"):
             check(binary.resolve(), mode)
     if args.formula is None:
-        for mode in ("no-sixel", "silent-da1"):
+        for mode in ("no-sixel", "silent-da1", "signed-only", "signed-then-valid"):
             check(binary.resolve(), mode)
     for mode in ("explicit", "os", "query", "resize", "timeout", "noise", "invalid", "mismatched-tty"):
         check(binary.resolve(), mode, args.formula)

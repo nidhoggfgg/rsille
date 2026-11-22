@@ -127,11 +127,21 @@ where
     /// verified terminal capabilities and valid physical cell metrics.
     /// Unsupported composition, output modes and resource limits are rejected
     /// before frame output; raster content never falls back to characters.
-    /// A failed frame is not saved.
+    /// A preflight error preserves the last displayed frame for the next diff.
+    /// A write or flush error invalidates that history for repaint.
     pub fn render(&mut self) -> std::io::Result<()> {
-        let result = self.render_frame();
-        if result.is_err() {
-            // A failed draw is not a valid previous frame. Repaint from scratch
+        #[cfg(debug_assertions)]
+        let start = std::time::Instant::now();
+
+        let plan = match self.prepare_frame() {
+            Ok(plan) => plan,
+            Err(error) => {
+                self.buffer.discard_frame();
+                return Err(error);
+            }
+        };
+        if let Err(error) = self.write_frame(plan) {
+            // A partial write can invalidate the displayed frame. Repaint from scratch
             // on retry; the presenter separately remembers uncertain graphics.
             self.buffer.clear_content();
             if self.raster.needs_protocol_recovery() {
@@ -147,14 +157,18 @@ where
                 let _ = crossterm::queue!(self.out, EndSynchronizedUpdate, ResetColor);
                 let _ = self.out.flush();
             }
+            return Err(error);
         }
-        result
+        #[cfg(debug_assertions)]
+        debug!(
+            target: "render",
+            "render complete: duration={:.2?}",
+            start.elapsed()
+        );
+        Ok(())
     }
 
-    fn render_frame(&mut self) -> std::io::Result<()> {
-        #[cfg(debug_assertions)]
-        let start = std::time::Instant::now();
-
+    fn prepare_frame(&mut self) -> std::io::Result<super::raster::RasterPlan> {
         debug!(
             target: "render",
             "render start: mode={}, size={}x{}",
@@ -207,13 +221,16 @@ where
         } else {
             self.pos
         };
-        let raster_plan = self.raster.prepare(
+        self.raster.prepare(
             &self.buffer,
             raster_origin,
             self.inline_mode,
             self.append_newline,
             self.inline_mode && self.previous_inline_height > self.used_height,
-        )?;
+        )
+    }
+
+    fn write_frame(&mut self, raster_plan: super::raster::RasterPlan) -> std::io::Result<()> {
         if raster_plan.overlay_frame
             && !raster_plan.clear
             && !raster_plan.has_commands()
@@ -325,13 +342,6 @@ where
 
         // Save current buffer for next frame's diff
         self.buffer.clear();
-
-        #[cfg(debug_assertions)]
-        debug!(
-            target: "render",
-            "render complete: duration={:.2?}",
-            start.elapsed()
-        );
 
         Ok(())
     }

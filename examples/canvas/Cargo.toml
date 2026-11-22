@@ -1,0 +1,16 @@
+[package]
+name = "rsille-canvas-debug"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[dependencies]
+rsille = { path = "../..", default-features = false }
+crossterm = "0.28.1"
+
+[features]
+default = ["kitty", "sixel"]
+kitty = ["rsille/kitty"]
+sixel = ["rsille/sixel"]

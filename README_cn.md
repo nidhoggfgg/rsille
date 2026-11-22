@@ -159,5 +159,5 @@ inline Sixel 沿用 `.raster_output(...)`，由宿主确认整行擦除和图像
 
 - [示例目录](examples/README_cn.md)
 - [TUI 小示例](packages/tui/examples/README_cn.md)
-- [Raster 后端与浮窗兼容性测试](examples/raster.rs)
+- [Canvas 调试与图像后端对照](examples/canvas/README_cn.md)
 - [MIT 许可](LICENCE)

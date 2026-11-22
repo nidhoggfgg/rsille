@@ -359,11 +359,16 @@ mod unix {
 
     fn da1_sixel(reply: &[u8]) -> Option<bool> {
         let params = std::str::from_utf8(reply.strip_prefix(b"\x1b[?")?).ok()?;
-        let mut fields = params.split(';').map(str::parse::<u16>);
-        let class = fields.next()?.ok()?;
+        let mut fields = params.split(';').map(|field| {
+            if field.is_empty() || !field.bytes().all(|byte| byte.is_ascii_digit()) {
+                return None;
+            }
+            field.parse::<u16>().ok()
+        });
+        let class = fields.next()??;
         let mut sixel = false;
         for field in fields {
-            sixel |= field.ok()? == 4;
+            sixel |= field? == 4;
         }
         // VT100-style reports encode option bits instead of a feature list.
         Some(class >= 60 && sixel)
@@ -536,6 +541,15 @@ mod unix {
                 }
             }
             assert_eq!(&bytes, b"\x1b[16t");
+        }
+
+        #[test]
+        fn da1_requires_unsigned_decimal_fields_even_after_a_matching_feature() {
+            for params in ["+65;4", "65;+4", "65;4;", "65;;4", "65;4; 2", "65;４"] {
+                assert_eq!(da1_sixel(format!("\x1b[?{params}").as_bytes()), None);
+            }
+            assert_eq!(da1_sixel(b"\x1b[?65;14;24"), Some(false));
+            assert_eq!(da1_sixel(b"\x1b[?65;4"), Some(true));
         }
 
         #[test]

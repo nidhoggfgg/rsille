@@ -379,13 +379,18 @@ impl Buffer {
     /// This is useful for transient offscreen buffers where callers want to
     /// reuse allocation but do not need frame-to-frame diffing.
     pub fn clear_content(&mut self) {
+        self.discard_frame();
+        self.reset_diff();
+    }
+
+    /// Discards staged drawing while retaining the last displayed frame.
+    pub(crate) fn discard_frame(&mut self) {
         self.overlays.clear();
         self.content.fill(Cell::space());
         if let Some(raster) = &mut self.raster {
             raster.fill(None);
         }
         self.unsupported_raster_composition = false;
-        self.reset_diff();
         self.dirty = false;
     }
 
