@@ -335,7 +335,17 @@ pub fn run(options: crate::Options) -> io::Result<()> {
             frame = frame.wrapping_add(1);
             next = now + Duration::from_millis(100);
         }
-        if tick || due.is_some_and(|d| now >= d) || batch.len() == CAP {
+        // A pointer update may wake us between animation ticks, but never split shell output.
+        let mut fish_due = None;
+        if batch.is_empty() && boundary.ready() && !boundary.alternate {
+            fish_due = pet.fish_refresh_at(now);
+        }
+        if tick
+            || due.is_some_and(|d| now >= d)
+            || batch.len() == CAP
+            || fish_due.is_some_and(|d| now >= d)
+        {
+            fish_due = None;
             if let Some(cell) = food
                 .as_mut()
                 .and_then(|food| food.feed(&batch, s.ws_col, s.ws_row))
@@ -383,6 +393,7 @@ pub fn run(options: crate::Options) -> io::Result<()> {
                     pixels.height,
                     &mut sprite,
                 )?;
+                fish_due = pet.fish_refresh_at(now);
             }
             render_batch(
                 &mut out,
@@ -411,6 +422,7 @@ pub fn run(options: crate::Options) -> io::Result<()> {
         let ms = due
             .unwrap_or(next)
             .min(next)
+            .min(fish_due.unwrap_or(next))
             .min(input_deadline.unwrap_or(next))
             .saturating_duration_since(Instant::now())
             .as_nanos()

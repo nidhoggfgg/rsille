@@ -23,6 +23,7 @@ use std::{
 };
 
 const MAX_SIDE: usize = 192;
+const FISH_FRAME_INTERVAL: Duration = Duration::from_nanos(1_000_000_000u64.div_ceil(30));
 
 fn erase_area(
     area: Area,
@@ -226,6 +227,9 @@ pub struct Pet<'a> {
     speech: Option<Speech<'a>>,
     bubble: Option<Bubble<'a>>,
     fish_icon: Option<FishIcon>,
+    // Keep the displayed cell across shell repaints. The whale chases the live treat.
+    fish_cell: Option<(u16, u16)>,
+    next_fish_move: Instant,
     menu_open: bool,
     painted_menu: Option<Menu>,
     hint_until: Option<Instant>,
@@ -257,6 +261,8 @@ impl<'a> Pet<'a> {
             features,
             bubble: None,
             fish_icon: None,
+            fish_cell: None,
+            next_fish_move: Instant::now(),
             menu_open: false,
             painted_menu: None,
             hint_until: None,
@@ -368,6 +374,24 @@ impl<'a> Pet<'a> {
         self.menu_open = false;
     }
 
+    pub fn fish_refresh_at(&self, now: Instant) -> Option<Instant> {
+        let target = self.life.treat.map(|t| t.cell);
+        if target == self.fish_cell {
+            None
+        } else if target.is_some() && self.fish_cell.is_some() {
+            Some(self.next_fish_move)
+        } else {
+            Some(now)
+        }
+    }
+
+    fn update_fish_cell(&mut self, now: Instant) {
+        if self.fish_refresh_at(now).is_some_and(|at| at <= now) {
+            self.fish_cell = self.life.treat.map(|t| t.cell);
+            self.next_fish_move = now + FISH_FRAME_INTERVAL;
+        }
+    }
+
     /// Replace the latest edible output cell (one-based terminal coordinates).
     pub fn notice_food(&mut self, col: u16, row: u16) {
         if let Some(foraging) = &mut self.life.foraging {
@@ -414,6 +438,14 @@ impl<'a> Pet<'a> {
         }
     }
 
+    fn paint_fish(&mut self, fish: Option<FishIcon>, out: &mut Vec<u8>) -> io::Result<()> {
+        if let Some(icon) = fish {
+            icon.draw(self.kitty.map(|k| &k.fish), out)?;
+        }
+        self.fish_icon = fish;
+        Ok(())
+    }
+
     pub fn draw(
         &mut self,
         tick: u64,
@@ -439,6 +471,7 @@ impl<'a> Pet<'a> {
             .min(height / band * band);
         if h == 0 {
             self.cancel_mouse_interaction();
+            self.fish_cell = None;
             self.hide(cols, rows, out);
             self.invalidate();
             return Ok(());
@@ -492,15 +525,21 @@ impl<'a> Pet<'a> {
                 .as_mut()
                 .and_then(|speech| speech.place(col, row, bubble_size, cols, rows))
         };
+        self.update_fish_cell(Instant::now());
         let fish = self
-            .life
-            .treat
-            .map(|t| FishIcon::place(t.cell, cols, rows, metrics, band));
-        if self.fish_icon != fish {
+            .fish_cell
+            .map(|cell| FishIcon::place(cell, cols, rows, metrics, band));
+        let fish_changed = self.fish_icon != fish;
+        if fish_changed {
             if let Some(old) = self.fish_icon.take() {
                 self.erase_fish(old, cols, rows, out);
+                if self.kitty.is_none() {
+                    let erased = old.erase_area();
+                    self.dirty |= erased.intersects(&whale)
+                        || bubble.is_some_and(|b| erased.intersects(&b.area))
+                        || menu.is_some_and(|m| erased.intersects(&m.area));
+                }
             }
-            self.dirty = true;
         }
         if self.bubble != bubble {
             if let Some(old) = self.bubble.take() {
@@ -523,6 +562,9 @@ impl<'a> Pet<'a> {
             leftward,
         };
         if !self.dirty && self.last_frame.as_ref() == Some(&key) {
+            if fish_changed {
+                self.paint_fish(fish, out)?;
+            }
             return Ok(());
         }
         self.last_frame = Some(key);
@@ -562,9 +604,10 @@ impl<'a> Pet<'a> {
             w,
             pixels,
         };
-        if !self.dirty && self.previous.as_ref() == Some(&image) {
+        if !self.dirty && !fish_changed && self.previous.as_ref() == Some(&image) {
             return Ok(());
         }
+        let repaint_fish = fish_changed || self.dirty || self.kitty.is_none();
         self.dirty = false;
         if let Some(kitty) = self.kitty {
             write!(out, "\x1b[{row};{col}H")?;
@@ -582,10 +625,9 @@ impl<'a> Pet<'a> {
             b.render(out)?;
         }
         self.bubble = bubble;
-        if let Some(icon) = fish {
-            icon.draw(self.kitty.map(|k| &k.fish), out)?;
+        if repaint_fish {
+            self.paint_fish(fish, out)?;
         }
-        self.fish_icon = fish;
         if let Some(menu) = menu {
             menu.render(out)?;
         }
@@ -774,6 +816,66 @@ mod tests {
         let (col, row) = (menu.x() + 3, menu.y() + 2);
         pet.mouse_event(MouseKind::LeftPress, col, row);
         pet.mouse_event(MouseKind::LeftRelease, col, row);
+    }
+
+    #[test]
+    fn fish_motion_coalesces_until_due_and_stops_when_idle() {
+        let mut pet = Pet::default();
+        let start = Instant::now();
+        pet.draw(0, 80, 24, 10, 20, &mut Vec::new()).unwrap();
+        choose_fish(&mut pet, 0);
+        pet.mouse_event(MouseKind::Motion, 3, 2);
+        assert_eq!(pet.fish_refresh_at(start), Some(start));
+        pet.update_fish_cell(start);
+        let deadline = start + FISH_FRAME_INTERVAL;
+        for col in 4..12 {
+            pet.mouse_event(MouseKind::Motion, col, 2);
+            assert_eq!(pet.fish_refresh_at(start), Some(deadline));
+            pet.update_fish_cell(deadline - Duration::from_nanos(1));
+            assert_eq!(pet.fish_cell, Some((3, 2)));
+        }
+        pet.update_fish_cell(deadline);
+        assert_eq!(pet.fish_cell, Some((11, 2)));
+        assert_eq!(pet.fish_refresh_at(deadline), None);
+        pet.mouse_event(MouseKind::RightPress, 11, 2);
+        pet.update_fish_cell(deadline);
+        assert_eq!(pet.fish_cell, None);
+        assert_eq!(pet.fish_refresh_at(deadline), None);
+    }
+
+    #[test]
+    fn moving_only_the_fish_repaints_the_whale_only_to_repair_sixel_overlap() {
+        use rsille::render::raster_output::KittyImage;
+        let kitty = KittySprites {
+            whale: KittyImage::new().unwrap(),
+            fish: KittyImage::new().unwrap(),
+        };
+        let catalog = crate::dialogue::Catalog::default();
+        for backend in [Some(&kitty), None] {
+            let mut pet = Pet::new(&catalog, [Feature::Mouse].into());
+            pet.kitty = backend;
+            pet.draw(0, 80, 24, 10, 20, &mut Vec::new()).unwrap();
+            choose_fish(&mut pet, 0);
+            pet.mouse_event(MouseKind::Motion, 2, 2);
+            pet.draw(0, 80, 24, 10, 20, &mut Vec::new()).unwrap();
+            pet.mouse_event(MouseKind::LeftPress, 2, 2);
+            for (col, row, erased_whale) in [(5, 3, false), (70, 20, false), (8, 5, true)] {
+                pet.mouse_event(MouseKind::LeftDrag, col, row);
+                pet.update_fish_cell(pet.next_fish_move);
+                let mut bytes = Vec::new();
+                pet.draw(0, 80, 24, 10, 20, &mut bytes).unwrap();
+                let output = std::str::from_utf8(&bytes).unwrap();
+                if backend.is_some() {
+                    assert_eq!(output.matches("\x1b_Ga=p,").count(), 1);
+                    assert!(output.contains("z=1,"));
+                } else {
+                    assert!(output.contains("q\"1;1;30;15#"));
+                    assert_eq!(output.contains("q\"1;1;160;160#"), erased_whale);
+                }
+                assert!(pet.fish_icon.unwrap().contains(col, row));
+                assert_eq!(pet.life.age, 0);
+            }
+        }
     }
 
     #[test]

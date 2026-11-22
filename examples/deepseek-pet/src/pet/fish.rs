@@ -1,4 +1,5 @@
 use crate::screen::{clear_span, Screen};
+use rsille::render::area::Area;
 use rsille::render::raster_output::CellPixels;
 
 // Each dot leaves the shell visible through the sprite.
@@ -110,6 +111,13 @@ impl FishIcon {
 
     pub(super) fn contains(self, col: u16, row: u16) -> bool {
         row == self.row && (self.col..self.col + self.span).contains(&col)
+    }
+
+    pub(super) fn erase_area(self) -> Area {
+        // Restoring a wide shell glyph can touch one cell on either side.
+        let left = self.col.saturating_sub(2);
+        let right = self.col.saturating_add(self.span);
+        Area::new((left, self.row - 1).into(), (right - left, 1).into())
     }
 
     pub(super) fn erase(self, cols: u16, rows: u16, screen: Option<&Screen>, out: &mut Vec<u8>) {
