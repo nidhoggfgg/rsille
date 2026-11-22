@@ -1,0 +1,104 @@
+name: Release rsille-playground
+
+on:
+  push:
+    tags:
+      - 'rsille-playground-v[0-9]*.[0-9]*.[0-9]*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-playground-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ github.ref_name }}
+      CARGO_TERM_COLOR: always
+      CARGO_BUILD_JOBS: "2"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check release version, notes and main ancestry
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          import tomllib
+          version = tomllib.loads(Path('packages/rsille-playground/Cargo.toml').read_text())['package']['version']
+          assert os.environ['RELEASE_TAG'] == f'rsille-playground-v{version}', 'tag and package version differ'
+          assert Path(f'releases/rsille-playground/{version}.md').is_file(), 'release notes are missing'
+          with open(os.environ['GITHUB_ENV'], 'a') as env:
+              print(f'VERSION={version}', file=env)
+          PY
+          git merge-base --is-ancestor HEAD origin/main
+
+      - name: Set up Rust
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt
+          rustup default stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-playground
+
+      - name: Package the playground
+        run: |
+          cargo fmt -p rsille-playground --check
+          cargo generate-lockfile
+          cargo package -p rsille-playground --locked --no-verify --registry crates-io
+
+      - name: Test and install the archive against published dependencies
+        run: |
+          archive="rsille-playground-${VERSION}"
+          tar -xzf "target/package/${archive}.crate" -C "$RUNNER_TEMP"
+          cd "$RUNNER_TEMP/$archive"
+          export CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target"
+          cargo test --all-targets --locked
+          cargo install --path . --locked --debug --root "$RUNNER_TEMP/install"
+          "$RUNNER_TEMP/install/bin/rsille" draw --headless
+
+      - name: Write package checksum
+        working-directory: target/package
+        run: sha256sum "rsille-playground-${VERSION}.crate" > SHA256SUMS-rsille-playground
+
+      - name: Publish playground to crates.io
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          metadata="$RUNNER_TEMP/published-version.json"
+          status=$(curl -sS --retry 3 -A "rsille release ($GITHUB_SERVER_URL/$GITHUB_REPOSITORY)" \
+            -o "$metadata" -w '%{http_code}' "https://crates.io/api/v1/crates/rsille-playground/$VERSION")
+          case "$status" in
+            404) cargo publish -p rsille-playground --locked --registry crates-io ;;
+            200)
+              read -r checksum _ < target/package/SHA256SUMS-rsille-playground
+              jq -e --arg checksum "$checksum" '.version.checksum == $checksum' "$metadata" ||
+                { echo "::error::Published crate differs from the release archive"; exit 1; }
+              ;;
+            *) echo "::error::Failed to check rsille-playground $VERSION (HTTP $status)"; exit 1 ;;
+          esac
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release create "$RELEASE_TAG" \
+            "target/package/rsille-playground-${VERSION}.crate" \
+            target/package/SHA256SUMS-rsille-playground \
+            --verify-tag --latest=false \
+            --title "rsille-playground $VERSION" \
+            --notes-file "releases/rsille-playground/${VERSION}.md"
