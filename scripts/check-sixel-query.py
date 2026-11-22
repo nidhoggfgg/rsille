@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify startup-only Sixel pixel probing and native input using a Unix PTY.
+"""Verify raster backend negotiation, pixel probing and native input using a Unix PTY.
 
 This tests protocol transport, not a real terminal's Sixel visual rendering.
 Run from any directory; --binary skips the debug example build.
@@ -56,7 +56,10 @@ print(f"RSILLE_TTY_RESTORED={restored}", flush=True)
 sys.exit(child.returncode if restored else 1)
 """
     args = [str(binary)]
-    if mode in ("explicit", "no-sixel"):
+    expect_kitty = mode in ("kitty", "auto-both")
+    if formula is None and not mode.startswith("auto-"):
+        args += ["--backend", "kitty" if expect_kitty else "sixel"]
+    if mode in ("explicit", "no-sixel", "kitty", "auto-both", "auto-sixel"):
         args += ["--cell-pixels", "10x20"]
     if formula:
         args += ["--", formula]
@@ -116,16 +119,24 @@ sys.exit(child.returncode if restored else 1)
 
     def plain_text(start=0):
         data = re.sub(rb"\x1bP.*?\x1b\\", b"", bytes(screen[start:]), flags=re.S)
+        data = re.sub(rb"\x1b_G.*?\x1b\\", b"", data, flags=re.S)
         data = re.sub(rb"\x1b[78]", b"", data)
         return re.sub(rb"\x1b\[[0-?]*[ -/]*[@-~]", b"", data)
 
     try:
         if formula is None and mode != "mismatched-tty":
-            wait_until(lambda: DA1 in screen, "Sixel capability query")
-            if mode != "silent-da1":
-                # Ignore a secondary DA and malformed primary DA, then handle a fragmented reply.
-                send_input(b"\x1b[>1;4c\x1b[?62;4;?c\x1b[?")
-                send_input(b"62;14;24c" if mode == "no-sixel" else b"65;4;22c")
+            if expect_kitty or mode == "auto-sixel":
+                query = rb"\x1b_Ga=q,i=(\d+),[^;]*;[^\x1b]*\x1b\\"
+                wait_until(lambda: re.search(query, screen), "Kitty capability query")
+                if expect_kitty:
+                    request_id = re.search(query, screen)[1]
+                    send_input(b"\x1b_Gi=" + request_id + b";OK\x1b\\")
+            if mode != "kitty":
+                wait_until(lambda: DA1 in screen, "Sixel capability query")
+                if mode != "silent-da1":
+                    # Ignore a secondary DA and malformed primary DA before the valid reply.
+                    send_input(b"\x1b[>1;4c\x1b[?62;4;?c\x1b[?")
+                    send_input(b"62;14;24c" if mode == "no-sixel" else b"65;4;22c")
             if mode in ("no-sixel", "silent-da1"):
                 wait_until(lambda: process.poll() is not None, "unsupported terminal exit")
                 while pump():
@@ -157,7 +168,8 @@ sys.exit(child.returncode if restored else 1)
             assert process.returncode != 0
             assert TILE not in screen
             assert FRAME_END not in screen, "failed startup must not render a frame"
-            assert (b"DA1" if mode == "mismatched-tty" and formula is None else b"CSI 16 t query") in screen
+            if mode != "mismatched-tty" or formula is not None:
+                assert b"CSI 16 t query" in screen
             assert b"RSILLE_TTY_RESTORED=True" in screen
             assert screen.count(QUERY) == (0 if mode == "mismatched-tty" else 1)
             if mode == "mismatched-tty":
@@ -175,9 +187,34 @@ sys.exit(child.returncode if restored else 1)
             return
 
         wait_until(lambda: FRAME_END in screen, "first complete frame")
-        assert TILE in screen, "must render actual 10x20 tiles without rounding"
+        if expect_kitty:
+            assert b"\x1b_Ga=t," in screen and b"\x1b_Ga=p," in screen and TILE not in screen
+            if mode == "kitty":
+                assert DA1 not in screen
+        else:
+            assert TILE in screen, "must render actual 10x20 tiles without rounding"
+            assert b"\x1b_Ga=t," not in screen
+        if formula is None:
+            backend = b"Kitty" if expect_kitty else b"Sixel"
+            assert backend + b" | 10x20 px/cell" in plain_text()
         expected_queries = 1 if mode in ("query", "resize") else 0
         assert screen.count(QUERY) == expected_queries
+
+        if mode in ("kitty", "auto-sixel"):
+            # SGR coordinates are one-based. On this 110x36 viewport the
+            # native title starts near the top left, above the character window.
+            expect_image = b"\x1b_Ga=p," if expect_kitty else TILE
+            start = len(screen)
+            send_input(b"\x1b[<0;12;5M")
+            wait_until(lambda: FRAME_END in screen[start:] and expect_image in screen[start:],
+                       "raising the partially covered native window")
+            start = len(screen)
+            send_input(b"\x1b[<32;17;7M")
+            wait_until(lambda: FRAME_END in screen[start:] and expect_image in screen[start:],
+                       "dragging the native window")
+            if expect_kitty:
+                assert b"\x1b_Ga=t," not in screen[start:], "moving the visible planet reuploaded pixels"
+            send_input(b"\x1b[<0;17;7m")
 
         # Only keys sent after startup belong to native Crossterm input. Verify
         # the state change as well as a frame, so an unrelated redraw cannot pass.
@@ -263,21 +300,26 @@ def check_formula_frame(data, rows, columns):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--binary", type=Path, help="Use an already built example (sixel_windows, or formula with --formula)")
-    parser.add_argument(
+    parser.add_argument("--binary", type=Path, help="Use an already built example (raster, or formula with --formula)")
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument("--both-backends", action="store_true", help="Also test explicit Kitty, Auto preference and Sixel fallback in the raster example")
+    modes.add_argument(
         "--formula", nargs="?", const="",
         help="Check formula example instead (optional quoted Typst source; default formula if omitted)",
     )
     args = parser.parse_args()
     binary = args.binary
     if binary is None:
-        example = "sixel_windows" if args.formula is None else "formula"
+        example = "raster" if args.formula is None else "formula"
         package = [] if args.formula is None else ["-p", "rsille-typst"]
         subprocess.run(
-            ["cargo", "build", *package, "--example", example],
+            ["cargo", "build", *package, "--example", example, *(["--features", "kitty"] if args.both_backends else [])],
             cwd=ROOT, check=True, timeout=120,
         )
         binary = ROOT / "target/debug/examples" / example
+    if args.both_backends:
+        for mode in ("kitty", "auto-both", "auto-sixel"):
+            check(binary.resolve(), mode)
     if args.formula is None:
         for mode in ("no-sixel", "silent-da1"):
             check(binary.resolve(), mode)

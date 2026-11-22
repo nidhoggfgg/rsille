@@ -68,6 +68,24 @@ pub(super) fn sixel(timeout: Duration) -> io::Result<bool> {
     before_input(|| unix::query(timeout, unix::sixel))
 }
 
+/// Caller holds the input lifecycle guard for protocol and metric discovery.
+pub(super) fn protocols(kitty: bool, sixel: bool, timeout: Duration) -> io::Result<(bool, bool)> {
+    #[cfg(unix)]
+    {
+        unix::query(timeout, |tty, deadline| {
+            unix::protocols(tty, deadline, kitty, sixel)
+        })
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (kitty, sixel, timeout);
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "raster protocol negotiation requires Unix or WSL; supply a verified session",
+        ))
+    }
+}
+
 #[cfg(unix)]
 mod unix {
     use std::{
@@ -273,26 +291,70 @@ mod unix {
     }
 
     pub(super) fn sixel(tty: &mut File, deadline: Instant) -> io::Result<bool> {
-        // Keep only the current control sequence, including across partial reads.
-        let mut reply = Vec::with_capacity(128);
-        exchange(tty, deadline, b"\x1b[c", |byte| {
-            if byte == 0x1b {
-                reply.clear();
-                reply.push(byte);
-            } else if !reply.is_empty() {
-                if byte == b'c' {
-                    let advertised = da1_sixel(&reply);
-                    reply.clear();
-                    return advertised;
+        protocols(tty, deadline, false, true).map(|(_, supported)| supported)
+    }
+
+    pub(super) fn protocols(
+        tty: &mut File,
+        deadline: Instant,
+        kitty: bool,
+        sixel: bool,
+    ) -> io::Result<(bool, bool)> {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static QUERY_ID: AtomicU32 = AtomicU32::new(1);
+        let id = QUERY_ID.fetch_add(1, Ordering::Relaxed).max(1);
+        let mut query = String::new();
+        if kitty {
+            query = format!("\x1b_Ga=q,i={id},s=1,v=1,f=24,t=d;AAAA\x1b\\");
+        }
+        if sixel {
+            query.push_str("\x1b[c");
+        }
+        let prefix = format!("\x1b_Gi={id};");
+        let mut kitty_reply = None;
+        let mut da1 = None;
+        let mut sequence = Vec::with_capacity(256);
+        let mut esc = false;
+        let result = exchange(tty, deadline, query.as_bytes(), |byte| {
+            if esc && byte == b'\\' {
+                if kitty {
+                    if let Some(status) = sequence.strip_prefix(prefix.as_bytes()) {
+                        kitty_reply = Some(status == b"OK");
+                    }
                 }
-                if reply.len() < 128 && (byte.is_ascii_digit() || b"[?;".contains(&byte)) {
-                    reply.push(byte);
-                } else {
-                    reply.clear();
+                sequence.clear();
+            } else {
+                if esc {
+                    sequence.clear();
+                    sequence.push(0x1b);
+                }
+                if byte != 0x1b && !sequence.is_empty() {
+                    if sixel && byte == b'c' && sequence.starts_with(b"\x1b[") {
+                        if let Some(support) = da1_sixel(&sequence) {
+                            da1 = Some(support);
+                        }
+                        sequence.clear();
+                    } else if sequence.len() < 256 {
+                        sequence.push(byte);
+                    } else {
+                        sequence.clear();
+                    }
                 }
             }
-            None
-        })
+            esc = byte == 0x1b;
+            ((!kitty || kitty_reply.is_some()) && (!sixel || da1.is_some())).then_some(())
+        });
+        match result {
+            // A terminal may implement just one of the two queries.
+            Err(e)
+                if e.kind() == io::ErrorKind::TimedOut
+                    && (kitty_reply.is_some() || da1.is_some()) => {}
+            other => other?,
+        }
+        Ok((
+            kitty && kitty_reply == Some(true),
+            sixel && da1 == Some(true),
+        ))
     }
 
     fn da1_sixel(reply: &[u8]) -> Option<bool> {
@@ -322,17 +384,16 @@ mod unix {
                 Err(error) => return Err(error),
             }
         }
-        let mut bytes = [0; 256];
+        // Leave bytes following the last expected reply for the input owner.
+        let mut bytes = [0; 1];
         loop {
             wait(tty, libc::POLLIN, deadline)?;
             match tty.read(&mut bytes) {
                 Ok(0) => return Err(io::ErrorKind::UnexpectedEof.into()),
-                Ok(count) => {
+                Ok(_) => {
                     remaining(deadline)?;
-                    for byte in &bytes[..count] {
-                        if let Some(reply) = scan(*byte) {
-                            return Ok(reply);
-                        }
+                    if let Some(reply) = scan(bytes[0]) {
+                        return Ok(reply);
                     }
                 }
                 Err(error) if retryable(&error) => {}
@@ -475,6 +536,72 @@ mod unix {
                 }
             }
             assert_eq!(&bytes, b"\x1b[16t");
+        }
+
+        #[test]
+        fn protocol_queries_share_a_deadline_consume_replies_and_leave_the_next_key() {
+            for (kitty_status, da, expected) in [
+                (Some("OK"), Some("65;4;22"), Some((true, true))),
+                (Some("ENOENT"), Some("65;4"), Some((false, true))),
+                (Some("OK"), None, Some((true, false))),
+                (None, Some("65;4"), Some((false, true))),
+                (Some("ERROR"), Some("65;14;24"), Some((false, false))),
+                (None, None, None),
+            ] {
+                let (mut master, mut slave) = pty();
+                let saved = attributes(&slave);
+                thread::scope(|scope| {
+                    scope.spawn(|| {
+                        let deadline = Instant::now() + Duration::from_secs(2);
+                        let mut query = Vec::new();
+                        while !query.ends_with(b"\x1b[c") {
+                            wait(&master, libc::POLLIN, deadline).unwrap();
+                            let mut bytes = [0; 128];
+                            let n = master.read(&mut bytes).unwrap();
+                            assert!(n > 0);
+                            query.extend_from_slice(&bytes[..n]);
+                        }
+                        let query = std::str::from_utf8(&query).unwrap();
+                        let id = query.split("i=").nth(1).unwrap().split(',').next().unwrap();
+                        let mut replies = String::from("noise\x1b_Gi=0;OK\x1b\\");
+                        if let Some(da) = da {
+                            replies.push_str(&format!("\x1b[?{da}c"));
+                        }
+                        if let Some(status) = kitty_status {
+                            replies.push_str(&format!("\x1b_Gi={id};{status}\x1b\\"));
+                        }
+                        if kitty_status.is_some() && da.is_some() {
+                            replies.push_str("k\n");
+                        }
+                        let (first, rest) = replies.split_at(8);
+                        master.write_all(first.as_bytes()).unwrap();
+                        thread::sleep(Duration::from_millis(3));
+                        master.write_all(rest.as_bytes()).unwrap();
+                    });
+                    let received = probe_tty(
+                        &mut slave,
+                        Instant::now() + Duration::from_millis(200),
+                        |tty, deadline| protocols(tty, deadline, true, true),
+                    );
+                    match expected {
+                        Some(pair) => assert_eq!(received.unwrap(), pair),
+                        None => assert_eq!(received.unwrap_err().kind(), io::ErrorKind::TimedOut),
+                    }
+                });
+                assert_restored(&slave, saved);
+                if kitty_status.is_some() && da.is_some() {
+                    let mut key = [0; 2];
+                    slave.read_exact(&mut key).unwrap();
+                    assert_eq!(&key, b"k\n");
+                } else if expected.is_none() {
+                    // A late response belongs to the subsequent reader. The
+                    // startup transport does not flush or consume it later.
+                    master.write_all(b"\x1b[?65;4c\n").unwrap();
+                    let mut late = [0; 9];
+                    slave.read_exact(&mut late).unwrap();
+                    assert_eq!(&late, b"\x1b[?65;4c\n");
+                }
+            }
         }
 
         #[test]

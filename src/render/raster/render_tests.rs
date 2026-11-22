@@ -308,6 +308,48 @@ fn inline_disabled_feature_rejects_even_with_inline_erase() {
     assert_eq!(render.raster_stats(), RasterStats::default());
 }
 
+#[cfg(any(feature = "sixel", feature = "kitty"))]
+#[derive(Clone, Default)]
+struct FaultWriter {
+    bytes: Vec<u8>,
+    remaining: Option<usize>,
+    persistent: bool,
+    fail_flush: bool,
+}
+
+#[cfg(any(feature = "sixel", feature = "kitty"))]
+impl Write for FaultWriter {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        if let Some(remaining) = self.remaining {
+            if remaining == 0 {
+                if !self.persistent {
+                    self.remaining = None;
+                }
+                return Err(io::Error::new(
+                    io::ErrorKind::BrokenPipe,
+                    "injected write failure",
+                ));
+            }
+            let count = remaining.min(bytes.len());
+            self.bytes.extend_from_slice(&bytes[..count]);
+            self.remaining = Some(remaining - count);
+            return Ok(count);
+        }
+        self.bytes.extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        if std::mem::take(&mut self.fail_flush) {
+            return Err(io::Error::new(
+                io::ErrorKind::BrokenPipe,
+                "injected flush failure",
+            ));
+        }
+        Ok(())
+    }
+}
+
 #[cfg(feature = "sixel")]
 mod native {
     use super::*;
@@ -536,6 +578,7 @@ mod native {
 
     #[test]
     fn removing_overlay_on_wide_tail_restores_latest_style_and_lower_layer() {
+        crossterm::style::force_color_output(true);
         use crossterm::style::{Color, Colors};
         let mut render = renderer(verified(), Vec::new());
         render.thing.visible = false;
@@ -2708,46 +2751,6 @@ mod native {
         assert!(render.raster.needs_protocol_recovery());
     }
 
-    #[derive(Clone, Default)]
-    struct FaultWriter {
-        bytes: Vec<u8>,
-        remaining: Option<usize>,
-        persistent: bool,
-        fail_flush: bool,
-    }
-
-    impl Write for FaultWriter {
-        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-            if let Some(remaining) = self.remaining {
-                if remaining == 0 {
-                    if !self.persistent {
-                        self.remaining = None;
-                    }
-                    return Err(io::Error::new(
-                        io::ErrorKind::BrokenPipe,
-                        "injected write failure",
-                    ));
-                }
-                let count = remaining.min(bytes.len());
-                self.bytes.extend_from_slice(&bytes[..count]);
-                self.remaining = Some(remaining - count);
-                return Ok(count);
-            }
-            self.bytes.extend_from_slice(bytes);
-            Ok(bytes.len())
-        }
-
-        fn flush(&mut self) -> io::Result<()> {
-            if std::mem::take(&mut self.fail_flush) {
-                return Err(io::Error::new(
-                    io::ErrorKind::BrokenPipe,
-                    "injected flush failure",
-                ));
-            }
-            Ok(())
-        }
-    }
-
     #[test]
     fn every_partial_native_write_releases_sync_and_retry_repaints() {
         let mut probe = renderer(verified(), FaultWriter::default());
@@ -2867,5 +2870,275 @@ mod native {
         assert_clear_before_paint(&trace);
         assert_eq!(tiles(&trace).len(), 2);
         assert_eq!(render.raster_stats().tiles_sent, 2);
+    }
+}
+
+#[test]
+fn custom_writers_keep_the_last_configuration_without_probing() {
+    use crate::render::RasterBackend;
+    let mut builder = Builder::new();
+    builder
+        .size((4, 2))
+        .enable_alt_screen()
+        .raster_backend(RasterBackend::Auto)
+        .raster_output(verified());
+    let mut legacy = builder.build_render(Scene::default(), Vec::new());
+    assert_eq!(legacy.render().is_ok(), cfg!(feature = "sixel"));
+    builder.raster_backend(RasterBackend::Auto);
+    let mut requested = builder.build_render(Scene::default(), Vec::new());
+    requested.thing.visible = false;
+    requested.render().unwrap();
+    requested.thing.visible = true;
+    requested.out.clear();
+    assert!(requested
+        .render()
+        .unwrap_err()
+        .to_string()
+        .contains("custom writers"));
+    assert!(requested.out.is_empty());
+}
+
+#[test]
+fn auto_defers_an_unavailable_mode_while_explicit_selection_fails_at_startup() {
+    use crate::render::RasterBackend;
+    let mut builder = Builder::new();
+    builder
+        .size((4, 2))
+        .inline_mode(true)
+        .raster_backend(RasterBackend::Auto);
+    let mut render = builder.build_render(Scene::default(), Vec::new());
+    render.negotiate_raster().unwrap();
+    render.thing.visible = false;
+    assert!(!frame(&mut render).is_empty());
+    render.thing.visible = true;
+    assert!(render.render().unwrap_err().to_string().contains("inline"));
+    assert!(render.out.is_empty());
+    for request in [RasterBackend::Sixel, RasterBackend::Kitty] {
+        let mut explicit = builder
+            .raster_backend(request)
+            .build_render(Scene::default(), Vec::new());
+        assert!(explicit
+            .negotiate_raster()
+            .unwrap_err()
+            .to_string()
+            .contains("inline"));
+        assert!(explicit.out.is_empty());
+    }
+}
+
+#[cfg(feature = "kitty")]
+mod kitty {
+    use super::*;
+    use crate::render::RasterSession;
+    use base64::{engine::general_purpose::STANDARD, Engine};
+
+    fn build<W: Write>(pixels: CellPixels, writer: W) -> Render<W, Scene> {
+        Builder::new()
+            .size((6, 3))
+            .enable_alt_screen()
+            .raster_session(RasterSession::KittyFullscreen(pixels))
+            .build_render(Scene::default(), writer)
+    }
+
+    fn commands(bytes: &[u8]) -> Vec<&str> {
+        std::str::from_utf8(bytes)
+            .unwrap()
+            .split("\x1b_G")
+            .skip(1)
+            .map(|s| s.split_once("\x1b\\").unwrap().0)
+            .collect()
+    }
+
+    fn image_id(command: &str) -> u32 {
+        command
+            .split(',')
+            .find_map(|f| f.strip_prefix("i="))
+            .unwrap()
+            .parse()
+            .unwrap()
+    }
+
+    #[test]
+    fn shared_surface_moves_splits_and_releases_after_the_last_placement() {
+        let pixels = CellPixels {
+            width: 10,
+            height: 20,
+        };
+        let mut render = build(pixels, Vec::new());
+        render.thing.target = (4, 2).into();
+        render.thing.canvas.clear_pixel(0, 0);
+        render.thing.canvas.set_pixel(1, 0, Rgb(19, 37, 81));
+        let first = frame(&mut render);
+        let first_commands = commands(&first);
+        let image = image_id(first_commands[0]);
+        assert!(first_commands[0].contains("s=40,v=40"));
+        let mut rgba = Vec::new();
+        for command in &first_commands[..first_commands.len() - 1] {
+            let (control, payload) = command.split_once(';').unwrap();
+            assert!(control.contains("q=2"));
+            assert!(payload.len() <= 4096);
+            if control.contains("m=1") {
+                assert_eq!(payload.len(), 4096);
+            }
+            rgba.extend(STANDARD.decode(payload).unwrap());
+        }
+        assert_eq!(rgba.len(), 40 * 40 * 4);
+        assert_eq!(rgba[..4], [0; 4]);
+        assert_eq!(rgba[10 * 4..11 * 4], [19, 37, 81, 255]);
+        assert!(first_commands
+            .last()
+            .unwrap()
+            .contains("x=0,y=0,w=40,h=40,c=4,r=2,z=1,C=1"));
+        assert!(frame(&mut render).is_empty());
+        render.thing.origin = (1, 1).into();
+        let moved = frame(&mut render);
+        let moved = commands(&moved);
+        assert_eq!(moved.len(), 2);
+        assert!(moved[0].starts_with("a=d,d=i,"));
+        assert!(moved[1].starts_with("a=p,"));
+        assert!(moved.iter().all(|cmd| image_id(cmd) == image));
+
+        render.thing.text.push(((2, 1).into(), '界'));
+        let covered = frame(&mut render);
+        let covered = commands(&covered);
+        assert!(covered.iter().all(|cmd| image_id(cmd) == image));
+        for crop in [
+            "x=0,y=0,w=10,h=20",
+            "x=30,y=0,w=10,h=20",
+            "x=0,y=20,w=40,h=20",
+        ] {
+            assert!(covered.iter().any(|cmd| cmd.contains(crop)));
+        }
+
+        render.thing.text.clear();
+        render.thing.target = (2, 1).into();
+        let resize = frame(&mut render);
+        assert!(commands(&resize)
+            .iter()
+            .any(|cmd| cmd.starts_with("a=t,") && image_id(cmd) != image));
+        render.thing.canvas.set_pixel(0, 0, Rgb(9, 8, 7));
+        let revision = frame(&mut render);
+        assert!(commands(&revision)
+            .iter()
+            .any(|cmd| cmd.starts_with("a=t,")));
+        let tile = RasterCell {
+            canvas: render.thing.canvas.clone(),
+            target: render.thing.target,
+            x: 0,
+            y: 0,
+            options: RasterOptions {
+                scale: RasterScale::Stretch,
+                ..Default::default()
+            },
+        };
+        render.thing.overlays = vec![((5, 0).into(), tile.clone()), ((5, 0).into(), tile)];
+        let extra = frame(&mut render);
+        let extra = commands(&extra);
+        assert_eq!(extra.len(), 2);
+        for layer in [",z=2,", ",z=3,"] {
+            assert!(extra.iter().any(|cmd| cmd.contains(layer)));
+        }
+        render.thing.visible = false;
+        let removed = frame(&mut render);
+        assert_eq!(commands(&removed).len(), 1);
+        assert!(commands(&removed)[0].starts_with("a=d,d=i,"));
+        render.thing.overlays.clear();
+        let last = frame(&mut render);
+        assert_eq!(commands(&last).len(), 1);
+        assert!(commands(&last)[0].starts_with("a=d,d=I,"));
+        assert_eq!(render.raster_stats(), RasterStats::default());
+    }
+
+    #[test]
+    fn failed_upload_placement_delete_and_flush_recover_owned_ids_only() {
+        let pixels = CellPixels {
+            width: 32,
+            height: 32,
+        };
+        for failure in ["upload", "placement", "delete", "flush"] {
+            let mut render = build(pixels, FaultWriter::default());
+            render.render().unwrap();
+            let old_id = image_id(commands(&render.out.bytes)[0]);
+            render.out.bytes.clear();
+            render.thing.canvas.clear(Rgb(7, 71, 191));
+            // Hold the writer broken through best-effort cleanup.
+            render.out.persistent = true;
+            match failure {
+                "upload" => render.out.remaining = Some(4500),
+                "placement" => {
+                    let mut reference = build(pixels, Vec::new());
+                    reference.render().unwrap();
+                    reference.out.clear();
+                    reference.thing.canvas.clear(Rgb(7, 71, 191));
+                    reference.render().unwrap();
+                    render.out.remaining = Some(reference.out.len() - 12);
+                }
+                "delete" => render.out.remaining = Some(20),
+                _ => render.out.fail_flush = true,
+            }
+            assert!(render.render().is_err());
+            assert!(render.raster.needs_protocol_recovery());
+            assert!(render.buffer.previous().is_none());
+            // Verify cleanup uses the attempted upload ID if its header made it out.
+            let partial = String::from_utf8_lossy(&render.out.bytes);
+            let attempted = partial.split("a=t,").nth(1).map(image_id);
+            render.out.bytes.clear();
+            render.out.remaining = None;
+            render.render().unwrap();
+            assert!(render.out.bytes.starts_with(b"\x18\x1b\\"));
+            assert!(!contains(&render.out.bytes, b"\x1b[2J"));
+            let retry = commands(&render.out.bytes);
+            let deletes: Vec<_> = retry.iter().filter(|c| c.starts_with("a=d,")).collect();
+            assert_eq!(deletes.len(), 2);
+            assert!(deletes.iter().all(|c| c.starts_with("a=d,d=I,i=")));
+            assert!(deletes.iter().any(|c| image_id(c) == old_id));
+            if let Some(id) = attempted {
+                assert!(deletes.iter().any(|c| image_id(c) == id));
+            }
+            assert!(retry.iter().any(|c| c.starts_with("a=t,")));
+            assert!(!render.raster.needs_protocol_recovery());
+            render.out.bytes.clear();
+            render.release_raster_resources().unwrap();
+            assert_eq!(commands(&render.out.bytes).len(), 1);
+            render.out.bytes.clear();
+            render.render().unwrap();
+            assert!(commands(&render.out.bytes)[0].starts_with("a=t,"));
+        }
+    }
+
+    #[test]
+    fn rejects_unsupported_modes_metrics_and_budget_before_writing() {
+        for mode in ["inline", "newline", "normal", "metrics", "budget"] {
+            let pixels = match mode {
+                "metrics" => CellPixels {
+                    width: 0,
+                    height: 10,
+                },
+                "budget" => CellPixels {
+                    width: 256,
+                    height: 256,
+                },
+                _ => CellPixels {
+                    width: 10,
+                    height: 20,
+                },
+            };
+            let mut render = build(pixels, Vec::new());
+            match mode {
+                "inline" => render.inline_mode = true,
+                "newline" => render.append_newline = true,
+                "normal" => render.set_alternate_screen(false),
+                "budget" => {
+                    render.resize((40, 4).into());
+                    render.thing.target = (40, 4).into();
+                }
+                _ => {}
+            }
+            assert_eq!(
+                render.render().unwrap_err().kind(),
+                io::ErrorKind::Unsupported
+            );
+            assert!(render.out.is_empty());
+        }
     }
 }

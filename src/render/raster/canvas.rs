@@ -671,7 +671,7 @@ impl RasterCell {
 
     /// Returns an opaque background placeholder, never an image preview.
     ///
-    /// Raster metadata remains authoritative; presenting the image requires Sixel.
+    /// Raster metadata remains authoritative; presenting the image requires a native raster backend.
     /// Explicit colors and empty attributes prevent inheriting underlying text styles.
     pub fn placeholder(&self) -> Stylized {
         styled(' ', self.options.background, self.options.background)

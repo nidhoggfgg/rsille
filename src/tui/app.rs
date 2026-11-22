@@ -30,7 +30,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crate::render::raster_output::RasterOutput;
+use crate::render::raster_output::{RasterBackend, RasterOutput, RasterSession};
+
 use crate::render::InlineMouseMode;
 
 use crate::tui::animation::MotionPolicy;
@@ -45,6 +46,13 @@ use crate::tui::subscription::Subscription;
 use crate::tui::widget::Widget;
 use crate::tui::widgets::visual::TerminalVisualCapabilities;
 use crate::tui::WidgetResult;
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum RasterSetting {
+    Output(RasterOutput),
+    Backend(RasterBackend),
+    Session(RasterSession),
+}
 
 /// Callback producing an application message without an input payload.
 pub type EventHandler<M> = Box<dyn Fn() -> M>;
@@ -110,7 +118,7 @@ pub struct App<State, M = ()> {
     pub(crate) global_key_handlers: HashMap<KeyCode, EventHandler<M>>,
     pub(crate) input_handler: Option<InputHandler<M>>,
     pub(crate) keyboard_mode: KeyboardMode,
-    pub(crate) raster_output: RasterOutput,
+    pub(crate) raster_output: RasterSetting,
     pub(crate) focus_events: bool,
     pub(crate) hotkeys: HotkeyRegistry<M>,
     pub(crate) command_router: Option<CommandRouter<M>>,
@@ -151,7 +159,7 @@ impl<State, M> App<State, M> {
             global_key_handlers: HashMap::new(),
             input_handler: None,
             keyboard_mode: KeyboardMode::Legacy,
-            raster_output: RasterOutput::default(),
+            raster_output: RasterSetting::Output(RasterOutput::default()),
             focus_events: false,
             hotkeys: HotkeyRegistry::new(),
             command_router: None,
@@ -258,7 +266,21 @@ impl<State, M> App<State, M> {
     /// Headless [`Runtime::frame`] retains raster metadata and background
     /// placeholders, not character previews of raster images.
     pub fn raster_output(mut self, config: RasterOutput) -> Self {
-        self.raster_output = config;
+        self.raster_output = RasterSetting::Output(config);
+        self
+    }
+
+    /// Negotiate native fullscreen graphics when the managed terminal starts.
+    /// Auto prefers Kitty. Inline Sixel requires explicit `raster_output`
+    /// capabilities. The last raster setting wins, including in headless apps.
+    pub fn raster_backend(mut self, backend: RasterBackend) -> Self {
+        self.raster_output = RasterSetting::Backend(backend);
+        self
+    }
+
+    /// Use verified fullscreen capabilities and physical metrics without querying input.
+    pub fn raster_session(mut self, session: RasterSession) -> Self {
+        self.raster_output = RasterSetting::Session(session);
         self
     }
 

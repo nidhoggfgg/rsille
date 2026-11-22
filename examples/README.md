@@ -15,7 +15,7 @@ cargo run --example basic_canvas
 cargo run --release --manifest-path examples/lumen/Cargo.toml
 ```
 
-`basic_canvas.rs` and `sixel_windows.rs` are single-file root-package examples,
+`basic_canvas.rs` and `raster.rs` are single-file root-package examples,
 run with `--example`, not standalone projects. Each subdirectory below is a
 standalone Cargo project with a path dependency on `rsille`; these projects are
 excluded from the root workspace. Run them with `--manifest-path`, using the
@@ -23,7 +23,7 @@ directory name in the table. Prefer release builds for animations and 3D scenes.
 
 | Example | File / directory | What it demonstrates |
 | --- | --- | --- |
-| [Sixel vs Canvas windows](sixel_windows.rs) | `sixel_windows.rs` (root example) | Two draggable, resizable windows showing the same static ringed planet as native RGB raster and Canvas character sampling. |
+| [Raster window compatibility test](raster.rs) | `raster.rs` (root example) | Check movement, occlusion, stacking, resizing and repainting with Kitty and Sixel in the same scene. |
 | [Function Plotter](function-plotter/README.md) | `function-plotter` | Mathematica-style input/output cells, compact Sixel function graphs, reevaluation and scrollable history. |
 | [TUI showcase](tui-showcase/README.md) | `tui-showcase` | Seven pages of controls, data, content, layout, motion and themes. |
 | [Lumen](lumen/README.md) | `lumen` | Interactive workspace with flows, a notebook and floating windows. |
@@ -56,57 +56,39 @@ palettes and non-scrolling positioned output. These capabilities are not
 automatically detected. See the [Function Plotter guide](function-plotter/README.md)
 for controls, measured cell-pixel overrides and headless checks.
 
-## Sixel vs Canvas windows
+## Raster window compatibility test
 
 ```sh
-cargo run --release --example sixel_windows
-cargo run --example sixel_windows -- --help
+cargo run --release --features kitty --example raster
+cargo run --release --features kitty --example raster -- --backend kitty
+cargo run --release --example raster -- --backend sixel
 ```
 
-Two `floating_window` widgets in a `window_host` show the same procedural ringed
-planet in fullscreen only, without live animation or an `--inline` option.
-For inline Sixel animation without an alternate screen or mouse capture, use
-[AI Babies](ai-babies/README.md#raster-and-sixel):
-`cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --sixel`.
-No extra `--inline` argument is needed there.
+Two windows show the same planet using native RasterCanvas and character Canvas.
+The default `auto` prefers Kitty, then Sixel, among compiled backends. The header
+shows the selected protocol and physical cell size. To compare protocols, repeat
+these checks with each explicit backend on the same terminal.
 
-Drag a title to move, drag a bottom grip to resize,
-and click to bring a window forward. `e` cycles Canvas Braille/HalfBlock/Quadrant;
-`r` restores the starting window rectangles; `q`/Esc quits. Ideally use 100×32 cells;
-smaller terminals and terminal resizing are supported.
+1. Drag the character window over the center of the planet. Check that its text, spaces and border cover the image.
+2. Move it away and click the planet window's title to raise it. Check the exposed pixels and desktop for gaps or trails.
+3. Drag a bottom grip to resize, then move the window to the bottom edge. Check the planet's aspect ratio, the bottom row and unexpected scrolling.
+4. Press `e` to cycle character encoding, `r` to reset the windows and `q` or Esc to exit. Tab focuses a title, arrows move it and Shift+arrows resize it.
 
-The entire terminal/multiplexer path must support Sixel, graphics ED 2 erasure,
-non-scrolling positioned output and stable palettes. On Unix (including macOS and WSL)
-the demo checks for Sixel in the terminal's primary device attributes (DA1) before
-measuring cells or drawing. This also applies with `--cell-pixels`. Erase, scroll,
-and palette behavior are still host requirements.
-Unsupported raster output returns an error, with no silent fallback. Startup probing
-uses OS window metrics first;
-unusable OS dimensions trigger a `CSI 16 t` query on Unix (including WSL), requiring
-stdin/stdout TTYs attached to the controlling terminal and a 500 ms absolute timeout.
-Native Windows has no query fallback and still needs explicit dimensions. Optional
-`--cell-pixels 8x18` skips both sources and must match **actual font metrics**, not
-an arbitrary size. Measured dimensions are stored as a startup snapshot and are
-not refreshed on resize; restart after font or DPI changes. Probing precedes all
-input readers and may consume unrelated input. Runtime input uses native crossterm.
-This query does not negotiate Sixel support.
-The feature and backend limits (1..=1024 per dimension, at most 65,536 pixels)
-are checked before entering the managed terminal session. Actual 10×20 cells are supported with
-`--cell-pixels 10x20`; do not round the height to 18 or 24. The terminal must honor
-transparent partial-band padding and the erase/no-scroll assertions; accepting
-these metrics does not certify real-terminal behavior.
-No arguments starts the interactive demo; `--help` shows help. Terminal capability
-requirements are documented on [`RasterCapabilities`](../src/render/raster/output.rs).
-
-Finite, terminal-independent mouse-drag and occlusion checks and example tests:
+A 100×32 cell terminal is a convenient starting size. Unix (including WSL)
+probes the selected protocols even with measured `--cell-pixels WxH`. Native
+Windows requires an explicit host-verified backend and measured dimensions.
+Fullscreen Sixel requires ED 2 graphics erasure, stable palettes, transparent
+band padding and positioned rendering without scrolling.
 
 ```sh
-cargo run --example sixel_windows -- --headless
-cargo test --example sixel_windows
-cargo test --example sixel_windows --no-default-features
+cargo run --example raster -- --headless
+cargo test --features kitty --example raster
+python3 scripts/check-sixel-query.py --both-backends
 ```
 
-These do not certify real-terminal graphics behavior or measure performance.
+Headless mode checks mouse interactions and visibility in memory. The Unix PTY
+script checks negotiation, output and keyboard input. Use the interactive steps
+above to inspect the display on the target terminal.
 
 ## Validate without a terminal
 

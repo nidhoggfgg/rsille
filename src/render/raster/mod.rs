@@ -1,9 +1,8 @@
 //! RGB drawing with optional pixel transparency and terminal presentation.
 //!
 //! Pixel storage and sampling are independent of the output protocol.
-//! Terminal raster presentation is Sixel-only; [`output`] configures the required
-//! host capabilities. The presenter and optional Sixel encoder remain renderer
-//! implementation details. Raster images are never converted to characters.
+//! Use [`output::RasterBackend`] for startup selection or [`output::RasterSession`]
+//! for host-verified fullscreen output. Inline Sixel uses [`output::RasterOutput`].
 //!
 //! # Drawing and presentation
 //!
@@ -17,13 +16,16 @@
 //!   physical pixels per character cell.
 //!
 //! Drawing, importing pixels, and sampling work without Cargo features or a
-//! terminal. Native presentation requires the `sixel` feature and explicit
-//! capability configuration; unknown capabilities cause an error rather than a
-//! character-based fallback. Measuring cell pixels does not establish Sixel
-//! support. See [`output::CellPixels::probe`] for startup probing restrictions.
+//! terminal. Managed fullscreen output negotiates only when requested. On Unix
+//! (including WSL), Auto prefers the compiled Kitty backend, then Sixel.
+//! Kitty uses direct RGBA uploads and clipped placements. Reusing a displayed
+//! surface avoids another upload until it is invalidated or removed. Terminal
+//! eviction is silent. Hosts can explicitly release resources to force a refresh.
+//! Kitty limits visible layer cells (and thus placements) to 32,768, and visible
+//! physical pixels to 16,777,216 per frame. Resident RGBA data and staged protocol
+//! bytes each have a 32 MiB limit. Large targets are sampled in visible blocks.
 //!
-//! Native output uses one positioned tile per visible terminal cell, favoring
-//! precise clipping and ownership over transport throughput; tiles are not merged.
+//! Sixel uses one positioned tile per visible terminal cell.
 //! Colors use a fixed RGB332 palette (3 red, 3 green, 2 blue bits), not lossless
 //! 24-bit output or adaptive quantization. Transparent pixels leave existing
 //! terminal content untouched; they do not erase previously drawn graphics. Source pixels remain unchanged.
@@ -55,10 +57,14 @@
 //! ```
 
 mod canvas;
+#[cfg(feature = "kitty")]
+mod kitty;
 pub mod output;
 mod presenter;
 #[cfg(feature = "sixel")]
 mod sixel;
+mod sixel_presenter;
 
 pub use canvas::*;
+pub use output::{RasterBackend, RasterSession};
 pub(super) use presenter::{RasterPlan, RasterPresenter};

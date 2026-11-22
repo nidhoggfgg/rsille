@@ -134,6 +134,17 @@ using just **20 terminal rows**. The enlarged preview preserves terminal cell pr
 Present fine curves, colorful images and rich visualizations in Sixel-capable
 terminals, alongside text, buttons and other widgets in one interface.
 
+For managed fullscreen apps, opt in with `.raster_backend(RasterBackend::Auto)`
+before `.update(...)`. With `features = ["kitty"]` and the default features,
+startup prefers Kitty, then Sixel. Explicit `Kitty` or `Sixel` selections
+report startup errors immediately. Auto allows text frames until an image is needed.
+Kitty retains full RGB and transparency and reuses uploaded surfaces during drags.
+Negotiation uses the controlling terminal on Unix, including macOS and WSL.
+Native Windows and custom writers can pass a verified `RasterSession`. Fullscreen
+Sixel requires graphics erasure with ED 2, stable palettes, transparent padding
+and positioned output without scrolling. Inline Sixel uses `.raster_output(...)`
+with explicit row-erasure and scrolling capabilities.
+
 ## Extension: Typst math
 
 The independent [`rsille-typst` extension](packages/rsille-typst/README.md) renders
@@ -152,5 +163,5 @@ without adding Typst dependencies to the core crate.
 
 - [Example gallery](examples/README.md)
 - [TUI examples](packages/tui/examples/README.md)
-- [Sixel vs Canvas demo](examples/sixel_windows.rs)
+- [Raster backend and window compatibility test](examples/raster.rs)
 - [MIT license](LICENCE)

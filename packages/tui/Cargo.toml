@@ -26,6 +26,7 @@ smallvec = "1.13"
 default = []
 syntax-highlighting = ["dep:syntect"]
 sixel = ["render/sixel"]
+kitty = ["render/kitty"]
 
 [dev-dependencies]
 tokio = { workspace = true }

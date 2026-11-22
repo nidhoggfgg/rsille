@@ -133,6 +133,14 @@ fn main() -> WidgetResult<()> {
 在支持 Sixel 的终端中呈现精细曲线、彩色图像与丰富的可视化，
 并与文本、按钮和其他组件融为一体。
 
+全屏应用可以在 `.update(...)` 前设置 `.raster_backend(RasterBackend::Auto)`。
+保留默认 features 并添加 `features = ["kitty"]` 后，启动时优先选 Kitty，其次选 Sixel。
+显式指定 `Kitty` 或 `Sixel` 会在启动时报告错误。Auto 允许先绘制文本，在首次需要图像时才报告协商失败。
+Kitty 保留原始 RGB 和透明像素，拖动时可以复用已上传的图像。启动探测支持 macOS、Linux 和 WSL。
+原生 Windows 和自定义 writer 可以通过 `.raster_session(...)` 传入已验证的全屏协议与字符像素尺寸。
+全屏 Sixel 要求 ED 2 能擦除图像、调色板稳定、补齐像素透明且定位输出不会滚屏。
+inline Sixel 沿用 `.raster_output(...)`，由宿主确认整行擦除和图像随文字滚动。
+
 ## 扩展：Typst 数学公式
 
 独立扩展 [`rsille-typst`](packages/rsille-typst/README.md)
@@ -151,5 +159,5 @@ fn main() -> WidgetResult<()> {
 
 - [示例目录](examples/README_cn.md)
 - [TUI 小示例](packages/tui/examples/README_cn.md)
-- [Sixel 与 Canvas 对比示例](examples/sixel_windows.rs)
+- [Raster 后端与浮窗兼容性测试](examples/raster.rs)
 - [MIT 许可](LICENCE)

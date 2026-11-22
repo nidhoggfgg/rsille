@@ -14,14 +14,14 @@ cargo run --example basic_canvas
 cargo run --release --manifest-path examples/lumen/Cargo.toml
 ```
 
-`basic_canvas.rs` 和 `sixel_windows.rs` 是根包的单文件示例，使用 `--example` 运行，
+`basic_canvas.rs` 和 `raster.rs` 是根包的单文件示例，使用 `--example` 运行，
 不是独立项目。下面每个子目录都是通过路径依赖引用 `rsille` 的独立 Cargo 项目，
 不属于根 workspace。用表中的目录名配合 `--manifest-path` 运行；
 动画和三维场景建议使用 release 构建。
 
 | 示例 | 文件 / 目录 | 展示内容 |
 | --- | --- | --- |
-| [Sixel 与 Canvas 浮窗](sixel_windows.rs) | `sixel_windows.rs`（根包示例） | 两个可拖动、调整大小的浮窗，以原生 RGB 栅格和 Canvas 字符采样展示同一颗静态带环行星。 |
+| [Raster 浮窗兼容性测试](raster.rs) | `raster.rs`（根包示例） | 在同一场景中检查 Kitty 和 Sixel 的窗口移动、遮挡、置前、缩放与重绘。 |
 | [函数绘图](function-plotter/README_cn.md) | `function-plotter` | Mathematica 风格输入/输出单元、紧凑 Sixel 函数图像、重新执行与滚动历史。 |
 | [TUI showcase](tui-showcase/README_cn.md) | `tui-showcase` | 七页组件展厅：表单、数据、内容、布局、动画和主题。 |
 | [Lumen](lumen/README_cn.md) | `lumen` | 包含流程、笔记和浮动桌面的交互工作台。 |
@@ -51,46 +51,30 @@ cargo run --manifest-path examples/function-plotter/Cargo.toml -- --help
 稳定调色板及无滚屏的定位输出。这些能力不会自动检测。
 操作方式、实际字符格像素覆盖值和 headless 检查见[函数绘图指南](function-plotter/README_cn.md)。
 
-## Sixel 与 Canvas 浮窗
+## Raster 浮窗兼容性测试
 
 ```sh
-cargo run --release --example sixel_windows
-cargo run --example sixel_windows -- --help
+cargo run --release --features kitty --example raster
+cargo run --release --features kitty --example raster -- --backend kitty
+cargo run --release --example raster -- --backend sixel
 ```
 
-在同一个 `window_host` 中用两个 `floating_window` 展示同一颗程序化带环行星，
-仅使用全屏，没有实时动画或 `--inline` 选项。inline Sixel 动画请使用
-[AI Babies](ai-babies/README.md#raster-and-sixel)：
-`cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --sixel`，
-无需额外 `--inline` 参数，不启用备用屏幕或鼠标捕获。
+两个浮窗用原生 RasterCanvas 和字符 Canvas 绘制同一颗行星。默认 `auto` 从已编译的后端中优先选 Kitty，再选 Sixel。顶部显示实际协议和每格像素尺寸。可在同一终端分别指定两个后端，对照以下操作。
 
-拖动标题移动窗口，拖动底部手柄调整大小，点击置前。
-`e` 循环切换 Canvas 的 Braille/HalfBlock/Quadrant；`r` 恢复初始窗口位置和大小；
-`q`/Esc 退出。建议使用 100×32 字符格，也支持更小终端及终端缩放。
+1. 把字符窗口拖到行星中央，检查前景的文字、空格和边框是否完全遮住后方图像。
+2. 把窗口移开，再点行星窗口的标题置前。检查露出的图像是否完整，桌面是否还有残影。
+3. 拖动底部手柄调整窗口大小，再把窗口移到屏幕底边。检查行星是否按比例缩放，底行有无错位或意外滚屏。
+4. 按 `e` 切换字符编码，`r` 恢复窗口位置和尺寸，`q` 或 Esc 退出。也可用 Tab 聚焦标题、方向键移动、Shift+方向键缩放。
 
-整个终端/复用器链路必须支持 Sixel、ED 2 图形擦除、无滚屏的定位输出及稳定调色板。
-在 Unix（含 macOS、WSL）上，示例先查询终端的主设备属性（DA1），确认终端声明支持 Sixel 后才测量字符格并绘图。即使指定了 `--cell-pixels` 也会检查。图形擦除、滚屏和调色板行为仍需由终端保证。
-每格像素尺寸优先来自操作系统窗口度量；不可用时在 Unix（包括 WSL）回退到 `CSI 16 t` 查询，要求
-stdin/stdout 均为连接到控制终端的 TTY，绝对超时为 500 ms。原生 Windows 尚无查询回退，
-仍需显式尺寸。可选的 `--cell-pixels 8x18` 跳过上述两种来源，必须匹配**实际字体度量**，
-不能任意填写。尺寸只在启动时保存，不会随字体、DPI 或窗口大小变化自动刷新，请显式更新或重启。
-此查询不协商 Sixel 能力。进入托管终端会话前会检查 feature 和后端限制
-（每个维度为 1..=1024，乘积不超过 65,536）。
-支持实际为 10×20 像素的字符格，可使用 `--cell-pixels 10x20`，不要将高度取整为 18 或 24。
-终端仍须正确处理末尾不完整六行带的透明填充，并满足图形擦除及无滚屏断言；
-接受这些尺寸不代表已通过真实终端认证。
-不带参数启动交互演示，`--help` 显示帮助。
-终端能力要求见 [`RasterCapabilities`](../src/render/raster/output.rs) 的 API 注释。
-
-有限的、无需终端的鼠标拖动与遮挡检查，以及示例测试：
+建议使用至少 100×32 字符格。在 Unix（含 macOS、WSL）上显式指定协议也会探测支持情况；`--cell-pixels WxH` 可提供实测的单格物理像素尺寸。原生 Windows 需同时指定已验证的后端和实测尺寸。全屏 Sixel 要求 ED 2 能清除图形、调色板稳定、补齐透明，且定位输出不会滚屏。
 
 ```sh
-cargo run --example sixel_windows -- --headless
-cargo test --example sixel_windows
-cargo test --example sixel_windows --no-default-features
+cargo run --example raster -- --headless
+cargo test --features kitty --example raster
+python3 scripts/check-sixel-query.py --both-backends
 ```
 
-这些检查不能认证真实终端的图形行为，也不是性能测量。
+`--headless` 在内存中验证鼠标操作与遮挡恢复。PTY 脚本在 Unix 上检查协议协商、输出和键盘输入。实际显示效果可按上述步骤在目标终端观察。
 
 ## 无终端验证
 

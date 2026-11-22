@@ -1,89 +1,216 @@
-//! Terminal-visible raster state, separate from the bounded encoding cache.
-//!
-//! A cache hit does not prove that a tile is still displayed. Preflight stages
-//! output before any frame bytes; visible state is committed only after flush.
-//! Changed old coverage requires mode-specific erasure and repaint, even when
-//! all replacement tile bytes can be reused.
+//! Session selection and frame preflight shared by the native presenters.
+#[cfg(feature = "kitty")]
+use super::kitty::{KittyFrame, KittyPresenter};
+use super::output::{
+    CellPixels, RasterBackend, RasterCapabilities, RasterConfig, RasterOutput, RasterSession,
+    RasterStats,
+};
+use super::sixel_presenter::{SixelFrame, SixelPresenter};
+use crate::render::{area::Position, buffer::Buffer};
+use std::{io, sync::Arc, time::Duration};
 
-use std::io;
-
-use crate::render::area::{Position, Size};
-use crate::render::buffer::Buffer;
-
-use super::output::{CellPixels, RasterOutput, RasterStats};
-use super::RasterCell;
-
-// Bound a single native frame as well as each encoded tile/cache. Oversized
-// layouts are rejected before terminal output rather than staging unbounded data.
-const MAX_NATIVE_CELLS: usize = 32 * 1024;
+pub(super) const MAX_NATIVE_CELLS: usize = 32 * 1024;
 const MAX_NATIVE_PIXELS: u64 = 16 * 1024 * 1024;
-#[cfg(feature = "sixel")]
-const MAX_FRAME_BYTES: usize = 32 * 1024 * 1024;
+#[cfg(any(feature = "sixel", feature = "kitty"))]
+pub(super) const MAX_FRAME_BYTES: usize = 32 * 1024 * 1024;
 
-type VisibleCell = (u16, u16, RasterCell);
-type EncodedCell = (u16, u16, std::sync::Arc<[u8]>);
-
-// Move only the DCS anchor, not the cell's source crop. Leading unset bits
-// preserve text/graphics above it. Within six cell rows a band boundary aligns
-// for every integral cell height; very short viewports may have no safe anchor.
-fn anchor_shift(y: u16, rows: u16, cell_height: u16) -> Option<u16> {
-    (0..=y.min(5)).find(|&shift| {
-        let image_height = u32::from(shift + 1) * u32::from(cell_height);
-        let available = u32::from(rows - y + shift) * u32::from(cell_height);
-        image_height.div_ceil(6) * 6 <= available
-    })
-}
-
-#[derive(Debug, Clone, Default)]
-pub(in crate::render) struct RasterPresenter {
-    pub config: RasterOutput,
-    pub alternate_screen: bool,
-    visible: Vec<VisibleCell>,
-    overlays: bool,
-    metrics: Option<CellPixels>,
+pub(super) fn check_limits(
+    buffer: &Buffer,
     origin: Position,
-    size: Size,
-    // Set before native I/O, cleared only after a successful flush. Even a
-    // failed first frame may have left graphics on the terminal.
-    uncertain: bool,
-    #[cfg(feature = "sixel")]
-    cache: super::sixel::SixelCache,
-    tiles_sent: u64,
-    bytes_sent: u64,
+    pixels: CellPixels,
+) -> io::Result<()> {
+    let count = buffer.raster_cells().count() + buffer.overlay_cells().count();
+    let pixel_count = count as u64 * u64::from(pixels.width) * u64::from(pixels.height);
+    let coordinates_valid = origin.x.checked_add(buffer.size().width).is_some()
+        && origin.y.checked_add(buffer.size().height).is_some();
+    let valid = count <= MAX_NATIVE_CELLS && pixel_count <= MAX_NATIVE_PIXELS && coordinates_valid;
+    if !valid {
+        return Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            format!(
+                "native raster frame exceeds resource or coordinate limits: \
+                             {count} cells (limit {MAX_NATIVE_CELLS}), \
+                             {pixel_count} physical pixels (limit {MAX_NATIVE_PIXELS}), \
+                             cell pixels {}x{}, coordinates valid: {coordinates_valid}",
+                pixels.width, pixels.height,
+            ),
+        ));
+    }
+    Ok(())
 }
 
+pub(super) type EncodedCell = (u16, u16, Arc<[u8]>);
 pub(in crate::render) struct RasterPlan {
     pub native: bool,
+    /// Text damage or protocol-only changes may need a synchronized frame
+    /// even after the last visible image has been removed.
     pub overlay_frame: bool,
     pub damage_pixels: Option<CellPixels>,
     pub clear: bool,
     pub inline_padding: u16,
-    pub encoded: Vec<EncodedCell>,
-    visible: Vec<VisibleCell>,
-    overlays: bool,
-    metrics: Option<CellPixels>,
-    origin: Position,
-    size: Size,
+    pub(super) payload: Payload,
 }
 
-impl RasterPresenter {
-    pub fn new(config: RasterOutput, alternate_screen: bool) -> Self {
-        Self {
-            config,
-            alternate_screen,
-            ..Self::default()
+pub(super) enum Payload {
+    Text,
+    Sixel(SixelFrame),
+    #[cfg(feature = "kitty")]
+    Kitty(KittyFrame),
+}
+
+impl RasterPlan {
+    pub fn sixel_tiles(&self) -> &[EncodedCell] {
+        match &self.payload {
+            Payload::Text => &[],
+            Payload::Sixel(frame) => &frame.encoded,
+            #[cfg(feature = "kitty")]
+            Payload::Kitty(_) => &[],
         }
     }
 
+    pub fn has_commands(&self) -> bool {
+        match &self.payload {
+            Payload::Text => false,
+            Payload::Sixel(frame) => !frame.encoded.is_empty(),
+            #[cfg(feature = "kitty")]
+            Payload::Kitty(frame) => !frame.commands.is_empty(),
+        }
+    }
+
+    pub fn kitty_commands(&self) -> &[u8] {
+        match &self.payload {
+            Payload::Text | Payload::Sixel(_) => &[],
+            #[cfg(feature = "kitty")]
+            Payload::Kitty(frame) => &frame.commands,
+        }
+    }
+
+    pub fn uses_kitty(&self) -> bool {
+        match self.payload {
+            Payload::Text | Payload::Sixel(_) => false,
+            #[cfg(feature = "kitty")]
+            Payload::Kitty(_) => true,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+enum Backend {
+    Sixel(SixelPresenter),
+    #[cfg(feature = "kitty")]
+    Kitty(KittyPresenter),
+    Pending(RasterBackend),
+    Unavailable(Arc<io::Error>),
+}
+
+#[derive(Debug, Clone)]
+pub(in crate::render) struct RasterPresenter {
+    backend: Backend,
+    pub alternate_screen: bool,
+    fullscreen_session: bool,
+}
+impl Default for RasterPresenter {
+    fn default() -> Self {
+        Self::new(RasterConfig::Output(Default::default()), false)
+    }
+}
+
+impl RasterPresenter {
+    pub fn new(config: RasterConfig, alternate_screen: bool) -> Self {
+        let backend = match config {
+            RasterConfig::Output(output) => {
+                Backend::Sixel(SixelPresenter::new(output, alternate_screen))
+            }
+            RasterConfig::Request(request) => Backend::Pending(request),
+            RasterConfig::Session(RasterSession::SixelFullscreen(pixels)) => {
+                Backend::Sixel(SixelPresenter::new(
+                    RasterOutput {
+                        capabilities: RasterCapabilities {
+                            sixel: true,
+                            reliable_erase: true,
+                            reliable_inline_erase: false,
+                            no_scroll: true,
+                            cell_pixels: Some(pixels),
+                        },
+                    },
+                    alternate_screen,
+                ))
+            }
+            #[cfg(feature = "kitty")]
+            RasterConfig::Session(RasterSession::KittyFullscreen(pixels)) => {
+                Backend::Kitty(KittyPresenter::new(pixels))
+            }
+            #[cfg(not(feature = "kitty"))]
+            RasterConfig::Session(RasterSession::KittyFullscreen(_)) => {
+                Backend::Unavailable(Arc::new(unsupported("the kitty Cargo feature is disabled")))
+            }
+        };
+        Self {
+            backend,
+            alternate_screen,
+            fullscreen_session: matches!(config, RasterConfig::Session(_)),
+        }
+    }
+
+    pub fn negotiate(&mut self, inline: bool, append_newline: bool) -> io::Result<()> {
+        let Backend::Pending(request) = self.backend else {
+            return Ok(());
+        };
+        let result = self
+            .fullscreen(inline, append_newline)
+            .and_then(|()| request.negotiate_fullscreen(None, Duration::from_millis(500)));
+        match result {
+            Ok(session) => *self = Self::new(RasterConfig::Session(session), self.alternate_screen),
+            Err(e) if request == RasterBackend::Auto => {
+                self.backend = Backend::Unavailable(Arc::new(e))
+            }
+            Err(e) => return Err(e),
+        }
+        Ok(())
+    }
+
+    fn fullscreen(&self, inline: bool, newline: bool) -> io::Result<()> {
+        if inline {
+            return Err(unsupported("backend negotiation and fullscreen snapshots do not support inline output; inline Sixel requires raster_output with verified erasure and scrolling"));
+        }
+        if !self.alternate_screen || newline {
+            return Err(unsupported(
+                "native fullscreen graphics require an alternate screen without appended newlines",
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn set_output(&mut self, config: RasterOutput) {
+        if !self.fullscreen_session {
+            if let Backend::Sixel(s) = &mut self.backend {
+                s.config = config;
+            }
+        }
+    }
+
+    fn validate(&self, buffer: &Buffer, inline: bool, newline: bool) -> io::Result<()> {
+        if buffer.has_raster() || buffer.has_unsupported_raster_composition() {
+            match &self.backend {
+                Backend::Pending(_) => return Err(unsupported(
+                    "custom writers require a verified raster_session or explicit raster_output",
+                )),
+                Backend::Unavailable(e) => {
+                    return Err(io::Error::new(io::ErrorKind::Unsupported, e.clone()))
+                }
+                _ if self.fullscreen_session => self.fullscreen(inline, newline)?,
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
     pub fn inline_padding_rows(&self, buffer: &Buffer) -> io::Result<u16> {
-        self.config
-            .resolve(
-                buffer.has_raster(),
-                buffer.has_unsupported_raster_composition(),
-                self.alternate_screen,
-                true,
-            )
-            .map(|metrics| metrics.map_or(0, CellPixels::inline_padding_rows))
+        self.validate(buffer, true, false)?;
+        match &self.backend {
+            Backend::Sixel(s) => s.inline_padding_rows(buffer),
+            _ => Ok(0),
+        }
     }
 
     pub fn prepare(
@@ -94,376 +221,76 @@ impl RasterPresenter {
         append_newline: bool,
         inline_shrank: bool,
     ) -> io::Result<RasterPlan> {
-        let metrics = self.config.resolve(
-            buffer.has_raster(),
-            buffer.has_unsupported_raster_composition(),
-            self.alternate_screen,
-            inline,
-        )?;
-        if metrics.is_some() && append_newline {
-            return Err(io::Error::new(
-                io::ErrorKind::Unsupported,
-                "native Sixel does not support appended-newline output",
-            ));
+        self.validate(buffer, inline, append_newline)?;
+        match &mut self.backend {
+            Backend::Sixel(s) => {
+                s.alternate_screen = self.alternate_screen;
+                s.prepare(buffer, origin, inline, append_newline, inline_shrank)
+            }
+            #[cfg(feature = "kitty")]
+            Backend::Kitty(k) => k.prepare(buffer, origin),
+            _ => Ok(RasterPlan {
+                native: false,
+                overlay_frame: false,
+                damage_pixels: None,
+                clear: false,
+                inline_padding: 0,
+                payload: Payload::Text,
+            }),
         }
-        if let Some(pixels) = metrics {
-            let count = buffer.raster_cells().count() + buffer.overlay_cells().count();
-            let pixel_count = count as u64 * u64::from(pixels.width) * u64::from(pixels.height);
-            let coordinates_valid = origin.x.checked_add(buffer.size().width).is_some()
-                && origin.y.checked_add(buffer.size().height).is_some();
-            let valid =
-                count <= MAX_NATIVE_CELLS && pixel_count <= MAX_NATIVE_PIXELS && coordinates_valid;
-            if !valid {
-                return Err(io::Error::new(
-                    io::ErrorKind::Unsupported,
-                    format!(
-                        "native raster frame exceeds resource or coordinate limits: \
-                             {count} cells (limit {MAX_NATIVE_CELLS}), \
-                             {pixel_count} physical pixels (limit {MAX_NATIVE_PIXELS}), \
-                             cell pixels {}x{}, coordinates valid: {coordinates_valid}",
-                        pixels.width, pixels.height,
-                    ),
-                ));
-            }
-        }
-        if let Some(pixels) = metrics {
-            if !inline
-                && buffer
-                    .raster_cells()
-                    .chain(buffer.overlay_cells())
-                    .any(|(_, y, _)| anchor_shift(y, buffer.size().height, pixels.height).is_none())
-            {
-                return Err(io::Error::new(
-                        io::ErrorKind::Unsupported,
-                        "fullscreen viewport is too short to position a complete Sixel band without scrolling",
-                    ));
-            }
-        }
-        let visible: Vec<_> = if metrics.is_some() {
-            buffer
-                .raster_cells()
-                .map(|(x, y, cell)| (x, y, cell.clone()))
-                .collect()
-        } else {
-            Vec::new()
-        };
-        // Both vectors are row-major. A merge scan detects erased/changed old
-        // coverage in linear time; adding a disjoint new tile needs no erase.
-        let mut current = visible.iter().peekable();
-        let old_changed = self.visible.iter().any(|old| {
-            while current
-                .peek()
-                .is_some_and(|new| (new.1, new.0) < (old.1, old.0))
-            {
-                current.next();
-            }
-            current.peek().is_none_or(|new| *new != old)
-        });
-        // Shrinking can abandon text-only rows while all raster cells stay
-        // unchanged. Erase those rows and repaint surviving tiles as well.
-        let overlays = buffer.overlay_cells().next().is_some();
-        let clear = self.uncertain
-            || (self.overlays
-                && (buffer.previous().is_none()
-                    || origin != self.origin
-                    || buffer.size() != self.size
-                    || (metrics.is_some() && metrics != self.metrics)))
-            || (inline_shrank && (metrics.is_some() || self.overlays))
-            || (!self.visible.is_empty()
-                && (old_changed
-                    || metrics != self.metrics
-                    || origin != self.origin
-                    || buffer.size() != self.size
-                    || buffer.previous().is_none()));
-        let mut plan = RasterPlan {
-            native: metrics.is_some(),
-            overlays,
-            overlay_frame: overlays || self.overlays,
-            damage_pixels: metrics.or(self.metrics),
-            clear,
-            inline_padding: if inline {
-                metrics.map_or(0, CellPixels::inline_padding_rows)
-            } else {
-                0
-            },
-            encoded: Vec::new(),
-            visible,
-            metrics,
-            origin,
-            size: buffer.size(),
-        };
-        #[cfg(feature = "sixel")]
-        if let Some(pixels) = metrics {
-            let mut bytes = 0usize;
-            // Every glyph we repaint can cover all tiles across its column span.
-            // Replay those tiles bottom-to-top, even if their samples are unchanged.
-            let mut damaged = std::collections::BTreeSet::new();
-            if plan.overlay_frame && !clear {
-                if let Some(diff) = buffer.native_diff(plan.damage_pixels) {
-                    for (x, y, base) in diff {
-                        for dx in 0..base.width() {
-                            damaged.insert((x + dx as u16, y));
-                        }
-                    }
-                }
-            }
-            for (x, y, cell, overlay) in plan
-                .visible
-                .iter()
-                .map(|(x, y, c)| (*x, *y, c, false))
-                .chain(buffer.overlay_cells().map(|(x, y, c)| (x, y, c, true)))
-            {
-                if !clear
-                    && self.metrics == metrics
-                    && buffer.previous().is_some()
-                    && !damaged.contains(&(x, y))
-                    && (overlay || buffer.previous_raster_at((x, y).into()) == Some(cell))
-                {
-                    continue;
-                }
-                let shift = if inline {
-                    0 // Inline already reserves trailing guard rows.
-                } else {
-                    anchor_shift(y, buffer.size().height, pixels.height)
-                        .expect("anchors validated before encoding")
-                };
-                let data = self.cache.encode_padded(
-                    cell,
-                    pixels.width,
-                    pixels.height,
-                    shift * pixels.height,
-                )?;
-                bytes = bytes.saturating_add(data.len());
-                if bytes > MAX_FRAME_BYTES {
-                    return Err(io::Error::new(
-                        io::ErrorKind::Unsupported,
-                        "encoded raster frame exceeds 32 MiB",
-                    ));
-                }
-                plan.encoded.push((x, y - shift, data));
-            }
-        }
-        // Frames without raster cells do not allocate source or encoded data.
-        #[cfg(not(feature = "sixel"))]
-        let _ = &mut plan;
-        Ok(plan)
     }
-
     pub fn begin(&mut self, plan: &RasterPlan) {
-        self.uncertain |= plan.native || plan.clear || plan.overlay_frame;
+        match &mut self.backend {
+            Backend::Sixel(s) => s.begin(plan),
+            #[cfg(feature = "kitty")]
+            Backend::Kitty(k) => {
+                if let Payload::Kitty(frame) = &plan.payload {
+                    k.begin(frame)
+                }
+            }
+            _ => {}
+        }
     }
-
     pub fn commit(&mut self, plan: RasterPlan) {
-        self.tiles_sent = self.tiles_sent.saturating_add(plan.encoded.len() as u64);
-        self.bytes_sent = self.bytes_sent.saturating_add(
-            plan.encoded
-                .iter()
-                .map(|(_, _, bytes)| bytes.len() as u64)
-                .sum::<u64>(),
-        );
-        self.overlays = plan.overlays;
-        self.visible = plan.visible;
-        self.metrics = plan.metrics;
-        self.origin = plan.origin;
-        self.size = plan.size;
-        self.uncertain = false;
+        match &mut self.backend {
+            Backend::Sixel(s) => s.commit(plan),
+            #[cfg(feature = "kitty")]
+            Backend::Kitty(k) => {
+                if let Payload::Kitty(frame) = plan.payload {
+                    k.commit(frame)
+                }
+            }
+            _ => {}
+        }
     }
-
-    // Transfer ownership of a successfully displayed region to terminal history.
-    // Keep the bounded encoding cache and counters, but never erase old coverage.
-    pub fn forget_region(&mut self) {
-        self.overlays = false;
-        self.visible.clear();
-        self.metrics = None;
-        self.origin = Position::default();
-        self.size = Size::default();
-        self.uncertain = false;
-    }
-
-    pub fn stats(&self) -> RasterStats {
-        let stats = RasterStats {
-            tiles_sent: self.tiles_sent,
-            bytes_sent: self.bytes_sent,
-            ..Default::default()
-        };
-        #[cfg(feature = "sixel")]
-        let stats = RasterStats {
-            encodes: self.cache.encodes(),
-            cache_hits: self.cache.hits(),
-            cache_bytes: self.cache.bytes(),
-            cache_entries: self.cache.len(),
-            ..stats
-        };
-        stats
-    }
-
     pub fn needs_protocol_recovery(&self) -> bool {
-        self.uncertain
+        match &self.backend {
+            Backend::Sixel(s) => s.needs_protocol_recovery(),
+            #[cfg(feature = "kitty")]
+            Backend::Kitty(k) => k.uncertain(),
+            _ => false,
+        }
+    }
+    pub fn cleanup_kitty(&mut self, _out: &mut impl io::Write) -> io::Result<()> {
+        #[cfg(feature = "kitty")]
+        if let Backend::Kitty(k) = &mut self.backend {
+            k.cleanup(_out)?;
+        }
+        Ok(())
+    }
+    pub fn forget_region(&mut self) {
+        if let Backend::Sixel(s) = &mut self.backend {
+            s.forget_region();
+        }
+    }
+    pub fn stats(&self) -> RasterStats {
+        match &self.backend {
+            Backend::Sixel(s) => s.stats(),
+            _ => RasterStats::default(),
+        }
     }
 }
 
-#[cfg(all(test, feature = "sixel"))]
-mod tests {
-    use super::*;
-    use crate::render::raster::output::RasterCapabilities;
-    use crate::render::raster::{RasterCanvas, RasterOptions, Rgb};
-
-    fn frame(width: u16) -> Buffer {
-        let mut buffer = Buffer::new((width, 3).into());
-        let canvas = RasterCanvas::new(1, 1, Rgb(0, 0, 0)).unwrap();
-        for x in 0..width {
-            buffer
-                .set_raster(
-                    (x, 0).into(),
-                    RasterCell {
-                        canvas: canvas.clone(),
-                        target: buffer.size(),
-                        x,
-                        y: 0,
-                        options: RasterOptions::default(),
-                    },
-                )
-                .unwrap();
-        }
-        buffer
-    }
-
-    fn presenter(width: u16, height: u16) -> RasterPresenter {
-        RasterPresenter::new(
-            RasterOutput {
-                capabilities: RasterCapabilities {
-                    sixel: true,
-                    reliable_erase: true,
-                    reliable_inline_erase: false,
-                    no_scroll: true,
-                    cell_pixels: Some(CellPixels { width, height }),
-                },
-            },
-            true,
-        )
-    }
-
-    #[test]
-    fn native_frame_limits_are_checked_before_any_encoding() {
-        for (cells, pixel_width, pixel_height) in
-            [((MAX_NATIVE_CELLS + 1) as u16, 1, 6), (300, 1000, 60)]
-        {
-            let buffer = frame(cells);
-
-            let mut presenter = presenter(pixel_width, pixel_height);
-            let plan = presenter.prepare(&buffer, Position::default(), false, false, false);
-
-            assert_eq!(plan.err().unwrap().kind(), io::ErrorKind::Unsupported);
-
-            assert_eq!(presenter.stats(), RasterStats::default());
-        }
-    }
-
-    #[test]
-    fn million_pixel_frame_and_cell_budget_boundary_use_native_output() {
-        for cells in [5000, MAX_NATIVE_CELLS as u16] {
-            let mut presenter = presenter(10, 20);
-            let plan = presenter
-                .prepare(&frame(cells), Position::default(), false, false, false)
-                .unwrap();
-            assert!(plan.native);
-            assert_eq!(plan.encoded.len(), usize::from(cells));
-            assert_eq!(plan.visible.len(), usize::from(cells));
-        }
-    }
-
-    #[test]
-    fn strict_limit_error_reports_usage_and_limits() {
-        let mut presenter = presenter(10, 20);
-        let error = presenter
-            .prepare(
-                &frame((MAX_NATIVE_CELLS + 1) as u16),
-                Position::default(),
-                false,
-                false,
-                false,
-            )
-            .err()
-            .unwrap()
-            .to_string();
-        assert!(error.contains("32769 cells (limit 32768)"));
-        assert!(error.contains("6553800 physical pixels (limit 16777216)"));
-        assert!(error.contains("cell pixels 10x20, coordinates valid: true"));
-    }
-
-    #[test]
-    fn encoded_frame_limit_rejects_without_committing_graphics() {
-        let mut canvas = RasterCanvas::new(24, 16, Rgb(0, 0, 0)).unwrap();
-        for y in 0..16 {
-            for x in 0..24 {
-                let value = (y * 24 + x) as u8;
-                canvas.set_pixel(
-                    x,
-                    y,
-                    Rgb(value, value.wrapping_mul(71), value.wrapping_mul(137)),
-                );
-            }
-        }
-        let cell = RasterCell {
-            canvas,
-            target: (1, 1).into(),
-            x: 0,
-            y: 0,
-            options: RasterOptions::default(),
-        };
-        let mut buffer = Buffer::new((MAX_NATIVE_CELLS as u16, 3).into());
-        for x in 0..MAX_NATIVE_CELLS as u16 {
-            buffer.set_raster((x, 0).into(), cell.clone()).unwrap();
-        }
-        let mut presenter = presenter(24, 16);
-        let error = presenter
-            .prepare(&buffer, Position::default(), false, false, false)
-            .err()
-            .unwrap();
-        assert_eq!(error.kind(), io::ErrorKind::Unsupported);
-        assert!(error.to_string().contains("encoded raster frame exceeds"));
-        assert!(presenter.visible.is_empty());
-        assert!(!presenter.needs_protocol_recovery());
-        assert_eq!(presenter.stats().tiles_sent, 0);
-        assert_eq!(presenter.stats().bytes_sent, 0);
-    }
-
-    #[test]
-    fn coordinate_overflow_is_rejected_before_encoding() {
-        let mut presenter = presenter(8, 18);
-        let error = presenter
-            .prepare(&frame(2), (u16::MAX, 0).into(), false, false, false)
-            .err()
-            .unwrap();
-        assert_eq!(error.kind(), io::ErrorKind::Unsupported);
-        assert_eq!(presenter.stats().encodes, 0);
-    }
-
-    #[test]
-    fn resource_limit_rejection_preserves_previously_visible_graphics() {
-        let mut presenter = presenter(8, 18);
-        let first = presenter
-            .prepare(&frame(1), Position::default(), false, false, false)
-            .unwrap();
-        presenter.begin(&first);
-        presenter.commit(first);
-        let before = presenter.stats();
-        assert!(presenter
-            .prepare(
-                &frame((MAX_NATIVE_CELLS + 1) as u16),
-                Position::default(),
-                false,
-                false,
-                false
-            )
-            .is_err());
-        assert_eq!(presenter.stats(), before);
-        assert_eq!(presenter.visible.len(), 1);
-        let empty = Buffer::new((1, 3).into());
-        let cleanup = presenter
-            .prepare(&empty, Position::default(), false, false, false)
-            .unwrap();
-        assert!(cleanup.clear);
-        assert!(!cleanup.native);
-    }
+pub(super) fn unsupported(message: &'static str) -> io::Error {
+    io::Error::new(io::ErrorKind::Unsupported, message)
 }

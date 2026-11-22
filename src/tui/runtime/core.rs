@@ -9,8 +9,8 @@ use std::time::{Duration, Instant};
 
 use crate::render::area::Size;
 use crate::render::chunk::Chunk;
-use crate::render::raster_output::RasterOutput;
 use crate::render::{Draw, DrawErr, InlineMouseMode, InputCapabilities, KeyboardMode, Update};
+use crate::tui::app::RasterSetting;
 use crossterm::event::Event;
 
 use super::{Clock, Executor};
@@ -288,7 +288,7 @@ impl<State, M: Send + 'static> Runtime<State, M> {
     ///
     /// The buffer is blank before the first step and immediately after resizing.
     /// Raster metadata is retained without requiring terminal capabilities.
-    /// Presenting a frame containing raster content requires Sixel output.
+    /// Presenting a frame containing raster content requires a native graphics backend.
     pub fn frame(&self) -> &crate::render::buffer::Buffer {
         &self.buffer
     }
@@ -636,7 +636,7 @@ pub(crate) struct AppRuntime<State, U, V, M> {
     global_key_handlers: HashMap<KeyCode, Box<dyn Fn() -> M>>,
     input_handler: Option<InputHandler<M>>,
     keyboard_mode: KeyboardMode,
-    raster_output: RasterOutput,
+    raster_output: RasterSetting,
     focus_events: bool,
     hotkeys: HotkeyRegistry<M>,
     command_router: Option<CommandRouter<M>>,
@@ -2439,7 +2439,6 @@ where
         builder
             .enable_raw_mode()
             .keyboard_mode(self.keyboard_mode)
-            .raster_output(self.raster_output)
             .focus_events(self.focus_events)
             .clear(false)
             .append_newline(false)
@@ -2459,6 +2458,11 @@ where
             builder.enable_alt_screen().size((width, height));
         }
 
+        match self.raster_output {
+            RasterSetting::Output(output) => builder.raster_output(output),
+            RasterSetting::Backend(backend) => builder.raster_backend(backend),
+            RasterSetting::Session(session) => builder.raster_session(session),
+        };
         let mut event_loop = builder.build_event_loop(self);
 
         if inline_mode {
@@ -3239,8 +3243,10 @@ mod tests {
         use crate::tui::widgets::label;
 
         let default = App::<(), ()>::new(());
-        assert_eq!(default.raster_output, RasterOutput::default());
-        assert!(!default.raster_output.capabilities.sixel);
+        let RasterSetting::Output(output) = default.raster_output else {
+            panic!()
+        };
+        assert_eq!(output, RasterOutput::default());
         let pixels = CellPixels {
             width: 8,
             height: 16,
@@ -3257,9 +3263,21 @@ mod tests {
                 },
             };
             let app = App::new(())
+                .raster_backend(crate::render::RasterBackend::Auto)
                 .raster_output(config)
                 .build(|_, ()| {}, |_| label("ready"));
-            assert_eq!(app.core.raster_output, config);
+            let mut requested = App::new(())
+                .raster_output(config)
+                .raster_backend(crate::render::RasterBackend::Kitty)
+                .build(|_, ()| {}, |_| label("ready"));
+            requested.step(&[]).unwrap();
+            assert!(matches!(
+                requested.core.raster_output,
+                RasterSetting::Backend(crate::render::RasterBackend::Kitty)
+            ));
+            assert!(
+                matches!(app.core.raster_output, RasterSetting::Output(output) if output == config)
+            );
         }
     }
 

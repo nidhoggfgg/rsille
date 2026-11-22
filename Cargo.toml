@@ -9,9 +9,10 @@ categories = ["command-line-interface", "graphics"]
 readme = "README.md"
 license = "MIT"
 repository = "https://github.com/nidhoggfgg/rsille.git"
-include = ["src/**", "examples/basic_canvas.rs", "examples/sixel_windows.rs", "/README.md", "/README_cn.md", "LICENCE", "Cargo.toml"]
+include = ["src/**", "examples/basic_canvas.rs", "examples/raster.rs", "/README.md", "/README_cn.md", "LICENCE", "Cargo.toml"]
 
 [dependencies]
+base64 = { workspace = true, optional = true }
 crossterm = { workspace = true }
 tokio = { workspace = true }
 futures = { workspace = true }
@@ -30,6 +31,7 @@ libc = "0.2"
 default = ["sixel"]
 syntax-highlighting = ["dep:syntect"]
 sixel = []
+kitty = ["dep:base64"]
 
 [workspace]
 members = ["packages/canvas", "packages/render", "packages/tui", "packages/rsille-typst", "packages/rsille-playground"]
@@ -37,6 +39,7 @@ resolver = "3"
 exclude = ["examples"]
 
 [workspace.dependencies]
+base64 = "0.22"
 tokio = { version = "1", features = ["rt", "sync", "time", "macros"] }
 unicode-width = "0.2.0"
 unicode-segmentation = "1.12"

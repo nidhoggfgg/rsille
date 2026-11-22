@@ -123,8 +123,8 @@ where
     /// # Errors
     ///
     /// Returns drawing failures converted to [`std::io::Error`], or errors
-    /// from writing or flushing output. Raster frames require the optional
-    /// `sixel` feature, verified terminal capabilities and valid pixel metrics.
+    /// from writing or flushing output. Raster frames require a compiled backend,
+    /// verified terminal capabilities and valid physical cell metrics.
     /// Unsupported composition, output modes and resource limits are rejected
     /// before frame output; raster content never falls back to characters.
     /// A failed frame is not saved.
@@ -216,7 +216,7 @@ where
         )?;
         if raster_plan.overlay_frame
             && !raster_plan.clear
-            && raster_plan.encoded.is_empty()
+            && !raster_plan.has_commands()
             && !self.output_uncertain
             && !self.append_newline
             && (!self.inline_mode
@@ -231,8 +231,9 @@ where
             self.buffer.clear();
             return Ok(());
         }
+        let recovering = self.raster.needs_protocol_recovery();
         self.output_uncertain = true;
-        if self.raster.needs_protocol_recovery() {
+        if recovering {
             // A prior writer failure may have prevented even the best-effort
             // terminator from reaching the terminal. Cancel an incomplete DCS
             // before issuing SGR/ED commands on the recovered writer.
@@ -244,6 +245,7 @@ where
                 self.inline_raster_padding = 0;
             }
             self.inline_raster_checkpoint = None;
+            self.raster.cleanup_kitty(&mut self.out)?;
         }
         self.raster.begin(&raster_plan);
         // A flush is not an atomic terminal repaint. Hide the intermediate
@@ -260,7 +262,11 @@ where
 
         let inline_raster = self.inline_mode
             && (raster_plan.native || raster_plan.clear || raster_plan.overlay_frame);
-        if !inline_raster && (raster_plan.clear || (self.clear && self.buffer.previous().is_none()))
+        if !inline_raster
+            && (raster_plan.clear
+                || (self.clear
+                    && self.buffer.previous().is_none()
+                    && !(recovering && raster_plan.uses_kitty())))
         {
             // Native output is enabled only for hosts that verified ED 2 erases
             // graphics. Spaces/EL are not assumed to remove old Sixel pixels.
@@ -275,14 +281,14 @@ where
             self.render_inline_raster(&raster_plan)?;
         } else if self.inline_mode {
             self.render_inline()?;
-        } else if raster_plan.native || raster_plan.overlay_frame {
+        } else if !raster_plan.uses_kitty() && (raster_plan.native || raster_plan.overlay_frame) {
             self.render_raster_characters(&raster_plan)?;
         } else {
             self.render_fullscreen()?;
         }
-        if !inline_raster && !raster_plan.encoded.is_empty() {
+        if !inline_raster && !raster_plan.sixel_tiles().is_empty() {
             crossterm::queue!(self.out, SavePosition)?;
-            for (x, y, bytes) in &raster_plan.encoded {
+            for (x, y, bytes) in raster_plan.sixel_tiles() {
                 crossterm::queue!(self.out, MoveTo(self.pos.x + x, self.pos.y + y))?;
                 if let Err(error) = self.out.write_all(bytes) {
                     // Best effort DCS termination and cursor restoration on a
@@ -294,6 +300,10 @@ where
                 }
             }
             crossterm::queue!(self.out, RestorePosition, ResetColor)?;
+        }
+
+        if !raster_plan.kitty_commands().is_empty() {
+            self.out.write_all(raster_plan.kitty_commands())?;
         }
 
         if self.append_newline {
@@ -447,12 +457,24 @@ where
         Ok(())
     }
 
-    /// Changes explicit terminal capabilities or pixel metrics for subsequent frames.
+    /// Updates capabilities or metrics when using the legacy Sixel output configuration.
     /// Raster frames with missing capabilities or invalid metrics fail without
     /// replacing the last successful frame. Removing raster content clears its
     /// old graphics on the next successful frame.
     pub fn set_raster_output(&mut self, config: super::raster_output::RasterOutput) {
-        self.raster.config = config;
+        self.raster.set_output(config);
+    }
+
+    /// Release this writer's Kitty resources before leaving the alternate screen.
+    /// Managed event loops do this automatically. A later raster frame reuploads
+    /// the visible resources. Call on the same writer after a known terminal cache
+    /// invalidation. A failed cleanup can be retried.
+    pub fn release_raster_resources(&mut self) -> std::io::Result<()> {
+        self.raster.cleanup_kitty(&mut self.out)
+    }
+
+    pub(super) fn negotiate_raster(&mut self) -> std::io::Result<()> {
+        self.raster.negotiate(self.inline_mode, self.append_newline)
     }
 
     /// Returns Sixel work counters and bounded cache occupancy.
@@ -632,7 +654,7 @@ where
                 paint(x, y, cell)?;
             }
         }
-        for (x, y, bytes) in &plan.encoded {
+        for (x, y, bytes) in plan.sixel_tiles() {
             Self::position_inline(&mut self.out, extent, *x, *y)?;
             self.out.write_all(bytes)?;
         }
@@ -784,7 +806,7 @@ where
             used_height: builder.size.height, // Initialize to buffer capacity
             inline_clipped_height: 0,
             raster: super::raster::RasterPresenter::new(
-                builder.raster_output,
+                builder.raster_config,
                 builder.enable_alt_screen,
             ),
         }

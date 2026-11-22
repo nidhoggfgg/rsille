@@ -1,5 +1,6 @@
 //! Configuration shared by standalone renderers and terminal event loops.
 
+use super::raster_output::{RasterBackend, RasterConfig, RasterSession};
 use crossterm::event::{KeyCode, KeyEvent};
 use log::info;
 
@@ -48,7 +49,7 @@ pub struct Builder {
     pub(super) enable_mouse_capture: bool,
     pub(super) enable_hide_cursor: bool,
     pub(super) keyboard_mode: KeyboardMode,
-    pub(super) raster_output: crate::render::raster_output::RasterOutput,
+    pub(super) raster_config: RasterConfig,
     pub(super) focus_events: bool,
     pub(super) exit_code: Option<KeyEvent>,
     pub(super) frame_limit: Option<u16>,
@@ -79,7 +80,7 @@ impl Builder {
             enable_mouse_capture: false,
             enable_hide_cursor: false,
             keyboard_mode: KeyboardMode::Legacy,
-            raster_output: crate::render::raster_output::RasterOutput::default(),
+            raster_config: RasterConfig::Output(Default::default()),
             focus_events: false,
             exit_code: Some(KeyCode::Esc.into()),
             frame_limit: None,
@@ -135,7 +136,24 @@ impl Builder {
         &mut self,
         config: crate::render::raster_output::RasterOutput,
     ) -> &mut Self {
-        self.raster_output = config;
+        self.raster_config = RasterConfig::Output(config);
+        self
+    }
+
+    /// Select a native backend at managed startup. Fullscreen requires an
+    /// alternate screen and the host guarantees on [`RasterSession`]. For
+    /// inline Sixel, supply verified capabilities with [`Self::raster_output`].
+    /// The last raster setting wins. Building a renderer never probes a TTY.
+    pub fn raster_backend(&mut self, backend: RasterBackend) -> &mut Self {
+        self.raster_config = RasterConfig::Request(backend);
+        self
+    }
+
+    /// Use a host-verified snapshot without probing or taking input ownership.
+    /// A standalone host enters the alternate screen before rendering and calls
+    /// [`Render::release_raster_resources`] before leaving it.
+    pub fn raster_session(&mut self, session: RasterSession) -> &mut Self {
+        self.raster_config = RasterConfig::Session(session);
         self
     }
 

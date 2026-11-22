@@ -14,6 +14,7 @@ name = "render"
 doctest = false
 
 [dependencies]
+base64 = { workspace = true, optional = true }
 crossterm = { workspace = true }
 tokio = { workspace = true }
 futures = { workspace = true }
@@ -27,6 +28,7 @@ libc = "0.2"
 [features]
 default = []
 sixel = []
+kitty = ["dep:base64"]
 
 [dev-dependencies]
 criterion = { version = "0.7", features = ["html_reports"] }

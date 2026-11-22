@@ -1,4 +1,4 @@
-//! Explicit terminal capabilities for Sixel raster frames.
+//! Startup backend selection and verified native graphics capabilities.
 //!
 //! Unknown graphics capabilities reject raster presentation. Native output
 //! requires explicit cell metrics, optionally obtained with a startup probe.
@@ -6,6 +6,78 @@
 //! does not negotiate Sixel support.
 
 use std::{io, time::Duration};
+
+/// Native graphics protocol requested for a managed terminal session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RasterBackend {
+    /// Prefer Kitty, then Sixel. Defer negotiation errors until a raster frame.
+    Auto,
+    /// Require Sixel at startup.
+    Sixel,
+    /// Require Kitty graphics at startup.
+    Kitty,
+}
+
+/// Verified fullscreen protocol and physical cell metrics for one output terminal.
+/// A custom writer's host must establish the alternate screen itself.
+/// Sixel additionally requires ED 2 graphics erasure, stable palette colors,
+/// transparent band padding and safe positioned output even on the bottom row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RasterSession {
+    /// Direct RGBA uploads and independently positioned Kitty placements.
+    KittyFullscreen(CellPixels),
+    /// Positioned Sixel tiles on a host satisfying the fullscreen requirements.
+    SixelFullscreen(CellPixels),
+}
+
+impl RasterBackend {
+    /// Negotiate on the controlling terminal before starting any input reader.
+    /// The result can be passed to a builder writing to the same terminal.
+    /// Explicit measured pixels take precedence over OS metrics and CSI 16 t.
+    /// Each terminal exchange is bounded by `timeout`. A late reply can reach
+    /// the subsequent input reader. Native Windows hosts can supply a snapshot.
+    pub fn negotiate_fullscreen(
+        self,
+        pixels: Option<CellPixels>,
+        timeout: Duration,
+    ) -> io::Result<RasterSession> {
+        let kitty = self != Self::Sixel && cfg!(feature = "kitty");
+        let sixel = self != Self::Kitty && cfg!(feature = "sixel");
+        if !kitty && !sixel {
+            return Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                format!("no compiled raster backend for {self:?}"),
+            ));
+        }
+        crate::render::terminal_probe::before_input(|| {
+            let (has_kitty, has_sixel) =
+                crate::render::terminal_probe::protocols(kitty, sixel, timeout)?;
+            if !has_kitty && !has_sixel {
+                return Err(io::Error::new(
+                    io::ErrorKind::Unsupported,
+                    match (kitty, sixel) {
+                        (true, true) => "terminal advertised neither Kitty graphics nor Sixel",
+                        (true, false) => "terminal did not advertise Kitty graphics",
+                        _ => "terminal did not advertise Sixel",
+                    },
+                ));
+            }
+            let pixels = CellPixels::resolve_with(pixels, || CellPixels::probe_locked(timeout))?;
+            Ok(if has_kitty {
+                RasterSession::KittyFullscreen(pixels)
+            } else {
+                RasterSession::SixelFullscreen(pixels)
+            })
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum RasterConfig {
+    Output(RasterOutput),
+    Request(RasterBackend),
+    Session(RasterSession),
+}
 
 /// Actual terminal-cell pixel dimensions, not Canvas samples per cell.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -103,11 +175,13 @@ impl CellPixels {
     /// # Ok::<(), std::io::Error>(())
     /// ```
     pub fn probe(timeout: Duration) -> io::Result<Self> {
-        crate::render::terminal_probe::before_input(|| {
-            Self::detect_with(Self::read_terminal, || {
-                let (width, height) = crate::render::terminal_probe::cell_pixels(timeout)?;
-                Ok(Self { width, height })
-            })
+        crate::render::terminal_probe::before_input(|| Self::probe_locked(timeout))
+    }
+
+    fn probe_locked(timeout: Duration) -> io::Result<Self> {
+        Self::detect_with(Self::read_terminal, || {
+            let (width, height) = crate::render::terminal_probe::cell_pixels(timeout)?;
+            Ok(Self { width, height })
         })
     }
 
@@ -241,7 +315,7 @@ impl RasterCapabilities {
 
 /// Terminal raster settings shared by render builders and TUI applications.
 ///
-/// Raster presentation uses only Sixel and requires the default-enabled `sixel` feature.
+/// This configuration selects Sixel and requires the `sixel` feature.
 /// Defaults leave every capability unknown: frames without raster content work
 /// normally, while raster frames fail until the required capabilities are set.
 /// Both modes require `sixel`, `no_scroll`, and valid `cell_pixels`. Fullscreen

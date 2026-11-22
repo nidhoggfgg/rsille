@@ -7,7 +7,7 @@
 //! rsille = "3"
 //! ```
 //!
-//! No optional features are enabled by default. Enable `syntax-highlighting` for
+//! Sixel is enabled by default. Enable `kitty` for Kitty graphics and `syntax-highlighting` for
 //! Syntect highlighting in code viewers; plain text and navigation work without it.
 //!
 //! # Choose an API
@@ -123,7 +123,7 @@ pub mod render;
 /// Independent opaque RGB drawing, shared with the renderer.
 ///
 /// Unlike [`canvas`], raster coordinates are explicit pixels with y increasing
-/// downward. Image presentation requires Sixel; headless frames retain raster metadata
+/// downward. Image presentation uses Sixel or Kitty; headless frames retain raster metadata
 /// and opaque background placeholders, not character previews.
 pub use render::raster;
 

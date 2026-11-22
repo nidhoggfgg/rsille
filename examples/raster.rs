@@ -1,6 +1,6 @@
-//! Two draggable windows, one native Sixel surface and one ordinary Canvas.
-//! Run `cargo run --release --features sixel --example sixel_windows`.
-//! Use `--headless` to exercise real mouse events.
+//! Fullscreen compatibility test for native raster graphics and overlapping windows.
+//! Run `cargo run --release --features kitty --example raster` to try both backends.
+//! Use `--backend sixel` or `--backend kitty` to test a specific protocol.
 
 use std::{error::Error, sync::Arc};
 
@@ -13,58 +13,35 @@ use rsille::{
 const BACKGROUND: Rgb = Rgb(8, 13, 25);
 const CYAN: Color = Color::Rgb(92, 218, 230);
 const AMBER: Color = Color::Rgb(255, 191, 115);
-const HELP: &str = "SIXEL / CANVAS — two surfaces, one desktop
+const HELP: &str = "Raster compatibility test — fullscreen window movement and occlusion
 
-Run from the repository root:
-  cargo run --release --features sixel --example sixel_windows
-  cargo run --example sixel_windows -- --headless
+  cargo run --release --features kitty --example raster
+  cargo run --release --features kitty --example raster -- --backend kitty
+  cargo run --example raster -- --backend sixel
+  cargo run --example raster -- --headless
 
-Options:
+  --backend auto|kitty|sixel  Auto prefers Kitty, then Sixel, among compiled backends.
+  --cell-pixels WxH           Measured physical pixels per character cell.
+  --force-cell-pixels         Confirm a measurement equal to the terminal grid.
+  --headless                  Exercise window interactions in memory.
+  --help                      Show this guide.
 
-  --cell-pixels WxH     Skip OS/query discovery: physical pixels per character cell
-  --force-cell-pixels   Confirm an override equal to the terminal columns x rows
-  --headless            Check dragging, resizing, stacking and restoration in memory
-  --help                Show this guide
+The header shows the active protocol and cell size. Drag one title across the
+other window. The foreground border and text should cover the planet. Move
+the window away to check that the hidden image and desktop reappear. Click
+either window to raise it. Drag the bottom grip to check image fitting during
+resize. Tab focuses a title, arrows move it, and Shift+arrows resize it.
+e cycles character encoding, r restores the windows, and q or Esc exits.
 
-Drag a title to move; drag the bottom grip to resize; click to bring forward.
-Tab focuses a title; arrows move it; Shift+arrows resize it.
-e cycles Canvas HalfBlock/Braille/Quadrant; r resets windows; q / Esc quits.
-Suggested terminal size: 100 columns by 32 rows (NOT --cell-pixels 100x32).
+Unix (including WSL) queries protocol support once, even with explicit metrics.
+Cell size comes from the override, OS window metrics or CSI 16 t, in that order.
+On native Windows, specify a host-verified backend and measured cell size.
+Fullscreen Sixel requires ED 2 graphics erasure, stable palettes, transparent
+band padding and positioned rendering without scrolling.";
 
-Cell pixels are the width x height of ONE character cell, not the terminal grid,
-window pixels, font point size, or Canvas samples. For example, a 960x648-pixel
-text area with 120 columns and 36 rows has 8x18-pixel cells, NOT 120x36.
-Omit --cell-pixels to try OS window metrics first. Unavailable, zero, non-integral,
-or unsupported OS dimensions trigger CSI 16 t on Unix (including WSL), with a
-500 ms absolute timeout. Stdin/stdout must be TTYs on the controlling terminal.
-The CSI 6 ; height ; width t reply is pixels per cell directly, not window pixels;
-do not divide it by columns/rows. The result is stored once at startup, not refreshed
-while running. After font or DPI changes, restart to measure again.
-Native Windows has no query fallback; explicit dimensions are still needed there.
-If both automatic sources fail, native startup fails: measure text-area pixels /
-columns and rows; do not guess 8x18. Explicit overrides skip all OS metric lookup
-and cell-size queries, and stay fixed after font changes. An override matching the
-grid requires --force-cell-pixels; use it only for a verified unusual cell size.
-Dimensions must be 1..=1024 with area <=65536 pixels per character cell.
-Metric queries do not detect Sixel support.
-Startup probing must precede any input reader. It may consume unrelated input;
-late replies after timeout may reach the subsequent reader. Runtime input uses
-native crossterm. Standalone/embedded hosts can call CellPixels::probe(timeout)
-before starting input and store the result as Some(pixels) in their configuration.
-Incorrect metrics can distort images and misalign graphics while dragging.
-
-Normal invocation requires native Sixel; it never silently falls back. Build with
---features sixel and use a terminal AND multiplexer that support Sixel, ED 2 graphics
-erasure, stable palettes, and non-scrolling positioned output.
-Partial final six-pixel bands must preserve transparent padding without scrolling.
-Actual cell sizes such as 10x20 are supported; do not round the height to 18 or 24.
-On Unix (including macOS and WSL), startup checks for Sixel in the terminal's
-primary device attributes (DA1), even with --cell-pixels.
-Erase, palette, and scrolling behavior must still be verified separately.
-The --headless checks do not certify terminal compatibility.";
-
-#[derive(Default, Debug)]
+#[derive(Debug)]
 struct Options {
+    backend: RasterBackend,
     pixels: Option<CellPixels>,
     force_cell_pixels: bool,
     headless: bool,
@@ -73,10 +50,24 @@ struct Options {
 
 impl Options {
     fn parse(arguments: impl IntoIterator<Item = String>) -> Result<Self, String> {
-        let mut options = Self::default();
+        let mut options = Self {
+            backend: RasterBackend::Auto,
+            pixels: None,
+            force_cell_pixels: false,
+            headless: false,
+            help: false,
+        };
         let mut args = arguments.into_iter();
         while let Some(argument) = args.next() {
             match argument.as_str() {
+                "--backend" => {
+                    options.backend = match args.next().as_deref() {
+                        Some("auto") => RasterBackend::Auto,
+                        Some("sixel") => RasterBackend::Sixel,
+                        Some("kitty") => RasterBackend::Kitty,
+                        _ => return Err("--backend expects auto, kitty or sixel".into()),
+                    };
+                }
                 "--cell-pixels" => {
                     let value = args.next().ok_or(
                         "--cell-pixels needs WxH: physical pixels per character cell, not terminal columns x rows; use --help",
@@ -101,42 +92,44 @@ impl Options {
         Ok(options)
     }
 
-    fn native_config(&self, grid: (u16, u16)) -> Result<RasterOutput, String> {
-        self.native_config_with_resolver(grid, CellPixels::resolve)
-    }
-
-    fn native_config_with_resolver(
-        &self,
-        grid: (u16, u16),
-        resolve: impl FnOnce(Option<CellPixels>) -> std::io::Result<CellPixels>,
-    ) -> Result<RasterOutput, String> {
-        if !cfg!(feature = "sixel") {
-            return Err("native output needs --features sixel".into());
-        }
-        // Resolve once before starting input; rendering only uses this snapshot.
-        let pixels = resolve(self.pixels).map_err(|error| error.to_string())?;
-        if self.pixels.is_some() && (pixels.width, pixels.height) == grid && !self.force_cell_pixels
-        {
+    fn measured_pixels(&self, grid: (u16, u16)) -> Result<Option<CellPixels>, String> {
+        let Some(pixels) = self.pixels else {
+            return Ok(None);
+        };
+        let pixels = CellPixels::resolve(Some(pixels)).map_err(|e| e.to_string())?;
+        if (pixels.width, pixels.height) == grid && !self.force_cell_pixels {
             return Err(format!(
                 "--cell-pixels {}x{} matches the terminal grid ({} columns x {} rows); this looks like columns x rows rather than physical pixels per character cell. Omit --cell-pixels to use automatic detection, or supply measured physical pixels per character cell (text-area pixels / columns and rows). If this unusual cell size is intentional, confirm it with --force-cell-pixels",
                 pixels.width, pixels.height, grid.0, grid.1,
             ));
         }
 
-        Ok(RasterOutput {
-            capabilities: RasterCapabilities {
-                // Normal invocation requires the terminal capabilities documented above.
-                sixel: true,
-                reliable_erase: true,
-                reliable_inline_erase: false,
-                no_scroll: true,
-                cell_pixels: Some(pixels),
-            },
-        })
+        Ok(Some(pixels))
+    }
+
+    fn session(&self, grid: (u16, u16)) -> Result<RasterSession, String> {
+        let pixels = self.measured_pixels(grid)?;
+        #[cfg(unix)]
+        {
+            self.backend
+                .negotiate_fullscreen(pixels, std::time::Duration::from_millis(500))
+                .map_err(|error| format!("{:?} raster startup: {error}", self.backend))
+        }
+        #[cfg(not(unix))]
+        {
+            let pixels = pixels.ok_or("supply measured cell dimensions with --cell-pixels WxH")?;
+            match self.backend {
+                RasterBackend::Auto => Err("automatic negotiation requires Unix or WSL; specify a verified --backend kitty or sixel".into()),
+                RasterBackend::Kitty if cfg!(feature = "kitty") => Ok(RasterSession::KittyFullscreen(pixels)),
+                RasterBackend::Sixel if cfg!(feature = "sixel") => Ok(RasterSession::SixelFullscreen(pixels)),
+                backend => Err(format!("the {backend:?} backend was not compiled")),
+            }
+        }
     }
 }
 
 struct State {
+    session: Option<RasterSession>,
     image: Arc<RasterCanvas>,
     windows: [WindowRect; 2],
     initial: [WindowRect; 2],
@@ -152,7 +145,7 @@ enum Msg {
 }
 
 impl State {
-    fn new(width: u16, height: u16) -> Result<Self, RasterError> {
+    fn new(width: u16, height: u16, session: Option<RasterSession>) -> Result<Self, RasterError> {
         let available_height = height.saturating_sub(4);
         let w = ((u32::from(width) * 3 / 5) as u16)
             .clamp(24, 58)
@@ -170,6 +163,7 @@ impl State {
             ),
         ];
         Ok(Self {
+            session,
             image: Arc::new(planet()?),
             windows,
             initial: windows,
@@ -309,6 +303,15 @@ impl Widget<Msg> for Desktop {
 fn view(state: &State) -> impl Widget<Msg> {
     let source = Arc::clone(&state.image);
 
+    let backend = match state.session {
+        Some(RasterSession::KittyFullscreen(p)) => {
+            format!("Kitty | {}x{} px/cell", p.width, p.height)
+        }
+        Some(RasterSession::SixelFullscreen(p)) => {
+            format!("Sixel | {}x{} px/cell", p.width, p.height)
+        }
+        None => "headless".to_owned(),
+    };
     let window_style = |accent| Style::default().fg(accent).bg(Color::Rgb(8, 13, 25));
     let native = floating_window(
         col()
@@ -319,9 +322,9 @@ fn view(state: &State) -> impl Widget<Msg> {
             )
             .child(label(" 320 x 200 RGB / fixed source / fit").style(window_style(CYAN))),
     )
-    .key("sixel")
-    .title("01 / SIXEL / RGB pixels")
-    .title_key("sixel-title")
+    .key("native")
+    .title("RasterCanvas / RGB")
+    .title_key("native-title")
     .rect(state.windows[0])
     .on_rect_change(|rect| Msg::Move(0, rect))
     .min_size(22, 10)
@@ -346,7 +349,7 @@ fn view(state: &State) -> impl Widget<Msg> {
             ),
     )
     .key("characters")
-    .title(format!("02 / CANVAS / {:?}", state.encoding))
+    .title(format!("Canvas / {:?}", state.encoding))
     .title_key("canvas-title")
     .rect(state.windows[1])
     .on_rect_change(|rect| Msg::Move(1, rect))
@@ -361,9 +364,12 @@ fn view(state: &State) -> impl Widget<Msg> {
                 .fg(Color::Rgb(161, 179, 198))
                 .bg(Color::Rgb(5, 9, 17)),
         )
-        .child(label(" RSILLE / ORBITAL DESKTOP").style(Style::default().fg(CYAN).bold()))
+        .child(
+            label(format!(" Raster compatibility | {backend}"))
+                .style(Style::default().fg(CYAN).bold()),
+        )
         .child(label(
-            " One scene. Two renderers. Drag the windows across each other.",
+            " Drag Canvas across the planet, then uncover it and check for trails.",
         ))
         .child(
             window_host(Desktop)
@@ -376,21 +382,22 @@ fn view(state: &State) -> impl Widget<Msg> {
         .child(label(
             " Drag title: move | bottom grip: resize | click: raise | e: encoding",
         ))
-        .child(label(
-            " r: reset windows | q / Esc: quit | RGB source stays cached while moving",
-        ))
+        .child(label(" r: reset windows | q / Esc: quit"))
 }
 
 fn application(
     width: u16,
     height: u16,
-    config: RasterOutput,
+    session: Option<RasterSession>,
 ) -> Result<Runtime<State, Msg>, RasterError> {
-    Ok(App::new(State::new(width, height)?)
+    let mut app = App::new(State::new(width, height, session)?);
+    if let Some(session) = session {
+        app = app.raster_session(session);
+    }
+    Ok(app
         .mode(Mode::Fullscreen)
         .focus_events(true)
         .with_motion_policy(MotionPolicy::disabled())
-        .raster_output(config)
         .with_quit_key(KeyCode::Esc)
         .on_key(KeyCode::Char('q'), || Msg::Quit)
         .on_key(KeyCode::Char('e'), || Msg::CycleEncoding)
@@ -442,14 +449,15 @@ fn inside(area: Area, x: u16, y: u16) -> bool {
 }
 
 fn headless() -> Result<(), Box<dyn Error>> {
-    let mut runtime = application(110, 36, RasterOutput::default())?;
+    let mut runtime = application(110, 36, None)?;
     runtime.step(&[])?;
     let initial = runtime.state().windows;
     let identity = runtime.state().image.id();
     let version = runtime.state().image.version();
     assert!(runtime.frame().has_raster());
-    drag(&mut runtime, "sixel", "sixel-title", 5, 2)?;
+    drag(&mut runtime, "native", "native-title", 5, 2)?;
     assert_ne!(runtime.state().windows[0], initial[0]);
+    let exposed = runtime.frame().clone();
     drag(&mut runtime, "characters", "canvas-title", 3, 1)?;
     assert_ne!(runtime.state().windows[1], initial[1]);
     let covered = runtime.frame().raster_cells().count();
@@ -459,9 +467,15 @@ fn headless() -> Result<(), Box<dyn Error>> {
         .raster_cells()
         .all(|(x, y, _)| !inside(foreground, x, y)));
 
-    // Clicking an exposed title raises the RGB window and restores its pixels.
+    assert!(covered > 0 && covered < exposed.raster_cells().count());
+    for (x, y, cell) in exposed.raster_cells() {
+        let expected = (!inside(foreground, x, y)).then_some(cell);
+        assert_eq!(runtime.frame().raster_at((x, y).into()), expected);
+    }
+
+    // Clicking an exposed title restores each cell with its original crop.
     let title = runtime
-        .bounds(&window_path("sixel").child("sixel-title"))
+        .bounds(&window_path("native").child("native-title"))
         .unwrap();
     for kind in [
         MouseEventKind::Down(MouseButton::Left),
@@ -469,7 +483,7 @@ fn headless() -> Result<(), Box<dyn Error>> {
     ] {
         runtime.step(&[mouse(kind, title.x() + 3, title.y())])?;
     }
-    assert!(runtime.frame().raster_cells().count() > covered);
+    assert!(exposed.raster_cells().eq(runtime.frame().raster_cells()));
 
     // The Canvas grip is below the RGB window and remains exposed.
     let grip = runtime
@@ -506,15 +520,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     if options.headless {
         return headless();
     }
-    #[cfg(all(unix, feature = "sixel"))]
-    if !RasterCapabilities::probe_sixel(std::time::Duration::from_millis(500))
-        .map_err(|err| format!("could not confirm Sixel support (DA1): {err}"))?
-    {
-        return Err("terminal did not advertise Sixel support".into());
-    }
-    let (width, height) = crossterm::terminal::size()?;
-    let config = options.native_config((width, height))?;
-    application(width, height, config)?.run()?;
+    let grid = crossterm::terminal::size()?;
+    let session = options.session(grid)?;
+    application(grid.0, grid.1, Some(session))?.run()?;
     Ok(())
 }
 
@@ -529,6 +537,7 @@ mod tests {
     #[test]
     fn native_is_default_and_obsolete_flags_are_rejected() {
         let defaults = options(&[]).unwrap();
+        assert_eq!(defaults.backend, RasterBackend::Auto);
         assert!(!defaults.help);
         assert!(!defaults.headless);
         assert_eq!(defaults.pixels, None);
@@ -544,13 +553,20 @@ mod tests {
     }
 
     #[test]
-    fn help_and_headless_remain_available() {
+    fn help_headless_and_backend_choices_are_available() {
         assert!(options(&["--help"]).unwrap().help);
         assert!(options(&["-h"]).unwrap().help);
         assert!(options(&["--headless"]).unwrap().headless);
-        assert!(HELP.contains("--features sixel"));
-        assert!(HELP.contains("Normal invocation requires native Sixel"));
-        assert!(!HELP.contains("--sixel"));
+        assert!(HELP.contains("--backend auto|kitty|sixel"));
+        for (arg, backend) in [
+            ("auto", RasterBackend::Auto),
+            ("kitty", RasterBackend::Kitty),
+            ("sixel", RasterBackend::Sixel),
+        ] {
+            assert_eq!(options(&["--backend", arg]).unwrap().backend, backend);
+        }
+        assert!(options(&["--backend"]).is_err());
+        assert!(options(&["--backend", "text"]).is_err());
     }
 
     #[test]
@@ -568,38 +584,6 @@ mod tests {
     }
 
     #[test]
-    fn native_mode_never_silently_falls_back() {
-        let valid = options(&["--cell-pixels", "10x20"])
-            .unwrap()
-            .native_config((110, 36));
-        if cfg!(feature = "sixel") {
-            let config = valid.unwrap();
-            assert_eq!(
-                config.capabilities.cell_pixels,
-                Some(CellPixels {
-                    width: 10,
-                    height: 20
-                })
-            );
-        } else {
-            assert!(valid.is_err());
-        }
-        for value in ["0x18", "8x0", "1025x18", "8x1025", "257x256", "1024x1020"] {
-            assert!(options(&["--cell-pixels", value])
-                .unwrap()
-                .native_config((110, 36))
-                .is_err());
-        }
-        assert!(options(&[])
-            .unwrap()
-            .native_config_with_resolver((110, 36), |explicit| {
-                assert_eq!(explicit, None);
-                Err(std::io::Error::other("OS cell pixels unavailable (test)"))
-            })
-            .is_err());
-    }
-
-    #[test]
     fn forcing_grid_sized_cells_requires_an_explicit_override() {
         assert_eq!(
             options(&["--force-cell-pixels"]).unwrap_err(),
@@ -613,11 +597,10 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "sixel")]
     #[test]
     fn terminal_grid_is_not_a_cell_pixel_measurement() {
         let opts = options(&["--cell-pixels", "120x36"]).unwrap();
-        let error = opts.native_config((120, 36)).unwrap_err();
+        let error = opts.measured_pixels((120, 36)).unwrap_err();
         assert!(error.contains("120 columns x 36 rows"));
         assert!(error.contains("physical pixels per character cell"));
         assert!(error.contains("Omit --cell-pixels"));
@@ -625,13 +608,12 @@ mod tests {
         // Detection is based on the current grid, not a hardcoded 120x36 ban.
         let error = options(&["--cell-pixels", "80x24"])
             .unwrap()
-            .native_config((80, 24))
+            .measured_pixels((80, 24))
             .unwrap_err();
         assert!(error.contains("80 columns x 24 rows"));
-        assert!(opts.native_config((100, 32)).is_ok());
+        assert!(opts.measured_pixels((100, 32)).is_ok());
     }
 
-    #[cfg(feature = "sixel")]
     #[test]
     fn unusual_grid_sized_cells_can_be_confirmed() {
         let pixels = CellPixels {
@@ -639,14 +621,7 @@ mod tests {
             height: 36,
         };
         let forced = options(&["--cell-pixels", "120x36", "--force-cell-pixels"]).unwrap();
-        assert_eq!(
-            forced
-                .native_config((120, 36))
-                .unwrap()
-                .capabilities
-                .cell_pixels,
-            Some(pixels),
-        );
+        assert_eq!(forced.measured_pixels((120, 36)).unwrap(), Some(pixels));
         // Confirmation bypasses only the grid ambiguity, never backend limits.
         for (value, grid) in [
             ("0x18", (0, 18)),
@@ -658,12 +633,11 @@ mod tests {
         ] {
             assert!(options(&["--cell-pixels", value, "--force-cell-pixels"])
                 .unwrap()
-                .native_config(grid)
+                .measured_pixels(grid)
                 .is_err());
         }
     }
 
-    #[cfg(feature = "sixel")]
     #[test]
     fn explicit_metrics_stay_authoritative_without_aspect_ratio_rules() {
         for value in [
@@ -671,81 +645,8 @@ mod tests {
             "256x256", "1024x64",
         ] {
             let opts = options(&["--cell-pixels", value]).unwrap();
-            assert_eq!(
-                opts.native_config((110, 36))
-                    .unwrap()
-                    .capabilities
-                    .cell_pixels,
-                opts.pixels,
-            );
+            assert_eq!(opts.measured_pixels((110, 36)).unwrap(), opts.pixels);
         }
-    }
-
-    #[cfg(feature = "sixel")]
-    #[test]
-    fn startup_metrics_are_validated_and_stored_in_configuration() {
-        let opts = options(&[]).unwrap();
-        for pixels in [
-            CellPixels {
-                width: 10,
-                height: 20,
-            },
-            CellPixels {
-                width: 8,
-                height: 18,
-            },
-            CellPixels {
-                width: 120,
-                height: 36,
-            },
-        ] {
-            let config = opts
-                .native_config_with_resolver((120, 36), |explicit| {
-                    assert_eq!(explicit, None);
-                    CellPixels::resolve(Some(pixels))
-                })
-                .unwrap();
-            assert_eq!(config.capabilities.cell_pixels, Some(pixels));
-        }
-        let error = opts
-            .native_config_with_resolver((120, 36), |explicit| {
-                assert_eq!(explicit, None);
-                Err(std::io::Error::other("OS cell pixels unavailable (test)"))
-            })
-            .unwrap_err();
-        assert_eq!(error, "OS cell pixels unavailable (test)");
-        for pixels in [
-            CellPixels {
-                width: 0,
-                height: 20,
-            },
-            CellPixels {
-                width: 10,
-                height: 0,
-            },
-            CellPixels {
-                width: 1025,
-                height: 20,
-            },
-            CellPixels {
-                width: 10,
-                height: 1025,
-            },
-            CellPixels {
-                width: 257,
-                height: 256,
-            },
-        ] {
-            let expected = CellPixels::resolve(Some(pixels)).unwrap_err().to_string();
-            let error = opts
-                .native_config_with_resolver((120, 36), |explicit| {
-                    assert_eq!(explicit, None);
-                    CellPixels::resolve(Some(pixels))
-                })
-                .unwrap_err();
-            assert_eq!(error, expected);
-        }
-        assert_eq!(opts.pixels, None);
     }
 
     #[test]
@@ -755,11 +656,11 @@ mod tests {
 
     #[test]
     fn resize_and_encoding_changes_keep_both_renderers_visible() {
-        let mut runtime = application(110, 36, RasterOutput::default()).unwrap();
+        let mut runtime = application(110, 36, None).unwrap();
         for size in [(80, 24), (48, 16), (110, 36)] {
             runtime.resize(size.into());
             runtime.step(&[]).unwrap();
-            assert!(runtime.bounds(&window_path("sixel")).is_some());
+            assert!(runtime.bounds(&window_path("native")).is_some());
             assert!(runtime.bounds(&window_path("characters")).is_some());
             assert!(runtime.frame().has_raster());
             assert!(!runtime.frame().has_unsupported_raster_composition());
@@ -777,36 +678,62 @@ mod tests {
     #[test]
     fn both_documented_quit_keys_exit() {
         for key in [KeyCode::Esc, KeyCode::Char('q')] {
-            let mut runtime = application(80, 24, RasterOutput::default()).unwrap();
+            let mut runtime = application(80, 24, None).unwrap();
             runtime.step(&[]).unwrap();
             runtime.step(&[Event::Key(key.into())]).unwrap();
             assert!(runtime.exit_reason().is_some());
         }
     }
 
+    #[cfg(feature = "kitty")]
+    #[test]
+    fn dragging_the_fullscreen_scene_reuses_kitty_uploads() {
+        use rsille::render::{Builder, RasterSession};
+        let mut runtime = application(110, 36, None).unwrap();
+        runtime.step(&[]).unwrap();
+        let mut output = Vec::new();
+        let mut renderer = Builder::new()
+            .size((110, 36))
+            .enable_alt_screen()
+            .raster_session(RasterSession::KittyFullscreen(CellPixels {
+                width: 10,
+                height: 20,
+            }))
+            .build_render(runtime.frame().clone(), &mut output);
+        renderer.render().unwrap();
+        // Raise the native window before moving it so all its surfaces are resident.
+        let title = runtime
+            .bounds(&window_path("native").child("native-title"))
+            .unwrap();
+        for kind in [
+            MouseEventKind::Down(MouseButton::Left),
+            MouseEventKind::Up(MouseButton::Left),
+        ] {
+            runtime
+                .step(&[mouse(kind, title.x() + 3, title.y())])
+                .unwrap();
+        }
+        *renderer.thing_mut() = runtime.frame().clone();
+        renderer.render().unwrap();
+        drag(&mut runtime, "native", "native-title", 5, 2).unwrap();
+        *renderer.thing_mut() = runtime.frame().clone();
+        renderer.render().unwrap();
+        let trace = std::str::from_utf8(&output).unwrap();
+        assert!(trace.contains("\x1b_Ga=t,"));
+        let moved = trace.rsplit_once("\x1b[?2026h").unwrap().1;
+        assert!(moved.contains("\x1b_Ga=p,"));
+        assert!(!moved.contains("\x1b_Ga=t,"));
+    }
+
     #[cfg(feature = "sixel")]
     #[test]
     fn native_window_emits_sixel_while_canvas_remains_character_output() {
-        use rsille::render::{area::Size, buffer::Buffer, Builder, Draw, DrawErr};
-        struct Snapshot(Buffer);
-        impl Draw for Snapshot {
-            fn draw(&mut self, mut target: Chunk) -> Result<Size, DrawErr> {
-                for (x, y, cell) in self.0.all_cells() {
-                    if let Some(raster) = self.0.raster_at((x, y).into()) {
-                        target.set_raster_cell(x, y, raster.clone())?;
-                    } else {
-                        target.set_forced(x, y, cell.content.clone())?;
-                    }
-                }
-                Ok(self.0.size())
-            }
-        }
-        // Synthetic verified capabilities apply ONLY to this memory writer.
-        let config = options(&["--cell-pixels", "10x20"])
-            .unwrap()
-            .native_config((110, 36))
-            .unwrap();
-        let mut runtime = application(110, 36, config).unwrap();
+        use rsille::render::Builder;
+        let session = RasterSession::SixelFullscreen(CellPixels {
+            width: 10,
+            height: 20,
+        });
+        let mut runtime = application(110, 36, Some(session)).unwrap();
         runtime.step(&[]).unwrap();
         let native_cells = runtime.frame().raster_cells().count();
         assert!(native_cells > 0);
@@ -816,8 +743,8 @@ mod tests {
             let mut renderer = Builder::new()
                 .size((110, 36))
                 .enable_alt_screen()
-                .raster_output(config)
-                .build_render(Snapshot(runtime.frame().clone()), &mut output);
+                .raster_session(session)
+                .build_render(runtime.frame().clone(), &mut output);
             renderer.render().unwrap();
             assert_eq!(renderer.raster_stats().tiles_sent, native_cells as u64);
             let stats = renderer.raster_stats();

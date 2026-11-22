@@ -57,6 +57,14 @@ pub struct EventLoop<T> {
     terminal_size: Size,
 }
 
+struct RunningLoop<'a, T: DrawUpdate>(&'a mut EventLoop<T>);
+
+impl<T: DrawUpdate> Drop for RunningLoop<'_, T> {
+    fn drop(&mut self) {
+        let _ = self.0.render.release_raster_resources();
+    }
+}
+
 impl<T> EventLoop<T>
 where
     T: DrawUpdate,
@@ -238,6 +246,10 @@ where
     ///
     /// May panic if polled outside a Tokio runtime or with its time driver disabled.
     pub async fn run_async_returning(mut self) -> Result<T, DrawErr> {
+        self.render.set_alternate_screen(self.alt_screen);
+        self.render
+            .negotiate_raster()
+            .map_err(DrawErr::TerminalSetup)?;
         let guard = TerminalGuard::new(
             self.alt_screen,
             self.raw_mode,
@@ -246,7 +258,6 @@ where
             self.keyboard_mode,
             self.focus_events,
         )?;
-        self.render.set_alternate_screen(self.alt_screen);
         self.render
             .thing_mut()
             .on_input_capabilities(guard.input_capabilities());
@@ -279,7 +290,12 @@ where
             }
         }
 
-        self.run_loop().await?;
+        // Drop the graphics guard before TerminalGuard, including cancellation.
+        {
+            let running = RunningLoop(&mut self);
+            running.0.run_loop().await?;
+            running.0.render.release_raster_resources()?;
+        }
         info!(target: "render::event_loop", "event loop stopped");
         Ok(self.render.thing)
     }
