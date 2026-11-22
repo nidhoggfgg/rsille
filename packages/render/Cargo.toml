@@ -16,14 +16,14 @@ doctest = false
 [dependencies]
 base64 = { workspace = true, optional = true }
 crossterm = { workspace = true }
-tokio = { workspace = true }
 futures = { workspace = true }
-unicode-width = { workspace = true }
-unicode-segmentation = { workspace = true }
 log = { workspace = true }
+tokio = { workspace = true }
+unicode-segmentation = { workspace = true }
+unicode-width = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
-libc = "0.2"
+libc = { workspace = true }
 
 [features]
 default = []

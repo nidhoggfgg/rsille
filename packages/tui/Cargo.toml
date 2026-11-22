@@ -14,13 +14,13 @@ name = "tui"
 doctest = false
 
 [dependencies]
+crossterm = { workspace = true }
 render = { path = "../render" }
 rsille-canvas = { package = "canvas", path = "../canvas" }
-crossterm = { workspace = true }
-taffy = { workspace = true }
+rustc-hash = { workspace = true }
+smallvec = { workspace = true }
 syntect = { workspace = true, optional = true }
-rustc-hash = "2.0"
-smallvec = "1.13"
+taffy = { workspace = true }
 
 [features]
 default = []

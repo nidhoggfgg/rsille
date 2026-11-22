@@ -14,18 +14,18 @@ include = ["src/**", "/README.md", "/README_cn.md", "LICENCE", "Cargo.toml"]
 [dependencies]
 base64 = { workspace = true, optional = true }
 crossterm = { workspace = true }
-tokio = { workspace = true }
 futures = { workspace = true }
-unicode-width = { workspace = true }
-unicode-segmentation = { workspace = true }
 log = { workspace = true }
-taffy = { workspace = true }
+rustc-hash = { workspace = true }
+smallvec = { workspace = true }
 syntect = { workspace = true, optional = true }
-rustc-hash = "2.0"
-smallvec = "1.13"
+taffy = { workspace = true }
+tokio = { workspace = true }
+unicode-segmentation = { workspace = true }
+unicode-width = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
-libc = "0.2"
+libc = { workspace = true }
 
 [features]
 default = ["sixel"]
@@ -34,24 +34,33 @@ sixel = []
 kitty = ["dep:base64"]
 
 [workspace]
-members = ["packages/canvas", "packages/render", "packages/tui", "packages/rsille-typst", "packages/rsille-playground"]
+members = [
+    "packages/canvas",
+    "packages/render",
+    "packages/tui",
+    "packages/rsille-typst",
+    "packages/rsille-playground",
+]
 resolver = "3"
 exclude = ["examples"]
 
 [workspace.dependencies]
 base64 = "0.22"
-tokio = { version = "1", features = ["rt", "sync", "time", "macros"] }
-unicode-width = "0.2.0"
-unicode-segmentation = "1.12"
 crossterm = { version = "0.28.1", features = ["event-stream"] }
 futures = { version = "0.3.31", default-features = false, features = ["std", "async-await"] }
-taffy = "0.9.1"
+libc = "0.2"
 log = "0.4.28"
+rustc-hash = "2.0"
+smallvec = "1.13"
 syntect = { version = "5.3", default-features = false, features = [
     "default-syntaxes",
     "default-themes",
     "regex-fancy",
 ] }
+taffy = "0.9.1"
+tokio = { version = "1", features = ["rt", "sync", "time", "macros"] }
+unicode-segmentation = "1.12"
+unicode-width = "0.2.0"
 
 [profile.release]
 lto = true
