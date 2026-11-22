@@ -22,9 +22,5 @@ fn main() -> WidgetResult<()> {
 }
 
 fn view(_: &()) -> impl Widget<()> {
-    code_viewer(CODE)
-        .key("code")
-        .language("rs")
-        .height(10)
-        .line_numbers(true)
+    code_viewer(CODE).key("code").height(10).line_numbers(true)
 }

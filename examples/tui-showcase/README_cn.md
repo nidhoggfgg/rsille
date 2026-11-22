@@ -14,7 +14,7 @@ cargo run --manifest-path examples/tui-showcase/Cargo.toml
 cargo run --manifest-path examples/tui-showcase/Cargo.toml -- --inline
 ```
 
-默认全屏，建议使用 104 × 44 的终端；小窗口可滚动。本项目已在依赖声明中开启语法高亮。
+默认全屏，建议使用 104 × 44 的终端；小窗口可滚动。代码查看器通过 `rsille-syntect` 扩展显示 Rust 语法高亮。
 
 | 页面 | 内容 |
 | --- | --- |

@@ -49,7 +49,7 @@ jobs:
 
       - name: Check formatting and workspace
         run: |
-          cargo fmt -p rsille -p rsille-render -p rsille-canvas -p rsille-tui -p rsille-typst --check
+          cargo fmt -p rsille -p rsille-render -p rsille-canvas -p rsille-tui -p rsille-typst -p rsille-syntect --check
           cargo test --workspace --exclude rsille-playground --all-features
           cargo check --workspace --exclude rsille-playground --all-targets --all-features
 

@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 
 use rsille::canvas::Canvas;
@@ -63,7 +64,7 @@ struct State {
     file: String,
     opened_file: String,
     load_request: String,
-    file_preview: String,
+    file_preview: Arc<[Line<'static>]>,
     file_diff: String,
     process: String,
     opened_process: String,
@@ -96,7 +97,7 @@ impl Default for State {
             opened_file: initial_file.clone(),
             load_request: String::new(),
             file_diff: diff_for_file(&initial_file, &preview),
-            file_preview: preview,
+            file_preview: rsille_syntect::highlight(&preview, language_for(&initial_file)).into(),
             process: "rsille-tui".to_owned(),
             opened_process: String::new(),
             process_cell: String::new(),
@@ -168,7 +169,7 @@ fn set_file(state: &mut State, path: String, opened: bool) {
 
     let preview = read_preview(&path);
     state.file_diff = diff_for_file(&path, &preview);
-    state.file_preview = preview;
+    state.file_preview = rsille_syntect::highlight(&preview, language_for(&path)).into();
 }
 
 fn press_calculator_button(state: &mut State, value: &str) {
@@ -399,9 +400,8 @@ fn file_preview_card(state: &State) -> impl Widget<Msg> {
         .gap(1)
         .style(Style::default().bg(Color::Rgb(9, 13, 20)))
         .child(
-            code_viewer::<Msg>(&state.file_preview)
+            CodeViewer::<Msg>::from_lines(Arc::clone(&state.file_preview))
                 .key("file-preview")
-                .language(language_for(&state.file))
                 .height(18)
                 .border(BorderStyle::Rounded),
         )

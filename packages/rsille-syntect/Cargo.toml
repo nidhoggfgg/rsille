@@ -1,0 +1,16 @@
+[package]
+name = "rsille-syntect"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Syntax highlighting for rsille code viewers"
+repository = "https://github.com/nidhoggfgg/rsille.git"
+readme = "README.md"
+
+[dependencies]
+rsille = { version = "3.3.0", path = "../..", default-features = false }
+syntect = { version = "5.3", default-features = false, features = [
+    "default-syntaxes",
+    "default-themes",
+    "regex-fancy",
+] }

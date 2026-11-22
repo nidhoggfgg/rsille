@@ -7,8 +7,8 @@
 //! rsille = "3"
 //! ```
 //!
-//! Sixel is enabled by default. Enable `kitty` for Kitty graphics and `syntax-highlighting` for
-//! Syntect highlighting in code viewers; plain text and navigation work without it.
+//! Sixel is enabled by default. Enable `kitty` for Kitty graphics.
+//! The `rsille-syntect` extension provides syntax highlighting for code viewers.
 //!
 //! # Choose an API
 //!
@@ -170,6 +170,6 @@ pub use rsille_canvas as canvas;
 /// - [`animation`](tui::animation) supplies timing and transition policies.
 /// - [`state`](tui::state) and [`shell`](tui::shell) hold application helper state.
 ///
-/// Enable the `syntax-highlighting` feature for syntect-backed code highlighting.
+/// Pass styled lines from `rsille-syntect` to [`CodeViewer::from_lines`](tui::widgets::CodeViewer::from_lines).
 #[doc(inline)]
 pub use rsille_tui as tui;

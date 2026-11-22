@@ -1,6 +1,7 @@
 //! Each page assembles ordinary public widgets; no custom renderer is needed.
 use super::{theme, Modal, Msg, State, THEMES};
 use rsille::tui::prelude::*;
+use std::sync::{Arc, LazyLock};
 
 const CODE: &str = r#"use rsille::tui::prelude::*;
 
@@ -433,12 +434,13 @@ fn collections(state: &State) -> impl Widget<Msg> {
 }
 
 fn content(state: &State) -> impl Widget<Msg> {
+    static HIGHLIGHTED: LazyLock<Arc<[Line<'static>]>> =
+        LazyLock::new(|| rsille_syntect::highlight(CODE, "rs").into());
     two_by_two()
         .child(
             card("CodeViewer / Rust syntax highlighting").gap(0).child(
-                code_viewer(CODE)
+                CodeViewer::from_lines(Arc::clone(&HIGHLIGHTED))
                     .key("source")
-                    .language("rs")
                     .line_numbers(true)
                     .height(16)
                     .borderless(),

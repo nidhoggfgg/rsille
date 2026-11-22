@@ -75,8 +75,9 @@ Run `cargo run -p rsille-playground` from the repository root to open the menu. 
 rsille = "3.2.0"
 ```
 
-The `sixel` feature is enabled by default; optional `syntax-highlighting` adds
-Syntect highlighting to code viewers.
+The `sixel` feature is enabled by default. For syntax highlighting, add the
+[`rsille-syntect` extension](packages/rsille-syntect/README.md) and pass
+`rsille_syntect::highlight(source, "rs")` to `CodeViewer::from_lines`.
 
 ## An animated application
 

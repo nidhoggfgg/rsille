@@ -13,7 +13,7 @@ Run from the repository root so the workbench can find the expected files:
 cargo run --release --manifest-path examples/rsille-showcase/Cargo.toml
 ```
 
-The project uses the local `rsille` package with syntax highlighting enabled.
+The project uses the local `rsille` package and the `rsille-syntect` extension for code previews.
 
 | Tab | What is real and what is simulated |
 | --- | --- |

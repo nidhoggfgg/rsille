@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify the core crate archives and a downstream application.
+"""Verify the core and syntax-highlighting extension archives and a downstream application.
 
 Requires Python 3.12+ and Cargo. Nothing is uploaded. Pass --offline to use cached
 third-party dependencies; first-time checks may need network access.
@@ -22,9 +22,9 @@ def main():
         ["cargo", "metadata", "--no-deps", "--format-version", "1"], cwd=root))
     target = Path(metadata["target_directory"])
     packages = {package["name"]: package for package in metadata["packages"]}
-    core = ("rsille-render", "rsille-canvas", "rsille-tui", "rsille")
-    selection = [arg for name in core for arg in ("-p", name)]
-    for name in core:
+    archives = ("rsille-render", "rsille-canvas", "rsille-tui", "rsille", "rsille-syntect")
+    selection = [arg for name in archives for arg in ("-p", name)]
+    for name in archives:
         registries = packages[name]["publish"]
         assert registries is None or "crates-io" in registries, f"{name} must be publishable"
 
@@ -41,7 +41,7 @@ def main():
         patches = []
         members = []
         config = extracted / "archives.toml"
-        for name in core:
+        for name in archives:
             # Resolve unpublished dependencies from the archives already verified.
             config.write_text("[patch.crates-io]\n" + "\n".join(patches))
             cargo("package", "-p", name, "--allow-dirty", "--all-features",
@@ -75,7 +75,6 @@ edition = "2021"
 rsille = {{ version = "={packages["rsille"]["version"]}" }}
 tokio = {{ version = "1", features = ["rt", "time", "net"] }}
 [features]
-syntax-highlighting = ["rsille/syntax-highlighting"]
 kitty = ["rsille/kitty"]
 ''')
         workflow = root / "packages/rsille-tui/examples/basics/workflow.rs"
@@ -117,7 +116,7 @@ fn check_canvas() {
             for example in (program, extensions):
                 main_rs.write_text(example)
                 cargo("run", *build_args, *features, cwd=consumer, program_args=["--headless"])
-    print("Verified all four core archives and the headless consumer.")
+    print("Verified the core archives, rsille-syntect archive and headless consumer.")
 
 
 if __name__ == "__main__":

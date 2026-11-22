@@ -14,12 +14,10 @@ rsille-render.workspace = true
 rsille-canvas.workspace = true
 rustc-hash = { workspace = true }
 smallvec = { workspace = true }
-syntect = { workspace = true, optional = true }
 taffy = { workspace = true }
 
 [features]
 default = []
-syntax-highlighting = ["dep:syntect"]
 sixel = ["rsille-render/sixel"]
 kitty = ["rsille-render/kitty"]
 

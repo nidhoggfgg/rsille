@@ -74,7 +74,8 @@ rsille = "3.2.0"
 ```
 
 默认启用 `sixel` feature，
-可选 `syntax-highlighting` 为代码查看器提供 Syntect 语法高亮。
+需要代码高亮时，添加独立扩展 [`rsille-syntect`](packages/rsille-syntect/README.md)，
+再将 `rsille_syntect::highlight(source, "rs")` 的结果传给 `CodeViewer::from_lines`。
 
 ## 第一个应用，就带动画
 

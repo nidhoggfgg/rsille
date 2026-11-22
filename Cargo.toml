@@ -21,7 +21,6 @@ tokio.workspace = true
 
 [features]
 default = ["sixel"]
-syntax-highlighting = ["rsille-tui/syntax-highlighting"]
 sixel = ["rsille-tui/sixel"]
 kitty = ["rsille-tui/kitty"]
 
@@ -31,6 +30,7 @@ members = [
     "packages/rsille-render",
     "packages/rsille-tui",
     "packages/rsille-typst",
+    "packages/rsille-syntect",
     "packages/rsille-playground",
 ]
 resolver = "3"
@@ -47,11 +47,6 @@ libc = "0.2"
 log = "0.4.28"
 rustc-hash = "2.0"
 smallvec = "1.13"
-syntect = { version = "5.3", default-features = false, features = [
-    "default-syntaxes",
-    "default-themes",
-    "regex-fancy",
-] }
 taffy = "0.9.1"
 tokio = { version = "1", features = ["rt", "sync", "time", "macros"] }
 unicode-segmentation = "1.12"

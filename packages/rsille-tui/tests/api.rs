@@ -126,12 +126,11 @@ fn explicit_exit_cancels_pending_work_before_returning_state() {
 }
 
 #[test]
-fn code_viewer_keeps_content_and_navigation_in_each_feature_configuration() {
+fn plain_code_viewer_keeps_content_and_navigation() {
     let mut app = App::new(())
         .update(|_, (), _| {})
         .view(|_| {
             code_viewer("let count = 1;\n// 中文\nthird\nfourth")
-                .language("rust")
                 .height(2)
                 .line_numbers(false)
                 .borderless()
@@ -154,4 +153,36 @@ fn code_viewer_keeps_content_and_navigation_in_each_feature_configuration() {
     ))])
     .unwrap();
     assert!(text(&app).contains("third"));
+}
+
+#[test]
+fn styled_code_viewer_scrolls_numbers_and_clips_wide_graphemes() {
+    let red = Style::default().fg(Color::Red).to_render_style();
+    let lines: std::sync::Arc<[Line<'static>]> = vec![
+        Line::from("first"),
+        Line::from_texts(vec![Span::from("ab"), Span::new("界界", red)]),
+        Line::from("last"),
+    ]
+    .into();
+    let mut app = App::new(lines)
+        .update(|_, (), _| {})
+        .view(|lines| CodeViewer::from_lines(lines.clone()).height(1).borderless())
+        .build()
+        .size(8, 1);
+    app.step(&[]).unwrap();
+    app.step(&[Event::Key(KeyEvent::new(
+        KeyCode::Down,
+        KeyModifiers::empty(),
+    ))])
+    .unwrap();
+    let cells = app.frame().content();
+    assert_eq!(cells[1].content.as_char(), Some('2'));
+    assert_eq!(cells[3].content.as_char(), Some('a'));
+    assert_eq!(cells[5].content.as_char(), Some('界'));
+    assert_eq!(
+        cells[5].content.style.colors.unwrap().foreground,
+        red.colors.unwrap().foreground
+    );
+    assert!(cells[6].is_occupied);
+    assert_eq!(cells[7].content.as_char(), Some(' '));
 }

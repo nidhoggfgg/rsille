@@ -15,7 +15,7 @@ cargo run -p rsille-tui --example workflow
 cargo run -p rsille-tui --example workflow -- --async
 cargo run -p rsille-tui --example workflow -- --headless
 cargo run -p rsille-tui --example windows
-cargo run -p rsille-tui --features syntax-highlighting --example code_viewer
+cargo run -p rsille-tui --example code_viewer
 ```
 
 | 示例 | 学习内容 |

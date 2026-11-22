@@ -12,7 +12,7 @@
 cargo run --release --manifest-path examples/rsille-showcase/Cargo.toml
 ```
 
-本项目依赖本地 `rsille`，并已启用语法高亮。
+本项目依赖本地 `rsille`，通过 `rsille-syntect` 为代码预览提供语法高亮。
 
 | 标签页 | 实际功能与模拟内容 |
 | --- | --- |

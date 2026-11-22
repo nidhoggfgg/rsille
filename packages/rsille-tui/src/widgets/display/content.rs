@@ -1,14 +1,8 @@
 //! Scrollable, read-only viewers for code, logs, diffs, and Markdown.
 
-use rsille_render::text::TextWidth;
-#[cfg(feature = "syntax-highlighting")]
-use std::sync::LazyLock;
-#[cfg(feature = "syntax-highlighting")]
-use syntect::easy::HighlightLines;
-#[cfg(feature = "syntax-highlighting")]
-use syntect::highlighting::{Style as SyntectStyle, ThemeSet};
-#[cfg(feature = "syntax-highlighting")]
-use syntect::parsing::SyntaxSet;
+use std::sync::Arc;
+
+use rsille_render::text::{Line, TextWidth};
 
 use crate::event::{Event, KeyCode, MouseEventKind};
 use crate::focus::FocusConfig;
@@ -16,11 +10,6 @@ use crate::layout::border_renderer;
 use crate::layout::{ensure_item_visible, AxisLimit, Constraints, MeasuredSize, SizeProposal};
 use crate::style::{BorderStyle, Color, Style};
 use crate::widget::{EventCtx, EventPhase, MeasureCtx, RenderCtx, Widget};
-
-#[cfg(feature = "syntax-highlighting")]
-static SYNTAX_SET: LazyLock<SyntaxSet> = LazyLock::new(SyntaxSet::load_defaults_newlines);
-#[cfg(feature = "syntax-highlighting")]
-static THEME_SET: LazyLock<ThemeSet> = LazyLock::new(ThemeSet::load_defaults);
 
 /// Persistent vertical scroll position shared by the content viewers.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -90,20 +79,11 @@ impl From<String> for LogLine {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ContentKind {
-    Code,
-    Diff,
-    Markdown,
-}
-
 /// A scrollable, read-only source-code viewer with optional line numbers.
 ///
-/// Enable the `syntax-highlighting` feature for syntect highlighting. Without it,
-/// the viewer uses its built-in lightweight styling.
+/// Use [`Self::new`] for plain source or [`Self::from_lines`] for styled source.
 pub struct CodeViewer<M = ()> {
-    code: String,
-    language: Option<String>,
+    lines: Arc<[Line<'static>]>,
     height: u16,
     border: Option<BorderStyle>,
     show_line_numbers: bool,
@@ -115,7 +95,7 @@ pub struct CodeViewer<M = ()> {
 impl<M> std::fmt::Debug for CodeViewer<M> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CodeViewer")
-            .field("language", &self.language)
+            .field("line_count", &self.lines.len())
             .field("height", &self.height)
             .field("border", &self.border)
             .field("show_line_numbers", &self.show_line_numbers)
@@ -126,9 +106,20 @@ impl<M> std::fmt::Debug for CodeViewer<M> {
 impl<M> CodeViewer<M> {
     /// Creates a twelve-row-high code viewer with a single border and line numbers.
     pub fn new(code: impl Into<String>) -> Self {
+        let code = code.into();
+        Self::from_lines(
+            code.lines()
+                .map(|text| Line::from(text.to_owned()))
+                .collect::<Vec<_>>(),
+        )
+    }
+
+    /// Creates a viewer from styled logical lines, one per row.
+    ///
+    /// Pass a vector directly, or share an `Arc<[Line<'static>]>` across view rebuilds.
+    pub fn from_lines(lines: impl Into<Arc<[Line<'static>]>>) -> Self {
         Self {
-            code: code.into(),
-            language: None,
+            lines: lines.into(),
             height: 12,
             border: Some(BorderStyle::Single),
             show_line_numbers: true,
@@ -141,15 +132,6 @@ impl<M> CodeViewer<M> {
     /// Sets the stable widget key used to identify this widget across view rebuilds.
     pub fn key(mut self, name: impl Into<String>) -> Self {
         self.widget_key = Some(name.into());
-        self
-    }
-
-    /// Sets the syntax token used for highlighting, such as `"rs"` or `"python"`.
-    ///
-    /// With `syntax-highlighting`, this is resolved by syntect. Without that feature,
-    /// the language setting is ignored by the built-in lightweight highlighter.
-    pub fn language(mut self, language: impl Into<String>) -> Self {
-        self.language = Some(language.into());
         self
     }
 
@@ -192,16 +174,18 @@ impl<M> Default for CodeViewer<M> {
 
 impl<M: 'static> Widget<M> for CodeViewer<M> {
     fn render(&self, chunk: &mut rsille_render::chunk::Chunk, ctx: &RenderCtx) {
-        render_code(
+        render_text_viewer(
             chunk,
             ctx,
-            ContentKind::Code,
             self.border,
             self.height,
             self.custom_style,
-            &self.code,
-            self.language.as_deref(),
+            self.lines.iter(),
+            self.lines.len(),
             self.show_line_numbers,
+            |row, line, _| {
+                let _ = row.set_line(0, 0, line);
+            },
         );
     }
 
@@ -212,7 +196,7 @@ impl<M: 'static> Widget<M> for CodeViewer<M> {
         handle_scroll_event(
             event,
             ctx,
-            self.code.lines().count(),
+            self.lines.len(),
             self.height,
             self.border.is_some(),
         );
@@ -224,11 +208,11 @@ impl<M: 'static> Widget<M> for CodeViewer<M> {
 
     fn measure(&self, proposal: SizeProposal, _ctx: &MeasureCtx) -> MeasuredSize {
         measure_text_viewer(
-            self.code.lines(),
+            self.lines.iter().map(Line::width),
             self.height,
             self.border,
             proposal,
-            code_line_number_width(self.code.lines().count(), self.show_line_numbers),
+            code_line_number_width(self.lines.len(), self.show_line_numbers),
             24,
         )
     }
@@ -352,7 +336,7 @@ impl<M: 'static> Widget<M> for LogViewer<M> {
 
     fn measure(&self, proposal: SizeProposal, _ctx: &MeasureCtx) -> MeasuredSize {
         measure_text_viewer(
-            self.lines.iter().map(|line| line.message.as_str()),
+            self.lines.iter().map(|line| line.message.width()),
             self.height,
             self.border,
             proposal,
@@ -510,16 +494,16 @@ impl<M> Default for MarkdownViewer<M> {
 
 impl<M: 'static> Widget<M> for MarkdownViewer<M> {
     fn render(&self, chunk: &mut rsille_render::chunk::Chunk, ctx: &RenderCtx) {
-        render_code(
+        render_text_viewer(
             chunk,
             ctx,
-            ContentKind::Markdown,
             self.border,
             self.height,
             self.custom_style,
-            &self.markdown,
-            Some("md"),
+            self.markdown.lines(),
+            self.markdown.lines().count(),
             false,
+            draw_markdown_line,
         );
     }
 
@@ -542,7 +526,7 @@ impl<M: 'static> Widget<M> for MarkdownViewer<M> {
 
     fn measure(&self, proposal: SizeProposal, _ctx: &MeasureCtx) -> MeasuredSize {
         measure_text_viewer(
-            self.markdown.lines(),
+            self.markdown.lines().map(TextWidth::width),
             self.height,
             self.border,
             proposal,
@@ -568,16 +552,16 @@ impl<M> Default for DiffViewer<M> {
 
 impl<M: 'static> Widget<M> for DiffViewer<M> {
     fn render(&self, chunk: &mut rsille_render::chunk::Chunk, ctx: &RenderCtx) {
-        render_code(
+        render_text_viewer(
             chunk,
             ctx,
-            ContentKind::Diff,
             self.border,
             self.height,
             self.custom_style,
-            &self.diff,
-            Some("diff"),
+            self.diff.lines(),
+            self.diff.lines().count(),
             false,
+            draw_diff_line,
         );
     }
 
@@ -599,7 +583,14 @@ impl<M: 'static> Widget<M> for DiffViewer<M> {
     }
 
     fn measure(&self, proposal: SizeProposal, _ctx: &MeasureCtx) -> MeasuredSize {
-        measure_text_viewer(self.diff.lines(), self.height, self.border, proposal, 0, 24)
+        measure_text_viewer(
+            self.diff.lines().map(TextWidth::width),
+            self.height,
+            self.border,
+            proposal,
+            0,
+            24,
+        )
     }
 
     fn focus_config(&self) -> FocusConfig {
@@ -611,16 +602,16 @@ impl<M: 'static> Widget<M> for DiffViewer<M> {
     }
 }
 
-fn render_code(
+fn render_text_viewer<T>(
     chunk: &mut rsille_render::chunk::Chunk,
     ctx: &RenderCtx,
-    kind: ContentKind,
     border: Option<BorderStyle>,
     height: u16,
     custom_style: Option<Style>,
-    text: &str,
-    language: Option<&str>,
+    lines: impl Iterator<Item = T>,
+    line_count: usize,
     show_line_numbers: bool,
+    draw_line: impl Fn(&mut rsille_render::chunk::Chunk, T, rsille_render::style::Style),
 ) {
     let area = chunk.area();
     if area.width() == 0 || area.height() == 0 {
@@ -642,84 +633,35 @@ fn render_code(
     let _ = chunk.fill(0, 0, area.width(), area.height(), ' ', base_style);
     let (content_x, content_y, content_width, content_height) =
         content_area(chunk, border, border_style);
-    if content_width == 0 || content_height == 0 {
-        return;
-    }
-
-    let lines = text.lines().collect::<Vec<_>>();
-    if lines.is_empty() {
+    if content_width == 0 || content_height == 0 || line_count == 0 {
         return;
     }
 
     let state = ctx.state_or_default::<ContentViewerState>();
     let visible_rows = content_height.min(height) as usize;
     let scroll_offset = ensure_item_visible(
-        state.scroll_offset.min(lines.len().saturating_sub(1)),
+        state.scroll_offset.min(line_count - 1),
         state.scroll_offset,
         visible_rows,
     );
-    let line_number_width = if show_line_numbers {
-        lines.len().to_string().width() + 2
-    } else {
-        0
-    };
-    let text_width = content_width.saturating_sub(line_number_width as u16) as usize;
-
-    #[cfg(not(feature = "syntax-highlighting"))]
-    let _ = language;
-    #[cfg(feature = "syntax-highlighting")]
-    let syntax = language
-        .and_then(|name| SYNTAX_SET.find_syntax_by_token(name))
-        .or_else(|| SYNTAX_SET.find_syntax_plain_text().into());
-    #[cfg(feature = "syntax-highlighting")]
-    let theme = THEME_SET
-        .themes
-        .get("base16-ocean.dark")
-        .or_else(|| THEME_SET.themes.values().next());
-
-    for row in 0..visible_rows {
-        let line_index = scroll_offset + row;
-        if line_index >= lines.len() {
-            break;
-        }
-
+    let number_width = code_line_number_width(line_count, show_line_numbers);
+    let gutter = number_width.min(content_width as usize) as u16;
+    let text_width = content_width - gutter;
+    for (row, line) in lines.skip(scroll_offset).take(visible_rows).enumerate() {
         let y = content_y + row as u16;
         if show_line_numbers {
-            let number = format!("{:>width$} ", line_index + 1, width = line_number_width - 1);
-            let _ = chunk.set_string(content_x, y, &number, muted_style);
+            let number = format!(
+                "{:>width$} ",
+                scroll_offset + row + 1,
+                width = number_width - 1
+            );
+            let _ = chunk.set_string(content_x, y, &number[..gutter as usize], muted_style);
         }
-
-        let text_x = content_x + line_number_width as u16;
-        match kind {
-            ContentKind::Diff => {
-                draw_diff_line(chunk, text_x, y, text_width, lines[line_index], base_style)
-            }
-            ContentKind::Markdown => {
-                draw_markdown_line(chunk, text_x, y, text_width, lines[line_index], base_style)
-            }
-            ContentKind::Code => {
-                #[cfg(not(feature = "syntax-highlighting"))]
-                draw_plain_line(chunk, text_x, y, text_width, lines[line_index], base_style);
-                #[cfg(feature = "syntax-highlighting")]
-                if let (Some(syntax), Some(theme)) = (syntax, theme) {
-                    let mut highlighter = HighlightLines::new(syntax, theme);
-                    if let Ok(ranges) = highlighter.highlight_line(lines[line_index], &SYNTAX_SET) {
-                        draw_highlighted_line(chunk, text_x, y, text_width, &ranges, base_style);
-                    } else {
-                        draw_plain_line(
-                            chunk,
-                            text_x,
-                            y,
-                            text_width,
-                            lines[line_index],
-                            base_style,
-                        );
-                    }
-                } else {
-                    draw_plain_line(chunk, text_x, y, text_width, lines[line_index], base_style);
-                }
-            }
-        }
+        let row_area = rsille_render::area::Area::new(
+            (area.x() + content_x + gutter, area.y() + y).into(),
+            (text_width, 1).into(),
+        );
+        let _ = chunk.with_clip(row_area, |row_chunk| draw_line(row_chunk, line, base_style));
     }
 }
 
@@ -841,8 +783,8 @@ fn content_constraints(height: u16, border: Option<BorderStyle>, min_width: u16)
     }
 }
 
-fn measure_text_viewer<'a>(
-    lines: impl Iterator<Item = &'a str>,
+fn measure_text_viewer(
+    widths: impl Iterator<Item = usize>,
     height: u16,
     border: Option<BorderStyle>,
     proposal: SizeProposal,
@@ -850,10 +792,10 @@ fn measure_text_viewer<'a>(
     min_width: u16,
 ) -> MeasuredSize {
     let border_size = if border.is_some() { 2 } else { 0 };
-    let widest = lines
-        .map(|line| line.width().saturating_add(prefix_width))
+    let widest = widths
         .max()
         .unwrap_or(0)
+        .saturating_add(prefix_width)
         .max(min_width as usize);
     let width = fit_axis(
         (widest.min(u16::MAX as usize) as u16).saturating_add(border_size),
@@ -880,63 +822,8 @@ fn fit_axis(natural: u16, proposal: AxisLimit) -> u16 {
     }
 }
 
-#[cfg(feature = "syntax-highlighting")]
-fn draw_highlighted_line(
-    chunk: &mut rsille_render::chunk::Chunk,
-    x: u16,
-    y: u16,
-    width: usize,
-    ranges: &[(SyntectStyle, &str)],
-    fallback: rsille_render::style::Style,
-) {
-    let spans = ranges
-        .iter()
-        .map(|(style, text)| {
-            let style = Style::default()
-                .fg(Color::Rgb(
-                    style.foreground.r,
-                    style.foreground.g,
-                    style.foreground.b,
-                ))
-                .to_render_style();
-            rsille_render::text::Span::new(*text, style)
-        })
-        .collect();
-    let line = rsille_render::text::Line::from_texts(spans);
-    let area = rsille_render::area::Area::new(
-        (
-            chunk.area().x().saturating_add(x),
-            chunk.area().y().saturating_add(y),
-        )
-            .into(),
-        (width.min(u16::MAX as usize) as u16, 1).into(),
-    );
-    let _ = chunk.with_clip(area, |line_chunk| {
-        if line.content.iter().all(|s| s.is_empty()) {
-            let _ = line_chunk.set_char(0, 0, ' ', fallback);
-        } else {
-            let _ = line_chunk.set_line(0, 0, &line);
-        }
-    });
-}
-
-fn draw_plain_line(
-    chunk: &mut rsille_render::chunk::Chunk,
-    x: u16,
-    y: u16,
-    width: usize,
-    line: &str,
-    style: rsille_render::style::Style,
-) {
-    let text = truncate_to_width(line, width, chunk.text_metrics());
-    let _ = chunk.set_string(x, y, &text, style);
-}
-
 fn draw_diff_line(
     chunk: &mut rsille_render::chunk::Chunk,
-    x: u16,
-    y: u16,
-    width: usize,
     line: &str,
     fallback: rsille_render::style::Style,
 ) {
@@ -958,16 +845,12 @@ fn draw_diff_line(
     } else {
         fallback
     };
-    let text = truncate_to_width(line, width, chunk.text_metrics());
-    let _ = chunk.fill(x, y, width as u16, 1, ' ', style);
-    let _ = chunk.set_string(x, y, &text, style);
+    let _ = chunk.fill(0, 0, chunk.area().width(), 1, ' ', style);
+    let _ = chunk.set_string(0, 0, line, style);
 }
 
 fn draw_markdown_line(
     chunk: &mut rsille_render::chunk::Chunk,
-    x: u16,
-    y: u16,
-    width: usize,
     line: &str,
     fallback: rsille_render::style::Style,
 ) {
@@ -1000,8 +883,7 @@ fn draw_markdown_line(
         fallback
     };
 
-    let text = truncate_to_width(line, width, chunk.text_metrics());
-    let _ = chunk.set_string(x, y, &text, style);
+    let _ = chunk.set_string(0, 0, line, style);
 }
 
 fn log_style(level: LogLevel) -> Style {

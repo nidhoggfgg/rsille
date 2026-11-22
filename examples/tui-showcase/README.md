@@ -15,7 +15,7 @@ cargo run --manifest-path examples/tui-showcase/Cargo.toml -- --inline
 ```
 
 Fullscreen is the default. A 104 × 44 terminal is recommended; smaller windows scroll.
-Syntax highlighting is enabled in this project's dependency declaration.
+The code viewer uses the `rsille-syntect` extension for Rust syntax highlighting.
 
 | Page | Contents |
 | --- | --- |
