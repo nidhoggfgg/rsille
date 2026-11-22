@@ -20,9 +20,8 @@ rsille-tui.workspace = true
 tokio.workspace = true
 
 [features]
-default = ["sixel"]
-sixel = ["rsille-tui/sixel"]
-kitty = ["rsille-tui/kitty"]
+default = ["raster"]
+raster = ["rsille-render/raster", "rsille-tui/raster"]
 
 [workspace]
 members = [
@@ -37,9 +36,9 @@ resolver = "3"
 exclude = ["examples"]
 
 [workspace.dependencies]
-rsille-render = { version = "0.1.0", path = "packages/rsille-render" }
+rsille-render = { version = "0.1.0", path = "packages/rsille-render", default-features = false }
 rsille-canvas = { version = "0.1.0", path = "packages/rsille-canvas" }
-rsille-tui = { version = "0.1.0", path = "packages/rsille-tui" }
+rsille-tui = { version = "0.1.0", path = "packages/rsille-tui", default-features = false }
 base64 = "0.22"
 crossterm = { version = "0.28.1", features = ["event-stream"] }
 futures = { version = "0.3.31", default-features = false, features = ["std", "async-await"] }

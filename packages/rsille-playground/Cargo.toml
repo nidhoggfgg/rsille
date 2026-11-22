@@ -21,7 +21,7 @@ clap = { version = "4.5", features = ["derive"] }
 crossterm.workspace = true
 meval = "0.2"
 png = "0.18"
-rsille = { version = "3.3.0", path = "../..", features = ["kitty"] }
+rsille = { version = "3.3.0", path = "../..", features = ["raster"] }
 rsille-typst = { version = "0.1.0", path = "../rsille-typst" }
 typst-assets = { version = "=0.13.1", features = ["fonts"] }
 

@@ -6,10 +6,11 @@
 
 use log::trace;
 
+#[cfg(feature = "raster")]
+use crate::raster::{RasterCanvas, RasterCell, RasterOptions};
 use crate::{
     area::Area,
     buffer::Buffer,
-    raster::{RasterCanvas, RasterCell, RasterOptions},
     style::{Style, Stylized},
     DrawErr,
 };
@@ -166,6 +167,7 @@ impl<'a> Chunk<'a> {
     /// copying a cropped image. Replaces any intersecting wide grapheme in full.
     /// Returns [`DrawErr::OutOfBounds`] for an invalid local position or raster
     /// offset, without modifying the buffer.
+    #[cfg(feature = "raster")]
     pub fn set_raster_cell(&mut self, x: u16, y: u16, cell: RasterCell) -> Result<(), DrawErr> {
         let pos = self
             .area
@@ -175,6 +177,7 @@ impl<'a> Chunk<'a> {
     }
 
     /// Adds a raster layer without replacing underlying glyphs or raster tiles.
+    #[cfg(feature = "raster")]
     pub fn overlay_raster_cell(&mut self, x: u16, y: u16, cell: RasterCell) -> Result<(), DrawErr> {
         let pos = self
             .area
@@ -184,6 +187,7 @@ impl<'a> Chunk<'a> {
     }
 
     /// Draws an image over the current text and earlier images in this chunk.
+    #[cfg(feature = "raster")]
     pub fn raster_overlay(
         &mut self,
         canvas: &RasterCanvas,
@@ -212,6 +216,7 @@ impl<'a> Chunk<'a> {
     ///
     /// Each cell retains the full chunk size as its target and its original
     /// local offsets. Empty chunks are a no-op. Canvas clones share pixel data.
+    #[cfg(feature = "raster")]
     pub fn raster(&mut self, canvas: &RasterCanvas, options: RasterOptions) -> Result<(), DrawErr> {
         let target = self.area.size();
         for y in 0..target.height {
@@ -233,6 +238,7 @@ impl<'a> Chunk<'a> {
     }
 
     /// Marks this frame as containing raster flattened by a visual effect.
+    #[cfg(feature = "raster")]
     pub fn mark_unsupported_raster_composition(&mut self) {
         self.buffer.mark_unsupported_raster_composition();
     }
@@ -449,7 +455,7 @@ impl<'a> Chunk<'a> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "raster"))]
 mod raster_tests {
     use super::*;
     use crate::text::{AmbiguousWidth, TextMetrics};

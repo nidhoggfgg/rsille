@@ -1,5 +1,4 @@
 //! Session selection and frame preflight shared by the native presenters.
-#[cfg(feature = "kitty")]
 use super::kitty::{KittyFrame, KittyPresenter};
 use super::output::{
     CellPixels, InlineRasterSession, RasterBackend, RasterCapabilities, RasterConfig, RasterOutput,
@@ -11,7 +10,6 @@ use std::{io, sync::Arc, time::Duration};
 
 pub(super) const MAX_NATIVE_CELLS: usize = 32 * 1024;
 const MAX_NATIVE_PIXELS: u64 = 16 * 1024 * 1024;
-#[cfg(any(feature = "sixel", feature = "kitty"))]
 pub(super) const MAX_FRAME_BYTES: usize = 32 * 1024 * 1024;
 
 pub(super) fn check_limits(
@@ -54,7 +52,6 @@ pub(crate) struct RasterPlan {
 pub(super) enum Payload {
     Text,
     Sixel(SixelFrame),
-    #[cfg(feature = "kitty")]
     Kitty(KittyFrame),
 }
 
@@ -69,7 +66,6 @@ impl RasterPlan {
         match &self.payload {
             Payload::Text => &[],
             Payload::Sixel(frame) => &frame.encoded,
-            #[cfg(feature = "kitty")]
             Payload::Kitty(_) => &[],
         }
     }
@@ -78,7 +74,6 @@ impl RasterPlan {
         match &self.payload {
             Payload::Text => false,
             Payload::Sixel(frame) => !frame.encoded.is_empty(),
-            #[cfg(feature = "kitty")]
             Payload::Kitty(frame) => !frame.commands.is_empty(),
         }
     }
@@ -86,24 +81,18 @@ impl RasterPlan {
     pub fn kitty_commands(&self) -> &[u8] {
         match &self.payload {
             Payload::Text | Payload::Sixel(_) => &[],
-            #[cfg(feature = "kitty")]
             Payload::Kitty(frame) => &frame.commands,
         }
     }
 
     pub fn uses_kitty(&self) -> bool {
-        match self.payload {
-            Payload::Text | Payload::Sixel(_) => false,
-            #[cfg(feature = "kitty")]
-            Payload::Kitty(_) => true,
-        }
+        matches!(self.payload, Payload::Kitty(_))
     }
 }
 
 #[derive(Debug, Clone)]
 enum Backend {
     Sixel(SixelPresenter),
-    #[cfg(feature = "kitty")]
     Kitty(KittyPresenter),
     Pending(RasterBackend),
     Unavailable(Arc<io::Error>),
@@ -154,15 +143,9 @@ impl RasterPresenter {
                     alternate_screen,
                 ))
             }
-            #[cfg(feature = "kitty")]
             RasterConfig::Session(RasterSession::KittyFullscreen(pixels))
             | RasterConfig::InlineSession(InlineRasterSession::Kitty(pixels)) => {
                 Backend::Kitty(KittyPresenter::new(pixels))
-            }
-            #[cfg(not(feature = "kitty"))]
-            RasterConfig::Session(RasterSession::KittyFullscreen(_))
-            | RasterConfig::InlineSession(InlineRasterSession::Kitty(_)) => {
-                Backend::Unavailable(Arc::new(unsupported("the kitty Cargo feature is disabled")))
             }
         };
         Self {
@@ -257,7 +240,6 @@ impl RasterPresenter {
                 s.alternate_screen = self.alternate_screen;
                 s.prepare(buffer, origin, inline, append_newline, inline_shrank)
             }
-            #[cfg(feature = "kitty")]
             Backend::Kitty(k) => k.prepare(buffer, origin, inline_extent),
             _ => Ok(RasterPlan {
                 native: false,
@@ -272,7 +254,6 @@ impl RasterPresenter {
     pub fn begin(&mut self, plan: &RasterPlan) {
         match &mut self.backend {
             Backend::Sixel(s) => s.begin(plan),
-            #[cfg(feature = "kitty")]
             Backend::Kitty(k) => {
                 if let Payload::Kitty(frame) = &plan.payload {
                     k.begin(frame)
@@ -284,7 +265,6 @@ impl RasterPresenter {
     pub fn commit(&mut self, plan: RasterPlan) {
         match &mut self.backend {
             Backend::Sixel(s) => s.commit(plan),
-            #[cfg(feature = "kitty")]
             Backend::Kitty(k) => {
                 if let Payload::Kitty(frame) = plan.payload {
                     k.commit(frame)
@@ -296,20 +276,17 @@ impl RasterPresenter {
     pub fn needs_protocol_recovery(&self) -> bool {
         match &self.backend {
             Backend::Sixel(s) => s.needs_protocol_recovery(),
-            #[cfg(feature = "kitty")]
             Backend::Kitty(k) => k.uncertain(),
             _ => false,
         }
     }
-    pub fn cleanup_kitty(&mut self, _out: &mut impl io::Write) -> io::Result<()> {
-        #[cfg(feature = "kitty")]
+    pub fn cleanup_kitty(&mut self, out: &mut impl io::Write) -> io::Result<()> {
         if let Backend::Kitty(k) = &mut self.backend {
-            k.cleanup(_out)?;
+            k.cleanup(out)?;
         }
         Ok(())
     }
     pub fn forget_region(&mut self) {
-        #[cfg(feature = "kitty")]
         if let Backend::Kitty(k) = &mut self.backend {
             k.forget_region();
         }

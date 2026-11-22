@@ -32,7 +32,6 @@ impl std::str::FromStr for RasterBackend {
     }
 }
 
-#[cfg(feature = "kitty")]
 pub use super::kitty::KittyImage;
 
 /// Verified fullscreen protocol and physical cell metrics for one terminal.
@@ -119,14 +118,8 @@ impl RasterBackend {
         kitty_session: fn(CellPixels) -> T,
         sixel_session: Option<fn(CellPixels) -> T>,
     ) -> io::Result<T> {
-        let kitty = self != Self::Sixel && cfg!(feature = "kitty");
-        let sixel = self != Self::Kitty && cfg!(feature = "sixel");
-        if !kitty && !sixel {
-            return Err(io::Error::new(
-                io::ErrorKind::Unsupported,
-                format!("no compiled raster backend for {self:?}"),
-            ));
-        }
+        let kitty = self != Self::Sixel;
+        let sixel = self != Self::Kitty;
         crate::terminal_probe::before_input(|| {
             let (has_kitty, has_sixel) = crate::terminal_probe::protocols(kitty, sixel, timeout)?;
             if !has_kitty && !has_sixel {
@@ -400,7 +393,7 @@ impl RasterCapabilities {
 
 /// Terminal raster settings shared by render builders and TUI applications.
 ///
-/// This configuration selects Sixel and requires the `sixel` feature.
+/// This configuration selects Sixel.
 /// Defaults leave every capability unknown: frames without raster content work
 /// normally, while raster frames fail until the required capabilities are set.
 /// Both modes require `sixel`, `no_scroll`, and valid `cell_pixels`. Fullscreen
@@ -431,8 +424,6 @@ impl RasterOutput {
         }
         let reason = if unsupported_composition {
             Some("Sixel raster output does not support this visual composition")
-        } else if !cfg!(feature = "sixel") {
-            Some("the sixel Cargo feature is disabled")
         } else if !inline && !alternate_screen {
             Some("native Sixel requires inline mode or an alternate screen")
         } else if !self.capabilities.sixel {
@@ -527,12 +518,9 @@ mod tests {
     }
 
     #[test]
-    fn feature_and_all_safety_conditions_are_required() {
+    fn all_safety_conditions_are_required() {
         let config = verified();
-        assert_eq!(
-            config.resolve(true, false, true, false).is_ok(),
-            cfg!(feature = "sixel")
-        );
+        assert!(config.resolve(true, false, true, false).is_ok());
         for missing in 0..4 {
             let mut config = config;
             match missing {
@@ -690,7 +678,6 @@ mod tests {
         assert_eq!(config.resolve(false, false, true, false).unwrap(), None);
     }
 
-    #[cfg(feature = "sixel")]
     #[test]
     fn native_output_requires_explicit_valid_pixels_and_never_discovers_them() {
         let mut config = verified();
@@ -734,7 +721,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "sixel")]
     #[test]
     fn partial_band_heights_resolve_without_rounding() {
         for height in 1..=25 {

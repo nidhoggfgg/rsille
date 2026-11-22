@@ -140,7 +140,6 @@ fn frame(render: &mut Render<Vec<u8>, Scene>) -> Vec<u8> {
     std::mem::take(&mut render.out)
 }
 
-#[cfg(any(feature = "kitty", feature = "sixel"))]
 #[test]
 fn transparent_replacement_and_overlay_preserve_their_distinct_backgrounds() {
     use crate::{InlineRasterSession, RasterSession};
@@ -180,9 +179,6 @@ fn transparent_replacement_and_overlay_preserve_their_distinct_backgrounds() {
         height: 6,
     };
     for kitty in [false, true] {
-        if (kitty && !cfg!(feature = "kitty")) || (!kitty && !cfg!(feature = "sixel")) {
-            continue;
-        }
         for inline in [false, true] {
             let mut builder = Builder::new();
             builder.size((1, 1)).clear(false);
@@ -346,19 +342,6 @@ fn append_newline_strict_rejects_before_any_output_or_commit() {
     assert_eq!(render.raster_stats(), RasterStats::default());
 }
 
-#[cfg(not(feature = "sixel"))]
-#[test]
-fn disabled_feature_rejects_even_when_verified() {
-    let mut render = renderer(verified(), Vec::new());
-    assert_eq!(
-        render.render().unwrap_err().kind(),
-        io::ErrorKind::Unsupported
-    );
-    assert!(render.out.is_empty());
-    assert!(render.buffer.previous().is_none());
-    assert_eq!(render.raster_stats(), RasterStats::default());
-}
-
 #[test]
 fn inline_missing_erase_or_appended_newline_rejects() {
     for append_newline in [false, true] {
@@ -384,23 +367,6 @@ fn inline_missing_erase_or_appended_newline_rejects() {
     }
 }
 
-#[cfg(not(feature = "sixel"))]
-#[test]
-fn inline_disabled_feature_rejects_even_with_inline_erase() {
-    let mut render = inline_renderer(inline_verified(), Vec::new());
-
-    assert_eq!(
-        render.render().unwrap_err().kind(),
-        io::ErrorKind::Unsupported
-    );
-    assert!(render.out.is_empty());
-    assert!(render.buffer.previous().is_none());
-    assert!(!render.buffer.has_raster());
-
-    assert_eq!(render.raster_stats(), RasterStats::default());
-}
-
-#[cfg(any(feature = "sixel", feature = "kitty"))]
 #[derive(Clone, Default)]
 struct FaultWriter {
     bytes: Vec<u8>,
@@ -409,7 +375,6 @@ struct FaultWriter {
     fail_flush: bool,
 }
 
-#[cfg(any(feature = "sixel", feature = "kitty"))]
 impl Write for FaultWriter {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
         if let Some(remaining) = self.remaining {
@@ -442,7 +407,6 @@ impl Write for FaultWriter {
     }
 }
 
-#[cfg(feature = "sixel")]
 mod native {
     use super::*;
 
@@ -2977,7 +2941,7 @@ fn custom_writers_keep_the_last_configuration_without_probing() {
         .raster_backend(RasterBackend::Auto)
         .raster_output(verified());
     let mut legacy = builder.build_render(Scene::default(), Vec::new());
-    assert_eq!(legacy.render().is_ok(), cfg!(feature = "sixel"));
+    legacy.render().unwrap();
     builder.raster_backend(RasterBackend::Auto);
     let mut requested = builder.build_render(Scene::default(), Vec::new());
     requested.thing.visible = false;
@@ -3020,7 +2984,6 @@ fn auto_defers_an_unavailable_mode_while_explicit_selection_fails_at_startup() {
     }
 }
 
-#[cfg(feature = "kitty")]
 mod kitty {
     use super::*;
     use crate::{InlineRasterSession, RasterSession};

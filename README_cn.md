@@ -70,10 +70,12 @@ npx skills add nidhoggfgg/rsille.skills --skill rsille
 
 ```toml
 [dependencies]
-rsille = "3.2.0"
+rsille = "3.3.0"
 ```
 
-默认启用 `sixel` feature，
+默认启用 `raster`，提供 `RasterCanvas`、`raster_canvas` 组件以及 Kitty 和 Sixel 输出。
+只使用文本和字符画布时，可设置 `default-features = false`。
+
 需要代码高亮时，添加独立扩展 [`rsille-syntect`](packages/rsille-syntect/README.md)，
 再将 `rsille_syntect::highlight(source, "rs")` 的结果传给 `CodeViewer::from_lines`。
 
@@ -134,7 +136,7 @@ fn main() -> WidgetResult<()> {
 并与文本、按钮和其他组件融为一体。
 
 全屏应用可以在 `.update(...)` 前设置 `.raster_backend(RasterBackend::Auto)`。
-保留默认 features 并添加 `features = ["kitty"]` 后，启动时优先选 Kitty，其次选 Sixel。
+启动时优先选 Kitty，其次选 Sixel。
 显式指定 `Kitty` 或 `Sixel` 会在启动时报告错误。Auto 允许先绘制文本，在首次需要图像时才报告协商失败。
 Kitty 保留原始 RGB 和透明像素，拖动时可以复用已上传的图像。启动探测支持 macOS、Linux 和 WSL。
 原生 Windows 和自定义 writer 可以通过 `.raster_session(...)` 传入已验证的全屏协议与字符像素尺寸。

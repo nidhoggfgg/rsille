@@ -13,9 +13,8 @@ use crate::buffer::Buffer;
 use super::output::{CellPixels, RasterOutput, RasterStats};
 use super::RasterCell;
 
-#[cfg(feature = "sixel")]
 use super::presenter::MAX_FRAME_BYTES;
-#[cfg(all(test, feature = "sixel"))]
+#[cfg(test)]
 use super::presenter::MAX_NATIVE_CELLS;
 use super::presenter::{check_limits, EncodedCell, Payload, RasterPlan};
 type VisibleCell = (u16, u16, RasterCell);
@@ -43,7 +42,6 @@ pub(crate) struct SixelPresenter {
     // Set before native I/O, cleared only after a successful flush. Even a
     // failed first frame may have left graphics on the terminal.
     uncertain: bool,
-    #[cfg(feature = "sixel")]
     cache: super::sixel::SixelCache,
     tiles_sent: u64,
     bytes_sent: u64,
@@ -172,7 +170,6 @@ impl SixelPresenter {
         let Payload::Sixel(frame) = &mut plan.payload else {
             unreachable!()
         };
-        #[cfg(feature = "sixel")]
         if let Some(pixels) = metrics {
             let mut bytes = 0usize;
             // Every glyph we repaint can cover all tiles across its column span.
@@ -224,9 +221,6 @@ impl SixelPresenter {
                 frame.encoded.push((x, y - shift, data));
             }
         }
-        // Frames without raster cells do not allocate source or encoded data.
-        #[cfg(not(feature = "sixel"))]
-        let _ = frame;
         Ok(plan)
     }
 
@@ -266,20 +260,14 @@ impl SixelPresenter {
     }
 
     pub fn stats(&self) -> RasterStats {
-        let stats = RasterStats {
+        RasterStats {
             tiles_sent: self.tiles_sent,
             bytes_sent: self.bytes_sent,
-            ..Default::default()
-        };
-        #[cfg(feature = "sixel")]
-        let stats = RasterStats {
             encodes: self.cache.encodes(),
             cache_hits: self.cache.hits(),
             cache_bytes: self.cache.bytes(),
             cache_entries: self.cache.len(),
-            ..stats
-        };
-        stats
+        }
     }
 
     pub fn needs_protocol_recovery(&self) -> bool {
@@ -287,7 +275,7 @@ impl SixelPresenter {
     }
 }
 
-#[cfg(all(test, feature = "sixel"))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::raster::output::RasterCapabilities;

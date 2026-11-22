@@ -72,10 +72,14 @@ Run `cargo run -p rsille-playground` from the repository root to open the menu. 
 
 ```toml
 [dependencies]
-rsille = "3.2.0"
+rsille = "3.3.0"
 ```
 
-The `sixel` feature is enabled by default. For syntax highlighting, add the
+The default `raster` feature provides `RasterCanvas`, the `raster_canvas` widget,
+and Kitty and Sixel output. For text and character canvases only, set
+`default-features = false`.
+
+For syntax highlighting, add the
 [`rsille-syntect` extension](packages/rsille-syntect/README.md) and pass
 `rsille_syntect::highlight(source, "rs")` to `CodeViewer::from_lines`.
 
@@ -135,8 +139,7 @@ Present fine curves, colorful images and rich visualizations in Sixel-capable
 terminals, alongside text, buttons and other widgets in one interface.
 
 For managed fullscreen apps, opt in with `.raster_backend(RasterBackend::Auto)`
-before `.update(...)`. With `features = ["kitty"]` and the default features,
-startup prefers Kitty, then Sixel. Explicit `Kitty` or `Sixel` selections
+before `.update(...)`. Startup prefers Kitty, then Sixel. Explicit `Kitty` or `Sixel` selections
 report startup errors immediately. Auto allows text frames until an image is needed.
 Kitty retains full RGB and transparency and reuses uploaded surfaces during drags.
 Negotiation uses the controlling terminal on Unix, including macOS and WSL.

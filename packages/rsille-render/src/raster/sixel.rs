@@ -1,6 +1,6 @@
 //! Position-independent Sixel tiles for already-visible raster cells.
 //!
-//! The parent gates this module with `cfg(feature = "sixel")` and owns cursor
+//! The presenter owns cursor
 //! placement, clipping, terminal capabilities, and graphics cleanup. Arbitrary
 //! cell heights use a partial final band: P2=1 leaves unset padding transparent,
 //! raster attributes keep the actual dimensions, and no trailing band advance

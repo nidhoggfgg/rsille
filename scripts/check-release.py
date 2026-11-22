@@ -72,10 +72,10 @@ name = "rsille-release-consumer"
 version = "0.0.0"
 edition = "2021"
 [dependencies]
-rsille = {{ version = "={packages["rsille"]["version"]}" }}
+rsille = {{ version = "={packages["rsille"]["version"]}", default-features = false }}
 tokio = {{ version = "1", features = ["rt", "time", "net"] }}
 [features]
-kitty = ["rsille/kitty"]
+raster = ["rsille/raster"]
 ''')
         workflow = root / "packages/rsille-tui/examples/basics/workflow.rs"
         program = workflow.read_text().replace("use rsille_tui::", "use rsille::tui::")
@@ -110,7 +110,7 @@ fn check_canvas() {
         main_rs = consumer / "src/main.rs"
         main_rs.write_text(program)
         build_args = ["--target-dir", str(target / "release-check-build")]
-        for features in ([], ["--all-features"]):
+        for features in (["--no-default-features"], ["--all-features"]):
             cargo("test", *selection, "--lib", *build_args, *features, cwd=extracted)
             cargo("test", *selection, "--doc", *build_args, *features, cwd=extracted)
             for example in (program, extensions):

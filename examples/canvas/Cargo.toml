@@ -7,10 +7,5 @@ publish = false
 [workspace]
 
 [dependencies]
-rsille = { path = "../..", default-features = false }
+rsille = { path = "../..", features = ["raster"] }
 crossterm = "0.28.1"
-
-[features]
-default = ["kitty", "sixel"]
-kitty = ["rsille/kitty"]
-sixel = ["rsille/sixel"]

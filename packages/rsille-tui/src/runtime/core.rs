@@ -7,6 +7,7 @@ use std::sync::mpsc::{self, Receiver};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+#[cfg(feature = "raster")]
 use crate::app::RasterSetting;
 use crossterm::event::Event;
 use rsille_render::area::Size;
@@ -634,6 +635,7 @@ pub(crate) struct AppRuntime<State, U, V, M> {
     global_key_handlers: HashMap<KeyCode, Box<dyn Fn() -> M>>,
     input_handler: Option<InputHandler<M>>,
     keyboard_mode: KeyboardMode,
+    #[cfg(feature = "raster")]
     raster_output: RasterSetting,
     focus_events: bool,
     hotkeys: HotkeyRegistry<M>,
@@ -880,6 +882,7 @@ impl<State, U, V, M: Send + 'static> AppRuntime<State, U, V, M> {
             global_key_handlers,
             input_handler,
             keyboard_mode,
+            #[cfg(feature = "raster")]
             raster_output,
             focus_events,
             hotkeys,
@@ -930,6 +933,7 @@ impl<State, U, V, M: Send + 'static> AppRuntime<State, U, V, M> {
             global_key_handlers,
             input_handler,
             keyboard_mode,
+            #[cfg(feature = "raster")]
             raster_output,
             focus_events,
             hotkeys,
@@ -2456,6 +2460,7 @@ where
             builder.enable_alt_screen().size((width, height));
         }
 
+        #[cfg(feature = "raster")]
         match self.raster_output {
             RasterSetting::Output(output) => builder.raster_output(output),
             RasterSetting::Backend(backend) => builder.raster_backend(backend),
@@ -3211,6 +3216,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "raster")]
     fn commit_frame_precedes_deferred_exit_and_preserves_raster_snapshot() {
         use crate::widgets::raster_canvas;
         use rsille_render::raster::{RasterCanvas, Rgb};
@@ -3237,6 +3243,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "raster")]
     fn raster_output_defaults_and_explicit_config_reach_the_runtime() {
         use crate::prelude::{CellPixels, RasterCapabilities, RasterOutput};
         use crate::widgets::label;
@@ -3281,6 +3288,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "raster")]
     fn raster_output_headless_frames_preserve_metadata() {
         use crate::layout::col;
         use crate::widgets::{label, raster_canvas};

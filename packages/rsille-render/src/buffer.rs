@@ -5,17 +5,54 @@
 //! Call [`Buffer::clear`] after presenting a frame to preserve it for diffing
 //! and prepare a blank working frame.
 
-use log::info;
-use std::collections::BTreeMap;
-type Overlays = BTreeMap<usize, Vec<RasterCell>>;
-
+#[cfg(feature = "raster")]
+use crate::raster::RasterCell;
 use crate::{
     area::{Position, Size},
     chunk::Chunk,
-    raster::RasterCell,
     style::Stylized,
     Draw, DrawErr,
 };
+use log::info;
+
+#[cfg(feature = "raster")]
+#[derive(Debug, Clone, Default)]
+struct RasterLayers {
+    overlays: std::collections::BTreeMap<usize, Vec<RasterCell>>,
+    owners: Option<Vec<Option<RasterCell>>>,
+    unsupported_composition: bool,
+}
+
+#[cfg(feature = "raster")]
+impl RasterLayers {
+    fn owner_at(&self, index: usize) -> Option<&RasterCell> {
+        self.owners.as_ref()?.get(index)?.as_ref()
+    }
+
+    fn has_storage(&self) -> bool {
+        self.owners.is_some() || !self.overlays.is_empty()
+    }
+
+    fn matches_range(&self, previous: &Self, range: std::ops::Range<usize>) -> bool {
+        let owners_match = (self.owners.is_none() && previous.owners.is_none())
+            || range
+                .clone()
+                .all(|i| self.owner_at(i) == previous.owner_at(i));
+        owners_match
+            && self
+                .overlays
+                .range(range.clone())
+                .eq(previous.overlays.range(range))
+    }
+
+    fn clear(&mut self) {
+        self.overlays.clear();
+        if let Some(owners) = &mut self.owners {
+            owners.fill(None);
+        }
+        self.unsupported_composition = false;
+    }
+}
 
 /// A row-major drawing buffer with optional previous-frame storage.
 ///
@@ -44,12 +81,10 @@ pub struct Buffer {
     size: Size,
     content: Vec<Cell>,
     previous: Option<Vec<Cell>>,
-    overlays: Overlays,
-    previous_overlays: Overlays,
-    raster: Option<Vec<Option<RasterCell>>>,
-    previous_raster: Option<Vec<Option<RasterCell>>>,
-    unsupported_raster_composition: bool,
-    previous_unsupported_raster_composition: bool,
+    #[cfg(feature = "raster")]
+    layers: RasterLayers,
+    #[cfg(feature = "raster")]
+    previous_layers: RasterLayers,
     dirty: bool,
     text_metrics: crate::text::TextMetrics,
 }
@@ -60,15 +95,8 @@ impl Buffer {
         Self {
             size,
             content: vec![Cell::space(); size.width as usize * size.height as usize],
-            previous: None,
-            overlays: Overlays::new(),
-            previous_overlays: Overlays::new(),
-            raster: None,
-            previous_raster: None,
-            unsupported_raster_composition: false,
-            previous_unsupported_raster_composition: false,
-            dirty: true, // Mark dirty on creation to force initial render
-            text_metrics: crate::text::TextMetrics::default(),
+            dirty: true, // Force initial render.
+            ..Default::default()
         }
     }
 
@@ -106,28 +134,29 @@ impl Buffer {
             None
         }
     }
+}
 
+#[cfg(feature = "raster")]
+impl Buffer {
     /// Returns the current raster owner at an absolute cell position.
     pub fn raster_at(&self, pos: Position) -> Option<&RasterCell> {
-        self.raster.as_ref()?.get(self.index(pos)?)?.as_ref()
+        self.layers.owner_at(self.index(pos)?)
     }
 
     /// Returns the previous frame's raster owner at an absolute cell position.
     pub fn previous_raster_at(&self, pos: Position) -> Option<&RasterCell> {
-        self.previous_raster
-            .as_ref()?
-            .get(self.index(pos)?)?
-            .as_ref()
+        self.previous_layers.owner_at(self.index(pos)?)
     }
 
     /// Whether the current frame contains any visible native raster cells.
     pub fn has_raster(&self) -> bool {
-        !self.overlays.is_empty() || self.raster_cells().next().is_some()
+        !self.layers.overlays.is_empty() || self.raster_cells().next().is_some()
     }
 
     /// Iterates current raster owners in row-major order, in buffer coordinates.
     pub fn raster_cells(&self) -> impl Iterator<Item = (u16, u16, &RasterCell)> {
-        self.raster
+        self.layers
+            .owners
             .iter()
             .flatten()
             .enumerate()
@@ -148,17 +177,17 @@ impl Buffer {
     /// if they cover the affected cells. Strict raster presenters must reject
     /// such frames rather than silently discarding the image.
     pub fn has_unsupported_raster_composition(&self) -> bool {
-        self.unsupported_raster_composition
+        self.layers.unsupported_composition
     }
 
     /// Returns the unsupported-composition marker saved with the previous frame.
     pub fn previous_has_unsupported_raster_composition(&self) -> bool {
-        self.previous_unsupported_raster_composition
+        self.previous_layers.unsupported_composition
     }
 
     /// Marks the current frame as containing flattened raster composition.
     pub fn mark_unsupported_raster_composition(&mut self) {
-        self.unsupported_raster_composition = true;
+        self.layers.unsupported_composition = true;
         self.dirty = true;
     }
 
@@ -175,7 +204,8 @@ impl Buffer {
         self.validate_raster(pos, &cell)?;
         self.write(pos, cell.placeholder(), false)?;
         let index = self.index(pos).unwrap();
-        self.raster
+        self.layers
+            .owners
             .get_or_insert_with(|| vec![None; self.content.len()])[index] = Some(cell);
         Ok(())
     }
@@ -183,7 +213,8 @@ impl Buffer {
     /// Appends a tile above the current text and earlier raster layers.
     pub fn overlay_raster(&mut self, pos: Position, cell: RasterCell) -> Result<(), DrawErr> {
         self.validate_raster(pos, &cell)?;
-        self.overlays
+        self.layers
+            .overlays
             .entry(self.index(pos).unwrap())
             .or_default()
             .push(cell);
@@ -194,7 +225,7 @@ impl Buffer {
     /// Iterates overlay tiles in row-major order, bottom-to-top within each cell.
     pub fn overlay_cells(&self) -> impl Iterator<Item = (u16, u16, &RasterCell)> {
         let width = usize::from(self.size.width);
-        self.overlays.iter().flat_map(move |(&i, stack)| {
+        self.layers.overlays.iter().flat_map(move |(&i, stack)| {
             stack
                 .iter()
                 .map(move |c| ((i % width) as u16, (i / width) as u16, c))
@@ -210,7 +241,9 @@ impl Buffer {
         }
         Ok(())
     }
+}
 
+impl Buffer {
     /// Returns the width and tab-stop policy used for writes.
     pub fn text_metrics(&self) -> crate::text::TextMetrics {
         self.text_metrics
@@ -259,15 +292,17 @@ impl Buffer {
     fn erase_owner(&mut self, index: usize) {
         let owner = self.content[index].owner.unwrap_or(index);
         let end = (owner + self.content[owner].width().max(1)).min(self.content.len());
-        if !self.overlays.is_empty() {
+        #[cfg(feature = "raster")]
+        if !self.layers.overlays.is_empty() {
             for i in owner..end {
-                self.overlays.remove(&i);
+                self.layers.overlays.remove(&i);
             }
         }
         for cell in &mut self.content[owner..end] {
             *cell = Cell::space();
         }
-        if let Some(raster) = &mut self.raster {
+        #[cfg(feature = "raster")]
+        if let Some(raster) = &mut self.layers.owners {
             raster[owner..end].fill(None);
         }
     }
@@ -341,14 +376,25 @@ impl Buffer {
             .content
             .capacity()
             .saturating_add(self.previous.as_ref().map_or(0, Vec::capacity));
-        let raster_cells = self
-            .raster
-            .as_ref()
-            .map_or(0, Vec::capacity)
-            .saturating_add(self.previous_raster.as_ref().map_or(0, Vec::capacity));
-        text_cells
-            .saturating_mul(std::mem::size_of::<Cell>())
-            .saturating_add(raster_cells.saturating_mul(std::mem::size_of::<Option<RasterCell>>()))
+        let bytes = text_cells.saturating_mul(std::mem::size_of::<Cell>());
+        #[cfg(feature = "raster")]
+        let bytes = {
+            let raster_cells = self
+                .layers
+                .owners
+                .as_ref()
+                .map_or(0, Vec::capacity)
+                .saturating_add(
+                    self.previous_layers
+                        .owners
+                        .as_ref()
+                        .map_or(0, Vec::capacity),
+                );
+            bytes.saturating_add(
+                raster_cells.saturating_mul(std::mem::size_of::<Option<RasterCell>>()),
+            )
+        };
+        bytes
     }
 
     /// Clear the buffer for the next frame, preserving previous for diffing
@@ -362,14 +408,11 @@ impl Buffer {
         std::mem::swap(&mut self.content, self.previous.as_mut().unwrap());
         // Reset all cells in the now-current buffer to empty
         self.content.fill(Cell::space());
-        std::mem::swap(&mut self.overlays, &mut self.previous_overlays);
-        self.overlays.clear();
-        std::mem::swap(&mut self.raster, &mut self.previous_raster);
-        if let Some(raster) = &mut self.raster {
-            raster.fill(None);
+        #[cfg(feature = "raster")]
+        {
+            std::mem::swap(&mut self.layers, &mut self.previous_layers);
+            self.layers.clear();
         }
-        self.previous_unsupported_raster_composition = self.unsupported_raster_composition;
-        self.unsupported_raster_composition = false;
         // Reset dirty flag after saving state
         self.dirty = false;
     }
@@ -385,32 +428,31 @@ impl Buffer {
 
     /// Discards staged drawing while retaining the last displayed frame.
     pub(crate) fn discard_frame(&mut self) {
-        self.overlays.clear();
+        #[cfg(feature = "raster")]
+        self.layers.clear();
         self.content.fill(Cell::space());
-        if let Some(raster) = &mut self.raster {
-            raster.fill(None);
-        }
-        self.unsupported_raster_composition = false;
         self.dirty = false;
     }
 
     /// Clips a staged inline frame without discarding the last displayed diff.
     /// Raster sampling retains its original target, just as with chunk clipping.
+    #[cfg(feature = "raster")]
     pub(crate) fn clip_inline_rows(&mut self, height: u16) {
         let start = usize::from(height.min(self.size.height)) * usize::from(self.size.width);
-        self.overlays.split_off(&start);
+        self.layers.overlays.split_off(&start);
         self.content[start..].fill(Cell::space());
-        if let Some(raster) = &mut self.raster {
+        if let Some(raster) = &mut self.layers.owners {
             raster[start..].fill(None);
         }
     }
 
     /// Discards the previous frame without changing current content or dirtiness.
     pub fn reset_diff(&mut self) {
-        self.previous_overlays.clear();
         self.previous = None;
-        self.previous_raster = None;
-        self.previous_unsupported_raster_composition = false;
+        #[cfg(feature = "raster")]
+        {
+            self.previous_layers = Default::default();
+        }
     }
 
     /// Get the previous buffer state for diffing
@@ -442,11 +484,12 @@ impl Buffer {
             new_size.width, new_size.height
         );
 
-        self.overlays.clear();
+        #[cfg(feature = "raster")]
+        {
+            self.layers = Default::default();
+        }
         self.size = new_size;
         self.content = vec![Cell::space(); new_size.width as usize * new_size.height as usize];
-        self.raster = None;
-        self.unsupported_raster_composition = false;
         // Clear previous buffer on resize to force full redraw
         self.reset_diff();
         self.dirty = true; // Mark dirty on resize
@@ -457,24 +500,28 @@ impl Buffer {
     /// Returns `None` when no previous frame exists. Items are `(x, y, cell)`
     /// in row-major order, excluding occupied continuation cells.
     pub fn diff(&self) -> Option<DiffIterator<'_>> {
-        self.native_diff(None)
+        self.previous.as_ref().map(|prev| DiffIterator {
+            current: &self.content,
+            previous: prev,
+            index: 0,
+            width: self.size.width,
+            #[cfg(feature = "raster")]
+            layers: &self.layers,
+            #[cfg(feature = "raster")]
+            previous_layers: &self.previous_layers,
+            #[cfg(feature = "raster")]
+            pixels: None,
+        })
     }
 
+    #[cfg(feature = "raster")]
     pub(crate) fn native_diff(
         &self,
         pixels: Option<crate::raster_output::CellPixels>,
     ) -> Option<DiffIterator<'_>> {
-        self.previous.as_ref().map(|prev| DiffIterator {
-            pixels,
-            current: &self.content,
-            previous: prev,
-            raster: self.raster.as_deref(),
-            previous_raster: self.previous_raster.as_deref(),
-            overlays: &self.overlays,
-            previous_overlays: &self.previous_overlays,
-            index: 0,
-            width: self.size.width,
-        })
+        let mut diff = self.diff()?;
+        diff.pixels = pixels;
+        Some(diff)
     }
 
     /// Returns an iterator over all visible cells (for first render or full redraw)
@@ -490,12 +537,12 @@ impl Buffer {
     /// Suitable for inline mode rendering with relative positioning
     pub fn diff_lines(&self) -> LineDiffIterator<'_> {
         LineDiffIterator {
-            overlays: &self.overlays,
-            previous_overlays: &self.previous_overlays,
+            #[cfg(feature = "raster")]
+            layers: &self.layers,
+            #[cfg(feature = "raster")]
+            previous_layers: &self.previous_layers,
             current: &self.content,
             previous: self.previous.as_deref(),
-            raster: self.raster.as_deref(),
-            previous_raster: self.previous_raster.as_deref(),
             width: self.size.width,
             height: self.size.height,
             line_index: 0,
@@ -513,6 +560,7 @@ impl Draw for Buffer {
     /// the clearing behavior documented by [`Chunk::set_text_metrics`].
     fn draw(&mut self, mut chunk: Chunk) -> Result<Size, DrawErr> {
         chunk.set_text_metrics(self.text_metrics());
+        #[cfg(feature = "raster")]
         if self.has_unsupported_raster_composition() {
             chunk.mark_unsupported_raster_composition();
         }
@@ -525,13 +573,15 @@ impl Draw for Buffer {
                 if cell.is_occupied || x as usize + cell.width() > width as usize {
                     continue;
                 }
+                #[cfg(feature = "raster")]
                 if let Some(raster) = self.raster_at((x, y).into()) {
                     chunk.set_raster_cell(x, y, raster.clone())?;
-                } else {
-                    chunk.set(x, y, cell.content.clone())?;
+                    continue;
                 }
+                chunk.set(x, y, cell.content.clone())?;
             }
         }
+        #[cfg(feature = "raster")]
         for (x, y, cell) in self.overlay_cells() {
             if x < width && y < height {
                 chunk.overlay_raster_cell(x, y, cell.clone())?;
@@ -541,30 +591,33 @@ impl Draw for Buffer {
     }
 }
 
-fn raster_cell_at(cells: Option<&[Option<RasterCell>]>, index: usize) -> Option<&RasterCell> {
-    cells?.get(index)?.as_ref()
-}
-
 /// Changed leading cells as `(column, row, cell)` in row-major order.
 ///
 /// Created by [`Buffer::diff`]; occupied continuation cells are skipped.
 pub struct DiffIterator<'a> {
+    #[cfg(feature = "raster")]
     pixels: Option<crate::raster_output::CellPixels>,
-    overlays: &'a Overlays,
-    previous_overlays: &'a Overlays,
+    #[cfg(feature = "raster")]
+    layers: &'a RasterLayers,
+    #[cfg(feature = "raster")]
+    previous_layers: &'a RasterLayers,
     current: &'a [Cell],
     previous: &'a [Cell],
-    raster: Option<&'a [Option<RasterCell>]>,
-    previous_raster: Option<&'a [Option<RasterCell>]>,
     index: usize,
     width: u16,
 }
 
+#[cfg(feature = "raster")]
 impl DiffIterator<'_> {
     fn overlay_changed(&self, index: usize) -> bool {
-        let stack = self.overlays.get(&index).map_or(&[][..], Vec::as_slice);
+        let stack = self
+            .layers
+            .overlays
+            .get(&index)
+            .map_or(&[][..], Vec::as_slice);
         let old = self
-            .previous_overlays
+            .previous_layers
+            .overlays
             .get(&index)
             .map_or(&[][..], Vec::as_slice);
         if stack == old {
@@ -590,12 +643,9 @@ impl<'a> Iterator for DiffIterator<'a> {
     type Item = (u16, u16, &'a Cell);
 
     fn next(&mut self) -> Option<Self::Item> {
+        #[cfg(feature = "raster")]
         // Keep raster lookups out of the scan for buffers that only paint text.
-        if self.overlays.is_empty()
-            && self.previous_overlays.is_empty()
-            && self.raster.is_none()
-            && self.previous_raster.is_none()
-        {
+        if self.layers.has_storage() || self.previous_layers.has_storage() {
             while self.index < self.current.len() {
                 let i = self.index;
                 self.index += 1;
@@ -603,7 +653,13 @@ impl<'a> Iterator for DiffIterator<'a> {
                 let curr = &self.current[i];
                 let prev = &self.previous[i];
 
-                if curr != prev && !curr.is_occupied {
+                // Only yield cells that changed and are not occupied by wide characters
+                let raster_changed = self.layers.owner_at(i) != self.previous_layers.owner_at(i);
+                if !curr.is_occupied
+                    && (curr != prev
+                        || raster_changed
+                        || (i..i + curr.width()).any(|j| self.overlay_changed(j)))
+                {
                     let x = (i % self.width as usize) as u16;
                     let y = (i / self.width as usize) as u16;
                     return Some((x, y, curr));
@@ -611,7 +667,6 @@ impl<'a> Iterator for DiffIterator<'a> {
             }
             return None;
         }
-
         while self.index < self.current.len() {
             let i = self.index;
             self.index += 1;
@@ -619,14 +674,7 @@ impl<'a> Iterator for DiffIterator<'a> {
             let curr = &self.current[i];
             let prev = &self.previous[i];
 
-            // Only yield cells that changed and are not occupied by wide characters
-            let raster_changed =
-                raster_cell_at(self.raster, i) != raster_cell_at(self.previous_raster, i);
-            if !curr.is_occupied
-                && (curr != prev
-                    || raster_changed
-                    || (i..i + curr.width()).any(|j| self.overlay_changed(j)))
-            {
+            if curr != prev && !curr.is_occupied {
                 let x = (i % self.width as usize) as u16;
                 let y = (i / self.width as usize) as u16;
                 return Some((x, y, curr));
@@ -717,12 +765,12 @@ pub struct LineDiff<'a> {
 
 /// Iterator over lines, comparing current with previous frame
 pub struct LineDiffIterator<'a> {
-    overlays: &'a Overlays,
-    previous_overlays: &'a Overlays,
+    #[cfg(feature = "raster")]
+    layers: &'a RasterLayers,
+    #[cfg(feature = "raster")]
+    previous_layers: &'a RasterLayers,
     current: &'a [Cell],
     previous: Option<&'a [Cell]>,
-    raster: Option<&'a [Option<RasterCell>]>,
-    previous_raster: Option<&'a [Option<RasterCell>]>,
     width: u16,
     height: u16,
     line_index: usize,
@@ -749,17 +797,11 @@ impl<'a> Iterator for LineDiffIterator<'a> {
             let prev_line = &prev[start..end.min(prev.len())];
 
             // Compare lines
-            let raster_unchanged = (self.raster.is_none() && self.previous_raster.is_none())
-                || (start..end).all(|i| {
-                    raster_cell_at(self.raster, i) == raster_cell_at(self.previous_raster, i)
-                });
-            if current_line == prev_line
-                && raster_unchanged
-                && self
-                    .overlays
-                    .range(start..end)
-                    .eq(self.previous_overlays.range(start..end))
-            {
+            let unchanged = current_line == prev_line;
+            #[cfg(feature = "raster")]
+            let unchanged =
+                unchanged && self.layers.matches_range(self.previous_layers, start..end);
+            if unchanged {
                 LineState::Unchanged
             } else {
                 // Calculate actual render width (sum of cell widths)
@@ -884,6 +926,7 @@ mod tests {
     use crate::style::Style;
     use crossterm::style::{Color, Colors};
 
+    #[cfg(feature = "raster")]
     fn raster_cell() -> RasterCell {
         RasterCell {
             canvas: crate::raster::RasterCanvas::new(2, 2, Default::default()).unwrap(),
@@ -936,7 +979,8 @@ mod tests {
         assert_eq!(destination.content(), source.content());
         assert_eq!(destination.text_metrics(), source.text_metrics());
         assert!(destination.previous().is_none());
-        assert!(destination.raster.is_none());
+        #[cfg(feature = "raster")]
+        assert!(destination.layers.owners.is_none());
         assert_eq!(source.content(), snapshot.content());
         assert_eq!(source.previous(), snapshot.previous());
         assert_eq!(source.has_pending_changes(), snapshot.has_pending_changes());
@@ -981,6 +1025,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "raster")]
     fn draw_preserves_cropped_raster_ownership_and_current_composition_metadata() {
         use crate::area::Area;
 
@@ -1003,7 +1048,7 @@ mod tests {
         assert_eq!(destination.raster_at((3, 1).into()), Some(&owner));
         assert_eq!(destination.get((3, 1).into()), source.get((1, 0).into()));
         assert!(!destination.has_unsupported_raster_composition());
-        assert!(destination.previous_raster.is_none());
+        assert!(destination.previous_layers.owners.is_none());
         source.mark_unsupported_raster_composition();
         source
             .draw(Chunk::new(&mut destination, area).unwrap())
@@ -1015,6 +1060,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "raster")]
     fn draw_handles_empty_dimensions_and_conservative_composition_marker() {
         for size in [(0, 0), (0, 2), (2, 0)] {
             let mut source = Buffer::new(size.into());
@@ -1082,6 +1128,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "raster")]
     fn raster_metadata_footprint() {
         use std::mem::size_of;
         // Keep the dense owner table out of Cell: text frames only pay the
@@ -1091,11 +1138,12 @@ mod tests {
             size_of::<crate::raster::RasterCanvas>(), size_of::<RasterCell>(),
             size_of::<Option<RasterCell>>(), 2 * 120 * 40 * size_of::<Option<RasterCell>>());
         let buffer = Buffer::new((120, 40).into());
-        assert!(buffer.raster.is_none());
-        assert!(buffer.previous_raster.is_none());
+        assert!(buffer.layers.owners.is_none());
+        assert!(buffer.previous_layers.owners.is_none());
     }
 
     #[test]
+    #[cfg(feature = "raster")]
     fn text_occludes_native_raster_with_explicit_or_inherited_background() {
         for background in [None, Some(Color::Blue)] {
             let mut buffer = Buffer::new((3, 1).into());
@@ -1141,6 +1189,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "raster")]
     fn storage_bytes_counts_capacity_and_clear_releases_frame_payloads() {
         use std::mem::size_of;
         let mut buffer = Buffer::new((2, 1).into());
@@ -1153,21 +1202,29 @@ mod tests {
         buffer.set_raster((1, 0).into(), raster_cell()).unwrap();
         buffer.content.reserve(5);
         buffer.previous.as_mut().unwrap().reserve(3);
-        buffer.raster.as_mut().unwrap().reserve(4);
+        buffer.layers.owners.as_mut().unwrap().reserve(4);
         let current_bytes = buffer.content.capacity() * size_of::<Cell>()
-            + buffer.raster.as_ref().unwrap().capacity() * size_of::<Option<RasterCell>>();
+            + buffer.layers.owners.as_ref().unwrap().capacity() * size_of::<Option<RasterCell>>();
         let previous_bytes = buffer.previous.as_ref().unwrap().capacity() * size_of::<Cell>()
-            + buffer.previous_raster.as_ref().unwrap().capacity() * size_of::<Option<RasterCell>>();
+            + buffer.previous_layers.owners.as_ref().unwrap().capacity()
+                * size_of::<Option<RasterCell>>();
         assert_eq!(buffer.storage_bytes(), current_bytes + previous_bytes);
         buffer.clear_content();
         assert_eq!(buffer.storage_bytes(), current_bytes);
-        assert!(buffer.raster.as_ref().unwrap().iter().all(Option::is_none));
-        assert!(buffer.previous_raster.is_none());
+        assert!(buffer
+            .layers
+            .owners
+            .as_ref()
+            .unwrap()
+            .iter()
+            .all(Option::is_none));
+        assert!(buffer.previous_layers.owners.is_none());
         assert!(buffer.previous.is_none());
         assert!(buffer.content.iter().all(|cell| *cell == Cell::space()));
     }
 
     #[test]
+    #[cfg(feature = "raster")]
     fn raster_storage_is_lazy_for_text_frames() {
         let mut buffer = Buffer::new((3, 1).into());
         buffer.set((0, 0).into(), Stylized::plain('x')).unwrap();
@@ -1175,13 +1232,14 @@ mod tests {
         buffer.clear();
         buffer.clear_content();
         buffer.resize((4, 2).into());
-        assert!(buffer.raster.is_none());
-        assert!(buffer.previous_raster.is_none());
+        assert!(buffer.layers.owners.is_none());
+        assert!(buffer.previous_layers.owners.is_none());
         assert!(!buffer.has_raster());
         assert_eq!(Buffer::default().raster_cells().count(), 0);
     }
 
     #[test]
+    #[cfg(feature = "raster")]
     fn raster_lifecycle_tracks_current_and_previous_frames() {
         let mut buffer = Buffer::new((3, 1).into());
         let cell = raster_cell();
@@ -1208,6 +1266,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "raster")]
     fn raster_clear_resize_and_metrics_discard_owners() {
         use crate::text::{AmbiguousWidth, TextMetrics};
         let mut buffer = Buffer::new((3, 1).into());
@@ -1231,13 +1290,14 @@ mod tests {
             }
             assert!(!buffer.has_raster());
             assert!(buffer.previous().is_none());
-            assert!(buffer.previous_raster.is_none());
+            assert!(buffer.previous_layers.owners.is_none());
             assert!(!buffer.has_unsupported_raster_composition());
             assert!(!buffer.previous_has_unsupported_raster_composition());
         }
     }
 
     #[test]
+    #[cfg(feature = "raster")]
     fn raster_overwrites_and_text_rewrites_respect_wide_owners() {
         let mut buffer = Buffer::new((4, 1).into());
         buffer.set((0, 0).into(), Stylized::plain('界')).unwrap();
@@ -1268,6 +1328,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "raster")]
     fn text_diff_fast_path_matches_empty_raster_tables() {
         let mut buffer = Buffer::new((6, 2).into());
         buffer.set((0, 0).into(), Stylized::plain('a')).unwrap();
@@ -1276,7 +1337,7 @@ mod tests {
         buffer.set((0, 0).into(), Stylized::plain('b')).unwrap();
         buffer.set((3, 0).into(), Stylized::plain('界')).unwrap();
         buffer.set((5, 1).into(), Stylized::plain('z')).unwrap();
-        assert!(buffer.raster.is_none() && buffer.previous_raster.is_none());
+        assert!(buffer.layers.owners.is_none() && buffer.previous_layers.owners.is_none());
         let expected: Vec<_> = buffer
             .diff()
             .unwrap()
@@ -1291,8 +1352,8 @@ mod tests {
         );
         for (current, previous) in [(false, false), (true, false), (false, true), (true, true)] {
             let mut with_tables = buffer.clone();
-            with_tables.raster = current.then(|| vec![None; buffer.content.len()]);
-            with_tables.previous_raster = previous.then(|| vec![None; buffer.content.len()]);
+            with_tables.layers.owners = current.then(|| vec![None; buffer.content.len()]);
+            with_tables.previous_layers.owners = previous.then(|| vec![None; buffer.content.len()]);
             let mut diff = with_tables.diff().unwrap();
             assert_eq!(
                 diff.by_ref()
@@ -1306,6 +1367,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "raster")]
     fn raster_metadata_only_changes_are_dirty() {
         let mut buffer = Buffer::new((2, 1).into());
         let first = raster_cell();
@@ -1334,20 +1396,21 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "raster")]
     fn raster_target_bounds_do_not_size_the_ownership_allocation() {
         let mut buffer = Buffer::new((1, 1).into());
         for target in [(0, 1), (1, 0), (0, 0)] {
             let mut cell = raster_cell();
             cell.target = target.into();
             assert!(buffer.set_raster((0, 0).into(), cell).is_err());
-            assert!(buffer.raster.is_none());
+            assert!(buffer.layers.owners.is_none());
         }
         let mut cell = raster_cell();
         cell.target = (u16::MAX, u16::MAX).into();
         cell.x = u16::MAX - 1;
         cell.y = u16::MAX - 1;
         buffer.set_raster((0, 0).into(), cell.clone()).unwrap();
-        assert_eq!(buffer.raster.as_ref().unwrap().len(), 1);
+        assert_eq!(buffer.layers.owners.as_ref().unwrap().len(), 1);
         assert_eq!(buffer.raster_at((0, 0).into()), Some(&cell));
         cell.y = u16::MAX;
         assert!(buffer.set_raster((0, 0).into(), cell).is_err());
@@ -1355,6 +1418,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "raster")]
     fn raster_invalid_writes_are_atomic_and_placeholder_is_opaque() {
         let mut buffer = Buffer::new((2, 1).into());
         buffer.set((0, 0).into(), Stylized::plain('界')).unwrap();
@@ -1364,7 +1428,7 @@ mod tests {
         assert!(buffer.set_raster((0, 0).into(), invalid).is_err());
         assert!(buffer.set_raster((2, 0).into(), raster_cell()).is_err());
         assert_eq!(buffer.content(), before);
-        assert!(buffer.raster.is_none());
+        assert!(buffer.layers.owners.is_none());
         let cell = raster_cell();
         buffer.set_raster((0, 0).into(), cell.clone()).unwrap();
         assert_eq!(buffer.get((0, 0).into()), Some(&cell.placeholder()));

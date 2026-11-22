@@ -30,6 +30,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+#[cfg(feature = "raster")]
 use rsille_render::raster_output::{
     InlineRasterSession, RasterBackend, RasterOutput, RasterSession,
 };
@@ -50,6 +51,7 @@ use crate::widgets::visual::TerminalVisualCapabilities;
 use crate::WidgetResult;
 
 #[derive(Clone, Copy, Debug)]
+#[cfg(feature = "raster")]
 pub(crate) enum RasterSetting {
     Output(RasterOutput),
     Backend(RasterBackend),
@@ -121,6 +123,7 @@ pub struct App<State, M = ()> {
     pub(crate) global_key_handlers: HashMap<KeyCode, EventHandler<M>>,
     pub(crate) input_handler: Option<InputHandler<M>>,
     pub(crate) keyboard_mode: KeyboardMode,
+    #[cfg(feature = "raster")]
     pub(crate) raster_output: RasterSetting,
     pub(crate) focus_events: bool,
     pub(crate) hotkeys: HotkeyRegistry<M>,
@@ -162,6 +165,7 @@ impl<State, M> App<State, M> {
             global_key_handlers: HashMap::new(),
             input_handler: None,
             keyboard_mode: KeyboardMode::Legacy,
+            #[cfg(feature = "raster")]
             raster_output: RasterSetting::Output(RasterOutput::default()),
             focus_events: false,
             hotkeys: HotkeyRegistry::new(),
@@ -260,7 +264,7 @@ impl<State, M> App<State, M> {
 
     /// Configures Sixel-only terminal raster presentation and known capabilities.
     ///
-    /// Requires the `sixel` feature. Defaults leave terminal capabilities unknown,
+    /// Defaults leave terminal capabilities unknown,
     /// rejecting raster frames while text-only frames remain unaffected. This
     /// configuration is passed unchanged to the terminal renderer. Set valid
     /// `capabilities.cell_pixels: Some(pixels)` explicitly or store the result of
@@ -268,6 +272,7 @@ impl<State, M> App<State, M> {
     /// or refreshes cell pixels; missing or invalid metrics reject raster frames.
     /// Headless [`Runtime::frame`] retains raster metadata and background
     /// placeholders, not character previews of raster images.
+    #[cfg(feature = "raster")]
     pub fn raster_output(mut self, config: RasterOutput) -> Self {
         self.raster_output = RasterSetting::Output(config);
         self
@@ -282,18 +287,21 @@ impl<State, M> App<State, M> {
     /// use [`RasterBackend::negotiate_fullscreen`] or [`RasterBackend::negotiate_inline`]
     /// before the first run and reuse the snapshot on subsequent graphics runs
     /// while the terminal, presentation mode and physical cell size still match.
+    #[cfg(feature = "raster")]
     pub fn raster_backend(mut self, backend: RasterBackend) -> Self {
         self.raster_output = RasterSetting::Backend(backend);
         self
     }
 
     /// Use a verified presentation mode and physical metrics without querying input.
+    #[cfg(feature = "raster")]
     pub fn raster_session(mut self, session: RasterSession) -> Self {
         self.raster_output = RasterSetting::Session(session);
         self
     }
 
     /// Use a host-verified inline session without querying terminal input.
+    #[cfg(feature = "raster")]
     pub fn inline_raster_session(mut self, session: InlineRasterSession) -> Self {
         self.raster_output = RasterSetting::InlineSession(session);
         self

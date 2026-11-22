@@ -15,9 +15,8 @@
 //! - [`output::RasterOutput`] describes verified terminal capabilities and
 //!   physical pixels per character cell.
 //!
-//! Drawing, importing pixels, and sampling work without Cargo features or a
-//! terminal. Managed fullscreen output negotiates only when requested. On Unix
-//! (including WSL), Auto prefers the compiled Kitty backend, then Sixel.
+//! Drawing, importing pixels, and sampling work without a terminal. Managed fullscreen output negotiates only when requested. On Unix
+//! (including WSL), Auto prefers Kitty, then Sixel.
 //! Kitty uses direct RGBA uploads and clipped placements. Reusing a displayed
 //! surface avoids another upload until it is invalidated or removed. Terminal
 //! eviction is silent. Hosts can explicitly release resources to force a refresh.
@@ -57,11 +56,9 @@
 //! ```
 
 mod canvas;
-#[cfg(feature = "kitty")]
 mod kitty;
 pub mod output;
 mod presenter;
-#[cfg(feature = "sixel")]
 mod sixel;
 mod sixel_presenter;
 

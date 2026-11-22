@@ -157,7 +157,6 @@ fn both_documented_quit_keys_exit() {
     }
 }
 
-#[cfg(feature = "kitty")]
 #[test]
 fn dragging_the_fullscreen_scene_reuses_kitty_uploads() {
     use rsille::render::{Builder, RasterSession};
@@ -197,7 +196,6 @@ fn dragging_the_fullscreen_scene_reuses_kitty_uploads() {
     assert!(!moved.contains("\x1b_Ga=t,"));
 }
 
-#[cfg(feature = "sixel")]
 #[test]
 fn native_window_emits_sixel_while_canvas_remains_character_output() {
     use rsille::render::Builder;

@@ -1,3 +1,5 @@
+#![cfg(feature = "raster")]
+
 //! Interactive fixtures driven by scripts/check-sixel-query.py on a controlling PTY.
 use rsille::tui::prelude::*;
 use std::time::Duration;

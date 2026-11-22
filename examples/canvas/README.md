@@ -13,7 +13,7 @@ cargo run --release --manifest-path examples/canvas/Cargo.toml -- --backend sixe
 
 Use `--basic` to print a character Canvas sine wave. In the default fullscreen scene,
 two windows show the same planet using native RasterCanvas and character Canvas.
-The default `auto` prefers Kitty, then Sixel, among compiled backends. The header
+The default `auto` prefers Kitty, then Sixel. The header
 shows the selected protocol and physical cell size. To compare protocols, repeat
 these checks with each explicit backend on the same terminal.
 

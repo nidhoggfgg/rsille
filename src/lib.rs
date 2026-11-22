@@ -7,7 +7,8 @@
 //! rsille = "3"
 //! ```
 //!
-//! Sixel is enabled by default. Enable `kitty` for Kitty graphics.
+//! The default `raster` feature provides `RasterCanvas`, the `raster_canvas` widget,
+//! and Kitty and Sixel output.
 //! The `rsille-syntect` extension provides syntax highlighting for code viewers.
 //!
 //! # Choose an API
@@ -125,6 +126,7 @@ pub use rsille_render as render;
 /// Unlike [`canvas`], raster coordinates are explicit pixels with y increasing
 /// downward. Image presentation uses Sixel or Kitty; headless frames retain raster metadata
 /// and opaque background placeholders, not character previews.
+#[cfg(feature = "raster")]
 pub use render::raster;
 
 /// Sample-based graphics with Braille, half-block, and quadrant terminal encoding.

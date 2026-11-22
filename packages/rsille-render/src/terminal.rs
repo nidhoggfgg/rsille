@@ -83,6 +83,7 @@ impl TerminalBackend for SystemTerminal {
         }
     }
     fn keyboard_supported(&mut self) -> io::Result<bool> {
+        #[cfg(feature = "raster")]
         super::terminal_probe::reserve_input()?;
         crossterm::terminal::supports_keyboard_enhancement()
     }
@@ -119,6 +120,7 @@ impl TerminalGuard {
         focus_events: bool,
     ) -> Result<Self, DrawErr> {
         // Reserve before any mode changes, not just before the first input read.
+        #[cfg(feature = "raster")]
         super::terminal_probe::reserve_input().map_err(DrawErr::TerminalSetup)?;
         Self::with_backend(
             SystemTerminal,

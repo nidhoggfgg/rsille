@@ -1,5 +1,6 @@
 //! Configuration shared by standalone renderers and terminal event loops.
 
+#[cfg(feature = "raster")]
 use super::raster_output::{InlineRasterSession, RasterBackend, RasterConfig, RasterSession};
 use crossterm::event::{KeyCode, KeyEvent};
 use log::info;
@@ -49,6 +50,7 @@ pub struct Builder {
     pub(super) enable_mouse_capture: bool,
     pub(super) enable_hide_cursor: bool,
     pub(super) keyboard_mode: KeyboardMode,
+    #[cfg(feature = "raster")]
     pub(super) raster_config: RasterConfig,
     pub(super) focus_events: bool,
     pub(super) exit_code: Option<KeyEvent>,
@@ -80,6 +82,7 @@ impl Builder {
             enable_mouse_capture: false,
             enable_hide_cursor: false,
             keyboard_mode: KeyboardMode::Legacy,
+            #[cfg(feature = "raster")]
             raster_config: RasterConfig::Output(Default::default()),
             focus_events: false,
             exit_code: Some(KeyCode::Esc.into()),
@@ -110,7 +113,7 @@ impl Builder {
         self
     }
 
-    /// Configures Sixel-only raster presentation, requiring the `sixel` feature.
+    /// Configures Sixel-only raster presentation.
     /// Unknown capabilities reject raster frames; text-only frames are unaffected.
     ///
     /// The renderer never discovers cell pixels or reads terminal input. Native
@@ -132,6 +135,7 @@ impl Builder {
     /// does not prevent bottom scrolling. Inline reserves a bottom margin, while
     /// fullscreen still requires safe output at the last row. Native appended-
     /// newline output is unsupported. These are host assertions, not detection.
+    #[cfg(feature = "raster")]
     pub fn raster_output(&mut self, config: crate::raster_output::RasterOutput) -> &mut Self {
         self.raster_config = RasterConfig::Output(config);
         self
@@ -146,6 +150,7 @@ impl Builder {
     /// use [`RasterBackend::negotiate_fullscreen`] or [`RasterBackend::negotiate_inline`]
     /// before the first run and reuse the snapshot on subsequent graphics runs
     /// while the terminal, presentation mode and physical cell size still match.
+    #[cfg(feature = "raster")]
     pub fn raster_backend(&mut self, backend: RasterBackend) -> &mut Self {
         self.raster_config = RasterConfig::Request(backend);
         self
@@ -154,12 +159,14 @@ impl Builder {
     /// Use a host-verified snapshot without probing or taking input ownership.
     /// A standalone fullscreen host enters the alternate screen before rendering and calls
     /// [`Render::release_raster_resources`] before leaving it.
+    #[cfg(feature = "raster")]
     pub fn raster_session(&mut self, session: RasterSession) -> &mut Self {
         self.raster_config = RasterConfig::Session(session);
         self
     }
 
     /// Use a host-verified inline session without querying terminal input.
+    #[cfg(feature = "raster")]
     pub fn inline_raster_session(&mut self, session: InlineRasterSession) -> &mut Self {
         self.raster_config = RasterConfig::InlineSession(session);
         self

@@ -17,9 +17,8 @@ smallvec = { workspace = true }
 taffy = { workspace = true }
 
 [features]
-default = []
-sixel = ["rsille-render/sixel"]
-kitty = ["rsille-render/kitty"]
+default = ["raster"]
+raster = ["rsille-render/raster"]
 
 [dev-dependencies]
 tokio = { workspace = true }

@@ -21,7 +21,7 @@ const HELP: &str = "Canvas debug — character drawing and native raster windows
   cargo run --manifest-path examples/canvas/Cargo.toml -- --backend sixel
   cargo run --manifest-path examples/canvas/Cargo.toml -- --headless
 
-  --backend auto|kitty|sixel  Auto prefers Kitty, then Sixel, among compiled backends.
+  --backend auto|kitty|sixel  Auto prefers Kitty, then Sixel.
   --cell-pixels WxH           Measured physical pixels per character cell.
   --force-cell-pixels         Confirm a measurement equal to the terminal grid.
   --basic                     Print a sine wave using the character Canvas.
@@ -139,9 +139,8 @@ impl Options {
             let pixels = pixels.ok_or("supply measured cell dimensions with --cell-pixels WxH")?;
             match self.backend {
                 RasterBackend::Auto => Err("automatic negotiation requires Unix or WSL; specify a verified --backend kitty or sixel".into()),
-                RasterBackend::Kitty if cfg!(feature = "kitty") => Ok(RasterSession::KittyFullscreen(pixels)),
-                RasterBackend::Sixel if cfg!(feature = "sixel") => Ok(RasterSession::SixelFullscreen(pixels)),
-                backend => Err(format!("the {backend:?} backend was not compiled")),
+                RasterBackend::Kitty => Ok(RasterSession::KittyFullscreen(pixels)),
+                RasterBackend::Sixel => Ok(RasterSession::SixelFullscreen(pixels)),
             }
         }
     }

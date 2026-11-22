@@ -57,8 +57,10 @@ pub struct EventLoop<T> {
     terminal_size: Size,
 }
 
+#[cfg(feature = "raster")]
 struct RunningLoop<'a, T: DrawUpdate>(&'a mut EventLoop<T>);
 
+#[cfg(feature = "raster")]
 impl<T: DrawUpdate> Drop for RunningLoop<'_, T> {
     fn drop(&mut self) {
         let _ = self.0.render.release_raster_resources();
@@ -246,10 +248,13 @@ where
     ///
     /// May panic if polled outside a Tokio runtime or with its time driver disabled.
     pub async fn run_async_returning(mut self) -> Result<T, DrawErr> {
-        self.render.set_alternate_screen(self.alt_screen);
-        self.render
-            .negotiate_raster()
-            .map_err(DrawErr::TerminalSetup)?;
+        #[cfg(feature = "raster")]
+        {
+            self.render.set_alternate_screen(self.alt_screen);
+            self.render
+                .negotiate_raster()
+                .map_err(DrawErr::TerminalSetup)?;
+        }
         let guard = TerminalGuard::new(
             self.alt_screen,
             self.raw_mode,
@@ -290,6 +295,9 @@ where
             }
         }
 
+        #[cfg(not(feature = "raster"))]
+        self.run_loop().await?;
+        #[cfg(feature = "raster")]
         // Drop the graphics guard before TerminalGuard, including cancellation.
         {
             let running = RunningLoop(&mut self);
@@ -301,6 +309,7 @@ where
     }
 
     async fn run_loop(&mut self) -> Result<(), DrawErr> {
+        #[cfg(feature = "raster")]
         super::terminal_probe::reserve_input()?;
         self.run_loop_with_stream(&mut EventStream::new()).await
     }
@@ -622,6 +631,7 @@ where
 }
 
 fn terminal_cursor_position() -> std::io::Result<(u16, u16)> {
+    #[cfg(feature = "raster")]
     super::terminal_probe::reserve_input()?;
     position()
 }
@@ -1092,7 +1102,7 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "sixel")]
+    #[cfg(feature = "raster")]
     #[tokio::test]
     async fn initial_full_height_raster_force_follow_preserves_identical_frame() {
         use crate::raster::{RasterCanvas, RasterCell, RasterOptions, RasterScale, Rgb};

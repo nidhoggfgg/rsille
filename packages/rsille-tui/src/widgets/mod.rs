@@ -47,7 +47,7 @@ mod variant;
 
 pub use collections::{data_table, file_explorer, list, selection, tree};
 pub use controls::{button, calendar, checkbox, radio_group, select, switch, text_input, textarea};
-pub use display::{canvas, content, divider, label, progress, raster_canvas, spacer};
+pub use display::{canvas, content, divider, label, progress, spacer};
 pub use layout::{collapsible, dialog, panel};
 pub use motion::{animated, visual};
 pub use navigation::{command_palette, menu, tabs};
@@ -71,6 +71,8 @@ pub use data_table::{
     DataTableSortDirection, DataTableState, TableAlign,
 };
 pub use dialog::{dialog, Dialog};
+#[cfg(feature = "raster")]
+pub use display::raster_canvas;
 pub use display::world_canvas::{CanvasPoint, CanvasViewport, WorldCanvas};
 pub use divider::{divider, Divider, DividerDirection, DividerTextPosition, DividerVariant};
 pub use file_explorer::{
@@ -84,6 +86,7 @@ pub use progress::{
     loading_indicator, progress_bar, LoadingIndicator, ProgressBar, ProgressBarVariant,
 };
 pub use radio_group::{radio_group, RadioGroup, RadioGroupState, RadioOption};
+#[cfg(feature = "raster")]
 pub use raster_canvas::{raster_canvas, RasterCanvasContext, RasterCanvasWidget};
 pub use select::{select, Select, SelectOption, SelectSearchMode, SelectState};
 pub use selection::{SelectionMode, SelectionState};

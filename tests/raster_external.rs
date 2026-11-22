@@ -1,3 +1,5 @@
+#![cfg(feature = "raster")]
+
 //! An external producer needs only public APIs, not a terminal or image library.
 use rsille::render::{
     area::Area,

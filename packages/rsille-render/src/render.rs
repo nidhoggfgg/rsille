@@ -1,11 +1,14 @@
 //! Buffered terminal output with cell-level and line-level frame comparison.
 
 use crossterm::{
-    cursor::{
-        MoveTo, MoveToColumn, MoveToNextLine, MoveToPreviousLine, RestorePosition, SavePosition,
-    },
+    cursor::{MoveTo, MoveToColumn, MoveToNextLine, MoveToPreviousLine},
     style::{Attribute, Attributes, Color, Colors, Print, ResetColor, SetAttributes, SetColors},
-    terminal::{BeginSynchronizedUpdate, Clear, ClearType, EndSynchronizedUpdate},
+    terminal::{Clear, ClearType, EndSynchronizedUpdate},
+};
+#[cfg(feature = "raster")]
+use crossterm::{
+    cursor::{RestorePosition, SavePosition},
+    terminal::BeginSynchronizedUpdate,
 };
 use log::debug;
 
@@ -89,15 +92,19 @@ pub struct Render<W, T> {
     inline_mode: bool,
     previous_inline_height: u16,
     inline_viewport_height: Option<u16>,
+    #[cfg(feature = "raster")]
     inline_raster_padding: u16,
     // Saved bottom-row anchor while a native inline frame is being written.
     // Retained after I/O failure so recovery never needs an absolute position.
+    #[cfg(feature = "raster")]
     inline_raster_checkpoint: Option<u16>,
     // Output may have stopped between cursor commands; cleanup must not erase
     // relative to an unknown anchor after a failed write or flush.
     output_uncertain: bool,
     used_height: u16,
+    #[cfg(feature = "raster")]
     inline_clipped_height: u16, // Restored before the next draw, which may be text-only.
+    #[cfg(feature = "raster")]
     raster: super::raster::RasterPresenter,
 }
 
@@ -133,17 +140,28 @@ where
         #[cfg(debug_assertions)]
         let start = std::time::Instant::now();
 
-        let plan = match self.prepare_frame() {
-            Ok(plan) => plan,
-            Err(error) => {
-                self.buffer.discard_frame();
-                return Err(error);
-            }
+        if let Err(error) = self.draw_frame() {
+            self.buffer.discard_frame();
+            return Err(error);
+        }
+        #[cfg(feature = "raster")]
+        let result = {
+            let plan = match self.prepare_raster_frame() {
+                Ok(plan) => plan,
+                Err(error) => {
+                    self.buffer.discard_frame();
+                    return Err(error);
+                }
+            };
+            self.write_raster_frame(plan)
         };
-        if let Err(error) = self.write_frame(plan) {
+        #[cfg(not(feature = "raster"))]
+        let result = self.write_text_frame();
+        if let Err(error) = result {
             // A partial write can invalidate the displayed frame. Repaint from scratch
             // on retry; the presenter separately remembers uncertain graphics.
             self.buffer.clear_content();
+            #[cfg(feature = "raster")]
             if self.raster.needs_protocol_recovery() {
                 // Cancel partial DCS/CSI before releasing a synchronized frame.
                 // Keep the presenter uncertain: a failed writer may reject this
@@ -168,7 +186,7 @@ where
         Ok(())
     }
 
-    fn prepare_frame(&mut self) -> std::io::Result<super::raster::RasterPlan> {
+    fn draw_frame(&mut self) -> std::io::Result<()> {
         debug!(
             target: "render",
             "render start: mode={}, size={}x{}",
@@ -179,6 +197,7 @@ where
 
         // the position in chunk should be (0, 0), the render already move to the target position
         let buffer_size = self.buffer.size();
+        #[cfg(feature = "raster")]
         if self.inline_mode {
             self.used_height = self
                 .used_height
@@ -197,7 +216,11 @@ where
         };
         let chunk = Chunk::new(&mut self.buffer, render_size.into())?;
         self.thing.draw(chunk)?;
+        Ok(())
+    }
 
+    #[cfg(feature = "raster")]
+    fn prepare_raster_frame(&mut self) -> std::io::Result<super::raster::RasterPlan> {
         if self.inline_mode && !self.append_newline {
             // Draw exactly once: Draw may advance application state. Decide from
             // this frame's ownership, not capabilities or the previous frame.
@@ -231,7 +254,38 @@ where
         )
     }
 
-    fn write_frame(&mut self, raster_plan: super::raster::RasterPlan) -> std::io::Result<()> {
+    fn write_text_frame(&mut self) -> std::io::Result<()> {
+        self.output_uncertain = true;
+        crossterm::queue!(self.out, ResetColor)?;
+        if self.clear && self.buffer.previous().is_none() {
+            crossterm::queue!(self.out, Clear(ClearType::All))?;
+        }
+        if self.inline_mode {
+            self.render_inline()?;
+        } else {
+            self.render_fullscreen()?;
+        }
+        if self.append_newline {
+            crossterm::queue!(self.out, Print("\n"))?;
+        }
+        self.out.flush()?;
+        self.output_uncertain = false;
+        self.buffer.clear();
+        Ok(())
+    }
+
+    #[cfg(feature = "raster")]
+    fn write_raster_frame(
+        &mut self,
+        raster_plan: super::raster::RasterPlan,
+    ) -> std::io::Result<()> {
+        let recovering = self.raster.needs_protocol_recovery();
+        let synchronized = raster_plan.native || raster_plan.clear || raster_plan.overlay_frame;
+        if !synchronized && !recovering && !raster_plan.has_commands() {
+            self.write_text_frame()?;
+            self.raster.commit(raster_plan);
+            return Ok(());
+        }
         if raster_plan.overlay_frame
             && !raster_plan.clear
             && !raster_plan.has_commands()
@@ -249,7 +303,6 @@ where
             self.buffer.clear();
             return Ok(());
         }
-        let recovering = self.raster.needs_protocol_recovery();
         self.output_uncertain = true;
         if recovering {
             // A prior writer failure may have prevented even the best-effort
@@ -269,7 +322,6 @@ where
         // A flush is not an atomic terminal repaint. Hide the intermediate
         // clear/text/tile passes on terminals supporting DEC mode 2026, including
         // cleanup when raster content is removed from the frame.
-        let synchronized = raster_plan.native || raster_plan.clear || raster_plan.overlay_frame;
         if synchronized {
             crossterm::queue!(self.out, BeginSynchronizedUpdate)?;
         }
@@ -359,30 +411,36 @@ where
                 "frame commits require inline mode without appended newlines",
             ));
         }
-        if self.output_uncertain || self.raster.needs_protocol_recovery() {
+        let uncertain = self.output_uncertain;
+        #[cfg(feature = "raster")]
+        let uncertain = uncertain || self.raster.needs_protocol_recovery();
+        if uncertain {
             return Err(std::io::Error::other("cannot commit an uncertain frame"));
         }
         // The cursor is on the last content row, not the last padding row.
         // Real LF (rather than CNL) scrolls correctly at the viewport bottom.
         self.output_uncertain = true;
-        for _ in 0..=self.inline_raster_padding {
+        for _ in 0..=self.inline_bottom_padding() {
             crossterm::queue!(self.out, Print("\r\n"))?;
         }
         self.out.flush()?;
         let extent = self
             .previous_inline_height
             .max(1)
-            .saturating_add(self.inline_raster_padding);
+            .saturating_add(self.inline_bottom_padding());
         self.pos.x = 0;
         self.pos.y = self.pos.y.saturating_add(extent);
         if let Some(height) = self.inline_viewport_height {
             self.pos.y = self.pos.y.min(height.saturating_sub(1));
         }
         self.previous_inline_height = 0;
-        self.inline_raster_padding = 0;
-        self.inline_raster_checkpoint = None;
         self.buffer.reset_diff();
-        self.raster.forget_region();
+        #[cfg(feature = "raster")]
+        {
+            self.inline_raster_padding = 0;
+            self.inline_raster_checkpoint = None;
+            self.raster.forget_region();
+        }
         self.output_uncertain = false;
         Ok(())
     }
@@ -402,6 +460,7 @@ where
         }
         let uncertain = self.output_uncertain;
         self.output_uncertain = true;
+        #[cfg(feature = "raster")]
         self.raster.cleanup_kitty(&mut self.out)?;
         if uncertain {
             self.out.write_all(b"\x18\x1b\\")?;
@@ -409,10 +468,11 @@ where
         } else {
             let rows = self
                 .previous_inline_height
-                .saturating_add(self.inline_raster_padding)
+                .saturating_add(self.inline_bottom_padding())
                 .min(self.inline_height_limit());
             crossterm::queue!(self.out, ResetColor)?;
             if rows > 0 {
+                #[cfg(feature = "raster")]
                 if self.inline_raster_padding > 0 {
                     crossterm::queue!(self.out, MoveToNextLine(self.inline_raster_padding))?;
                 }
@@ -427,10 +487,13 @@ where
         }
         self.out.flush()?;
         self.previous_inline_height = 0;
-        self.inline_raster_padding = 0;
-        self.inline_raster_checkpoint = None;
         self.buffer.reset_diff();
-        self.raster.forget_region();
+        #[cfg(feature = "raster")]
+        {
+            self.inline_raster_padding = 0;
+            self.inline_raster_checkpoint = None;
+            self.raster.forget_region();
+        }
         self.output_uncertain = false;
         Ok(())
     }
@@ -446,6 +509,7 @@ where
 
     // Ownership was resolved during drawing/blitting, so these cells cannot
     // overlap any native tile. This is not a fixed text-before-images z-order.
+    #[cfg(feature = "raster")]
     fn render_raster_characters(
         &mut self,
         plan: &super::raster::RasterPlan,
@@ -473,6 +537,7 @@ where
     /// Raster frames with missing capabilities or invalid metrics fail without
     /// replacing the last successful frame. Removing raster content clears its
     /// old graphics on the next successful frame.
+    #[cfg(feature = "raster")]
     pub fn set_raster_output(&mut self, config: super::raster_output::RasterOutput) {
         self.raster.set_output(config);
     }
@@ -481,15 +546,18 @@ where
     /// Managed event loops do this automatically. A later raster frame reuploads
     /// the visible resources. Call on the same writer after a known terminal cache
     /// invalidation. A failed cleanup can be retried.
+    #[cfg(feature = "raster")]
     pub fn release_raster_resources(&mut self) -> std::io::Result<()> {
         self.raster.cleanup_kitty(&mut self.out)
     }
 
+    #[cfg(feature = "raster")]
     pub(super) fn negotiate_raster(&mut self) -> std::io::Result<()> {
         self.raster.negotiate(self.inline_mode, self.append_newline)
     }
 
     /// Returns Sixel work counters and bounded cache occupancy.
+    #[cfg(feature = "raster")]
     pub fn raster_stats(&self) -> super::raster_output::RasterStats {
         self.raster.stats()
     }
@@ -499,7 +567,14 @@ where
     }
 
     pub(crate) fn inline_bottom_padding(&self) -> u16 {
-        self.inline_raster_padding
+        #[cfg(feature = "raster")]
+        {
+            self.inline_raster_padding
+        }
+        #[cfg(not(feature = "raster"))]
+        {
+            0
+        }
     }
 
     /// Updates the physical viewport height for inline positioning.
@@ -514,6 +589,7 @@ where
         }
         let height = height.max(1);
         if self.inline_viewport_height != Some(height) {
+            #[cfg(feature = "raster")]
             if self.inline_viewport_height.is_some_and(|old| height < old) {
                 // The terminal can clip the rows below the content cursor while
                 // leaving that cursor unchanged. Re-reserve padding with LF;
@@ -523,14 +599,19 @@ where
             self.inline_viewport_height = Some(height);
             self.used_height = self.used_height.min(self.inline_height_limit());
             self.previous_inline_height = self.previous_inline_height.min(height);
-            self.inline_raster_padding = self
-                .inline_raster_padding
-                .min(height - self.previous_inline_height);
-            self.inline_raster_checkpoint = self.inline_raster_checkpoint.map(|h| h.min(height));
+            #[cfg(feature = "raster")]
+            {
+                self.inline_raster_padding = self
+                    .inline_raster_padding
+                    .min(height - self.previous_inline_height);
+                self.inline_raster_checkpoint =
+                    self.inline_raster_checkpoint.map(|h| h.min(height));
+            }
             self.buffer.reset_diff();
         }
     }
 
+    #[cfg(feature = "raster")]
     pub(crate) fn set_alternate_screen(&mut self, enabled: bool) {
         self.raster.alternate_screen = enabled;
     }
@@ -589,13 +670,14 @@ where
         Ok(())
     }
 
+    #[cfg(feature = "raster")]
     fn render_inline_raster(&mut self, plan: &super::raster::RasterPlan) -> std::io::Result<()> {
         // Reserve new rows before painting any pixels. LF may scroll existing
         // output; the saved anchor must describe the viewport AFTER that scroll.
         let displayed_height = self.previous_inline_height;
         let previous_extent = displayed_height
             .max(1)
-            .saturating_add(self.inline_raster_padding);
+            .saturating_add(self.inline_bottom_padding());
         let current_extent = self.used_height.max(1).saturating_add(plan.inline_padding);
         let extent = previous_extent.max(current_extent);
         crossterm::queue!(self.out, Print("\r"))?;
@@ -679,6 +761,7 @@ where
         Ok(())
     }
 
+    #[cfg(feature = "raster")]
     fn position_inline(out: &mut W, height: u16, x: u16, y: u16) -> std::io::Result<()> {
         crossterm::queue!(out, RestorePosition)?;
         if y < height - 1 {
@@ -813,11 +896,15 @@ where
             inline_mode: builder.inline_mode,
             previous_inline_height: 0,
             inline_viewport_height: None,
+            #[cfg(feature = "raster")]
             inline_raster_padding: 0,
+            #[cfg(feature = "raster")]
             inline_raster_checkpoint: None,
             output_uncertain: false,
             used_height: builder.size.height, // Initialize to buffer capacity
+            #[cfg(feature = "raster")]
             inline_clipped_height: 0,
+            #[cfg(feature = "raster")]
             raster: super::raster::RasterPresenter::new(
                 builder.raster_config,
                 builder.enable_alt_screen,
@@ -865,7 +952,10 @@ impl<W: std::io::Write, T: Draw> Render<W, T> {
     /// are clipped further if Sixel band-padding rows need space.
     pub fn set_used_height(&mut self, height: u16) {
         let max_height = self.buffer.size().height.min(self.inline_height_limit());
-        self.inline_clipped_height = 0;
+        #[cfg(feature = "raster")]
+        {
+            self.inline_clipped_height = 0;
+        }
         self.used_height = height.min(max_height);
     }
 
@@ -910,7 +1000,7 @@ impl<W: std::io::Write, T: Draw> Render<W, T> {
 #[path = "render_tests.rs"]
 mod style_tests;
 
-#[cfg(test)]
+#[cfg(all(test, feature = "raster"))]
 #[path = "raster/render_tests.rs"]
 mod raster_tests;
 

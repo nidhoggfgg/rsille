@@ -36,6 +36,7 @@ pub(crate) fn blit_with_effects(
         ctx.area.height() as usize,
     );
 
+    #[cfg(feature = "raster")]
     let backdrop_uses_raster = backdrop.is_some() && chunk.buffer().has_raster();
     let snapshot =
         backdrop.map(|backdrop| BackdropSnapshot::capture(chunk.buffer(), backdrop, ctx));
@@ -80,6 +81,7 @@ pub(crate) fn blit_with_effects(
     });
     // Backdrops sample stored cells, including a halo outside this chunk.
     // Conservatively reject native composition if any lower raster is present.
+    #[cfg(feature = "raster")]
     if blit_stats.unsupported_raster_composition || backdrop_uses_raster {
         chunk.mark_unsupported_raster_composition();
     }
@@ -129,6 +131,7 @@ pub(crate) fn blit_with_effect_groups(
         ctx.area.height() as usize,
     );
 
+    #[cfg(feature = "raster")]
     let backdrop_uses_raster = backdrop.is_some() && chunk.buffer().has_raster();
     let snapshot =
         backdrop.map(|backdrop| BackdropSnapshot::capture(chunk.buffer(), backdrop, ctx));
@@ -183,6 +186,7 @@ pub(crate) fn blit_with_effect_groups(
             report.skipped_cells += 1;
         }
     });
+    #[cfg(feature = "raster")]
     if blit_stats.unsupported_raster_composition || backdrop_uses_raster {
         chunk.mark_unsupported_raster_composition();
     }
@@ -194,7 +198,7 @@ pub(crate) fn blit_with_effect_groups(
     report
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "raster"))]
 mod tests {
     use super::*;
     use crate::{animation::MotionPolicy, style::Theme};

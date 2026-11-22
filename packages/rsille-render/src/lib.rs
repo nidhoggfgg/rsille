@@ -10,6 +10,7 @@ mod input;
 #[path = "render.rs"]
 mod renderer;
 mod terminal;
+#[cfg(feature = "raster")]
 mod terminal_probe;
 mod wake;
 
@@ -17,6 +18,7 @@ pub mod area;
 pub mod buffer;
 pub mod chunk;
 pub mod event_loop;
+#[cfg(feature = "raster")]
 pub mod raster;
 pub mod style;
 pub mod text;
@@ -25,7 +27,9 @@ pub use draw_err::DrawErr;
 pub use draw_update::*;
 pub use input::{InputCapabilities, KeyboardMode};
 /// Compatibility path for raster output configuration; see [`raster::output`].
+#[cfg(feature = "raster")]
 pub use raster::output as raster_output;
+#[cfg(feature = "raster")]
 pub use raster_output::{InlineRasterSession, RasterBackend, RasterSession};
 pub use renderer::Render;
 pub use wake::WakeHandle;

@@ -11,7 +11,7 @@ cargo run --release --manifest-path examples/canvas/Cargo.toml -- --backend kitt
 cargo run --release --manifest-path examples/canvas/Cargo.toml -- --backend sixel
 ```
 
-`--basic` 用字符 Canvas 输出正弦曲线。默认进入全屏场景，两个浮窗用原生 RasterCanvas 和字符 Canvas 绘制同一颗行星。默认 `auto` 从已编译的后端中优先选 Kitty，再选 Sixel。顶部显示实际协议和每格像素尺寸。可在同一终端分别指定两个后端，对照以下操作。
+`--basic` 用字符 Canvas 输出正弦曲线。默认进入全屏场景，两个浮窗用原生 RasterCanvas 和字符 Canvas 绘制同一颗行星。默认 `auto` 优先选 Kitty，再选 Sixel。顶部显示实际协议和每格像素尺寸。可在同一终端分别指定两个后端，对照以下操作。
 
 1. 把字符窗口拖到行星中央，检查前景的文字、空格和边框是否完全遮住后方图像。
 2. 把窗口移开，再点行星窗口的标题置前。检查露出的图像是否完整，桌面是否还有残影。

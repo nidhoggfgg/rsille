@@ -380,7 +380,7 @@ def main():
         else:
             binary = build_binary("-p", "rsille-typst", "--example", "formula")
         if args.both_backends:
-            managed = build_binary("-p", "rsille", "--test", "raster_managed", "--features", "sixel,kitty")
+            managed = build_binary("-p", "rsille", "--test", "raster_managed", "--features", "raster")
             for entry in ("managed_sync", "managed_async"):
                 for mode in ("auto-both", "auto-sixel", "auto-none"):
                     check(managed, mode, managed=entry)

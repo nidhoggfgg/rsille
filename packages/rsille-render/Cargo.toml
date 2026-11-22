@@ -18,12 +18,11 @@ unicode-segmentation = { workspace = true }
 unicode-width = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
-libc = { workspace = true }
+libc = { workspace = true, optional = true }
 
 [features]
-default = []
-sixel = []
-kitty = ["dep:base64"]
+default = ["raster"]
+raster = ["dep:base64", "dep:libc"]
 
 [dev-dependencies]
 criterion = { version = "0.7", features = ["html_reports"] }

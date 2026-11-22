@@ -50,6 +50,7 @@ pub(crate) struct BlitStats {
     pub(crate) skipped_clean: u64,
     /// Effect callers must propagate this to the destination chunk so strict
     /// raster presentation can reject flattened raster content.
+    #[cfg(feature = "raster")]
     pub(crate) unsupported_raster_composition: bool,
 }
 
@@ -184,16 +185,18 @@ pub(crate) fn blit_region(
     options: BlitOptions,
 ) {
     let target_size = target.area().size();
-    let stats = select_blit_cells(source, region, Some(target_size), options, false, |cell| {
+    let _stats = select_blit_cells(source, region, Some(target_size), options, false, |cell| {
+        #[cfg(feature = "raster")]
         if let Some(raster) = source.raster_at((cell.source_x, cell.source_y).into()) {
             // Write first: erasing the previous grapheme must not erase the
             // incoming metadata, and copying must not resample cropped cells.
             let _ = target.set_raster_cell(cell.dest_x, cell.dest_y, raster.clone());
-        } else {
-            let _ = target.set_forced(cell.dest_x, cell.dest_y, cell.content);
+            return;
         }
+        let _ = target.set_forced(cell.dest_x, cell.dest_y, cell.content);
     });
-    if stats.unsupported_raster_composition {
+    #[cfg(feature = "raster")]
+    if _stats.unsupported_raster_composition {
         target.mark_unsupported_raster_composition();
     }
 }
@@ -217,10 +220,11 @@ fn select_blit_cells(
     region: BlitRegion,
     dest_size: Option<Size>,
     options: BlitOptions,
-    flatten_raster: bool,
+    _flatten_raster: bool,
     mut visit: impl FnMut(BlitCell),
 ) -> BlitStats {
     let mut stats = BlitStats {
+        #[cfg(feature = "raster")]
         unsupported_raster_composition: source.has_unsupported_raster_composition(),
         ..BlitStats::default()
     };
@@ -260,16 +264,22 @@ fn select_blit_cells(
             let Some(cell) = source.content().get(index) else {
                 continue;
             };
-            let pos = (source_x as u16, source_y as u16).into();
-            let raster = source.raster_at(pos);
-            if flatten_raster && raster.is_some() {
-                stats.unsupported_raster_composition = true;
-            }
+            #[cfg(feature = "raster")]
+            let (has_raster, raster_unchanged) = {
+                let pos = (source_x as u16, source_y as u16).into();
+                let raster = source.raster_at(pos);
+                if _flatten_raster && raster.is_some() {
+                    stats.unsupported_raster_composition = true;
+                }
+                (raster.is_some(), raster == source.previous_raster_at(pos))
+            };
+            #[cfg(not(feature = "raster"))]
+            let (has_raster, raster_unchanged) = (false, true);
             if previous
                 .and_then(|previous| previous.get(index))
                 .map(|previous| previous == cell)
                 .unwrap_or(false)
-                && raster == source.previous_raster_at(pos)
+                && raster_unchanged
             {
                 stats.skipped_clean += 1;
                 continue;
@@ -291,7 +301,7 @@ fn select_blit_cells(
             let content = if !fully_visible {
                 Stylized::new(' ', source.content()[owner].content.style)
             } else {
-                if cell.is_occupied || (raster.is_none() && should_skip_cell(cell, options)) {
+                if cell.is_occupied || (!has_raster && should_skip_cell(cell, options)) {
                     stats.skipped_blank += 1;
                     continue;
                 }
@@ -454,6 +464,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "raster")]
     fn raster_source(size: Size) -> Buffer {
         let canvas = rsille_render::raster::RasterCanvas::new(2, 2, Default::default()).unwrap();
         render_to_offscreen(size.into(), |chunk| {
@@ -463,6 +474,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "raster")]
     fn raster_blit_preserves_scroll_crop_and_nested_clip_mapping() {
         let source = raster_source((5, 4).into());
         let mut target = Buffer::new((5, 4).into());
@@ -494,6 +506,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "raster")]
     fn raster_blits_follow_text_and_wide_grapheme_draw_order() {
         let source = raster_source((3, 1).into());
         let mut target = Buffer::new((3, 1).into());
@@ -527,6 +540,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "raster")]
     fn dirty_only_blits_compare_raster_ownership_even_with_identical_placeholders() {
         let mut source = raster_source((2, 1).into());
         let mut changed = source.raster_at((0, 0).into()).unwrap().clone();
@@ -566,6 +580,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "raster")]
     fn effects_use_stored_placeholder_and_report_unsupported_composition() {
         let source = raster_source((2, 1).into());
         let mut target = Buffer::new((2, 1).into());
@@ -611,6 +626,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "raster")]
     fn headless_and_reused_offscreen_buffers_keep_raster_results_without_stale_owners() {
         let canvas = rsille_render::raster::RasterCanvas::new(2, 2, Default::default()).unwrap();
         let area = Area::new((1, 1).into(), (2, 1).into());
@@ -660,6 +676,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "raster")]
     fn recycling_releases_current_and_previous_raster_snapshots() {
         OFFSCREEN_CACHE.with(|cache| cache.borrow_mut().clear());
         let mut buffer = raster_source((2, 1).into());
@@ -738,6 +755,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "raster")]
     fn offscreen_pool_budget_counts_retained_raster_metadata_capacity() {
         use rsille_render::raster::{RasterCanvas, RasterCell};
         OFFSCREEN_CACHE.with(|cache| cache.borrow_mut().clear());
@@ -807,7 +825,7 @@ mod tests {
 
     #[test]
     fn blit_extreme_bounds_are_safe() {
-        let source = raster_source((2, 1).into());
+        let source = Buffer::new((2, 1).into());
         for region in [
             BlitRegion::new(usize::MAX, 0, 0, 0, usize::MAX, 1),
             BlitRegion::new(0, usize::MAX, 0, 0, 2, usize::MAX),
@@ -827,6 +845,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "raster")]
     fn render_widget_into(
         widget: &impl crate::widget::Widget<()>,
         buffer: &mut Buffer,
@@ -842,6 +861,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "raster")]
     fn raster_scroll_view_preserves_full_target_and_clamps_scroll_offsets() {
         use crate::{
             layout::{scroll_view, ScrollState, ScrollbarVisibility},
@@ -885,6 +905,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "raster")]
     fn floating_raster_over_text_preserves_source_and_target_offsets() {
         use crate::{
             layout::{overlay, OverlayAnchor, OverlayLayer},
@@ -919,6 +940,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "raster")]
     fn raster_overlay_popup_moves_and_closes_without_stale_ownership() {
         use crate::{
             layout::{overlay, OverlayAnchor, OverlayLayer},
