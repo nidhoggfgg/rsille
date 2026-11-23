@@ -9,6 +9,9 @@ use std::collections::BTreeSet;
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
 pub(super) enum Mood {
     Swim,
+    Morph,
+    Chase,
+    Unmorph,
     Watch,
     Grab,
     Hop,
@@ -19,6 +22,7 @@ pub(super) enum Mood {
     Puzzled,
     Snack,
     EatFish,
+    Burp,
     Nap,
     #[default]
     Idle,
@@ -147,11 +151,29 @@ impl Life {
                 if self.x != x {
                     self.leftward = x < self.x;
                 }
-                self.x = approach(self.x, x);
-                self.altitude = approach(self.altitude, altitude);
+                let chasing = treat.is_none() && meal.is_none();
+                if chasing {
+                    match self.mood {
+                        Mood::Chase => {}
+                        Mood::Morph if self.age < animation::MORPH.duration => continue,
+                        Mood::Morph => {
+                            self.mood = Mood::Chase;
+                            self.age = 0;
+                        }
+                        _ => {
+                            self.altitude = self.altitude.saturating_add(self.lift()).min(rise);
+                            self.mood = Mood::Morph;
+                            self.age = 0;
+                            continue;
+                        }
+                    }
+                }
+                // Terminal cells are usually taller than they are wide.
+                self.x = approach(self.x, x, if chasing { 2 } else { 1 });
+                self.altitude = approach(self.altitude, altitude, 1);
                 if (self.x, self.altitude) != (x, altitude) {
-                    self.mood = Mood::Swim;
-                    self.age %= animation::SWIM.duration;
+                    self.mood = if chasing { Mood::Chase } else { Mood::Swim };
+                    self.age %= self.clip().duration;
                     continue;
                 }
                 if let Some(pointer) = &mut self.pointer {
@@ -172,6 +194,10 @@ impl Life {
                     self.mood = Mood::Grab;
                 }
                 self.age = 0;
+                continue;
+            }
+            if matches!(self.mood, Mood::Chase | Mood::Morph) {
+                self.play(Mood::Unmorph);
                 continue;
             }
             if !fixed && !reacting && !matches!(self.mood, Mood::Snack | Mood::Idle) {
@@ -205,6 +231,8 @@ impl Life {
                     if let Some(foraging) = &mut self.foraging {
                         foraging.hunger = 0;
                     }
+                    self.play(Mood::Burp);
+                    continue;
                 }
                 self.choice = self.choice.wrapping_mul(1664525).wrapping_add(1013904223);
                 self.mood = if self.fatigue >= 160 {
@@ -269,6 +297,9 @@ impl Life {
     fn clip(&self) -> &'static Clip {
         match self.mood {
             Mood::Swim | Mood::Swoop => &animation::SWIM,
+            Mood::Morph => &animation::MORPH,
+            Mood::Chase => &animation::CHASE,
+            Mood::Unmorph => &animation::UNMORPH,
             Mood::Bubbles => &animation::BUBBLES,
             Mood::Wave => &animation::WAVE,
             Mood::Puzzled if self.leftward => &animation::PUZZLED_LEFT,
@@ -278,6 +309,8 @@ impl Life {
             Mood::Watch => &animation::WATCH,
             Mood::Grab => &animation::GRAB,
             Mood::Snack | Mood::EatFish => &animation::SNACK,
+            Mood::Burp if self.leftward => &animation::BURP_LEFT,
+            Mood::Burp => &animation::BURP,
             Mood::Nap => &animation::NAP,
             Mood::Idle if self.choice & 1 != 0 => &animation::IDLE_FIN,
             Mood::Idle => &animation::IDLE,
@@ -316,13 +349,11 @@ impl Life {
     }
 }
 
-fn approach(value: u16, goal: u16) -> u16 {
+fn approach(value: u16, goal: u16, step: u16) -> u16 {
     if value < goal {
-        value + 1
-    } else if value > goal {
-        value - 1
+        value.saturating_add(step).min(goal)
     } else {
-        value
+        value.saturating_sub(step).max(goal)
     }
 }
 
@@ -366,16 +397,31 @@ mod tests {
         for tick in 0..2000 {
             life.update(tick, 60, 10, 1, 1);
             if life.mood == Mood::Bubbles {
-                let has_bubble = |frame, x: usize, y: usize| {
-                    let px: usize = (2 * x + 1) * SIDE / (2 * 96);
-                    let py: usize = (2 * y + 1) * SIDE / (2 * 48);
-                    let i = (py * SIDE + px) * 4;
-                    animation::pixels(frame)[i..i + 4] == [146, 255, 255, 255]
+                // Follow the turquoise rim from the wand into the air.
+                let rim = |frame| {
+                    let mut bounds = (SIDE, SIDE, 0, 0);
+                    for (i, pixel) in animation::pixels(frame).chunks_exact(4).enumerate() {
+                        if pixel == [132, 239, 250, 255] {
+                            let (x, y) = (i % SIDE, i / SIDE);
+                            bounds = (
+                                bounds.0.min(x),
+                                bounds.1.min(y),
+                                bounds.2.max(x),
+                                bounds.3.max(y),
+                            );
+                        }
+                    }
+                    bounds
                 };
-                assert!(has_bubble(life.frame(), 82, 25));
-                life.update(tick + 10, 60, 10, 1, 1);
-                assert!(has_bubble(life.frame(), 87, 10));
-                life.update(tick + 20, 60, 10, 1, 1);
+                life.update(tick + 6, 60, 10, 1, 1);
+                let small = rim(life.frame());
+                life.update(tick + 11, 60, 10, 1, 1);
+                let inflated = rim(life.frame());
+                assert!(small.0.abs_diff(inflated.0) <= 4 && small.2 + 20 < inflated.2);
+                life.update(tick + 18, 60, 10, 1, 1);
+                let floating = rim(life.frame());
+                assert!(floating.0 > inflated.0 && floating.3 < inflated.1);
+                life.update(tick + u64::from(animation::BUBBLES.duration), 60, 10, 1, 1);
                 assert_ne!(life.mood, Mood::Bubbles);
                 return;
             }

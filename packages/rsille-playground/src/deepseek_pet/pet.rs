@@ -911,6 +911,16 @@ mod tests {
             let mut out = Vec::new();
             pet.draw(1, 80, 24, 10, 20, &mut out).unwrap();
             assert_eq!(pet.life.mood, Mood::Snack);
+            pet.draw(
+                1 + u64::from(animation::SNACK.duration),
+                80,
+                24,
+                10,
+                20,
+                &mut Vec::new(),
+            )
+            .unwrap();
+            assert_eq!(pet.life.mood, Mood::Burp);
             let mut grid = vt100::Parser::new(24.try_into().unwrap(), 80.try_into().unwrap(), 0);
             grid.process(b"\x1b[20;69Habc");
             grid.process(&out);
@@ -1271,7 +1281,10 @@ mod tests {
         let bitten_fish = gold_pixels(&pet);
         draw(&mut pet, caught + 16);
         assert!(whole_fish > bitten_fish && bitten_fish > gold_pixels(&pet));
-        draw(&mut pet, caught + u64::from(animation::SNACK.duration));
+        let burp = caught + u64::from(animation::SNACK.duration);
+        draw(&mut pet, burp);
+        assert_eq!(pet.life.mood, Mood::Burp);
+        draw(&mut pet, burp + u64::from(animation::BURP.duration));
         assert_eq!(pet.life.mood, Mood::Idle);
         assert!(pet.life.treat.is_none() && pet.fish_icon.is_none());
         let mut out = Vec::new();
@@ -1527,6 +1540,10 @@ mod tests {
         }
         assert!(pet.life.pointer.as_ref().unwrap().target.is_none());
         assert!(pet.life.cooldown > 0);
+        assert_eq!(pet.life.mood, Mood::Unmorph);
+        pet.life
+            .update(33 + u64::from(animation::UNMORPH.duration), 200, 0, 1, 1);
+        assert_eq!(pet.life.mood, Mood::Idle);
     }
 
     #[test]
@@ -1535,11 +1552,33 @@ mod tests {
         pet.life.pointer.as_mut().unwrap().curiosity = 0;
         pet.mouse_event(MouseKind::Motion, 12, 2);
         pet.life.update(0, 20, 10, 1, 1);
-        pet.life.update(9, 20, 10, 1, 1);
-        assert_eq!((pet.life.x, pet.life.altitude), (11, 9));
+        let transformed = 1 + u64::from(animation::MORPH.duration);
+        for tick in 1..transformed {
+            pet.life.update(tick, 20, 10, 1, 1);
+            assert_eq!(
+                (pet.life.mood, pet.life.x, pet.life.altitude),
+                (Mood::Morph, 20, 0)
+            );
+        }
+        pet.life.update(transformed, 20, 10, 1, 1);
+        assert_eq!(
+            (pet.life.mood, pet.life.x, pet.life.altitude),
+            (Mood::Chase, 18, 1)
+        );
+        pet.mouse_event(MouseKind::Motion, 20, 2);
+        pet.life.update(transformed + 1, 20, 10, 1, 1);
+        assert_eq!(
+            (pet.life.mood, pet.life.leftward, pet.life.x),
+            (Mood::Chase, false, 19)
+        );
+        pet.life.update(transformed + 8, 20, 10, 1, 1);
+        assert_eq!(
+            (pet.life.mood, pet.life.x, pet.life.altitude),
+            (Mood::Grab, 19, 9)
+        );
         pet.life.foraging.as_mut().unwrap().hunger = 100;
         pet.notice_food(18, 8);
-        assert_eq!(pet.life.update(12, 20, 10, 1, 1), None);
+        assert_eq!(pet.life.update(transformed + 10, 20, 10, 1, 1), None);
         pet.forget_food();
         assert_eq!(pet.life.update(45, 20, 10, 1, 1), None);
         pet.notice_food(3, 4);
