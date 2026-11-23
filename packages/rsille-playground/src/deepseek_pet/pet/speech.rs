@@ -110,16 +110,6 @@ impl<'a> Bubble<'a> {
         })
     }
 
-    pub(super) fn erase(
-        self,
-        cols: u16,
-        rows: u16,
-        screen: Option<&crate::deepseek_pet::screen::Screen>,
-        out: &mut Vec<u8>,
-    ) {
-        super::erase_area(self.area, cols, rows, screen, out);
-    }
-
     pub(super) fn render(self, out: &mut Vec<u8>) -> io::Result<()> {
         Builder::new()
             .size(self.area.size().into())
@@ -169,7 +159,7 @@ mod tests {
             assert!(drawing.contains(tail));
             assert_eq!(drawing.matches('─').count(), 11); // two six-cell edges, one pointer
             let mut erase = Vec::new();
-            bubble.erase(15, top + 1, None, &mut erase);
+            super::super::erase_area(bubble.area, 15, top + 1, None, &mut erase);
             assert_eq!(
                 erase,
                 format!("\x1b[49m\x1b[{top};12H\x1b[4X\x1b[{};12H\x1b[4X", top + 1).as_bytes()

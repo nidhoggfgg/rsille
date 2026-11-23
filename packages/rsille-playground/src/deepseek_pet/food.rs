@@ -47,6 +47,7 @@ pub struct Food {
     cursor: Option<Cell>,
     seq: Vec<u8>,
     absolute_safe: bool,
+    saved_absolute: [bool; 2],
 }
 
 impl Food {
@@ -56,6 +57,7 @@ impl Food {
             cursor,
             seq: Vec::new(),
             absolute_safe: true,
+            saved_absolute: [true; 2],
         }
     }
     pub fn resize(&mut self) {
@@ -71,7 +73,6 @@ impl Food {
             if !ground || !self.syntax.ready() {
                 if ground {
                     self.seq.clear();
-                    change = Some(None);
                 }
                 if self.seq.len() < 64 {
                     self.seq.push(b);
@@ -89,8 +90,21 @@ impl Food {
                     }
                     if seq.starts_with(b"\x1b]0;")
                         || seq.starts_with(b"\x1b]2;")
-                        || matches!(seq, b"\x1b[?2004h" | b"\x1b[?2004l")
+                        || matches!(
+                            seq,
+                            b"\x1b[?2004h"
+                                | b"\x1b[?2004l"
+                                | b"\x1b[?25h"
+                                | b"\x1b[?25l"
+                                | b"\x1b[?2026h"
+                                | b"\x1b[?2026l"
+                        )
                     {
+                        continue;
+                    }
+                    let saved = &mut self.saved_absolute[usize::from(self.syntax.alternate)];
+                    if seq == b"\x1b7" {
+                        *saved = self.absolute_safe;
                         continue;
                     }
                     self.cursor = None;
@@ -117,11 +131,20 @@ impl Food {
                                 self.cursor = Some((x, y));
                             }
                         }
-                    } else if seq.starts_with(b"\x1b")
-                        && !(seq.starts_with(b"\x1b[")
-                            && matches!(seq.last(), Some(b'A'..=b'G' | b'J' | b'K')))
-                    {
-                        self.absolute_safe = false;
+                    } else {
+                        change = Some(None);
+                        if let Some(mode) = seq.strip_prefix(b"\x1b[?") {
+                            if let Some((&end, params)) = mode.split_last() {
+                                if matches!(end, b'h' | b'l')
+                                    && params.split(|&p| p == b';').any(|p| p == b"6")
+                                {
+                                    // CUP is relative to the margins while origin mode is set.
+                                    self.absolute_safe = end == b'l';
+                                }
+                            }
+                        } else if matches!(seq, b"\x1b8" | b"\x1bc") {
+                            self.absolute_safe = seq == b"\x1bc" || *saved;
+                        }
                     }
                 }
                 continue;
@@ -151,11 +174,24 @@ impl Food {
 mod tests {
     use super::*;
     #[test]
+    fn editor_redraw_keeps_only_food_on_the_selected_screen() {
+        let mut f = Food::new(Some((1, 1)));
+        assert_eq!(
+            f.feed(b"A\x1b[?1049h\x1b[2;3Hnew\x1b[0m\x1b[H\x1b[?25h", 80, 24),
+            Some(Some((5, 2)))
+        );
+        assert_eq!(f.feed(b"\x1b[?1049l", 80, 24), Some(None));
+        assert_eq!(
+            f.feed(b"\x1b[?6h\x1b[Hx\x1b[?6l\x1b[4;6Hy", 80, 24),
+            Some(Some((6, 4)))
+        );
+    }
+    #[test]
     fn positions_and_uncertainty() {
         let mut f = Food::new(Some((1, 1)));
         assert_eq!(f.feed(b"ab\r\nc", 8, 2), Some(Some((1, 2))));
         assert_eq!(f.feed(b"\n", 8, 2), Some(None));
-        assert_eq!(f.feed(b"\x1b[2", 8, 2), Some(None));
+        assert_eq!(f.feed(b"\x1b[2", 8, 2), None);
         assert_eq!(f.feed(b";3HX", 8, 2), Some(Some((3, 2))));
         f.resize();
         assert_eq!(f.feed(b"x", 8, 2), Some(None));

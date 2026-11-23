@@ -101,6 +101,7 @@ impl Drop for Terminal<'_> {
         if let Some(kitty) = self.kitty {
             let _ = kitty.whale.delete(&mut out);
             let _ = kitty.fish.delete(&mut out);
+            let _ = kitty.panel.delete(&mut out);
         }
         let _ = out.write_all(b"\x1b[0m");
         if self.alt_screen || self.child_alternate {
@@ -218,11 +219,7 @@ pub fn run(options: crate::deepseek_pet::Options) -> io::Result<i32> {
         })?;
     let mut pixels = session.cell_pixels();
     let kitty = if matches!(session, InlineRasterSession::Kitty(_)) {
-        use rsille::render::raster_output::KittyImage;
-        Some(crate::deepseek_pet::pet::KittySprites {
-            whale: KittyImage::new()?,
-            fish: KittyImage::new()?,
-        })
+        Some(crate::deepseek_pet::pet::KittySprites::new()?)
     } else {
         None
     };
@@ -384,7 +381,7 @@ pub fn run(options: crate::deepseek_pet::Options) -> io::Result<i32> {
         }
         // A pointer update may wake us between animation ticks, but never split shell output.
         let mut fish_due = None;
-        if batch.is_empty() && boundary.can_draw() && !boundary.alternate {
+        if batch.is_empty() && boundary.can_draw() && (!boundary.alternate || kitty.is_some()) {
             fish_due = pet.fish_refresh_at(now);
         }
         if tick
@@ -392,6 +389,7 @@ pub fn run(options: crate::deepseek_pet::Options) -> io::Result<i32> {
             || batch.len() == CAP
             || fish_due.is_some_and(|d| now >= d)
         {
+            let refresh_fish = fish_due.is_some_and(|d| now >= d);
             fish_due = None;
             let start = boundary.can_draw();
             let was_alternate = boundary.alternate;
@@ -406,25 +404,20 @@ pub fn run(options: crate::deepseek_pet::Options) -> io::Result<i32> {
             ) {
                 pet.notice_bell();
             }
-            if boundary.screen_selected
-                || (!boundary.alternate && was_child_mouse != boundary.child_mouse())
+            if kitty.is_none()
+                && (boundary.screen_selected
+                    || (!boundary.alternate && was_child_mouse != boundary.child_mouse()))
             {
                 buttons = Default::default();
                 decoder.flush(&mut pending);
                 input_deadline = None;
                 pet.cancel_mouse_interaction();
             }
-            if boundary.screen_selected {
-                pet.forget_food();
-                food_deadline = None;
-                if let Some(food) = &mut food {
-                    *food = crate::deepseek_pet::food::Food::new(None);
-                }
-            } else if let Some(cell) = food
+            if let Some(cell) = food
                 .as_mut()
-                .filter(|_| !boundary.alternate)
                 .and_then(|food| food.feed(&batch, s.ws_col, s.ws_row))
             {
+                let cell = cell.filter(|_| !boundary.alternate || kitty.is_some());
                 if let Some((col, row)) = cell {
                     pet.notice_food(col, row);
                     food_deadline = Some(now + Duration::from_secs(3));
@@ -449,14 +442,13 @@ pub fn run(options: crate::deepseek_pet::Options) -> io::Result<i32> {
             }
             sprite.clear();
             terminal.child_alternate = boundary.alternate;
-            pet.image_only = boundary.alternate;
             // Forward the screen switch first. Resume drawing on a later batch.
             // A full batch can be followed immediately by more shell output.
             // During a flood, cap sprite repaints at the animation tick rate.
             if end
                 && (!boundary.alternate || kitty.is_some())
                 && !boundary.screen_selected
-                && (tick || (!boundary.alternate && batch.len() < CAP))
+                && (tick || refresh_fish || (!boundary.alternate && batch.len() < CAP))
             {
                 pet.draw(
                     frame.wrapping_sub(1),
@@ -557,7 +549,7 @@ pub fn run(options: crate::deepseek_pet::Options) -> io::Result<i32> {
             if bytes.contains(&0x1d) {
                 break;
             }
-            let shared = boundary.alternate && kitty.is_some();
+            let shared = kitty.is_some();
             if capture_mouse && (shared || !boundary.child_mouse()) {
                 decoder.feed(bytes, &mut pending, |report, out| {
                     if shared {
@@ -565,9 +557,14 @@ pub fn run(options: crate::deepseek_pet::Options) -> io::Result<i32> {
                         let cell = report.cell(modes.encoding, (pixels.width, pixels.height));
                         let pixel = (modes.encoding == 1016).then_some((report.x, report.y));
                         let kind = report.kind();
-                        if buttons.pet_owns(report, pet.covers(cell, pixel)) {
+                        if buttons.pet_owns(report, pet.captures_press(kind, cell, pixel)) {
                             pet.mouse_event(kind, cell.0, cell.1);
                         } else {
+                            if report.is_hover() {
+                                pet.mouse_event(kind, cell.0, cell.1);
+                            } else {
+                                pet.dismiss_outside(kind);
+                            }
                             report.forward(modes, out);
                         }
                     } else if s.ws_col > 1 && s.ws_row > 0 {
@@ -625,23 +622,16 @@ fn relay_modes(
     out: &mut Vec<u8>,
 ) -> bool {
     let mut start = 0;
-    let mut was_shared = kitty && boundary.alternate;
     let mut was_child = boundary.child_mouse();
     let bell = boundary.feed_with_mouse(bytes, |end, state| {
-        let shared = kitty && state.alternate;
-        if capture && (shared || was_shared || !state.child_mouse() || !was_child) {
-            let (tracking, encoding) = if shared {
-                let tracking = if state.mouse.tracking == 1003 {
-                    1003
-                } else {
-                    1002
-                };
+        if capture && (kitty || !state.child_mouse() || !was_child) {
+            let (tracking, encoding) = if kitty {
                 let encoding = if state.mouse.encoding == 1016 {
                     1016
                 } else {
                     1006
                 };
-                (tracking, encoding)
+                (1003, encoding)
             } else if state.child_mouse() {
                 (state.mouse.tracking, state.mouse.encoding)
             } else {
@@ -649,9 +639,7 @@ fn relay_modes(
             };
             out.extend_from_slice(&bytes[start..end]);
             start = end;
-            if was_shared && !shared {
-                out.extend_from_slice(b"\x1b[?1002l\x1b[?1016l");
-            }
+
             out.extend_from_slice(b"\x1b[?1003l\x1b[?1006l");
             for mode in [encoding, tracking] {
                 if mode != 0 {
@@ -659,7 +647,6 @@ fn relay_modes(
                 }
             }
         }
-        was_shared = shared;
         was_child = state.child_mouse();
     });
     out.extend_from_slice(&bytes[start..]);
@@ -718,16 +705,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn kitty_requests_drags_even_without_child_tracking_and_restores_legacy_mode() {
+    fn kitty_tracks_hover_across_screen_switches_and_preserves_child_encoding() {
         let mut b = crate::deepseek_pet::boundary::Boundary::default();
         let mut out = Vec::new();
         relay_modes(&mut b, b"\x1b[?1049h", true, true, &mut out);
-        assert!(out.ends_with(b"\x1b[?1006h\x1b[?1002h"));
+        assert!(out.ends_with(b"\x1b[?1006h\x1b[?1003h"));
         assert_eq!(b.mouse.tracking, 0);
         relay_modes(&mut b, b"\x1b[?1000h\x1b[?1016h", true, true, &mut out);
-        assert!(out.ends_with(b"\x1b[?1016h\x1b[?1002h"));
+        assert!(out.ends_with(b"\x1b[?1016h\x1b[?1003h"));
         relay_modes(&mut b, b"\x1b[?1016l\x1b[?1049l", true, true, &mut out);
-        assert!(out.ends_with(b"\x1b[?1006l\x1b[?1000h"));
+        assert!(out.ends_with(b"\x1b[?1006h\x1b[?1003h"));
+        assert_eq!(b.mouse.tracking, 1000);
     }
 
     #[test]

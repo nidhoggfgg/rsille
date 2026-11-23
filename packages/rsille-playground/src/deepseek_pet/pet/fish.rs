@@ -144,7 +144,13 @@ impl FishIcon {
         if let Some(image) = kitty {
             use std::io::Write;
             write!(out, "\x1b[{};{}H", self.row, self.col)?;
-            image.draw(out, self.width as u16, self.height as u16, &pixels, 1)
+            image.draw(
+                out,
+                self.width as u16,
+                self.height as u16,
+                &pixels,
+                super::kitty::FISH_Z,
+            )
         } else {
             super::sixel::draw(self.col, self.row, self.width, &pixels, out);
             Ok(())

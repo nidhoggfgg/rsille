@@ -30,6 +30,8 @@ fastrand = "2"
 libc.workspace = true
 serde = { version = "1", features = ["derive"] }
 tempfile = "3"
+unicode-normalization = "0.1"
+unifont = "1.1"
 vt100 = "0.18.1"
 yaml_serde = "0.10"
 

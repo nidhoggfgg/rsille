@@ -23,6 +23,10 @@ pub struct Report<'a> {
 }
 
 impl Report<'_> {
+    pub fn is_hover(self) -> bool {
+        !self.release && self.button & !(4 | 8 | 16) == 35
+    }
+
     pub fn kind(self) -> MouseKind {
         match (self.release, self.button & !(4 | 8 | 16)) {
             (false, 0) => MouseKind::LeftPress,

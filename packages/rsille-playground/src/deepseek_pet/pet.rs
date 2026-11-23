@@ -1,5 +1,6 @@
 mod behavior;
 mod fish;
+mod kitty;
 mod menu;
 mod sixel;
 mod speech;
@@ -220,10 +221,7 @@ struct FrameKey {
     leftward: bool,
 }
 
-pub struct KittySprites {
-    pub whale: rsille::render::raster_output::KittyImage,
-    pub fish: rsille::render::raster_output::KittyImage,
-}
+pub use kitty::KittySprites;
 
 struct WhaleGrab {
     press: (u16, u16),
@@ -233,7 +231,6 @@ struct WhaleGrab {
 
 pub struct Pet<'a> {
     pub kitty: Option<&'a KittySprites>,
-    pub image_only: bool,
     pub(crate) screen: Option<crate::deepseek_pet::screen::Screen>,
     catalog: &'a crate::deepseek_pet::dialogue::Catalog,
     features: BTreeSet<Feature>,
@@ -277,7 +274,6 @@ impl<'a> Pet<'a> {
         Self {
             screen: None,
             kitty: None,
-            image_only: false,
             life: Life::new(choice, &features),
             catalog,
             speech: features.contains(&Feature::Speech).then(Speech::default),
@@ -391,10 +387,8 @@ impl<'a> Pet<'a> {
                     if self.life.mood != Mood::Wave {
                         self.life.react(Mood::Wave);
                     }
-                    if !self.image_only {
-                        self.hint_until
-                            .get_or_insert_with(|| Instant::now() + Duration::from_secs(3));
-                    }
+                    self.hint_until
+                        .get_or_insert_with(|| Instant::now() + Duration::from_secs(3));
                 }
             }
             (MouseKind::LeftDrag, Some(treat)) if treat.state != TreatState::Placed => {
@@ -408,19 +402,48 @@ impl<'a> Pet<'a> {
             (MouseKind::Motion, Some(treat)) if treat.state == TreatState::Carried => {
                 treat.cell = cell;
             }
-            (MouseKind::Motion | MouseKind::LeftDrag, _) if !self.image_only => {
-                self.life.notice_mouse(col, row)
-            }
+            (MouseKind::Motion | MouseKind::LeftDrag, _) => self.life.notice_mouse(col, row),
             (MouseKind::RightPress, Some(_)) => self.life.treat = None,
-            (MouseKind::RightPress, None) if hit.is_some() && self.image_only => {
-                self.life.play(Mood::Bubbles)
-            }
             (MouseKind::RightPress, None) if hit.is_some() => {
                 self.grab = None;
                 self.menu_open = true;
                 self.hint_until = Some(Instant::now());
             }
             _ => {}
+        }
+    }
+
+    // Dismiss transient UI while the underlying application receives its own click.
+    pub fn dismiss_outside(&mut self, kind: MouseKind) {
+        if self.menu_open && matches!(kind, MouseKind::LeftPress | MouseKind::RightPress) {
+            self.menu_open = false;
+        } else if kind == MouseKind::RightPress {
+            self.life.treat = None;
+        }
+    }
+
+    pub fn captures_press(
+        &self,
+        kind: MouseKind,
+        cell: (u16, u16),
+        pixel: Option<(u16, u16)>,
+    ) -> bool {
+        match kind {
+            MouseKind::LeftPress | MouseKind::RightPress => {
+                let on_menu = self.menu_open
+                    && self.painted_menu.is_some_and(|m| {
+                        m.area.contains_area(&Area::new(
+                            (cell.0 - 1, cell.1 - 1).into(),
+                            (1, 1).into(),
+                        ))
+                    });
+                let handles_treat = self.life.treat.is_some_and(|t| {
+                    t.state == TreatState::Carried
+                        || self.fish_icon.is_some_and(|f| f.contains(cell.0, cell.1))
+                });
+                on_menu || handles_treat || self.covers(cell, pixel)
+            }
+            _ => false,
         }
     }
 
@@ -483,13 +506,13 @@ impl<'a> Pet<'a> {
     /// Remove the visible sprite while its original coordinates are still valid.
     pub fn hide(&mut self, cols: u16, rows: u16, out: &mut Vec<u8>) {
         if let Some(old) = self.painted_menu.take() {
-            erase_area(old.area, cols, rows, self.screen.as_ref(), out);
+            self.erase_panel(old.area, cols, rows, out);
         }
         if let Some(old) = self.fish_icon.take() {
             self.erase_fish(old, cols, rows, out);
         }
         if let Some(old) = self.bubble.take() {
-            old.erase(cols, rows, self.screen.as_ref(), out);
+            self.erase_panel(old.area, cols, rows, out);
         }
         let Some(old) = self.previous.take() else {
             return;
@@ -499,6 +522,14 @@ impl<'a> Pet<'a> {
             kitty.whale.delete(out).expect("Vec write");
         } else {
             old.clear_uncovered(None, cols, rows, self.screen.as_ref(), out);
+        }
+    }
+
+    fn erase_panel(&self, area: Area, cols: u16, rows: u16, out: &mut Vec<u8>) {
+        if let Some(kitty) = self.kitty {
+            kitty.panel.delete(out).expect("Vec write");
+        } else {
+            erase_area(area, cols, rows, self.screen.as_ref(), out);
         }
     }
 
@@ -566,7 +597,7 @@ impl<'a> Pet<'a> {
             .update(tick, travel, rise, size.width, size.height)
         {
             let start = out.len();
-            write!(out, "\x1b[49m\x1b[{r};{c}H\x1b[X").unwrap();
+            write!(out, "\x1b[49m\x1b[{r};{c}H\x1b[X")?;
             if let Some(screen) = &mut self.screen {
                 screen.consume(&out[start..]);
             }
@@ -586,12 +617,12 @@ impl<'a> Pet<'a> {
         self.menu_open = menu.is_some();
         if self.painted_menu != menu {
             if let Some(old) = self.painted_menu.take() {
-                erase_area(old.area, cols, rows, self.screen.as_ref(), out);
+                self.erase_panel(old.area, cols, rows, out);
             }
             self.dirty = true;
         }
         let bubble_size = (size.width, size.height);
-        let bubble = if self.image_only || self.menu_open {
+        let bubble = if self.menu_open {
             None
         } else if self.hint_until.is_some_and(|until| Instant::now() < until) {
             Bubble::place("右键点我，一起玩", col, row, bubble_size, cols, rows)
@@ -616,9 +647,10 @@ impl<'a> Pet<'a> {
                 }
             }
         }
+        let repaint_panel = self.dirty || self.bubble != bubble;
         if self.bubble != bubble {
             if let Some(old) = self.bubble.take() {
-                old.erase(cols, rows, self.screen.as_ref(), out);
+                self.erase_panel(old.area, cols, rows, out);
             }
             self.dirty = true;
         }
@@ -659,18 +691,6 @@ impl<'a> Pet<'a> {
                 pixels.push(c);
             }
         }
-        // Kitty placements sit above terminal text. Leave room for the menu
-        // when a small window forces it to overlap the whale.
-        if let Some(menu) = menu.filter(|m| self.kitty.is_some() && whale.intersects(&m.area)) {
-            let left = usize::from(menu.area.x().saturating_sub(whale.x())) * usize::from(cell_w);
-            let right = usize::from(menu.area.real_size().width - whale.x()) * usize::from(cell_w);
-            let top = usize::from(menu.area.y().saturating_sub(whale.y())) * usize::from(cell_h);
-            let bottom =
-                usize::from(menu.area.real_size().height - whale.y()) * usize::from(cell_h);
-            for line in pixels.chunks_exact_mut(w).take(bottom).skip(top) {
-                line[left.min(w)..right.min(w)].fill([0; 4]);
-            }
-        }
         let image = Image {
             col,
             row,
@@ -686,13 +706,9 @@ impl<'a> Pet<'a> {
         self.dirty = false;
         if let Some(kitty) = self.kitty {
             write!(out, "\x1b[{row};{col}H")?;
-            kitty.whale.draw(
-                out,
-                w as u16,
-                h as u16,
-                &image.pixels,
-                if self.image_only { i32::MAX } else { 0 },
-            )?;
+            kitty
+                .whale
+                .draw(out, w as u16, h as u16, &image.pixels, kitty::WHALE_Z)?;
         } else {
             if let Some(old) = &self.previous {
                 old.clear_uncovered(Some(&image), cols, rows, self.screen.as_ref(), out);
@@ -701,14 +717,26 @@ impl<'a> Pet<'a> {
         }
         self.previous = Some(image);
         if let Some(b) = bubble {
-            b.render(out)?;
+            if let Some(kitty) = self.kitty {
+                if repaint_panel {
+                    kitty.draw_panel(b.area, b, out)?;
+                }
+            } else {
+                b.render(out)?;
+            }
         }
         self.bubble = bubble;
         if repaint_fish {
             self.paint_fish(fish, out)?;
         }
         if let Some(menu) = menu {
-            menu.render(out)?;
+            if let Some(kitty) = self.kitty {
+                if repaint_panel {
+                    kitty.draw_panel(menu.area, menu, out)?;
+                }
+            } else {
+                menu.render(out)?;
+            }
         }
         self.painted_menu = menu;
         Ok(())
@@ -755,9 +783,10 @@ mod tests {
     use std::time::Instant;
 
     #[test]
-    fn mouse_enables_petting_and_dragging_on_both_screens() {
+    fn mouse_enables_petting_and_dragging_on_both_backends() {
         let catalog = crate::deepseek_pet::dialogue::Catalog::default();
-        for image_only in [false, true] {
+        let kitty = KittySprites::new().unwrap();
+        for backend in [None, Some(&kitty)] {
             for enabled in [false, true] {
                 let features = if enabled {
                     [Feature::Mouse].into()
@@ -765,7 +794,7 @@ mod tests {
                     BTreeSet::new()
                 };
                 let mut pet = Pet::new(&catalog, features);
-                pet.image_only = image_only;
+                pet.kitty = backend;
                 pet.draw(0, 80, 24, 10, 20, &mut Vec::new()).unwrap();
                 let origin = pet.last_frame.as_ref().unwrap().origin;
                 pet.mouse_event(MouseKind::LeftPress, origin.0 + 6, origin.1 + 3);
@@ -783,14 +812,10 @@ mod tests {
 
     #[test]
     fn dragging_a_fixed_overlay_releases_the_covered_text() {
-        let kitty = KittySprites {
-            whale: rsille::render::raster_output::KittyImage::new().unwrap(),
-            fish: rsille::render::raster_output::KittyImage::new().unwrap(),
-        };
+        let kitty = KittySprites::new().unwrap();
         let catalog = crate::deepseek_pet::dialogue::Catalog::default();
         let mut pet = Pet::new(&catalog, [Feature::Mouse].into());
         pet.kitty = Some(&kitty);
-        pet.image_only = true;
         pet.draw(0, 80, 24, 10, 20, &mut Vec::new()).unwrap();
         let (col, row) = pet.last_frame.as_ref().unwrap().origin;
         let hit = (col + 6, row + 3);
@@ -805,17 +830,12 @@ mod tests {
             assert!(!pet.covers(hit, None));
         }
         pet.mouse_event(MouseKind::RightPress, 16, 8);
-        assert_eq!(pet.life.mood, Mood::Bubbles);
-        assert!(!pet.menu_open);
+        assert!(pet.menu_open);
     }
 
     #[test]
     fn kitty_pet_and_treat_use_independent_images_and_hide_without_erasing_text() {
-        use rsille::render::raster_output::KittyImage;
-        let kitty = KittySprites {
-            whale: KittyImage::new().unwrap(),
-            fish: KittyImage::new().unwrap(),
-        };
+        let kitty = KittySprites::new().unwrap();
         let catalog = crate::deepseek_pet::dialogue::Catalog::default();
         let mut pet = Pet::new(&catalog, [Feature::Mouse].into());
         pet.kitty = Some(&kitty);
@@ -835,6 +855,70 @@ mod tests {
         kitty.fish.delete(&mut expected).unwrap();
         kitty.whale.delete(&mut expected).unwrap();
         assert_eq!(bytes, expected);
+    }
+
+    #[test]
+    fn kitty_panels_capture_menu_actions_and_leave_the_child_grid_intact() {
+        let kitty = KittySprites::new().unwrap();
+        let catalog = crate::deepseek_pet::dialogue::Catalog::load(None).unwrap();
+        let mut pet = Pet::new(&catalog, [Feature::Mouse, Feature::Speech].into());
+        pet.kitty = Some(&kitty);
+        let mut out = Vec::new();
+        pet.notice_command(b'+', catalog.commands["ls"]);
+        pet.draw(0, 80, 24, 10, 20, &mut out).unwrap();
+        assert!(pet.bubble.is_some());
+        let (x, y) = pet
+            .previous
+            .as_ref()
+            .map(|w| (w.col + 6, w.row + 3))
+            .unwrap();
+        for (item, mood) in [(1, Mood::Bubbles), (2, Mood::Nap)] {
+            assert!(pet.captures_press(MouseKind::RightPress, (x, y), None));
+            pet.mouse_event(MouseKind::RightPress, x, y);
+            pet.draw(0, 80, 24, 10, 20, &mut out).unwrap();
+            let area = pet.painted_menu.unwrap().area;
+            let cell = (area.x() + 3, area.y() + 2 + item);
+            assert!(pet.captures_press(MouseKind::LeftPress, cell, None));
+            assert!(!pet.captures_press(MouseKind::LeftPress, (1, 1), None));
+            pet.mouse_event(MouseKind::LeftPress, cell.0, cell.1);
+            assert_eq!(pet.life.mood, mood);
+            assert!(!pet.captures_press(MouseKind::LeftPress, cell, None));
+            pet.draw(0, 80, 24, 10, 20, &mut out).unwrap();
+        }
+        pet.hide(80, 24, &mut out);
+        let commands = std::str::from_utf8(&out).unwrap();
+        assert!(commands.contains("z=2147483647,c=14,r=5,"));
+        assert!(commands.is_ascii());
+        let mut grid = vt100::Parser::new(24.try_into().unwrap(), 80.try_into().unwrap(), 0);
+        for row in 1..=24 {
+            grid.process(format!("\x1b[{row};1H{}", "v".repeat(79)).as_bytes());
+        }
+        let before = grid.screen().contents();
+        grid.process(&out);
+        assert_eq!(grid.screen().contents(), before);
+    }
+
+    #[test]
+    fn foraging_erases_one_cell_and_the_child_can_redraw_it() {
+        let kitty = KittySprites::new().unwrap();
+        let catalog = crate::deepseek_pet::dialogue::Catalog::default();
+        for backend in [None, Some(&kitty)] {
+            let mut pet = Pet::new(&catalog, [Feature::Forage].into());
+            pet.kitty = backend;
+            pet.draw(0, 80, 24, 10, 20, &mut Vec::new()).unwrap();
+            pet.life.foraging.as_mut().unwrap().hunger = 100;
+            pet.notice_food(70, 20);
+            let mut out = Vec::new();
+            pet.draw(1, 80, 24, 10, 20, &mut out).unwrap();
+            assert_eq!(pet.life.mood, Mood::Snack);
+            let mut grid = vt100::Parser::new(24.try_into().unwrap(), 80.try_into().unwrap(), 0);
+            grid.process(b"\x1b[20;69Habc");
+            grid.process(&out);
+            grid.process(b"\x1b[1;1Hunrelated");
+            assert_eq!(grid.screen().contents_between(19, 68, 19, 71), "a c");
+            grid.process(b"\x1b[20;70Hb");
+            assert_eq!(grid.screen().contents_between(19, 68, 19, 71), "abc");
+        }
     }
 
     #[test]
@@ -980,11 +1064,7 @@ mod tests {
 
     #[test]
     fn moving_only_the_fish_repaints_the_whale_only_to_repair_sixel_overlap() {
-        use rsille::render::raster_output::KittyImage;
-        let kitty = KittySprites {
-            whale: KittyImage::new().unwrap(),
-            fish: KittyImage::new().unwrap(),
-        };
+        let kitty = KittySprites::new().unwrap();
         let catalog = crate::deepseek_pet::dialogue::Catalog::default();
         for backend in [Some(&kitty), None] {
             let mut pet = Pet::new(&catalog, [Feature::Mouse].into());
@@ -1002,7 +1082,7 @@ mod tests {
                 let output = std::str::from_utf8(&bytes).unwrap();
                 if backend.is_some() {
                     assert_eq!(output.matches("\x1b_Ga=p,").count(), 1);
-                    assert!(output.contains("z=1,"));
+                    assert!(output.contains(&format!("z={},", kitty::FISH_Z)));
                 } else {
                     assert!(output.contains("q\"1;1;30;15#"));
                     assert_eq!(output.contains("q\"1;1;160;160#"), erased_whale);
@@ -1248,7 +1328,7 @@ mod tests {
         pet.speech.as_mut().unwrap().held_speech.as_mut().unwrap().1 = Instant::now();
         pet.draw(0, 80, 24, 10, 20, &mut out).unwrap();
         let mut erase = Vec::new();
-        first.erase(80, 24, None, &mut erase);
+        erase_area(first.area, 80, 24, None, &mut erase);
         assert!(out.starts_with(&erase));
         assert!(pet.bubble.is_none());
         pet.notice_command(b'r', pet.catalog.editing("cargo test").unwrap());

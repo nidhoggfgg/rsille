@@ -462,6 +462,29 @@ impl KittyImage {
         rgba: &[[u8; 4]],
         z_index: i32,
     ) -> io::Result<()> {
+        self.draw_sized(out, (width, height).into(), rgba, z_index, None)
+    }
+
+    /// Replace the image at the cursor, optionally scaling it to a rectangle of terminal cells.
+    pub fn draw_sized(
+        &self,
+        out: &mut Vec<u8>,
+        pixels: Size,
+        rgba: &[[u8; 4]],
+        z_index: i32,
+        cells: Option<Size>,
+    ) -> io::Result<()> {
+        let Size { width, height } = pixels;
+        let placement_size = match cells {
+            Some(size) if size.width == 0 || size.height == 0 => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "empty Kitty placement",
+                ));
+            }
+            Some(size) => format!("c={},r={},", size.width, size.height),
+            None => String::new(),
+        };
         if width == 0 || height == 0 || rgba.len() != usize::from(width) * usize::from(height) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -474,7 +497,8 @@ impl KittyImage {
         let header = format!(
             "\x1b_Ga=d,d=N,I={number},q=2\x1b\\\x1b_Ga=t,f=32,t=d,I={number},s={width},v={height},"
         );
-        let placement = format!("\x1b_Ga=p,I={number},p=1,z={z_index},C=1,q=2\x1b\\");
+        let placement =
+            format!("\x1b_Ga=p,I={number},p=1,z={z_index},{placement_size}C=1,q=2\x1b\\");
         transmit(out, &header, rgba.as_flattened(), placement.as_bytes())
     }
 
