@@ -95,7 +95,8 @@ struct Terminal<'a> {
 impl Drop for Terminal<'_> {
     fn drop(&mut self) {
         // Ctrl+] can also interrupt a child application that enabled mouse tracking.
-        let _ = io::stdout().write_all(b"\x18\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l");
+        let _ =
+            io::stdout().write_all(b"\x18\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1016l");
         let mut out = io::stdout().lock();
         if let Some(kitty) = self.kitty {
             let _ = kitty.whale.delete(&mut out);
@@ -113,8 +114,31 @@ impl Drop for Terminal<'_> {
 }
 
 struct Child(i32);
+
+impl Child {
+    fn wait(&mut self) -> io::Result<i32> {
+        let mut status = 0;
+        loop {
+            if unsafe { libc::waitpid(self.0, &mut status, 0) } >= 0 {
+                self.0 = -1;
+                return Ok(if libc::WIFEXITED(status) {
+                    libc::WEXITSTATUS(status)
+                } else {
+                    128 + libc::WTERMSIG(status)
+                });
+            }
+            let error = io::Error::last_os_error();
+            if error.kind() != io::ErrorKind::Interrupted {
+                return Err(error);
+            }
+        }
+    }
+}
 impl Drop for Child {
     fn drop(&mut self) {
+        if self.0 < 0 {
+            return;
+        }
         // The master is dropped first (hangup). Don't block on a shell that ignores it.
         unsafe {
             libc::kill(self.0, libc::SIGKILL);
@@ -126,17 +150,19 @@ impl Drop for Child {
 }
 
 /// Requires exclusive use of stdin, stdout and the spawned child's wait status.
-pub fn run(options: crate::deepseek_pet::Options) -> io::Result<()> {
-    let shell = std::env::var_os("SHELL").unwrap_or_else(|| "/bin/sh".into());
-    if shell.is_empty() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "SHELL 为空，请指定已安装的 shell 路径，或直接在 fish 中运行",
-        ));
+pub fn run(options: crate::deepseek_pet::Options) -> io::Result<i32> {
+    let direct = !options.command.is_empty();
+    let program = options
+        .command
+        .first()
+        .cloned()
+        .unwrap_or_else(|| std::env::var_os("SHELL").unwrap_or_else(|| "/bin/sh".into()));
+    if program.is_empty() {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "程序路径为空"));
     }
     let features = options.enabled_features();
-    let command_events =
-        features.contains(&Feature::CommandReactions) || features.contains(&Feature::Speech);
+    let command_events = !direct
+        && (features.contains(&Feature::CommandReactions) || features.contains(&Feature::Speech));
     let forage = features.contains(&Feature::Forage);
     let capture_mouse = features.contains(&Feature::Mouse);
     let catalog = if command_events || options.commands.is_some() {
@@ -146,7 +172,7 @@ pub fn run(options: crate::deepseek_pet::Options) -> io::Result<()> {
     };
     let mut pet = crate::deepseek_pet::pet::Pet::new(&catalog, features);
     let hooks = if command_events {
-        crate::deepseek_pet::commands::Hooks::prepare(shell.as_ref(), &catalog)?
+        crate::deepseek_pet::commands::Hooks::prepare(program.as_ref(), &catalog)?
     } else {
         None
     };
@@ -161,8 +187,19 @@ pub fn run(options: crate::deepseek_pet::Options) -> io::Result<()> {
                 .chain(std::iter::once(std::ptr::null()))
                 .collect::<Vec<_>>()
         });
-    let shell = CString::new(shell.as_bytes())?;
-    let mut args = vec![shell.as_ptr(), b"-i\0".as_ptr().cast()];
+    let program = CString::new(program.as_bytes())?;
+    let arguments = options
+        .command
+        .iter()
+        .skip(1)
+        .map(|arg| CString::new(arg.as_bytes()))
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut args = vec![program.as_ptr()];
+    if direct {
+        args.extend(arguments.iter().map(|arg| arg.as_ptr()));
+    } else {
+        args.push(b"-i\0".as_ptr().cast());
+    }
     if let Some(init) = hooks
         .as_ref()
         .and_then(|(hooks, _)| hooks.fish_init.as_ref())
@@ -176,7 +213,7 @@ pub fn run(options: crate::deepseek_pet::Options) -> io::Result<()> {
         .map_err(|e| {
             io::Error::new(
                 e.kind(),
-                format!("无法确认终端图形协议或字符格像素尺寸，未启动 shell：{e}"),
+                format!("无法确认终端图形协议或字符格像素尺寸，未启动子进程：{e}"),
             )
         })?;
     let mut pixels = session.cell_pixels();
@@ -209,14 +246,20 @@ pub fn run(options: crate::deepseek_pet::Options) -> io::Result<()> {
                 }
             }
             if let Some(env) = &environment {
-                libc::execve(shell.as_ptr(), args.as_ptr(), env.as_ptr());
+                libc::execve(program.as_ptr(), args.as_ptr(), env.as_ptr());
+            } else if direct {
+                libc::execvp(program.as_ptr(), args.as_ptr());
             } else {
-                libc::execv(shell.as_ptr(), args.as_ptr());
+                libc::execv(program.as_ptr(), args.as_ptr());
             }
+            let error = b"rsille pet: cannot execute ";
+            libc::write(2, error.as_ptr().cast(), error.len());
+            libc::write(2, program.as_ptr().cast(), program.as_bytes().len());
+            libc::write(2, b"\r\n".as_ptr().cast(), 2);
             libc::_exit(127);
         }
     }
-    let _child = Child(pid);
+    let mut child = Child(pid);
     let mut preview = hooks
         .as_ref()
         .filter(|(hooks, _)| hooks.fish_init.is_some())
@@ -237,6 +280,7 @@ pub fn run(options: crate::deepseek_pet::Options) -> io::Result<()> {
         child_alternate: false,
     };
     let mut decoder = crate::deepseek_pet::mouse::Mouse::default();
+    let mut buttons = crate::deepseek_pet::mouse::Buttons::default();
     let mut input_deadline = None;
     let cursor = if options.alt_screen {
         Some((1, 1))
@@ -260,6 +304,7 @@ pub fn run(options: crate::deepseek_pet::Options) -> io::Result<()> {
     let mut pending = std::collections::VecDeque::<u8>::new();
     let mut input = [0u8; 4096];
     let mut output = [0u8; 8192];
+    let mut forwarded = Vec::new();
     let mut update = Vec::new();
     let mut sprite = Vec::new();
     let mut frame = 0u64;
@@ -268,6 +313,7 @@ pub fn run(options: crate::deepseek_pet::Options) -> io::Result<()> {
     let mut batch = Vec::with_capacity(CAP);
     let mut due = None;
     let mut boundary = crate::deepseek_pet::boundary::Boundary::default();
+    let mut child_eof = false;
     loop {
         let now = Instant::now();
         if input_deadline.is_some_and(|d| now >= d) {
@@ -338,7 +384,7 @@ pub fn run(options: crate::deepseek_pet::Options) -> io::Result<()> {
         }
         // A pointer update may wake us between animation ticks, but never split shell output.
         let mut fish_due = None;
-        if batch.is_empty() && boundary.ready() && !boundary.alternate {
+        if batch.is_empty() && boundary.can_draw() && !boundary.alternate {
             fish_due = pet.fish_refresh_at(now);
         }
         if tick
@@ -347,8 +393,36 @@ pub fn run(options: crate::deepseek_pet::Options) -> io::Result<()> {
             || fish_due.is_some_and(|d| now >= d)
         {
             fish_due = None;
-            if let Some(cell) = food
+            let start = boundary.can_draw();
+            let was_alternate = boundary.alternate;
+            let was_child_mouse = boundary.child_mouse();
+            forwarded.clear();
+            if relay_modes(
+                &mut boundary,
+                &batch,
+                capture_mouse,
+                kitty.is_some(),
+                &mut forwarded,
+            ) {
+                pet.notice_bell();
+            }
+            if boundary.screen_selected
+                || (!boundary.alternate && was_child_mouse != boundary.child_mouse())
+            {
+                buttons = Default::default();
+                decoder.flush(&mut pending);
+                input_deadline = None;
+                pet.cancel_mouse_interaction();
+            }
+            if boundary.screen_selected {
+                pet.forget_food();
+                food_deadline = None;
+                if let Some(food) = &mut food {
+                    *food = crate::deepseek_pet::food::Food::new(None);
+                }
+            } else if let Some(cell) = food
                 .as_mut()
+                .filter(|_| !boundary.alternate)
                 .and_then(|food| food.feed(&batch, s.ws_col, s.ws_row))
             {
                 if let Some((col, row)) = cell {
@@ -359,18 +433,15 @@ pub fn run(options: crate::deepseek_pet::Options) -> io::Result<()> {
                     food_deadline = None;
                 }
             }
-            let start = boundary.ready();
-            if boundary.feed(&batch) {
-                pet.notice_bell();
-            }
-            if boundary.screen_selected {
-                pet.cancel_mouse_interaction();
-            }
-            let end = boundary.ready();
+            let end = boundary.can_draw();
             update.clear();
             if !batch.is_empty() {
-                if start {
+                if start && (!was_alternate || boundary.screen_selected) {
                     pet.hide(s.ws_col, s.ws_row, &mut update);
+                }
+                if was_alternate {
+                    // Scrolling, clearing or plugin deletes may remove or move a placement.
+                    pet.invalidate();
                 }
                 if let Some(screen) = &mut pet.screen {
                     screen.feed(&batch);
@@ -378,13 +449,14 @@ pub fn run(options: crate::deepseek_pet::Options) -> io::Result<()> {
             }
             sprite.clear();
             terminal.child_alternate = boundary.alternate;
+            pet.image_only = boundary.alternate;
             // Forward the screen switch first. Resume drawing on a later batch.
             // A full batch can be followed immediately by more shell output.
             // During a flood, cap sprite repaints at the animation tick rate.
             if end
-                && !boundary.alternate
+                && (!boundary.alternate || kitty.is_some())
                 && !boundary.screen_selected
-                && (tick || batch.len() < CAP)
+                && (tick || (!boundary.alternate && batch.len() < CAP))
             {
                 pet.draw(
                     frame.wrapping_sub(1),
@@ -399,7 +471,7 @@ pub fn run(options: crate::deepseek_pet::Options) -> io::Result<()> {
             render_batch(
                 &mut out,
                 &update,
-                &batch,
+                &forwarded,
                 &sprite,
                 start && end && !boundary.screen_selected,
             )?;
@@ -437,12 +509,18 @@ pub fn run(options: crate::deepseek_pet::Options) -> io::Result<()> {
         if fds[1].revents & (libc::POLLIN | libc::POLLHUP | libc::POLLERR) != 0 {
             let room = output.len().min(CAP - batch.len());
             match master.read(&mut output[..room]) {
-                Ok(0) => break,
+                Ok(0) => {
+                    child_eof = true;
+                    break;
+                }
                 Ok(n) => {
                     batch.extend_from_slice(&output[..n]);
                     due.get_or_insert_with(|| Instant::now() + Duration::from_millis(20));
                 }
-                Err(e) if e.raw_os_error() == Some(libc::EIO) => break,
+                Err(e) if e.raw_os_error() == Some(libc::EIO) => {
+                    child_eof = true;
+                    break;
+                }
                 Err(e) if retry(&e) => {}
                 Err(e) => return Err(e),
             }
@@ -479,10 +557,25 @@ pub fn run(options: crate::deepseek_pet::Options) -> io::Result<()> {
             if bytes.contains(&0x1d) {
                 break;
             }
-            if capture_mouse {
-                decoder.feed(bytes, &mut pending, |kind, col, row| {
-                    if !boundary.alternate && s.ws_col > 1 && s.ws_row > 0 {
-                        pet.mouse_event(kind, col.min(s.ws_col - 1), row.min(s.ws_row));
+            let shared = boundary.alternate && kitty.is_some();
+            if capture_mouse && (shared || !boundary.child_mouse()) {
+                decoder.feed(bytes, &mut pending, |report, out| {
+                    if shared {
+                        let modes = boundary.mouse;
+                        let cell = report.cell(modes.encoding, (pixels.width, pixels.height));
+                        let pixel = (modes.encoding == 1016).then_some((report.x, report.y));
+                        let kind = report.kind();
+                        if buttons.pet_owns(report, pet.covers(cell, pixel)) {
+                            pet.mouse_event(kind, cell.0, cell.1);
+                        } else {
+                            report.forward(modes, out);
+                        }
+                    } else if s.ws_col > 1 && s.ws_row > 0 {
+                        pet.mouse_event(
+                            report.kind(),
+                            report.x.min(s.ws_col - 1),
+                            report.y.min(s.ws_row),
+                        );
                     }
                 });
                 input_deadline = decoder
@@ -497,7 +590,7 @@ pub fn run(options: crate::deepseek_pet::Options) -> io::Result<()> {
         }
     }
     update.clear();
-    let start = boundary.ready();
+    let start = boundary.can_draw();
     if start {
         pet.hide(s.ws_col, s.ws_row, &mut update);
     }
@@ -508,12 +601,69 @@ pub fn run(options: crate::deepseek_pet::Options) -> io::Result<()> {
         &update,
         &batch,
         &[],
-        start && boundary.ready() && !boundary.screen_selected,
+        start && boundary.can_draw() && !boundary.screen_selected,
     )?;
     if !boundary.ready() {
         out.write_all(b"\x18")?; // Cancel unfinished shell output before terminal teardown.
     }
-    out.flush()
+    out.flush()?;
+    drop(terminal);
+    if direct && child_eof {
+        child.wait()
+    } else {
+        Ok(0)
+    }
+}
+
+// Insert mode changes at the CSI final byte, so later Vim mode requests in
+// the same read take effect normally (also when the CSI spans two reads).
+fn relay_modes(
+    boundary: &mut crate::deepseek_pet::boundary::Boundary,
+    bytes: &[u8],
+    capture: bool,
+    kitty: bool,
+    out: &mut Vec<u8>,
+) -> bool {
+    let mut start = 0;
+    let mut was_shared = kitty && boundary.alternate;
+    let mut was_child = boundary.child_mouse();
+    let bell = boundary.feed_with_mouse(bytes, |end, state| {
+        let shared = kitty && state.alternate;
+        if capture && (shared || was_shared || !state.child_mouse() || !was_child) {
+            let (tracking, encoding) = if shared {
+                let tracking = if state.mouse.tracking == 1003 {
+                    1003
+                } else {
+                    1002
+                };
+                let encoding = if state.mouse.encoding == 1016 {
+                    1016
+                } else {
+                    1006
+                };
+                (tracking, encoding)
+            } else if state.child_mouse() {
+                (state.mouse.tracking, state.mouse.encoding)
+            } else {
+                (1003, 1006)
+            };
+            out.extend_from_slice(&bytes[start..end]);
+            start = end;
+            if was_shared && !shared {
+                out.extend_from_slice(b"\x1b[?1002l\x1b[?1016l");
+            }
+            out.extend_from_slice(b"\x1b[?1003l\x1b[?1006l");
+            for mode in [encoding, tracking] {
+                if mode != 0 {
+                    write!(out, "\x1b[?{mode}h").expect("Vec write");
+                }
+            }
+        }
+        was_shared = shared;
+        was_child = state.child_mouse();
+    });
+    out.extend_from_slice(&bytes[start..]);
+    bell
 }
 
 fn render_batch(
@@ -566,6 +716,43 @@ fn cursor_update(out: &mut impl Write, update: &[u8]) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn kitty_requests_drags_even_without_child_tracking_and_restores_legacy_mode() {
+        let mut b = crate::deepseek_pet::boundary::Boundary::default();
+        let mut out = Vec::new();
+        relay_modes(&mut b, b"\x1b[?1049h", true, true, &mut out);
+        assert!(out.ends_with(b"\x1b[?1006h\x1b[?1002h"));
+        assert_eq!(b.mouse.tracking, 0);
+        relay_modes(&mut b, b"\x1b[?1000h\x1b[?1016h", true, true, &mut out);
+        assert!(out.ends_with(b"\x1b[?1016h\x1b[?1002h"));
+        relay_modes(&mut b, b"\x1b[?1016l\x1b[?1049l", true, true, &mut out);
+        assert!(out.ends_with(b"\x1b[?1006l\x1b[?1000h"));
+    }
+
+    #[test]
+    fn mouse_handoff_survives_split_switches_and_vims_teardown_order() {
+        let mut b = crate::deepseek_pet::boundary::Boundary::default();
+        let mut out = Vec::new();
+        for byte in b"\x1b[?1049h\x1b[?1002h\x1b[?1006h" {
+            relay_modes(&mut b, &[*byte], true, false, &mut out);
+        }
+        assert!(b.child_mouse());
+        assert_eq!(
+            out,
+            b"\x1b[?1049h\x1b[?1003l\x1b[?1006l\x1b[?1002h\x1b[?1006h"
+        );
+        out.clear();
+        relay_modes(
+            &mut b,
+            b"\x1b[?1049l\x1b[?1002l\x1b[?1006l",
+            true,
+            false,
+            &mut out,
+        );
+        assert!(!b.child_mouse());
+        assert!(out.ends_with(b"\x1b[?1006h\x1b[?1003h"));
+    }
 
     #[test]
     fn reads_one_based_cursor_position_alongside_device_attributes() {

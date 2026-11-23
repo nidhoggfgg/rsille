@@ -107,3 +107,33 @@ fn main() -> Result<(), Box<dyn Error>> {
         .run()?;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pet_passes_every_argument_after_the_separator_to_the_child() {
+        for character in [None, Some("deepseek")] {
+            let args = ["rsille", "pet"].into_iter().chain(character).chain([
+                "--backend",
+                "kitty",
+                "--",
+                "vim",
+                "-Nu",
+                "NONE",
+                "--",
+                "my notes",
+            ]);
+            let Some(Experience::Pet { options, .. }) =
+                Args::try_parse_from(args).unwrap().experience
+            else {
+                panic!("expected a pet session");
+            };
+            assert_eq!(
+                options.command,
+                ["vim", "-Nu", "NONE", "--", "my notes"].map(std::ffi::OsString::from)
+            );
+        }
+    }
+}

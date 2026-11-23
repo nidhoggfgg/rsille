@@ -1,6 +1,6 @@
 //! With pet mouse interaction enabled, the session reserves SGR mouse reports for chasing
 //! the pointer, petting the whale, and dragging treats. In that mode a literal escape prefix may be delayed
-//! briefly and pasted reports look like mouse input.
+//! briefly while checking for a mouse report.
 //! Food is inferred only from recent ASCII glyphs at known terminal positions.
 #[cfg(unix)]
 mod animation;
@@ -27,6 +27,9 @@ use std::collections::BTreeSet;
 
 #[derive(Clone, clap::Parser)]
 pub struct Options {
+    /// Program and arguments to run in the PTY instead of an interactive shell
+    #[arg(last = true, value_name = "COMMAND", num_args = 1..)]
+    pub command: Vec<std::ffi::OsString>,
     /// Graphics backend. Select sixel explicitly to confirm inline erase and scroll support.
     #[arg(long, default_value = "auto", value_name = "auto|kitty|sixel")]
     pub backend: rsille::render::RasterBackend,
@@ -36,9 +39,6 @@ pub struct Options {
     /// Skip caching and restoring shell text covered by the pet
     #[arg(long)]
     pub no_restore: bool,
-    /// Disable pet mouse capture
-    #[arg(long = "quite", action = clap::ArgAction::SetFalse)]
-    pub capture_mouse: bool,
     /// Run the pet on the alternate screen
     #[arg(long)]
     pub alt_screen: bool,
@@ -50,10 +50,10 @@ pub struct Options {
 impl Default for Options {
     fn default() -> Self {
         Self {
+            command: Vec::new(),
             backend: rsille::render::RasterBackend::Auto,
             features: None,
             no_restore: false,
-            capture_mouse: true,
             alt_screen: false,
             commands: None,
         }
@@ -62,23 +62,23 @@ impl Default for Options {
 
 impl Options {
     pub fn enabled_features(&self) -> BTreeSet<Feature> {
-        use Feature::*;
-        let mut enabled = self
-            .features
+        use clap::ValueEnum;
+        self.features
             .as_deref()
-            .unwrap_or(&[Roam, Mouse, Speech, CommandReactions, Typing, Bell, Forage])
+            .unwrap_or_else(|| Feature::value_variants())
             .iter()
             .copied()
-            .collect::<BTreeSet<_>>();
-        if !self.capture_mouse {
-            enabled.remove(&Mouse);
-        }
-        enabled
+            .collect()
     }
 
     #[cfg(unix)]
     pub fn run(self) -> std::io::Result<()> {
-        session::run(self)
+        let direct = !self.command.is_empty();
+        let status = session::run(self)?;
+        if direct && status != 0 {
+            std::process::exit(status);
+        }
+        Ok(())
     }
 
     #[cfg(not(unix))]
@@ -107,10 +107,7 @@ mod tests {
                 vec!["pet", "--features", "mouse", "--features", "speech,mouse"],
                 vec![Speech, Mouse],
             ),
-            (
-                vec!["pet", "--features", "speech,mouse", "--quite"],
-                vec![Speech],
-            ),
+            (vec!["pet", "--features", "speech"], vec![Speech]),
             (vec!["pet", "--features"], vec![]),
         ] {
             assert_eq!(
@@ -118,7 +115,8 @@ mod tests {
                 expected.into_iter().collect()
             );
         }
-        assert!(Options::try_parse_from(["pet", "--features", "unknown"]).is_err());
+        assert!(Options::try_parse_from(["pet", "--features", "drag"]).is_err());
+        assert!(Options::try_parse_from(["pet", "--quite"]).is_err());
         assert_eq!(
             Options::parse_from(["pet"]).enabled_features(),
             Options::default().enabled_features()

@@ -27,6 +27,8 @@ pub(super) enum Mood {
 #[derive(Default)]
 pub(super) struct Life {
     anchored: bool,
+    // Top-left cell chosen by the user, in one-based terminal coordinates.
+    pub(super) manual_origin: Option<(u16, u16)>,
     pub(super) mood: Mood,
     pub(super) age: u16,
     fatigue: u16,
@@ -93,14 +95,21 @@ impl Life {
         if let Some(pointer) = &mut self.pointer {
             pointer.target = pointer.target.filter(visible);
         }
-        if self.anchored || self.last.is_none() {
-            self.x = travel;
+        let fixed = self.anchored || self.manual_origin.is_some();
+        let (left, top) = self
+            .manual_origin
+            .map(|(col, row)| ((col - 1).min(travel), (row - 1).min(rise)))
+            .unwrap_or((travel, rise));
+        if fixed || self.last.is_none() {
+            self.x = left;
         }
         self.x = self.x.min(travel);
-        if self.anchored {
-            self.altitude = 0;
+        if fixed {
+            self.altitude = rise - top;
         }
-        let reachable = |&(col, row): &(u16, u16)| !self.anchored || (col > travel && row > rise);
+        let reachable = |&(col, row): &(u16, u16)| {
+            !fixed || (col > left && col <= left + width && row > top && row <= top + height)
+        };
         // A suspended session resumes near its last pose, without unbounded catch-up.
         let elapsed = tick
             .saturating_sub(self.last.replace(tick).unwrap_or(tick))
@@ -127,8 +136,8 @@ impl Life {
                 } else {
                     height / 2
                 };
-                let (x, altitude) = if self.anchored {
-                    (travel, 0)
+                let (x, altitude) = if fixed {
+                    (left, rise - top)
                 } else {
                     (
                         (c - 1).saturating_sub(width / 2).min(travel),
@@ -165,10 +174,10 @@ impl Life {
                 self.age = 0;
                 continue;
             }
-            if !reacting && !matches!(self.mood, Mood::Snack | Mood::Idle) {
+            if !fixed && !reacting && !matches!(self.mood, Mood::Snack | Mood::Idle) {
                 self.altitude = self.altitude.saturating_sub(1);
             }
-            if !self.anchored && matches!(self.mood, Mood::Swim | Mood::Swoop) {
+            if !fixed && matches!(self.mood, Mood::Swim | Mood::Swoop) {
                 self.fatigue = self.fatigue.saturating_add(1);
                 if self.mood == Mood::Swoop || self.age % 2 == 0 {
                     if self.x == 0 || self.x == travel {
@@ -285,7 +294,7 @@ impl Life {
     }
 
     pub(super) fn lift(&self) -> u16 {
-        if self.anchored {
+        if self.anchored || self.manual_origin.is_some() {
             return 0;
         }
         // Keep the motion in step with the clip even when its frame timings change.

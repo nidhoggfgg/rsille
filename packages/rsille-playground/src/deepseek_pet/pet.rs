@@ -225,8 +225,15 @@ pub struct KittySprites {
     pub fish: rsille::render::raster_output::KittyImage,
 }
 
+struct WhaleGrab {
+    press: (u16, u16),
+    offset: (u16, u16),
+    moved: bool,
+}
+
 pub struct Pet<'a> {
     pub kitty: Option<&'a KittySprites>,
+    pub image_only: bool,
     pub(crate) screen: Option<crate::deepseek_pet::screen::Screen>,
     catalog: &'a crate::deepseek_pet::dialogue::Catalog,
     features: BTreeSet<Feature>,
@@ -236,6 +243,7 @@ pub struct Pet<'a> {
     // Keep the displayed cell across shell repaints. The whale chases the live treat.
     fish_cell: Option<(u16, u16)>,
     next_fish_move: Instant,
+    grab: Option<WhaleGrab>,
     menu_open: bool,
     painted_menu: Option<Menu>,
     hint_until: Option<Instant>,
@@ -269,6 +277,7 @@ impl<'a> Pet<'a> {
         Self {
             screen: None,
             kitty: None,
+            image_only: false,
             life: Life::new(choice, &features),
             catalog,
             speech: features.contains(&Feature::Speech).then(Speech::default),
@@ -277,6 +286,7 @@ impl<'a> Pet<'a> {
             fish_icon: None,
             fish_cell: None,
             next_fish_move: Instant::now(),
+            grab: None,
             menu_open: false,
             painted_menu: None,
             hint_until: None,
@@ -342,11 +352,27 @@ impl<'a> Pet<'a> {
             }
             return;
         }
-        let on_whale = || {
-            self.previous
-                .as_ref()
-                .is_some_and(|image| image.covers_cell(col, row))
-        };
+        if let Some(grab) = &mut self.grab {
+            match kind {
+                MouseKind::LeftDrag | MouseKind::LeftRelease => {
+                    grab.moved |= cell != grab.press;
+                    if grab.moved {
+                        let (dx, dy) = grab.offset;
+                        self.life.manual_origin =
+                            Some((col.saturating_sub(dx).max(1), row.saturating_sub(dy).max(1)));
+                    }
+                    if kind == MouseKind::LeftRelease {
+                        self.grab = None;
+                    }
+                    return;
+                }
+                _ => {}
+            }
+        }
+        let hit = self
+            .previous
+            .as_ref()
+            .filter(|image| image.covers_cell(col, row));
         match (kind, self.life.treat.as_mut()) {
             (MouseKind::LeftPress, Some(treat))
                 if treat.state == TreatState::Carried
@@ -355,12 +381,21 @@ impl<'a> Pet<'a> {
                 treat.cell = cell;
                 treat.state = TreatState::Dragging;
             }
-            (MouseKind::LeftPress, _) if on_whale() => {
-                if self.life.mood != Mood::Wave {
-                    self.life.react(Mood::Wave);
+            (MouseKind::LeftPress, _) => {
+                if let Some(image) = hit {
+                    self.grab = Some(WhaleGrab {
+                        press: cell,
+                        offset: (col - image.col, row - image.row),
+                        moved: false,
+                    });
+                    if self.life.mood != Mood::Wave {
+                        self.life.react(Mood::Wave);
+                    }
+                    if !self.image_only {
+                        self.hint_until
+                            .get_or_insert_with(|| Instant::now() + Duration::from_secs(3));
+                    }
                 }
-                self.hint_until
-                    .get_or_insert_with(|| Instant::now() + Duration::from_secs(3));
             }
             (MouseKind::LeftDrag, Some(treat)) if treat.state != TreatState::Placed => {
                 treat.cell = cell;
@@ -373,9 +408,15 @@ impl<'a> Pet<'a> {
             (MouseKind::Motion, Some(treat)) if treat.state == TreatState::Carried => {
                 treat.cell = cell;
             }
-            (MouseKind::Motion | MouseKind::LeftDrag, _) => self.life.notice_mouse(col, row),
+            (MouseKind::Motion | MouseKind::LeftDrag, _) if !self.image_only => {
+                self.life.notice_mouse(col, row)
+            }
             (MouseKind::RightPress, Some(_)) => self.life.treat = None,
-            (MouseKind::RightPress, None) if on_whale() => {
+            (MouseKind::RightPress, None) if hit.is_some() && self.image_only => {
+                self.life.play(Mood::Bubbles)
+            }
+            (MouseKind::RightPress, None) if hit.is_some() => {
+                self.grab = None;
                 self.menu_open = true;
                 self.hint_until = Some(Instant::now());
             }
@@ -383,7 +424,24 @@ impl<'a> Pet<'a> {
         }
     }
 
+    pub fn covers(&self, cell: (u16, u16), pixel: Option<(u16, u16)>) -> bool {
+        let Some(image) = &self.previous else {
+            return false;
+        };
+        if let Some((x, y)) = pixel {
+            let left = usize::from(image.col - 1) * usize::from(image.cell_w);
+            let top = usize::from(image.row - 1) * usize::from(image.cell_h);
+            let x = usize::from(x - 1).checked_sub(left);
+            let y = usize::from(y - 1).checked_sub(top);
+            return x.zip(y).is_some_and(|(x, y)| {
+                x < image.w && y < image.w && image.pixels[y * image.w + x][3] >= 128
+            });
+        }
+        image.covers_cell(cell.0, cell.1)
+    }
+
     pub fn cancel_mouse_interaction(&mut self) {
+        self.grab = None;
         self.life.treat = None;
         self.menu_open = false;
     }
@@ -517,6 +575,9 @@ impl<'a> Pet<'a> {
         let frame = self.life.frame();
         let col = 1 + self.life.x;
         let row = 1 + (rise - self.life.altitude).saturating_sub(self.life.lift());
+        if self.grab.is_none() && self.features.contains(&Feature::Roam) {
+            self.life.manual_origin = None;
+        }
         let whale = Area::new((col - 1, row - 1).into(), (size.width, size.height).into());
         let menu = self
             .menu_open
@@ -530,7 +591,7 @@ impl<'a> Pet<'a> {
             self.dirty = true;
         }
         let bubble_size = (size.width, size.height);
-        let bubble = if self.menu_open {
+        let bubble = if self.image_only || self.menu_open {
             None
         } else if self.hint_until.is_some_and(|until| Instant::now() < until) {
             Bubble::place("右键点我，一起玩", col, row, bubble_size, cols, rows)
@@ -625,9 +686,13 @@ impl<'a> Pet<'a> {
         self.dirty = false;
         if let Some(kitty) = self.kitty {
             write!(out, "\x1b[{row};{col}H")?;
-            kitty
-                .whale
-                .draw(out, w as u16, h as u16, &image.pixels, 0)?;
+            kitty.whale.draw(
+                out,
+                w as u16,
+                h as u16,
+                &image.pixels,
+                if self.image_only { i32::MAX } else { 0 },
+            )?;
         } else {
             if let Some(old) = &self.previous {
                 old.clear_uncovered(Some(&image), cols, rows, self.screen.as_ref(), out);
@@ -688,6 +753,61 @@ fn sixel_redraw_contract() {
 mod tests {
     use super::*;
     use std::time::Instant;
+
+    #[test]
+    fn mouse_enables_petting_and_dragging_on_both_screens() {
+        let catalog = crate::deepseek_pet::dialogue::Catalog::default();
+        for image_only in [false, true] {
+            for enabled in [false, true] {
+                let features = if enabled {
+                    [Feature::Mouse].into()
+                } else {
+                    BTreeSet::new()
+                };
+                let mut pet = Pet::new(&catalog, features);
+                pet.image_only = image_only;
+                pet.draw(0, 80, 24, 10, 20, &mut Vec::new()).unwrap();
+                let origin = pet.last_frame.as_ref().unwrap().origin;
+                pet.mouse_event(MouseKind::LeftPress, origin.0 + 6, origin.1 + 3);
+                pet.mouse_event(MouseKind::LeftDrag, 20, 10);
+                pet.mouse_event(MouseKind::LeftRelease, 20, 10);
+                pet.draw(1, 80, 24, 10, 20, &mut Vec::new()).unwrap();
+                assert_eq!(
+                    pet.last_frame.as_ref().unwrap().origin,
+                    if enabled { (14, 7) } else { origin }
+                );
+                assert_eq!(pet.life.mood == Mood::Wave, enabled);
+            }
+        }
+    }
+
+    #[test]
+    fn dragging_a_fixed_overlay_releases_the_covered_text() {
+        let kitty = KittySprites {
+            whale: rsille::render::raster_output::KittyImage::new().unwrap(),
+            fish: rsille::render::raster_output::KittyImage::new().unwrap(),
+        };
+        let catalog = crate::deepseek_pet::dialogue::Catalog::default();
+        let mut pet = Pet::new(&catalog, [Feature::Mouse].into());
+        pet.kitty = Some(&kitty);
+        pet.image_only = true;
+        pet.draw(0, 80, 24, 10, 20, &mut Vec::new()).unwrap();
+        let (col, row) = pet.last_frame.as_ref().unwrap().origin;
+        let hit = (col + 6, row + 3);
+        assert!(pet.covers(hit, None));
+        assert!(!pet.covers((col, row), None));
+        pet.mouse_event(MouseKind::LeftPress, hit.0, hit.1);
+        pet.mouse_event(MouseKind::LeftDrag, 16, 8);
+        pet.mouse_event(MouseKind::LeftRelease, 16, 8);
+        for tick in [1, 2, 42] {
+            pet.draw(tick, 80, 24, 10, 20, &mut Vec::new()).unwrap();
+            assert_eq!(pet.last_frame.as_ref().unwrap().origin, (10, 5));
+            assert!(!pet.covers(hit, None));
+        }
+        pet.mouse_event(MouseKind::RightPress, 16, 8);
+        assert_eq!(pet.life.mood, Mood::Bubbles);
+        assert!(!pet.menu_open);
+    }
 
     #[test]
     fn kitty_pet_and_treat_use_independent_images_and_hide_without_erasing_text() {

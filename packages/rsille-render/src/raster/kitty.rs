@@ -435,7 +435,8 @@ fn upload(
             });
         }
     }
-    transmit(out, id, width, height, &rgba, b"")
+    let header = format!("\x1b_Ga=t,f=32,t=d,i={id},s={width},v={height},");
+    transmit(out, &header, &rgba, b"")
 }
 
 /// A single Kitty image owned by an application that manages its own terminal
@@ -444,7 +445,7 @@ fn upload(
 pub struct KittyImage(u32);
 
 impl KittyImage {
-    /// Allocate a process-local, nonzero protocol ID.
+    /// Allocate a nonzero image number for use on a shared terminal.
     pub fn new() -> io::Result<Self> {
         image_id().map(Self)
     }
@@ -467,20 +468,19 @@ impl KittyImage {
                 "Kitty RGBA dimensions do not match",
             ));
         }
-        let placement = format!("\x1b_Ga=p,i={},p=1,z={z_index},C=1,q=2\x1b\\", self.0);
-        transmit(
-            out,
-            self.0,
-            width.into(),
-            height.into(),
-            rgba.as_flattened(),
-            placement.as_bytes(),
-        )
+        // Use an image number (I) so the terminal chooses a free image ID.
+        // Reusing a number creates a fresh image, so release the old one first.
+        let number = self.0;
+        let header = format!(
+            "\x1b_Ga=d,d=N,I={number},q=2\x1b\\\x1b_Ga=t,f=32,t=d,I={number},s={width},v={height},"
+        );
+        let placement = format!("\x1b_Ga=p,I={number},p=1,z={z_index},C=1,q=2\x1b\\");
+        transmit(out, &header, rgba.as_flattened(), placement.as_bytes())
     }
 
     /// Remove this image's placements and pixel data from the terminal.
     pub fn delete(&self, out: &mut impl Write) -> io::Result<()> {
-        delete_image(out, self.0)
+        write!(out, "\x1b_Ga=d,d=N,I={},q=2\x1b\\", self.0)
     }
 }
 
@@ -490,18 +490,10 @@ const LAST: &[u8] = b"q=2,m=0;";
 const END: &[u8] = b"\x1b\\";
 const CONTINUE: &[u8] = b"\x1b_G";
 
-fn transmit(
-    out: &mut Vec<u8>,
-    id: u32,
-    width: u32,
-    height: u32,
-    rgba: &[u8],
-    placement: &[u8],
-) -> io::Result<()> {
+fn transmit(out: &mut Vec<u8>, header: &str, rgba: &[u8], placement: &[u8]) -> io::Result<()> {
     if rgba.len() > MAX_FRAME_BYTES {
         return Err(unsupported("Kitty image exceeds 32 MiB"));
     }
-    let header = format!("\x1b_Ga=t,f=32,t=d,i={id},s={width},v={height},");
     // CHUNK_BYTES is divisible by three, so only the final chunk can need padding.
     let chunks = rgba.len().div_ceil(CHUNK_BYTES);
     let encoded = rgba.len().div_ceil(3) * 4;
