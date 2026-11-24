@@ -67,40 +67,80 @@ jobs:
         run: python3 scripts/check-terminal.py
 
       - name: Publish to crates.io
+        shell: bash
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
-          if [ -z "$CARGO_REGISTRY_TOKEN" ]; then
-            echo "::error::Set the CARGO_REGISTRY_TOKEN repository secret to a crates.io API token with publish access to the core crates."
-            exit 1
-          fi
-          packages=(-p rsille)
+          packages=()
           metadata=$(cargo metadata --no-deps --format-version 1)
-          for name in rsille-render rsille-canvas rsille-tui; do
+          version_info="$RUNNER_TEMP/crate-version.json"
+          for name in rsille-render rsille-canvas rsille-tui rsille; do
             version=$(jq -er --arg name "$name" '.packages[] | select(.name == $name).version' <<< "$metadata")
             status=$(curl -sS --retry 3 -A "rsille release ($GITHUB_SERVER_URL/$GITHUB_REPOSITORY)" \
-              -o /dev/null -w '%{http_code}' "https://crates.io/api/v1/crates/$name/$version")
+              -o "$version_info" -w '%{http_code}' "https://crates.io/api/v1/crates/$name/$version")
             case "$status" in
-              200) echo "$name $version is already published" ;;
+              200)
+                echo "$name $version is already published"
+                if [[ "$name" == rsille ]]; then
+                  # Cargo.lock is untracked. A later rerun can resolve different dependencies.
+                  # Attach the exact bytes from crates.io after checking the release commit.
+                  archive="$name-$version.crate"
+                  checksum=$(jq -er '.version.checksum | select(test("^[0-9a-f]{64}$"))' "$version_info")
+                  curl -fsSL --retry 3 "https://static.crates.io/crates/$name/$archive" -o "$RUNNER_TEMP/$archive"
+                  (cd "$RUNNER_TEMP" && echo "$checksum  $archive" | sha256sum -c -)
+                  tar -xzOf "$RUNNER_TEMP/$archive" "$name-$version/.cargo_vcs_info.json" |
+                    jq -e --arg commit "$(git rev-parse HEAD)" '.git.sha1 == $commit and .git.dirty != true' >/dev/null ||
+                    { echo "::error::Published $archive does not match the release commit"; exit 1; }
+                  cp "$RUNNER_TEMP/$archive" "target/package/$archive"
+                fi
+                ;;
               404) packages+=(-p "$name") ;;
               *) echo "::error::Failed to check $name $version (HTTP $status)"; exit 1 ;;
             esac
           done
-          cargo publish "${packages[@]}" --all-features --registry crates-io
+          if (( ${#packages[@]} )); then
+            if [[ -z "$CARGO_REGISTRY_TOKEN" ]]; then
+              echo "::error::Set CARGO_REGISTRY_TOKEN to publish the missing core crates."
+              exit 1
+            fi
+            cargo publish "${packages[@]}" --all-features --registry crates-io
+          fi
 
       - name: Write package checksum
         working-directory: target/package
         run: sha256sum "rsille-${RELEASE_TAG#v}.crate" > SHA256SUMS
 
       - name: Publish GitHub Release
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          gh release create "$RELEASE_TAG" \
-            "target/package/rsille-${RELEASE_TAG#v}.crate" \
-            target/package/SHA256SUMS \
-            --verify-tag \
-            --title "rsille ${RELEASE_TAG#v}" \
-            --notes-file "releases/${RELEASE_TAG#v}.md" \
-            --latest
+          # Listing releases also finds drafts left by interrupted uploads.
+          release=$(gh api --paginate "repos/$GH_REPO/releases?per_page=100" \
+            --jq '.[]' | jq -sc --arg tag "$RELEASE_TAG" 'map(select(.tag_name == $tag)) |
+              if length > 1 then error("multiple releases for the same tag") else .[0] end')
+          if [[ "$release" == null ]]; then
+            gh release create "$RELEASE_TAG" --draft --verify-tag \
+              --title "rsille ${RELEASE_TAG#v}" --notes-file "releases/${RELEASE_TAG#v}.md"
+          fi
+
+          draft=$(jq -r 'if . == null then true else .draft end' <<< "$release")
+          for file in "target/package/rsille-${RELEASE_TAG#v}.crate" target/package/SHA256SUMS; do
+            name=${file##*/}
+            asset=$(jq -c --arg name "$name" 'first(.assets[]? | select(.name == $name)) // null' <<< "$release")
+            if [[ "$asset" == null ]]; then
+              gh release upload "$RELEASE_TAG" "$file"
+            elif [[ "$draft" == true && $(jq -r '.state' <<< "$asset") == starter ]]; then
+              # GitHub can leave an empty starter asset after an interrupted upload.
+              gh release upload "$RELEASE_TAG" "$file" --clobber
+            else
+              id=$(jq -er '.id' <<< "$asset")
+              gh api "repos/$GH_REPO/releases/assets/$id" -H 'Accept: application/octet-stream' > "$RUNNER_TEMP/existing-asset"
+              cmp -s "$file" "$RUNNER_TEMP/existing-asset" ||
+                { echo "::error::Existing release asset $name differs"; exit 1; }
+            fi
+          done
+          if [[ "$draft" == true ]]; then
+            gh release edit "$RELEASE_TAG" --draft=false --latest
+          fi
