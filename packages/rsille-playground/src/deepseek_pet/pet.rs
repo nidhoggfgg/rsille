@@ -44,7 +44,7 @@ fn erase_area(
     };
     let col = visible.x() + 1;
     let width = visible.width();
-    out.extend_from_slice(b"\x1b[49m");
+    out.extend_from_slice(b"\x1b[0m");
     for y in visible.y()..visible.y() + visible.height() {
         crate::deepseek_pet::screen::clear_span(screen, col, y + 1, width, out);
     }
@@ -166,7 +166,7 @@ impl Image {
             for run in dirty.chunk_by(|a, b| a == b) {
                 if run[0] {
                     if out.len() == start {
-                        out.extend_from_slice(b"\x1b[49m");
+                        out.extend_from_slice(b"\x1b[0m");
                     }
                     crate::deepseek_pet::screen::clear_span(
                         screen,
@@ -1171,6 +1171,8 @@ mod tests {
             bytes.clear();
         }
         assert!(pet.bubble.is_some());
+        // Erased cells must also recover their default attributes when SGR is active.
+        visible.process(b"\x1b[1;31;44m");
         pet.hide(80, 24, &mut bytes);
         visible.process(&bytes);
         for row in 0..24 {

@@ -162,7 +162,7 @@ mod tests {
             super::super::erase_area(bubble.area, 15, top + 1, None, &mut erase);
             assert_eq!(
                 erase,
-                format!("\x1b[49m\x1b[{top};12H\x1b[4X\x1b[{};12H\x1b[4X", top + 1).as_bytes()
+                format!("\x1b[0m\x1b[{top};12H\x1b[4X\x1b[{};12H\x1b[4X", top + 1).as_bytes()
             );
         }
         assert_eq!(

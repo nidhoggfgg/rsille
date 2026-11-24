@@ -123,7 +123,7 @@ impl FishIcon {
     pub(super) fn erase(self, cols: u16, rows: u16, screen: Option<&Screen>, out: &mut Vec<u8>) {
         if self.col <= cols && self.row <= rows {
             let width = self.span.min(cols - self.col + 1);
-            out.extend_from_slice(b"\x1b[49m");
+            out.extend_from_slice(b"\x1b[0m");
             clear_span(screen, self.col, self.row, width, out);
         }
     }

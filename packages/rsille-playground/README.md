@@ -32,4 +32,4 @@ cargo run -p rsille-playground -- pet --help
 
 ## 发布
 
-Playground 独立发版。确认依赖的 `rsille` 版本已发布到 crates.io，将本包的版本号和 `releases/rsille-playground/<版本号>.md` 合入 `main`，然后在该提交上打 `rsille-playground-v<版本号>` tag 并推送。例如，`0.1.0` 对应 `rsille-playground-v0.1.0`。
+Playground 独立发版。确认依赖的 `rsille` 版本已发布到 crates.io，将本包的版本号和 `releases/rsille-playground/<版本号>.md` 合入 `main`，然后在该提交上打 `rsille-playground-v<版本号>` tag 并推送。例如，`0.1.1` 对应 `rsille-playground-v0.1.1`。

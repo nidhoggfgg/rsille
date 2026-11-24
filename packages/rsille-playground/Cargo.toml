@@ -1,6 +1,6 @@
 [package]
 name = "rsille-playground"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "An interactive playground for rsille terminal graphics"
 license = "MIT"
