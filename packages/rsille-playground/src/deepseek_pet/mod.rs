@@ -30,7 +30,7 @@ pub struct Options {
     /// Program and arguments to run in the PTY instead of an interactive shell
     #[arg(last = true, value_name = "COMMAND", num_args = 1..)]
     pub command: Vec<std::ffi::OsString>,
-    /// Graphics backend. Select sixel explicitly to confirm inline erase and scroll support.
+    /// Graphics backend. Auto prefers Kitty and falls back to advertised Sixel.
     #[arg(long, default_value = "auto", value_name = "auto|kitty|sixel")]
     pub backend: rsille::render::RasterBackend,
     /// Enable only the listed behaviors (comma-separated). An empty list keeps the idle pet.

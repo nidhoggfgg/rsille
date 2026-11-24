@@ -1,6 +1,6 @@
 [package]
 name = "rsille-playground"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 description = "An interactive playground for rsille terminal graphics"
 license = "MIT"
@@ -21,7 +21,7 @@ clap = { version = "4.5", features = ["derive"] }
 crossterm.workspace = true
 meval = "0.2"
 png = "0.18"
-rsille = { version = "3.3.0", path = "../..", features = ["raster"] }
+rsille = { version = "3.3.1", path = "../..", features = ["raster"] }
 
 [target.'cfg(unix)'.dependencies]
 fastrand = "2"

@@ -14,7 +14,7 @@ const X_RANGE: [f64; 2] = [-10.0, 10.0];
 const BOUNDS: [f64; 4] = [-10.0, 10.0, -3.0, 3.0];
 const HELP: &str = "Function plotter — 2D curves and shaded 3D surfaces
 
-Unix selects Kitty automatically. On native Windows, specify a backend.
+Unix prefers Kitty and falls back to advertised Sixel. On native Windows, specify a backend.
 
   --expr 'sin(x); x^2/8'   Initial functions (up to six)
   --grid                  Independent demo panels; no expr: four presets
@@ -23,7 +23,7 @@ Unix selects Kitty automatically. On native Windows, specify a backend.
                           Live preview; Enter/F5 freezes, commits and exits.
                           Responsive 1–2 columns; no grid editor or history.
   --x-range MIN MAX      Finite increasing x domain (default -10 10)
-  --backend auto|kitty|sixel  Select native graphics; sixel confirms inline erase and scroll support
+  --backend auto|kitty|sixel  Select the native graphics backend
   --cell-pixels WxH       Actual pixels per character cell, NOT terminal size
   --frames DIRECTORY      Export 90 RGB preview frames (15 FPS); new directory
   --snapshot FILE.ppm     Export a static RGB preview; new file
