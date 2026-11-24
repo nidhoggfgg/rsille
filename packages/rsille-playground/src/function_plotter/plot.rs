@@ -17,7 +17,6 @@ const GRID: Rgb = Rgb(39, 46, 59);
 const AXIS: Rgb = Rgb(115, 130, 151);
 const TEXT: Rgb = Rgb(174, 187, 205);
 pub struct Plot {
-    pub formula: crate::function_plotter::formula::Formula,
     functions: Vec<Box<dyn Fn(f64) -> f64>>,
     cache: RefCell<Option<Rendered>>,
     curves: Vec<Curve>,
@@ -82,7 +81,6 @@ impl Plot {
         }
         Ok(Self {
             spatial: (!objects.is_empty()).then(|| spatial::Scene::new(objects)),
-            formula: crate::function_plotter::formula::Formula::new(source),
             functions,
             curves,
             survey: RefCell::new(None),
@@ -1036,7 +1034,6 @@ mod tests {
 
             fn render(self, bounds: [f64; 4], size: (u32, u32)) -> RasterCanvas {
                 super::Plot {
-                    formula: crate::function_plotter::formula::Formula::new(""),
                     curves: (0..self.functions.len()).map(Curve::Cartesian).collect(),
                     functions: self.functions,
                     cache: self.cache,
@@ -1055,7 +1052,6 @@ mod tests {
         let calls = std::rc::Rc::new(std::cell::Cell::new(0));
         let count = calls.clone();
         let plot = Plot {
-            formula: crate::function_plotter::formula::Formula::new("sin(x)"),
             functions: vec![Box::new(move |x| {
                 count.set(count.get() + 1);
                 x.sin()

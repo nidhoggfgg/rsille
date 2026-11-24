@@ -567,6 +567,8 @@ pub fn run(options: crate::deepseek_pet::Options) -> io::Result<i32> {
                             }
                             report.forward(modes, out);
                         }
+                    } else if report.is_hover() && (report.x > s.ws_col || report.y > s.ws_row) {
+                        pet.mouse_event(report.kind(), report.x, report.y);
                     } else if s.ws_col > 1 && s.ws_row > 0 {
                         pet.mouse_event(
                             report.kind(),

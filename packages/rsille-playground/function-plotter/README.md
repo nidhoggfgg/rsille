@@ -8,7 +8,7 @@ A small inline terminal math REPL: `meval` evaluates expressions and rsille rend
 
 ## Preview export
 
-`src/function_plotter/export.rs` reuses the existing formula and graph renderers for a wave surface,
+`src/function_plotter/export.rs` reuses the graph renderer for a wave surface,
 a saddle, a helix, and a trefoil knot. No terminal, Sixel support, or new dependencies
 are required; normal interactive operation is unchanged. This is a fixed two-column
 RGB preview, not a terminal recording: prompts, Sixel quantization, and terminal
@@ -22,12 +22,12 @@ rsille function-plotter --frames target/function-plotter-preview-frames
 ffmpeg -n -framerate 15 -i target/function-plotter-preview-frames/%04d.ppm -filter_complex "[0:v]split[a][b];[a]palettegen[p];[b][p]paletteuse=dither=bayer:bayer_scale=3" -loop 0 -final_delay 7 packages/rsille-playground/function-plotter/preview-new.gif
 ```
 
-The export produces 90 PPM images at 996×716 pixels: a 6-second loop at 15 FPS.
+The export produces 90 PPM images at 996×516 pixels: a 6-second loop at 15 FPS.
 One full turn excludes the repeated endpoint and rotates at approximately
-1.05 radians/second, faster than the live preview. Formulas retain native pixel sizes without extra scaling.
+1.05 radians/second, faster than the live preview.
 FFmpeg is only needed to assemble the GIF. `--frames` and `--snapshot` are standalone
 commands and cannot be combined with other options. Intermediate frames occupy
-about 193 MB and can be deleted after conversion. The included `preview.gif` uses
+about 139 MB and can be deleted after conversion. The included `preview.gif` uses
 these settings.
 
 ## Run
@@ -40,9 +40,9 @@ rsille function-plotter --help
 rsille function-plotter --expr 'sin(x); cos(x); x^2/8'
 ```
 
-On Unix the REPL selects Kitty automatically. Use `--backend sixel` to confirm that the terminal supports inline Sixel erasure and scrolling. On native Windows, select `--backend kitty` or `--backend sixel` explicitly. Recommended terminal: 100×32 cells. Without `--expr`, startup opens a blank, borderless `In[1]:=` editor with no graph, history entry, or commit. An explicit `--expr` evaluates automatically and commits its graph or error, followed by a blank `In[2]:=` prompt. Each subsequent evaluation commits its `In[n]:=` input and `Out[n]=` graph (or error) to terminal history, then opens a new blank prompt. The editor uses the existing borderless `TextArea`, constrained to one row with no outline or bottom rule; editable and committed expressions both start immediately after `In[n]:=` on the same row. The editor and surrounding text use the terminal's default background, with an underlined caret/selection instead of background highlighting. The graph retains its own intentional background. `Out[n]=` (or the preview heading) is followed by a read-only formula area above the graph; the editable input remains linear. Pasted CRLF, CR, and LF line endings become spaces, preserving single-line input. There is no alternate screen, scrolling editable notebook, or saved session. Old results cannot be edited in place.
+On Unix the REPL selects Kitty automatically. Use `--backend sixel` to confirm that the terminal supports inline Sixel erasure and scrolling. On native Windows, select `--backend kitty` or `--backend sixel` explicitly. Recommended terminal: 100×32 cells. Without `--expr`, startup opens a blank, borderless `In[1]:=` editor with no graph, history entry, or commit. An explicit `--expr` evaluates automatically and commits its graph or error, followed by a blank `In[2]:=` prompt. Each subsequent evaluation commits its `In[n]:=` input and `Out[n]=` graph (or error) to terminal history, then opens a new blank prompt. The editor uses the existing borderless `TextArea`, constrained to one row with no outline or bottom rule; editable and committed expressions both start immediately after `In[n]:=` on the same row. The editor and surrounding text use the terminal's default background, with an underlined caret/selection instead of background highlighting. The graph retains its own intentional background. The graph appears directly below `Out[n]=` or the preview heading. Pasted CRLF, CR, and LF line endings become spaces, preserving single-line input. There is no alternate screen, scrolling editable notebook, or saved session. Old results cannot be edited in place.
 
-For a single plot in native mode, the formula and graph share `min(available columns, max(70, formula content columns))`. Formula content width includes padding and is rounded up to whole character cells; available width excludes the one-column padding on each side. The graph stays 14 rows high. This replaces the deliberate formula-only width policy: short formulas such as `sin(x); cos(x)` now get a useful 70-column graph when space permits, rather than a narrow strip. Narrow viewports still shrink both areas to fit. Unused space to the right retains the terminal background. Layout determines the raster dimensions before functions are sampled: allocated columns/rows multiplied by actual physical cell pixels. A 70×14 allocation therefore draws directly at 560×224 for 8×16 cells. There is no intermediate image or downsampling. For Cartesian-only inputs, the plot intentionally fills the available rectangle: the sampled bounds stay fixed across resize, but pixel aspect and x/y scale proportions can change with terminal size and cell metrics; equal mathematical units need not have equal screen lengths. Margins and grid density adapt to the pixel budget. Numeric 3×5 pixel labels appear only at sizes of at least 160×80; smaller plots omit labels and margins to prioritize curves. Curves use an approximately 1.5-target-pixel antialiased round stroke, blended over the existing grid, axes, and earlier curves. Coverage is accumulated per function before blending, so adaptive subdivision joints do not become brighter. Stroke caps/fringes extend up to 1.25 pixels beyond accepted endpoints; gaps smaller than the stroke footprint cannot be represented. The AA stroke itself does not increase function sampling or supersample/rescale the image.
+Single plots use up to 70 columns and 14 rows, with one column of padding on each side. Unused space to the right retains the terminal background. Layout determines the raster dimensions before functions are sampled: allocated columns/rows multiplied by actual physical cell pixels. A 70×14 allocation therefore draws directly at 560×224 for 8×16 cells. There is no intermediate image or downsampling. For Cartesian-only inputs, the plot intentionally fills the available rectangle: the sampled bounds stay fixed across resize, but pixel aspect and x/y scale proportions can change with terminal size and cell metrics; equal mathematical units need not have equal screen lengths. Margins and grid density adapt to the pixel budget. Numeric 3×5 pixel labels appear only at sizes of at least 160×80; smaller plots omit labels and margins to prioritize curves. Curves use an approximately 1.5-target-pixel antialiased round stroke, blended over the existing grid, axes, and earlier curves. Coverage is accumulated per function before blending, so adaptive subdivision joints do not become brighter. Stroke caps/fringes extend up to 1.25 pixels beyond accepted endpoints; gaps smaller than the stroke footprint cannot be represented. The AA stroke itself does not increase function sampling or supersample/rescale the image.
 
 UI state holds an immutable parsed plot source, not a pre-layout image. Its single-entry cache is keyed by bounds and target pixel size (source identity is implicit in ownership). Ordinary redraws and submission of an unchanged preview reuse it; resize redraws at the new resolution without reparsing. Bound `meval` closures are not `Send`, so the source uses UI-thread-local `Rc` sharing and `RefCell` caching, not a background task. Replacing the source or advancing to the next prompt releases the old cache.
 
@@ -68,7 +68,7 @@ surface(x*y, -2, 2, -2, 2)
 - **Enter adds** the current expression as an independent panel and clears the input.
   Up to six panels, each up to 4096 bytes; semicolons still overlay curves within one panel.
 - The draft previews as the next panel after 500 ms idle. Added panels remain visible;
-  3D panels keep rotating while you type. Each panel has its own formulas, bounds and cache.
+  3D panels keep rotating while you type. Each panel has its own sampled bounds and render cache.
 - **F5** adds a nonempty draft, then freezes and commits the whole grid at the displayed angle.
   With a blank input it commits just the added panels. **`:submit`** does the latter too.
   Invalid expressions, oversized input, and attempts to add a seventh panel keep the draft
@@ -94,7 +94,7 @@ rsille function-plotter --headless --grid
 `--grid` remains a read-only CLI demo, separate from the interactive `:grid` composer.
 Without `--expr` it supplies four presets; otherwise supply one to six repeated
 `--expr` arguments (4096 bytes each). Errors identify the panel and reject startup.
-Each panel owns its formulas, sampled bounds and render cache. 2D and 3D may coexist
+Each panel owns its sampled bounds and render cache. 2D and 3D may coexist
 in separate panels; existing within-panel overlay restrictions still apply.
 `--x-range` supplies the same Cartesian sampling domain to all panels, but their
 y bounds are independent. Use explicit `param`/`polar`/3D ranges for independent
@@ -102,12 +102,7 @@ domains; there is no per-panel Cartesian CLI range option.
 
 The inline grid requests 30 rows, uses two columns at 80+ terminal columns and
 stacks panels below that width. Cells divide the available height, with a one-column
-gutter and a heading. Formula heights use measured native renders (up to 12 rows)
-aligned to the tallest formula in each grid row.
-Allocation reserves at least three graph rows when space permits; smaller panels
-prioritize the graph over formulas. Long formulas and very small
-viewports may clip; there is no scrolling or panel editor. Unlike ordinary REPL
-graphs, grid graphs fill their allocated cells rather than using the single-plot preferred width.
+gutter. Each graph fills the space below its panel heading.
 Raster sizes are allocated cells × measured native cell pixels,
 without intermediate resampling. Resize redraws each cache at its new size.
 3D panels rotate together at 0.6 radians/second; 2D panels remain static.
@@ -115,14 +110,6 @@ without intermediate resampling. Resize redraws each cache at its new size.
 Esc exits without explicitly submitting. Sixel scrollback retention still depends
 on the terminal. These exit-on-submit controls apply only to the CLI demo;
 the interactive composer stays in the REPL.
-
-## Two-dimensional formula output
-
-Sixel previews and submitted results display powers as raised, smaller superscripts, stacked fractions, square-root radicals with overbars, functions, and nested grouping parentheses. `pi` and `theta` appear as π and θ in parsed formulas. Layout uses `meval`'s RPN tokens, not regex substitution; redundant source parentheses and numeric spelling may be normalized, and grouping can be more explicit than in the input. This is Mathematica-inspired presentation, not Mathematica syntax or symbolic typesetting.
-
-`rsille-typst` typesets and antialiases formulas using Typst and the bundled New Computer Modern Math font (`typst-assets` 0.13.1). Font size follows cell height (12–40 pixels); formula rasters are copied at their original size, without rescaling. No external Typst/TeX executable, system font discovery, or runtime network access is needed. The first build is heavier because it includes Typst and font assets. Rows match semicolon curve colors. Polar output labels `r(θ)`; parametric output groups the `x(t)` and `y(t)` equations under a large left brace, with the typeset parameter interval to the right of the system. Polar intervals likewise follow the equation on the same line. The single-plot formula area and graph share a preferred width of at least 70 columns, expanding for wider native formulas and capped by available terminal space. Formula glyphs remain at native scale; extra width is background, not stretched text. Native output uses Typst's standard `cases` layout. Cartesian sampling still uses `--x-range`.
-
-Native mode never falls back to source-expression text: successfully rendered formulas are copied at native scale and clipped to the available width/height. Expressions over 128 RPN tokens or Typst rendering/allocation failures show `[Formula rendering unavailable]` without rejecting valid plotting input. Each formula row has a 500,000-pixel budget. Formula height is capped at 12 terminal rows in native mode (grid panels may allocate less to preserve graphs); output beyond the viewport is clipped. There is no formula wrapping or horizontal scrolling. Input remains `meval` syntax, not Typst or LaTeX: only generated math from parsed tokens reaches Typst, with identifiers quoted to prevent code execution. Formula rows (including failed renders) are cached by cell height; ordinary resize only recomposes the target canvas, without recompiling. Unchanged preview submission reuses the canvas. Opening the next prompt releases per-source caches, but Typst maintains its own process-level caches.
 
 ## Controls
 
@@ -192,7 +179,7 @@ param3((2+cos(3*t))*cos(2*t), (2+cos(3*t))*sin(2*t), sin(3*t), 0, 2*pi)
 surface(0, -2, 2, -2, 2); param3(cos(t), sin(t), t/4, -2*pi, 2*pi)
 ```
 
-The software renderer uses an orthographic camera, equal world-unit scaling, opaque two-sided shaded triangles, a shared depth buffer for surfaces and curves, and bounding-box reference edges. Live 3D previews rotate around vertical z at 0.6 radians/second (approximately 20 fps); submission freezes the currently displayed angle permanently. Editing clears the old draft animation; already-added grid panels keep rotating. Clearing all panels or opening the next prompt cancels the old animation; 2D previews remain static. Framing stays fixed throughout rotation. Curves and reference edges use approximately 1.5-pixel antialiased round strokes with unioned joint coverage, retaining surface occlusion and nonfinite sampling gaps. Raster output requires Sixel. Formula output shows both surface domains or a three-equation parameter system.
+The software renderer uses an orthographic camera, equal world-unit scaling, opaque two-sided shaded triangles, a shared depth buffer for surfaces and curves, and bounding-box reference edges. Live 3D previews rotate around vertical z at 0.6 radians/second (approximately 20 fps); submission freezes the currently displayed angle permanently. Editing clears the old draft animation; already-added grid panels keep rotating. Clearing all panels or opening the next prompt cancels the old animation; 2D previews remain static. Framing stays fixed throughout rotation. Curves and reference edges use approximately 1.5-pixel antialiased round strokes with unioned joint coverage, retaining surface occlusion and nonfinite sampling gaps. Raster output requires Sixel.
 
 Sampling is bounded: 65×65 vertices per surface and 2049 points per curve, evaluated at parse time and reused on resize. Nonfinite samples create gaps; finite discontinuities can still be bridged, narrow/high-frequency features missed, and large finite pole values can dominate framing. Coplanar depth ties depend on draw order. There are no camera controls, perspective, numeric axis labels, transparency, parametric surfaces, or implicit 3D equations yet.
 

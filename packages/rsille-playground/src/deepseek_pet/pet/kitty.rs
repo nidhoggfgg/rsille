@@ -13,8 +13,6 @@ pub struct KittySprites {
 pub(super) const WHALE_Z: i32 = i32::MAX - 2;
 pub(super) const FISH_Z: i32 = i32::MAX - 1;
 
-const PANEL_BG: [u8; 4] = [22, 37, 50, 255];
-
 impl KittySprites {
     pub fn new() -> io::Result<Self> {
         Ok(Self {
@@ -39,7 +37,7 @@ impl KittySprites {
         let width = cells.width * cell_width;
         let height = cells.height * 16;
         let stride = usize::from(width);
-        let mut bitmap = vec![PANEL_BG; stride * usize::from(height)];
+        let mut bitmap = vec![[0; 4]; stride * usize::from(height)];
         for y in 0..cells.height {
             for x in 0..cells.width {
                 let Some(cell) = buffer.get((x, y).into()) else {

@@ -1,28 +1,16 @@
-use std::io::Write;
-use std::process::{Command, Stdio};
+use std::process::Command;
 
 #[test]
-fn menu_recovers_from_unknown_choice() {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_rsille"))
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .spawn()
-        .unwrap();
-    child
-        .stdin
-        .take()
-        .unwrap()
-        .write_all(b"invalid\nq\n")
-        .unwrap();
-    let output = child.wait_with_output().unwrap();
+fn no_arguments_prints_help() {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_rsille"));
+    let output = command.output().unwrap();
+    let help = command.arg("--help").output().unwrap();
+
     assert!(output.status.success());
-    assert_eq!(
-        String::from_utf8(output.stdout)
-            .unwrap()
-            .matches("Choose a number")
-            .count(),
-        2
-    );
+    assert!(help.status.success());
+    assert!(output.stderr.is_empty());
+    assert!(String::from_utf8_lossy(&help.stdout).contains("Usage: rsille"));
+    assert_eq!(output.stdout, help.stdout);
 }
 
 #[test]

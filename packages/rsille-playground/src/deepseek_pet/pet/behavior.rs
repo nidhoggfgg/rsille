@@ -97,7 +97,10 @@ impl Life {
             foraging.target = foraging.target.filter(visible);
         }
         if let Some(pointer) = &mut self.pointer {
-            pointer.target = pointer.target.filter(visible);
+            // The terminal's last column is valid input even though sprites avoid painting it.
+            pointer.target = pointer.target.filter(|&(c, r)| {
+                c > 0 && c <= (travel + width).saturating_add(1) && r > 0 && r <= rise + height
+            });
         }
         let fixed = self.anchored || self.manual_origin.is_some();
         let (left, top) = self
@@ -122,12 +125,13 @@ impl Life {
             self.age += 1;
             self.cooldown = self.cooldown.saturating_sub(1);
             self.bell_cooldown = self.bell_cooldown.saturating_sub(1);
+            let pointer = self.pointer_target();
             let meal = self
                 .foraging
                 .as_mut()
                 .and_then(Foraging::tick)
-                .filter(reachable);
-            let pointer = self.pointer.as_mut().and_then(Pursuit::tick);
+                .filter(reachable)
+                .filter(|_| pointer.is_none());
             let reacting =
                 self.playing || matches!(self.mood, Mood::Wave | Mood::Startled | Mood::Puzzled);
             let treat = self.treat.filter(|t| reachable(&t.cell));
@@ -257,6 +261,9 @@ impl Life {
 
     pub(super) fn notice_command(&mut self, phase: crate::deepseek_pet::dialogue::Phase) {
         use crate::deepseek_pet::dialogue::Phase;
+        if self.pointer_target().is_some() {
+            return;
+        }
         self.react(match phase {
             Phase::Editing => Mood::Watch,
             Phase::Running => Mood::Swim,
@@ -268,20 +275,29 @@ impl Life {
     }
 
     pub(super) fn notice_bell(&mut self) {
-        if self.bell_cooldown == 0 && self.mood != Mood::Wave {
+        if self.bell_cooldown == 0 && self.mood != Mood::Wave && self.pointer_target().is_none() {
             self.react(Mood::Startled);
             self.bell_cooldown = 60;
         }
     }
 
+    fn pointer_target(&self) -> Option<(u16, u16)> {
+        self.pointer.as_ref().and_then(|p| p.target)
+    }
+
     /// Notice a mouse position in one-based terminal cells.
-    pub(super) fn notice_mouse(&mut self, col: u16, row: u16) {
+    pub(super) fn notice_mouse(&mut self, cell: (u16, u16), distant: bool) {
         if self.treat.is_some() {
             return;
         }
         if let Some(pointer) = &mut self.pointer {
+            let chasing = matches!(self.mood, Mood::Morph | Mood::Chase);
+            if !distant && !chasing {
+                pointer.target = None;
+                return;
+            }
             let receptive = matches!(self.mood, Mood::Swim | Mood::Idle | Mood::Watch);
-            pointer.motion((col, row), receptive, &mut self.cooldown);
+            pointer.motion(cell, receptive, &mut self.cooldown);
         }
     }
 

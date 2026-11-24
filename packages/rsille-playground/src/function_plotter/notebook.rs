@@ -397,10 +397,6 @@ pub(crate) fn view(state: &State) -> impl Widget<Msg> {
             })
             .height(1),
         );
-        body = body.child(FormulaOutput {
-            source: Rc::clone(image),
-            cell_pixels: state.cell_pixels,
-        });
         body = body.child(Graph {
             source: Rc::clone(image),
             bounds: state.bounds,
@@ -507,55 +503,6 @@ impl Widget<Msg> for Prompt {
 
 // Layout selects the final pixel grid before adaptive curve sampling.
 // The separate bounds survey runs once when the source is parsed.
-pub(crate) struct FormulaOutput {
-    pub(crate) source: Rc<Plot>,
-    pub(crate) cell_pixels: (u16, u16),
-}
-impl<M> Widget<M> for FormulaOutput {
-    fn key(&self) -> Option<&str> {
-        Some("formula")
-    }
-    fn constraints(&self) -> Constraints {
-        let height = self.source.formula.height(self.cell_pixels.1);
-        Constraints {
-            min_width: 1,
-            max_width: Some(
-                self.source
-                    .formula
-                    .width(self.cell_pixels)
-                    .max(GRAPH_COLUMNS),
-            ),
-            min_height: height,
-            max_height: Some(height),
-            flex: None,
-        }
-    }
-    fn render(&self, chunk: &mut Chunk, ctx: &RenderCtx) {
-        let area = ctx.layout_target().unwrap_or_else(|| chunk.area());
-        if area.width() == 0 || area.height() == 0 {
-            return;
-        }
-        {
-            let size = (
-                u32::from(area.width()) * u32::from(self.cell_pixels.0),
-                u32::from(area.height()) * u32::from(self.cell_pixels.1),
-            );
-            if let Some(image) = self.source.formula.image(size, self.cell_pixels.1) {
-                raster_canvas::<M>(image)
-                    .align_x(RasterAlign::Start)
-                    .render(chunk, ctx);
-            } else {
-                let _ = chunk.set_string(
-                    0,
-                    0,
-                    "[Formula rendering unavailable]",
-                    Style::default().to_render_style(),
-                );
-            }
-        }
-    }
-}
-
 struct Graph {
     source: Rc<Plot>,
     bounds: [f64; 4],
@@ -589,12 +536,7 @@ impl Widget<Msg> for Graph {
     fn constraints(&self) -> Constraints {
         Constraints {
             min_width: 1,
-            max_width: Some(
-                self.source
-                    .formula
-                    .width(self.cell_pixels)
-                    .max(GRAPH_COLUMNS),
-            ),
+            max_width: Some(GRAPH_COLUMNS),
             min_height: GRAPH_ROWS,
             max_height: Some(GRAPH_ROWS),
             flex: None,
@@ -804,8 +746,7 @@ mod tests {
             .filter(|(_, _, r)| r.x == 0 && r.y == 0)
             .map(|(_, _, r)| r.canvas.clone())
             .collect();
-        // Each panel now has both a raster formula and a raster graph.
-        assert_eq!(before.len(), 2 * rt.state().panels.len());
+        assert_eq!(before.len(), rt.state().panels.len());
         assert_eq!(after.len(), before.len());
         for (a, b) in before.iter().zip(&after) {
             assert_eq!(a.pixels(), b.pixels());
@@ -1321,7 +1262,7 @@ mod tests {
     }
 
     #[test]
-    fn inline_input_stays_linear_with_raster_formula_rows() {
+    fn graph_follows_preview_and_committed_headings() {
         let (mut rt, clock) = timed();
         assert_inline_input(&rt, "In[2]:=");
         rt.step(&[Event::Paste("sin(x); cos(x)".into())]).unwrap();
@@ -1335,20 +1276,17 @@ mod tests {
         rt.step(&[]).unwrap();
         assert_inline_input(&rt, "In[2]:=sin(x); cos(x)");
         assert_eq!(frame_row(&rt, 1).trim(), "Preview (not submitted)");
-        let formula = WidgetPath::root().child(WidgetKey::Named("formula".into()));
-        let formula_area = rt.layout_geometry(&formula).unwrap().target;
-        assert_eq!(formula_area.y(), 2);
+        let graph = WidgetPath::root().child(WidgetKey::Named("output".into()));
+        let graph_area = rt.layout_geometry(&graph).unwrap().target;
+        assert_eq!(graph_area.y(), 2);
         assert!(rt
             .frame()
-            .raster_at((formula_area.x(), formula_area.y()).into())
+            .raster_at((graph_area.x(), graph_area.y()).into())
             .is_some());
-        let graph = WidgetPath::root().child(WidgetKey::Named("output".into()));
-        let graph_y = formula_area.y() + formula_area.height();
-        assert_eq!(rt.layout_geometry(&graph).unwrap().target.y(), graph_y);
         assert!(rt.step(&[key(KeyCode::Enter)]).unwrap().committed);
         assert_inline_input(&rt, "In[2]:=sin(x); cos(x)");
         assert_eq!(frame_row(&rt, 1).trim(), "Out[2]=");
-        assert_eq!(rt.layout_geometry(&graph).unwrap().target.y(), graph_y);
+        assert_eq!(rt.layout_geometry(&graph).unwrap().target.y(), 2);
         rt.step(&[]).unwrap();
         assert_inline_input(&rt, "In[3]:=");
         assert_eq!(rt.focused_key(), Some("editor"));
@@ -1372,17 +1310,7 @@ mod tests {
                 .unwrap()
                 .auto_bounds(crate::function_plotter::X_RANGE)
         );
-        let expected = Plot::parse(HEART).unwrap();
-        assert_eq!(
-            rt.state()
-                .output
-                .as_ref()
-                .unwrap()
-                .formula
-                .text_rows()
-                .collect::<Vec<_>>(),
-            expected.formula.text_rows().collect::<Vec<_>>()
-        );
+        assert!(rt.frame().has_raster());
         rt.step(&[
             key(KeyCode::Home),
             Event::Key(KeyEvent::new(KeyCode::End, KeyModifiers::SHIFT)),
@@ -1403,16 +1331,7 @@ mod tests {
                 .unwrap()
                 .auto_bounds(crate::function_plotter::X_RANGE)
         );
-        assert_eq!(
-            rt.state()
-                .output
-                .as_ref()
-                .unwrap()
-                .formula
-                .text_rows()
-                .collect::<Vec<_>>(),
-            expected.formula.text_rows().collect::<Vec<_>>()
-        );
+        assert!(rt.frame().has_raster());
         assert!(rt.step(&[key(KeyCode::Enter)]).unwrap().committed);
         assert_eq!(rt.state().history.last().unwrap(), HEART);
     }
@@ -1558,11 +1477,10 @@ mod tests {
             rt.step(&[]).unwrap();
             let source = Rc::clone(rt.state().output.as_ref().unwrap());
             let bounds = rt.state().bounds;
-            let columns = source.formula.width(cell).max(GRAPH_COLUMNS).min(98);
             let image = source.image(
                 bounds,
                 (
-                    u32::from(columns) * u32::from(cell.0),
+                    u32::from(GRAPH_COLUMNS) * u32::from(cell.0),
                     14 * u32::from(cell.1),
                 ),
             );
@@ -1575,23 +1493,12 @@ mod tests {
                     raster.canvas.height(),
                     u32::from(raster.target.height) * u32::from(cell.1)
                 );
-                if raster.target.height == GRAPH_ROWS {
-                    assert_eq!(raster.canvas.pixels(), image.pixels());
-                }
+                assert_eq!(raster.canvas.pixels(), image.pixels());
             }
             rt.step(&[Event::Resize(32, 32)]).unwrap();
             assert!(Rc::ptr_eq(&source, rt.state().output.as_ref().unwrap()));
-            let resized = source.image(
-                bounds,
-                (
-                    u32::from(columns.min(30)) * u32::from(cell.0),
-                    14 * u32::from(cell.1),
-                ),
-            );
+            let resized = source.image(bounds, (30 * u32::from(cell.0), 14 * u32::from(cell.1)));
             for (_, _, raster) in rt.frame().raster_cells() {
-                if raster.target.height != GRAPH_ROWS {
-                    continue;
-                }
                 assert_eq!(raster.canvas.width(), resized.width());
                 assert_eq!(raster.canvas.height(), resized.height());
                 assert_eq!(raster.canvas.pixels(), resized.pixels());
@@ -1607,97 +1514,6 @@ mod tests {
     }
 
     #[test]
-    fn formula_preview_commit_cache_and_small_physical_cells() {
-        let (mut rt, clock) = timed_with_pixels((8, 16));
-        send(&mut rt, Msg::Edit("sqrt(1/(1+x^2))".into()));
-        clock.advance(PREVIEW_DELAY);
-        rt.step(&[]).unwrap();
-        let source = Rc::clone(rt.state().output.as_ref().unwrap());
-        let path = WidgetPath::root().child(WidgetKey::Named("formula".into()));
-        let area = rt.layout_geometry(&path).unwrap().target;
-        assert_eq!(area.y(), 2);
-        let size = (u32::from(area.width()) * 8, u32::from(area.height()) * 16);
-        let image = source.formula.image(size, 16).unwrap();
-        assert!(rt
-            .frame()
-            .raster_cells()
-            .any(|(_, _, r)| r.canvas.pixels() == image.pixels()));
-        assert!(rt.step(&[key(KeyCode::Enter)]).unwrap().committed);
-        assert!(std::sync::Arc::ptr_eq(
-            &image,
-            &source.formula.image(size, 16).unwrap()
-        ));
-        rt.step(&[]).unwrap();
-        assert!(!rt.frame().has_raster());
-        assert!(rt.state().output.is_none());
-
-        for pixels in [(1, 2), (1, 16)] {
-            let (mut rt, clock) = timed_with_pixels(pixels);
-            send(&mut rt, Msg::Edit("param(cos(t),sin(t),0,2*pi)".into()));
-            clock.advance(PREVIEW_DELAY);
-            rt.step(&[]).unwrap();
-            let path = WidgetPath::root().child(WidgetKey::Named("formula".into()));
-            assert!(rt.frame().raster_cells().any(|(_, y, _)| y == 2));
-            assert!(rt.layout_geometry(&path).unwrap().target.height() > 0);
-            assert!(!frame_row(&rt, 2).contains("x(t)"));
-        }
-    }
-
-    #[test]
-    fn failed_native_formula_shows_placeholder_not_source_text() {
-        let (mut rt, clock) = timed_with_pixels((8, 16));
-        send(&mut rt, Msg::Edit(vec!["x"; 150].join("+")));
-        clock.advance(PREVIEW_DELAY);
-        rt.step(&[]).unwrap();
-        assert_eq!(frame_row(&rt, 2).trim(), "[Formula rendering unavailable]");
-        assert!(rt.frame().has_raster());
-        assert!(!frame_row(&rt, 2).contains("x+x"));
-    }
-
-    #[test]
-    fn long_formulas_expand_single_plot_width_beyond_preferred_minimum() {
-        let (rt, clock) = timed_with_pixels((8, 16));
-        let mut rt = rt.size(160, 32);
-        send(&mut rt, Msg::Edit(vec!["x"; 25].join("+")));
-        clock.advance(PREVIEW_DELAY);
-        rt.step(&[]).unwrap();
-        let path = WidgetPath::root().child(WidgetKey::Named("formula".into()));
-        let area = rt.layout_geometry(&path).unwrap().target;
-        assert_eq!(
-            area.width(),
-            rt.state()
-                .output
-                .as_ref()
-                .unwrap()
-                .formula
-                .width((8, 16))
-                .max(GRAPH_COLUMNS)
-        );
-        assert!(area.width() > GRAPH_COLUMNS);
-        assert!(area.width() < 158);
-        let image = rt
-            .state()
-            .output
-            .as_ref()
-            .unwrap()
-            .formula
-            .image(
-                (u32::from(area.width()) * 8, u32::from(area.height()) * 16),
-                16,
-            )
-            .expect("the long formula should fit a wide terminal");
-        assert!(rt
-            .frame()
-            .raster_cells()
-            .any(|(_, _, r)| r.canvas.pixels() == image.pixels()));
-        let graph = WidgetPath::root().child(WidgetKey::Named("output".into()));
-        assert_eq!(
-            rt.layout_geometry(&graph).unwrap().target.width(),
-            area.width()
-        );
-    }
-
-    #[test]
     fn native_single_plot_preferred_width_survives_grid_resize_and_commit() {
         for source in ["sin(x); cos(x)", "param(cos(t),sin(t),0,2*pi)"] {
             let (rt, clock) = timed_with_pixels((8, 16));
@@ -1710,21 +1526,16 @@ mod tests {
             send(&mut rt, Msg::Edit(source.into()));
             clock.advance(PREVIEW_DELAY);
             rt.step(&[]).unwrap();
-            let columns = rt.state().output.as_ref().unwrap().formula.width((8, 16));
-            assert!(columns < GRAPH_COLUMNS);
             let source = Rc::clone(rt.state().output.as_ref().unwrap());
             for terminal_width in [160, 200, 12, 160] {
                 rt.step(&[Event::Resize(terminal_width, 32)]).unwrap();
-                let formula = WidgetPath::root().child(WidgetKey::Named("formula".into()));
                 let graph = WidgetPath::root().child(WidgetKey::Named("output".into()));
-                let f = rt.layout_geometry(&formula).unwrap().target;
                 let g = rt.layout_geometry(&graph).unwrap().target;
-                assert_eq!(f.width(), GRAPH_COLUMNS.min(terminal_width - 2));
+                assert_eq!(g.width(), GRAPH_COLUMNS.min(terminal_width - 2));
                 assert_eq!(g.height(), GRAPH_ROWS);
-                assert_eq!((f.x(), f.width()), (g.x(), g.width()));
                 for (x, _, raster) in rt.frame().raster_cells() {
-                    assert!(x < f.x() + f.width());
-                    assert_eq!(raster.canvas.width(), u32::from(f.width()) * 8);
+                    assert!(x < g.x() + g.width());
+                    assert_eq!(raster.canvas.width(), u32::from(g.width()) * 8);
                     assert_eq!(raster.canvas.height(), u32::from(raster.target.height) * 16);
                 }
             }

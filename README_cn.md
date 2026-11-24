@@ -64,7 +64,7 @@ npx skills add nidhoggfgg/rsille.skills --skill rsille
 
 ## 体验终端游乐场
 
-在仓库根目录运行 `cargo run -p rsille-playground` 打开菜单，选择 `draw` 或 `pet`。也可以直接启动对应的命令，见 [playground 使用指南](packages/rsille-playground/README.md)。
+在仓库根目录运行 `cargo run -p rsille-playground` 查看可用命令。在命令末尾加上 `-- draw` 或 `-- pet` 即可启动对应模式，详见 [playground 使用指南](packages/rsille-playground/README.md)。
 
 ## 在应用中引入 rsille
 

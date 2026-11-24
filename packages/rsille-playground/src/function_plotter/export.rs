@@ -1,4 +1,4 @@
-//! Offline RGB previews using the same formula and graph renderers as the REPL.
+//! Offline RGB previews using the same graph renderer as the REPL.
 use std::{error::Error, fs, path::Path};
 
 use rsille::raster::{RasterCanvas, Rgb};
@@ -8,7 +8,6 @@ use crate::function_plotter::Plot;
 const WIDTH: u32 = 480;
 const GRAPH_HEIGHT: u32 = 240;
 const GAP: u32 = 12;
-const CELL_HEIGHT: u16 = 20;
 const FRAMES: usize = 90;
 const PRESETS: [&str; 4] = [
     "surface(sin(x)*cos(y), -pi, pi, -pi, pi)",
@@ -20,8 +19,6 @@ const PRESETS: [&str; 4] = [
 struct Preview {
     plots: Vec<Plot>,
     bounds: Vec<[f64; 4]>,
-    formulas: Vec<std::sync::Arc<RasterCanvas>>,
-    formula_height: u32,
 }
 
 impl Preview {
@@ -34,43 +31,20 @@ impl Preview {
             .iter()
             .map(|plot| plot.auto_bounds(crate::function_plotter::X_RANGE))
             .collect();
-        let formula_height = plots
-            .iter()
-            .map(|plot| u32::from(plot.formula.height(CELL_HEIGHT)) * u32::from(CELL_HEIGHT))
-            .max()
-            .unwrap();
-        let formulas = plots
-            .iter()
-            .map(|plot| {
-                if u32::from(plot.formula.width((1, CELL_HEIGHT))) > WIDTH {
-                    return Err("Preview formula exceeds panel width");
-                }
-                plot.formula
-                    .image((WIDTH, formula_height), CELL_HEIGHT)
-                    .ok_or("Preview formula rendering failed")
-            })
-            .collect::<Result<_, _>>()?;
-        Ok(Self {
-            plots,
-            bounds,
-            formulas,
-            formula_height,
-        })
+        Ok(Self { plots, bounds })
     }
 
     fn frame(&self, angle: f64) -> Result<RasterCanvas, Box<dyn Error>> {
-        let panel_height = self.formula_height + GRAPH_HEIGHT;
         let mut canvas = RasterCanvas::new(
             WIDTH * 2 + GAP * 3,
-            panel_height * 2 + GAP * 3,
+            GRAPH_HEIGHT * 2 + GAP * 3,
             Rgb(18, 22, 30),
         )?;
         for (index, plot) in self.plots.iter().enumerate() {
             let x = GAP + (index as u32 % 2) * (WIDTH + GAP);
-            let y = GAP + (index as u32 / 2) * (panel_height + GAP);
-            paste(&mut canvas, &self.formulas[index], x, y);
+            let y = GAP + (index as u32 / 2) * (GRAPH_HEIGHT + GAP);
             let graph = plot.image_at(self.bounds[index], (WIDTH, GRAPH_HEIGHT), angle);
-            paste(&mut canvas, &graph, x, y + self.formula_height);
+            paste(&mut canvas, &graph, x, y);
         }
         Ok(canvas)
     }
@@ -158,6 +132,7 @@ mod tests {
         let rotated = preview.frame(1.0).unwrap();
         let end = preview.frame(std::f64::consts::TAU).unwrap();
         assert_eq!(start.width(), WIDTH * 2 + GAP * 3);
+        assert_eq!(start.height(), GRAPH_HEIGHT * 2 + GAP * 3);
         assert_ne!(start.pixels(), rotated.pixels());
         // Floating-point rotation can move a few edge pixels at a full turn.
         let differences = start

@@ -190,6 +190,15 @@ impl Image {
         }
     }
 
+    fn near_cell(&self, col: u16, row: u16) -> bool {
+        let width = self.w.div_ceil(usize::from(self.cell_w)) as u16;
+        let height = self.w.div_ceil(usize::from(self.cell_h)) as u16;
+        // Leave two columns and one row around the displayed sprite for interaction.
+        (self.col.saturating_sub(2)..=self.col.saturating_add(width).saturating_add(1))
+            .contains(&col)
+            && (self.row.saturating_sub(1)..=self.row.saturating_add(height)).contains(&row)
+    }
+
     fn covers_cell(&self, col: u16, row: u16) -> bool {
         let (Some(dx), Some(dy)) = (col.checked_sub(self.col), row.checked_sub(self.row)) else {
             return false;
@@ -402,7 +411,13 @@ impl<'a> Pet<'a> {
             (MouseKind::Motion, Some(treat)) if treat.state == TreatState::Carried => {
                 treat.cell = cell;
             }
-            (MouseKind::Motion | MouseKind::LeftDrag, _) => self.life.notice_mouse(col, row),
+            (MouseKind::Motion | MouseKind::LeftDrag, _) => {
+                let distant = self
+                    .previous
+                    .as_ref()
+                    .is_some_and(|image| !image.near_cell(col, row));
+                self.life.notice_mouse(cell, distant);
+            }
             (MouseKind::RightPress, Some(_)) => self.life.treat = None,
             (MouseKind::RightPress, None) if hit.is_some() => {
                 self.grab = None;
@@ -464,6 +479,9 @@ impl<'a> Pet<'a> {
     }
 
     pub fn cancel_mouse_interaction(&mut self) {
+        if let Some(pointer) = &mut self.life.pointer {
+            pointer.target = None;
+        }
         self.grab = None;
         self.life.treat = None;
         self.menu_open = false;
@@ -1531,26 +1549,61 @@ mod tests {
     }
 
     #[test]
-    fn moving_pointer_cannot_extend_pursuit() {
+    fn pursuit_tracks_motion_then_keeps_a_stationary_target_until_caught() {
         let mut pet = Pet::default();
         pet.life.pointer.as_mut().unwrap().curiosity = 0;
-        for tick in 0..=33 {
-            pet.mouse_event(MouseKind::Motion, 1 + tick as u16, 1);
-            pet.life.update(tick, 200, 0, 1, 1);
+        let mut out = Vec::new();
+        pet.draw(0, 240, 24, 10, 20, &mut out).unwrap();
+        pet.mouse_event(MouseKind::Motion, 1, 1);
+        for tick in 1..=65 {
+            if tick == 40 {
+                pet.mouse_event(MouseKind::Motion, 8, 5);
+                pet.notice_bell();
+                pet.life
+                    .notice_command(crate::deepseek_pet::dialogue::Phase::Running);
+                pet.notice_food(220, 1);
+            }
+            out.clear();
+            pet.draw(tick, 240, 24, 10, 20, &mut out).unwrap();
         }
-        assert!(pet.life.pointer.as_ref().unwrap().target.is_none());
-        assert!(pet.life.cooldown > 0);
+        assert_eq!(pet.life.mood, Mood::Chase);
+        assert_eq!(pet.life.pointer.as_ref().unwrap().target, Some((8, 5)));
+        for tick in 66..=140 {
+            out.clear();
+            pet.draw(tick, 240, 24, 10, 20, &mut out).unwrap();
+            if pet.life.mood == Mood::Grab {
+                break;
+            }
+        }
+        assert_eq!(pet.life.mood, Mood::Grab);
+        assert_eq!(pet.life.pointer.as_ref().unwrap().target, None);
+    }
+
+    #[test]
+    fn nearby_motion_only_updates_an_existing_chase() {
+        let mut pet = Pet::default();
+        pet.life.pointer.as_mut().unwrap().curiosity = 0;
+        pet.draw(0, 80, 24, 10, 20, &mut Vec::new()).unwrap();
+        let (col, row) = pet.last_frame.as_ref().unwrap().origin;
+        for cell in [(col, row), (col - 2, row - 1), (col + 4, row - 1)] {
+            pet.mouse_event(MouseKind::Motion, cell.0, cell.1);
+            assert_eq!(pet.life.pointer.as_ref().unwrap().target, None);
+        }
+        pet.mouse_event(MouseKind::Motion, col - 3, row);
+        pet.draw(1, 80, 24, 10, 20, &mut Vec::new()).unwrap();
+        assert_eq!(pet.life.mood, Mood::Morph);
+        pet.mouse_event(MouseKind::Motion, col, row);
+        assert_eq!(pet.life.pointer.as_ref().unwrap().target, Some((col, row)));
+        pet.mouse_event(MouseKind::Motion, 81, row);
+        pet.draw(2, 80, 24, 10, 20, &mut Vec::new()).unwrap();
         assert_eq!(pet.life.mood, Mood::Unmorph);
-        pet.life
-            .update(33 + u64::from(animation::UNMORPH.duration), 200, 0, 1, 1);
-        assert_eq!(pet.life.mood, Mood::Idle);
     }
 
     #[test]
     fn targets_follow_both_axes_and_stale_food_is_not_eaten() {
         let mut pet = Pet::default();
         pet.life.pointer.as_mut().unwrap().curiosity = 0;
-        pet.mouse_event(MouseKind::Motion, 12, 2);
+        pet.life.notice_mouse((12, 2), true);
         pet.life.update(0, 20, 10, 1, 1);
         let transformed = 1 + u64::from(animation::MORPH.duration);
         for tick in 1..transformed {

@@ -1,5 +1,4 @@
 mod export;
-mod formula;
 mod grid;
 mod notebook;
 mod plot;
@@ -48,9 +47,7 @@ Drafts preview after 500ms; added 3D panels keep rotating until commit.
 Commands are not expression history; added expressions are. :grid in grid is a no-op.
 Inputs are capped at 4096 bytes. No session is saved; committed graphs are released.
 Mouse capture is disabled: use your terminal's normal scrollback controls.
-Single plots: formulas and graphs share max(70 columns, native formula width),
-capped by available terminal width.
-Single graphs stay 14 rows high; grids request 30 rows with responsive 1–2 columns.
+Single graphs use up to 70 columns and 14 rows; grids request 30 rows with responsive 1–2 columns.
 Bounds auto-scale independently from finite samples.
 Polar/parametric plots use equal pixel-unit axes; Cartesian-only plots fill the frame.
 Pole outliers may be clipped; sampled bounds do not guarantee global extrema.

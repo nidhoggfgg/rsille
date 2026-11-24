@@ -1,6 +1,6 @@
 # rsille Playground
 
-在交互终端运行 `rsille` 打开菜单，也可以用子命令直接启动内置模式。
+运行 `rsille` 查看帮助，使用子命令启动对应的内置模式。
 
 | 命令 | 功能 |
 | --- | --- |
@@ -20,7 +20,7 @@ rsille --help
 
 ## 从源码运行
 
-在仓库根目录运行以下命令。省略子命令时打开菜单。
+在仓库根目录运行以下命令。
 
 ```sh
 cargo run -p rsille-playground
@@ -32,4 +32,4 @@ cargo run -p rsille-playground -- pet --help
 
 ## 发布
 
-Playground 独立发版。确认依赖的 `rsille` 和 `rsille-typst` 版本已发布到 crates.io，将本包的版本号和 `releases/rsille-playground/<版本号>.md` 合入 `main`，然后在该提交上打 `rsille-playground-v<版本号>` tag 并推送。例如，`0.1.0` 对应 `rsille-playground-v0.1.0`。
+Playground 独立发版。确认依赖的 `rsille` 版本已发布到 crates.io，将本包的版本号和 `releases/rsille-playground/<版本号>.md` 合入 `main`，然后在该提交上打 `rsille-playground-v<版本号>` tag 并推送。例如，`0.1.0` 对应 `rsille-playground-v0.1.0`。

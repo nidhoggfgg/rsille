@@ -1,5 +1,5 @@
 //! Independent panels shared by the REPL composer and CLI demo.
-use crate::function_plotter::{notebook::FormulaOutput, Plot};
+use crate::function_plotter::Plot;
 use rsille::render::{area::Area, chunk::Chunk};
 use rsille::tui::prelude::*;
 use std::{
@@ -133,47 +133,24 @@ impl<M: 'static> Widget<M> for Grid<M> {
         let panels = cells(
             area.width(),
             area.height().saturating_sub(1),
-            self.children.len() / 3,
+            self.children.len() / 2,
         );
-        // Share the tallest measured formula in each grid row so graphs align.
-        // Reserve the heading and at least three graph rows whenever possible.
-        let heights: Vec<_> = panels
-            .iter()
-            .map(|&(_, y, _, h)| {
-                panels
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, cell)| cell.1 == y)
-                    .map(|(i, _)| self.children[i * 3 + 1].constraints().min_height)
-                    .max()
-                    .unwrap_or(0)
-                    .min(h.saturating_sub(4))
-            })
-            .collect();
         Layout::new(
             panels
                 .into_iter()
                 .enumerate()
                 .flat_map(|(i, (x, y, w, h))| {
-                    let formula = heights[i];
                     let heading = h.min(1);
-                    let graph = h.saturating_sub(heading + formula);
+                    let graph = h - heading;
                     [
                         ChildLayout::new(
-                            i * 3,
+                            i * 2,
                             Area::new((area.x() + x, area.y() + y + 1).into(), (w, heading).into()),
                         ),
                         ChildLayout::new(
-                            i * 3 + 1,
+                            i * 2 + 1,
                             Area::new(
                                 (area.x() + x, area.y() + y + 1 + heading).into(),
-                                (w, formula).into(),
-                            ),
-                        ),
-                        ChildLayout::new(
-                            i * 3 + 2,
-                            Area::new(
-                                (area.x() + x, area.y() + y + 1 + heading + formula).into(),
                                 (w, graph).into(),
                             ),
                         ),
@@ -255,13 +232,6 @@ pub(crate) fn panels_view<M: 'static>(
             i + 1,
             if panel.plot.is_spatial() { "3D" } else { "2D" }
         ))));
-        children.push(Box::new(
-            FormulaOutput {
-                source: panel.plot.clone(),
-                cell_pixels: pixels,
-            }
-            .scope(format!("panel-{i}")),
-        ));
         children.push(Box::new(Graph {
             plot: panel.plot.clone(),
             bounds: panel.bounds,
@@ -388,7 +358,7 @@ mod tests {
     }
 
     #[test]
-    fn native_grid_measures_formulas_aligns_graphs_and_clips_small_viewports() {
+    fn graphs_fill_each_panel_below_its_heading() {
         for (width, height) in [(100, 32), (160, 32), (30, 20), (100, 10)] {
             let mut state = State::new(Vec::new(), crate::function_plotter::X_RANGE).unwrap();
             state.pixels = (8, 16);
@@ -403,37 +373,15 @@ mod tests {
                 .raster_cells()
                 .filter(|(_, _, r)| r.x == 0 && r.y == 0)
                 .collect();
-            let mut graph_tops = Vec::new();
-
             let area = rt.layout_geometry(&WidgetPath::root()).unwrap().target;
-            let grid_cells = cells(area.width(), area.height().saturating_sub(1), 4);
-            for (i, &(x, y, w, h)) in grid_cells.iter().enumerate() {
-                let measured = grid_cells
+            let panels = cells(area.width(), area.height().saturating_sub(1), 4);
+            assert_eq!(origins.len(), panels.len());
+            for (x, y, w, h) in panels {
+                let (_, _, graph) = origins
                     .iter()
-                    .enumerate()
-                    .filter(|(_, cell)| cell.1 == y)
-                    .map(|(j, _)| rt.state().panels[j].plot.formula.height(16))
-                    .max()
+                    .find(|(a, b, _)| *a == x && *b == y + 2)
                     .unwrap();
-                let rows = measured.min(h.saturating_sub(4));
-                if rows > 0 {
-                    let expected = rt.state().panels[i]
-                        .plot
-                        .formula
-                        .image((u32::from(w) * 8, u32::from(rows) * 16), 16)
-                        .unwrap();
-                    assert!(origins.iter().any(|(a, b, r)| *a == x
-                        && *b == y + 2
-                        && r.canvas.pixels() == expected.pixels()), "viewport {width}x{height}, panel {i}, expected {x},{} {w}x{rows}; origins {:?}", y + 2, origins.iter().map(|(x,y,r)| (*x,*y,r.target.width,r.target.height)).collect::<Vec<_>>());
-                }
-                let graph_y = y + 2 + rows;
-                assert!(origins.iter().any(|(a, b, _)| *a == x && *b == graph_y));
-                assert!(h.saturating_sub(1 + rows) >= 1);
-                graph_tops.push(graph_y);
-            }
-            if width >= 80 {
-                assert_eq!(graph_tops[0], graph_tops[1]);
-                assert_eq!(graph_tops[2], graph_tops[3]);
+                assert_eq!((graph.target.width, graph.target.height), (w, h - 1));
             }
         }
     }
@@ -453,14 +401,9 @@ mod tests {
             rt.handle().send(Msg::Tick).unwrap();
             rt.step(&[]).unwrap();
             let images = |rt: &Runtime<State, Msg>| {
-                let area = rt.layout_geometry(&WidgetPath::root()).unwrap().target;
-                let formula_tops: Vec<_> = cells(area.width(), area.height().saturating_sub(1), 4)
-                    .iter()
-                    .map(|cell| area.y() + cell.1 + 2)
-                    .collect();
                 rt.frame()
                     .raster_cells()
-                    .filter(|(_, y, r)| r.x == 0 && r.y == 0 && !formula_tops.contains(y))
+                    .filter(|(_, _, r)| r.x == 0 && r.y == 0)
                     .map(|(_, _, r)| {
                         assert_eq!(
                             r.canvas.width(),
