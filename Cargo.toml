@@ -1,6 +1,6 @@
 [package]
 name = "rsille"
-version = "3.3.0"
+version = "3.3.1"
 edition = "2021"
 authors = ["nidhoggfgg <nidhoggfgg@gmail.com>"]
 description = "A terminal UI framework with widgets, layouts, animation, and Unicode, Sixel, and Kitty graphics"
@@ -36,7 +36,7 @@ resolver = "3"
 exclude = ["examples"]
 
 [workspace.dependencies]
-rsille-render = { version = "0.1.0", path = "packages/rsille-render", default-features = false }
+rsille-render = { version = "0.1.1", path = "packages/rsille-render", default-features = false }
 rsille-canvas = { version = "0.1.0", path = "packages/rsille-canvas" }
 rsille-tui = { version = "0.1.0", path = "packages/rsille-tui", default-features = false }
 base64 = "0.22"

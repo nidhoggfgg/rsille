@@ -70,7 +70,7 @@ npx skills add nidhoggfgg/rsille.skills --skill rsille
 
 ```toml
 [dependencies]
-rsille = "3.3.0"
+rsille = "3.3.1"
 ```
 
 默认启用 `raster`，提供 `RasterCanvas`、`raster_canvas` 组件以及 Kitty 和 Sixel 输出。
@@ -142,7 +142,7 @@ Kitty 保留原始 RGB 和透明像素，拖动时可以复用已上传的图像
 原生 Windows 和自定义 writer 可以通过 `.raster_session(...)` 传入已验证的全屏协议与字符像素尺寸。
 全屏 Sixel 要求 ED 2 能擦除图像、调色板稳定、补齐像素透明且定位输出不会滚屏。
 inline Sixel 沿用 `.raster_output(...)`，由宿主确认整行擦除和图像随文字滚动。
-inline 应用也可在读取输入前调用 `RasterBackend::Auto.negotiate_inline(...)`，将结果传给 `.inline_raster_session(...)`。inline 的 Auto 选择 Kitty；仅有 Sixel 时，由宿主确认整行擦除、图像随文字滚动和定位输出行为后显式选择 `RasterBackend::Sixel`。
+inline 应用也可在读取输入前调用 `RasterBackend::Auto.negotiate_inline(...)`，将结果传给 `.inline_raster_session(...)`。inline 的 Auto 优先选择 Kitty，终端仅声明支持 Sixel 时自动使用 Sixel。探测检查协议支持，逐行擦除图像、图像随文字滚动和定位输出效果取决于终端。
 
 ## 扩展：Typst 数学公式
 

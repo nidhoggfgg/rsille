@@ -72,7 +72,7 @@ Run `cargo run -p rsille-playground` from the repository root to see the availab
 
 ```toml
 [dependencies]
-rsille = "3.3.0"
+rsille = "3.3.1"
 ```
 
 The default `raster` feature provides `RasterCanvas`, the `raster_canvas` widget,
@@ -148,9 +148,9 @@ Sixel requires graphics erasure with ED 2, stable palettes, transparent padding
 and positioned output without scrolling. Inline Sixel uses `.raster_output(...)`
 with explicit row-erasure and scrolling capabilities. Inline apps can also use
 `RasterBackend::Auto.negotiate_inline(...)` before input starts and pass the
-result to `.inline_raster_session(...)`. Inline Auto selects Kitty. On a Sixel-only
-terminal, explicitly select `RasterBackend::Sixel` after confirming row-local
-graphics erasure, image scrolling and safe positioned output.
+result to `.inline_raster_session(...)`. Inline Auto prefers Kitty and falls back to advertised Sixel.
+The probe checks protocol support. Row-local graphics erasure, image scrolling
+and safe positioned output depend on the terminal.
 
 ## Extension: Typst math
 
