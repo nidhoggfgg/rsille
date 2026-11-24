@@ -35,6 +35,8 @@ pub(super) struct Life {
     pub(super) manual_origin: Option<(u16, u16)>,
     pub(super) mood: Mood,
     pub(super) age: u16,
+    // The swim pose clip and its bob have different periods.
+    swim_phase: u8,
     fatigue: u16,
     playing: bool,
     pub(super) foraging: Option<Foraging>,
@@ -44,6 +46,8 @@ pub(super) struct Life {
     pub(super) choice: u32,
     pub(super) leftward: bool,
     pub(super) x: u16,
+    // A free swim advances one column every other tick.
+    pub(super) slow_swim_step: bool,
     pub(super) altitude: u16,
     pub(super) pointer: Option<Pursuit>,
     last: Option<u64>,
@@ -64,6 +68,7 @@ impl Life {
     pub(super) fn react(&mut self, mood: Mood) {
         self.altitude = self.altitude.saturating_add(self.lift());
         self.playing = false;
+        self.swim_phase = 0;
         self.mood = mood;
         self.age = 0;
         if let Some(pointer) = &mut self.pointer {
@@ -122,7 +127,13 @@ impl Life {
             .saturating_sub(self.last.replace(tick).unwrap_or(tick))
             .min(128);
         for _ in 0..elapsed {
+            self.slow_swim_step = false;
             self.age += 1;
+            self.swim_phase = if self.mood == Mood::Swim {
+                (self.swim_phase + 1) % 12
+            } else {
+                0
+            };
             self.cooldown = self.cooldown.saturating_sub(1);
             self.bell_cooldown = self.bell_cooldown.saturating_sub(1);
             let pointer = self.pointer_target();
@@ -210,6 +221,7 @@ impl Life {
             if !fixed && matches!(self.mood, Mood::Swim | Mood::Swoop) {
                 self.fatigue = self.fatigue.saturating_add(1);
                 if self.mood == Mood::Swoop || self.age % 2 == 0 {
+                    self.slow_swim_step = self.mood == Mood::Swim;
                     if self.x == 0 || self.x == travel {
                         self.leftward = self.x != 0;
                     }
@@ -342,26 +354,43 @@ impl Life {
         self.clip().frame(age)
     }
 
-    pub(super) fn lift(&self) -> u16 {
-        if self.anchored || self.manual_origin.is_some() {
-            return 0;
+    /// Height in cell units at a fractional behavior tick. Round only after scaling
+    /// to the terminal's pixels, including when the viewport limits the amplitude.
+    pub(super) fn lift_at(&self, fraction: f32, headroom: u16) -> Option<f32> {
+        use std::f32::consts::{PI, TAU};
+        if self.anchored || self.manual_origin.is_some() || headroom == 0 {
+            return None;
         }
-        // Keep the motion in step with the clip even when its frame timings change.
-        let arc = |heights: &[u16]| {
-            let phase = usize::from(self.age) * heights.len() / usize::from(self.clip().duration);
-            heights[phase.min(heights.len() - 1)]
-        };
-        match self.mood {
-            Mood::Swim => self.age / 6 % 2,
-            Mood::Startled => arc(&[0, 3, 5, 4, 2, 0]),
-            Mood::Hop => arc(&[0, 0, 1, 3, 3, 1, 0, 0]),
-            Mood::Swoop => {
-                let phase = f32::from(self.age) / 39.0;
-                let amplitude = 5 + self.choice % 9;
-                ((phase * std::f32::consts::PI).sin() * amplitude as f32).round() as u16
+        let age = f32::from(self.age) + fraction;
+        let (amplitude, phase_height) = match self.mood {
+            Mood::Swim => {
+                let phase = (f32::from(self.swim_phase) + fraction) / 12.0;
+                (1.0, (1.0 - (TAU * phase).cos()) * 0.5)
             }
-            _ => 0,
-        }
+            Mood::Swoop => {
+                let phase = (age / 39.0).min(1.0);
+                ((5 + self.choice % 9) as f32, (PI * phase).sin().max(0.0))
+            }
+            Mood::Hop | Mood::Startled => {
+                // The hop crouches before takeoff. Both clips finish on the ground.
+                let (height, takeoff, landing) = if self.mood == Mood::Hop {
+                    (3.0, 0.125, 0.875)
+                } else {
+                    (5.0, 0.0, 5.0 / 6.0)
+                };
+                let phase = ((age / f32::from(self.clip().duration) - takeoff)
+                    / (landing - takeoff))
+                    .clamp(0.0, 1.0);
+                (height, 4.0 * phase * (1.0 - phase))
+            }
+            _ => return None,
+        };
+        Some(amplitude.min(f32::from(headroom)) * phase_height)
+    }
+
+    // Behavior targets are in cells. Carry the current lift into a reaction's base altitude.
+    pub(super) fn lift(&self) -> u16 {
+        self.lift_at(0.0, u16::MAX).unwrap_or(0.0).round() as u16
     }
 }
 
@@ -469,6 +498,33 @@ mod tests {
             assert!(life.x <= travel);
         }
         assert_eq!(seen, [true; 6]);
+    }
+
+    #[test]
+    fn flight_arcs_fit_short_viewports_and_land_at_the_end_of_the_clip() {
+        for (mood, ticks) in [
+            (Mood::Swoop, 40),
+            (Mood::Hop, animation::HOP.duration),
+            (Mood::Startled, animation::STARTLED.duration),
+        ] {
+            let mut life = Life {
+                mood,
+                choice: 8,
+                ..Default::default()
+            };
+            let mut peak = 0.0f32;
+            let mut last = 0.0;
+            for frame in 0..u32::from(ticks) * 3 {
+                life.age = (frame / 3) as u16;
+                let height = life.lift_at((frame % 3) as f32 / 3.0, 2).unwrap();
+                assert!((0.0..=2.0).contains(&height));
+                assert!((height - last).abs() < 0.3);
+                peak = peak.max(height);
+                last = height;
+            }
+            assert!(peak > 1.99);
+            assert_eq!(last, 0.0);
+        }
     }
 
     #[test]

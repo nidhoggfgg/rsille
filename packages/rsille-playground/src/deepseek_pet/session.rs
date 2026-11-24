@@ -1,5 +1,5 @@
 //! Local interactive PTY session for an ANSI-compatible terminal.
-use crate::deepseek_pet::Feature;
+use crate::deepseek_pet::{mouse::MouseKind, pet::FRAMES_PER_TICK, Feature};
 use rsille::render::raster_output::{CellPixels, InlineRasterSession};
 use std::{
     ffi::CString,
@@ -304,8 +304,15 @@ pub fn run(options: crate::deepseek_pet::Options) -> io::Result<i32> {
     let mut forwarded = Vec::new();
     let mut update = Vec::new();
     let mut sprite = Vec::new();
-    let mut frame = 0u64;
-    let mut next = Instant::now();
+    let epoch = Instant::now();
+    let mut next = epoch;
+    const FRAME_RATE: u64 = 10 * FRAMES_PER_TICK;
+    let deadline = |f: u64| {
+        epoch
+            + Duration::from_secs(f / FRAME_RATE)
+            + Duration::from_nanos(((f % FRAME_RATE) * 1_000_000_000).div_ceil(FRAME_RATE))
+    };
+    let mut last_tick = None;
     const CAP: usize = 64 * 1024;
     let mut batch = Vec::with_capacity(CAP);
     let mut due = None;
@@ -351,7 +358,10 @@ pub fn run(options: crate::deepseek_pet::Options) -> io::Result<i32> {
                 }
             }
         }
-        let tick = now >= next;
+        let refresh = now >= next;
+        let frame =
+            (now.duration_since(epoch).as_nanos() * u128::from(FRAME_RATE) / 1_000_000_000) as u64;
+        let tick = last_tick != Some(frame / FRAMES_PER_TICK);
         if tick {
             let new = size(1)?;
             if (s.ws_col, s.ws_row, s.ws_xpixel, s.ws_ypixel)
@@ -376,8 +386,7 @@ pub fn run(options: crate::deepseek_pet::Options) -> io::Result<i32> {
                 food_deadline = None;
                 pet.invalidate();
             }
-            frame = frame.wrapping_add(1);
-            next = now + Duration::from_millis(100);
+            last_tick = Some(frame / FRAMES_PER_TICK);
         }
         // A pointer update may wake us between animation ticks, but never split shell output.
         let mut fish_due = None;
@@ -385,6 +394,7 @@ pub fn run(options: crate::deepseek_pet::Options) -> io::Result<i32> {
             fish_due = pet.fish_refresh_at(now);
         }
         if tick
+            || refresh
             || due.is_some_and(|d| now >= d)
             || batch.len() == CAP
             || fish_due.is_some_and(|d| now >= d)
@@ -448,10 +458,13 @@ pub fn run(options: crate::deepseek_pet::Options) -> io::Result<i32> {
             if end
                 && (!boundary.alternate || kitty.is_some())
                 && !boundary.screen_selected
-                && (tick || refresh_fish || (!boundary.alternate && batch.len() < CAP))
+                && (tick
+                    || (refresh && batch.is_empty())
+                    || refresh_fish
+                    || (!boundary.alternate && batch.len() < CAP))
             {
-                pet.draw(
-                    frame.wrapping_sub(1),
+                pet.draw_frame(
+                    frame,
                     s.ws_col,
                     s.ws_row,
                     pixels.width,
@@ -469,6 +482,18 @@ pub fn run(options: crate::deepseek_pet::Options) -> io::Result<i32> {
             )?;
             batch.clear();
             due = None;
+        }
+        if refresh || pet.moving(frame) {
+            next = deadline(
+                if pet.moving(frame)
+                    && boundary.can_draw()
+                    && (!boundary.alternate || kitty.is_some())
+                {
+                    frame + 1
+                } else {
+                    (frame / FRAMES_PER_TICK + 1) * FRAMES_PER_TICK
+                },
+            );
         }
         out.flush()?;
         let reading = pending.is_empty();
@@ -552,6 +577,9 @@ pub fn run(options: crate::deepseek_pet::Options) -> io::Result<i32> {
             let shared = kitty.is_some();
             if capture_mouse && (shared || !boundary.child_mouse()) {
                 decoder.feed(bytes, &mut pending, |report, out| {
+                    if matches!(report.kind(), MouseKind::LeftDrag | MouseKind::LeftRelease) {
+                        next = next.min(deadline(frame + 1));
+                    }
                     if shared {
                         let modes = boundary.mouse;
                         let cell = report.cell(modes.encoding, (pixels.width, pixels.height));

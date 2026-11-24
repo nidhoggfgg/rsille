@@ -474,6 +474,31 @@ impl KittyImage {
         z_index: i32,
         cells: Option<Size>,
     ) -> io::Result<()> {
+        self.draw_placed(out, pixels, rgba, z_index, cells, Position::default())
+    }
+
+    /// Draw unscaled RGBA with a pixel offset inside the cursor cell. Both
+    /// offsets must be smaller than the corresponding cell dimension.
+    pub fn draw_offset(
+        &self,
+        out: &mut Vec<u8>,
+        pixels: Size,
+        rgba: &[[u8; 4]],
+        z_index: i32,
+        offset: Position,
+    ) -> io::Result<()> {
+        self.draw_placed(out, pixels, rgba, z_index, None, offset)
+    }
+
+    fn draw_placed(
+        &self,
+        out: &mut Vec<u8>,
+        pixels: Size,
+        rgba: &[[u8; 4]],
+        z_index: i32,
+        cells: Option<Size>,
+        offset: Position,
+    ) -> io::Result<()> {
         let Size { width, height } = pixels;
         let placement_size = match cells {
             Some(size) if size.width == 0 || size.height == 0 => {
@@ -497,9 +522,27 @@ impl KittyImage {
         let header = format!(
             "\x1b_Ga=d,d=N,I={number},q=2\x1b\\\x1b_Ga=t,f=32,t=d,I={number},s={width},v={height},"
         );
-        let placement =
-            format!("\x1b_Ga=p,I={number},p=1,z={z_index},{placement_size}C=1,q=2\x1b\\");
+        let placement = self.placement(z_index, &placement_size, offset);
         transmit(out, &header, rgba.as_flattened(), placement.as_bytes())
+    }
+
+    fn placement(&self, z_index: i32, size: &str, offset: Position) -> String {
+        let Position { x, y } = offset;
+        format!(
+            "\x1b_Ga=p,I={},p=1,z={z_index},{size}X={x},Y={y},C=1,q=2\x1b\\",
+            self.0
+        )
+    }
+
+    /// Move the previously uploaded image to the cursor cell without uploading it again.
+    /// The placement uses the image's natural size and the given in-cell pixel offset.
+    pub fn place_offset(
+        &self,
+        out: &mut impl Write,
+        z_index: i32,
+        offset: Position,
+    ) -> io::Result<()> {
+        out.write_all(self.placement(z_index, "", offset).as_bytes())
     }
 
     /// Remove this image's placements and pixel data from the terminal.

@@ -2,6 +2,7 @@ mod behavior;
 mod fish;
 mod kitty;
 mod menu;
+mod motion;
 mod sixel;
 mod speech;
 
@@ -14,15 +15,19 @@ use crate::deepseek_pet::{
 use behavior::{Life, Mood};
 use fish::{FishBite, FishIcon};
 use menu::{Action, Menu};
-use rsille::render::area::{Area, Size};
+use motion::{Motion, Movement};
+
+use rsille::render::area::{Area, Position, Size};
 use speech::{Bubble, Speech};
 use std::{
     collections::BTreeSet,
     fmt::Write,
     io,
+    rc::Rc,
     time::{Duration, Instant},
 };
 
+pub(super) const FRAMES_PER_TICK: u64 = 3;
 const MAX_SIDE: usize = 192;
 const FISH_FRAME_INTERVAL: Duration = Duration::from_nanos(1_000_000_000u64.div_ceil(30));
 
@@ -122,8 +127,9 @@ struct Image {
     row: u16,
     cell_w: u16,
     cell_h: u16,
+    offset: Position,
     w: usize,
-    pixels: Vec<[u8; 4]>,
+    pixels: Rc<[[u8; 4]]>,
 }
 
 impl Image {
@@ -142,34 +148,19 @@ impl Image {
         let cw = usize::from(self.cell_w);
         let ch = usize::from(self.cell_h);
         let same_grid = next.filter(|n| (n.cell_w, n.cell_h) == (self.cell_w, self.cell_h));
-        let width = self.w.div_ceil(cw).min(usize::from(cols - self.col) + 1);
+        let (width, height) = self.cell_extent();
+        let width = usize::from(width).min(usize::from(cols - self.col) + 1);
         let mut dirty = vec![false; width];
         let start = out.len();
-        for (dy, band) in self
-            .pixels
-            .chunks(self.w * ch)
-            .take(usize::from(rows - self.row) + 1)
-            .enumerate()
-        {
-            let row = self.row + dy as u16;
-            dirty.fill(false);
-            for (py, line) in band.chunks_exact(self.w).enumerate() {
-                for (px, &color) in line.iter().take(width * cw).enumerate() {
-                    let dx = px / cw;
-                    if color[3] < 128 || dirty[dx] {
-                        continue;
-                    }
-                    let col = self.col + dx as u16;
-                    let covered = same_grid.is_some_and(|n| {
-                        if col < n.col || row < n.row {
-                            return false;
-                        }
-                        let x = usize::from(col - n.col) * cw + px % cw;
-                        let y = usize::from(row - n.row) * ch + py;
-                        x < n.w && y < n.w && n.pixels[y * n.w + x][3] >= 128
-                    });
-                    dirty[dx] = !covered;
-                }
+        for dy in 0..height.min(rows - self.row + 1) {
+            let row = self.row + dy;
+            for (dx, dirty) in dirty.iter_mut().enumerate() {
+                let col = self.col + dx as u16;
+                let left = usize::from(col - 1) * cw;
+                let top = usize::from(row - 1) * ch;
+                *dirty = self.ink_in_cell(col, row, |x, y| {
+                    !same_grid.is_some_and(|n| n.opaque_at(left + x, top + y))
+                });
             }
             let mut col = usize::from(self.col);
             for run in dirty.chunk_by(|a, b| a == b) {
@@ -190,9 +181,26 @@ impl Image {
         }
     }
 
+    fn cell_extent(&self) -> (u16, u16) {
+        (
+            (usize::from(self.offset.x) + self.w).div_ceil(usize::from(self.cell_w)) as u16,
+            (usize::from(self.offset.y) + self.w).div_ceil(usize::from(self.cell_h)) as u16,
+        )
+    }
+
+    fn opaque_at(&self, x: usize, y: usize) -> bool {
+        let left =
+            usize::from(self.col - 1) * usize::from(self.cell_w) + usize::from(self.offset.x);
+        let top = usize::from(self.row - 1) * usize::from(self.cell_h) + usize::from(self.offset.y);
+        x >= left
+            && y >= top
+            && x - left < self.w
+            && y - top < self.w
+            && self.pixels[(y - top) * self.w + x - left][3] >= 128
+    }
+
     fn near_cell(&self, col: u16, row: u16) -> bool {
-        let width = self.w.div_ceil(usize::from(self.cell_w)) as u16;
-        let height = self.w.div_ceil(usize::from(self.cell_h)) as u16;
+        let (width, height) = self.cell_extent();
         // Leave two columns and one row around the displayed sprite for interaction.
         (self.col.saturating_sub(2)..=self.col.saturating_add(width).saturating_add(1))
             .contains(&col)
@@ -200,28 +208,31 @@ impl Image {
     }
 
     fn covers_cell(&self, col: u16, row: u16) -> bool {
+        self.ink_in_cell(col, row, |_, _| true)
+    }
+
+    /// Visit only sprite pixels in this cell, passing their offsets within the cell.
+    fn ink_in_cell(&self, col: u16, row: u16, mut visit: impl FnMut(usize, usize) -> bool) -> bool {
         let (Some(dx), Some(dy)) = (col.checked_sub(self.col), row.checked_sub(self.row)) else {
             return false;
         };
-        let x = usize::from(dx) * usize::from(self.cell_w);
-        let y = usize::from(dy) * usize::from(self.cell_h);
-        x < self.w
-            && self
-                .pixels
-                .chunks_exact(self.w)
-                .skip(y)
-                .take(usize::from(self.cell_h))
-                .any(|line| {
-                    line[x..]
-                        .iter()
-                        .take(usize::from(self.cell_w))
-                        .any(|c| c[3] >= 128)
-                })
+        let (cw, ch) = (usize::from(self.cell_w), usize::from(self.cell_h));
+        let (left, top) = (usize::from(dx) * cw, usize::from(dy) * ch);
+        let (ox, oy) = (usize::from(self.offset.x), usize::from(self.offset.y));
+        for y in top.max(oy)..(top + ch).min(oy + self.w) {
+            for x in left.max(ox)..(left + cw).min(ox + self.w) {
+                if self.pixels[(y - oy) * self.w + x - ox][3] >= 128 && visit(x - left, y - top) {
+                    return true;
+                }
+            }
+        }
+        false
     }
 }
 
 #[derive(PartialEq)]
 struct FrameKey {
+    offset: Position,
     origin: (u16, u16),
     cell_pixels: (u16, u16),
     side: usize,
@@ -254,6 +265,7 @@ pub struct Pet<'a> {
     painted_menu: Option<Menu>,
     hint_until: Option<Instant>,
     life: Life,
+    motion: Motion,
     previous: Option<Image>,
     last_frame: Option<FrameKey>,
     dirty: bool,
@@ -284,6 +296,7 @@ impl<'a> Pet<'a> {
             screen: None,
             kitty: None,
             life: Life::new(choice, &features),
+            motion: Motion::default(),
             catalog,
             speech: features.contains(&Feature::Speech).then(Speech::default),
             features,
@@ -467,13 +480,7 @@ impl<'a> Pet<'a> {
             return false;
         };
         if let Some((x, y)) = pixel {
-            let left = usize::from(image.col - 1) * usize::from(image.cell_w);
-            let top = usize::from(image.row - 1) * usize::from(image.cell_h);
-            let x = usize::from(x - 1).checked_sub(left);
-            let y = usize::from(y - 1).checked_sub(top);
-            return x.zip(y).is_some_and(|(x, y)| {
-                x < image.w && y < image.w && image.pixels[y * image.w + x][3] >= 128
-            });
+            return x > 0 && y > 0 && image.opaque_at(usize::from(x - 1), usize::from(y - 1));
         }
         image.covers_cell(cell.0, cell.1)
     }
@@ -567,7 +574,12 @@ impl<'a> Pet<'a> {
         Ok(())
     }
 
-    pub fn draw(
+    pub fn moving(&self, frame: u64) -> bool {
+        self.motion.moving(frame)
+    }
+
+    #[cfg(test)]
+    fn draw(
         &mut self,
         tick: u64,
         cols: u16,
@@ -576,8 +588,28 @@ impl<'a> Pet<'a> {
         cell_h: u16,
         out: &mut Vec<u8>,
     ) -> io::Result<()> {
+        self.draw_frame(
+            tick * FRAMES_PER_TICK + FRAMES_PER_TICK - 1,
+            cols,
+            rows,
+            cell_w,
+            cell_h,
+            out,
+        )
+    }
+
+    pub fn draw_frame(
+        &mut self,
+        display_frame: u64,
+        cols: u16,
+        rows: u16,
+        cell_w: u16,
+        cell_h: u16,
+        out: &mut Vec<u8>,
+    ) -> io::Result<()> {
         use rsille::render::raster_output::CellPixels;
         use std::io::Write;
+        let tick = display_frame / FRAMES_PER_TICK;
         // A PTY can report rows and columns without pixel dimensions.
         if cell_w == 0 || cell_h == 0 {
             return Ok(());
@@ -591,6 +623,7 @@ impl<'a> Pet<'a> {
             .min(width)
             .min(height / band * band);
         if h == 0 {
+            self.motion = Motion::default();
             self.cancel_mouse_interaction();
             self.fish_cell = None;
             self.hide(cols, rows, out);
@@ -622,12 +655,46 @@ impl<'a> Pet<'a> {
             self.dirty = true;
         }
         let frame = self.life.frame();
-        let col = 1 + self.life.x;
-        let row = 1 + (rise - self.life.altitude).saturating_sub(self.life.lift());
+        let base_row = rise - self.life.altitude;
+        let fraction = (display_frame % FRAMES_PER_TICK) as f32 / FRAMES_PER_TICK as f32;
+        let lift = self
+            .life
+            .lift_at(fraction, base_row)
+            .map(|rows| (self.life.mood, (rows * f32::from(cell_h)).round() as u32));
+        let (x, y) = self.motion.position(
+            display_frame,
+            (self.life.x, base_row),
+            (cols, rows, cell_w, cell_h),
+            if self.menu_open {
+                Movement::Paused
+            } else if self.life.manual_origin.is_some() {
+                Movement::Drag
+            } else if self.life.slow_swim_step {
+                Movement::SlowSwim
+            } else {
+                Movement::Step
+            },
+            lift,
+        );
+        let col = 1 + (x / u32::from(cell_w)) as u16;
+        let y = y.min(u32::from(rise) * u32::from(cell_h));
+        let row = 1 + (y / u32::from(cell_h)) as u16;
+        // Reserve the last partial Sixel band even at an in-cell origin.
+        let available = height - usize::from(row - 1) * usize::from(cell_h);
+        let offset = Position {
+            x: (x % u32::from(cell_w)) as u16,
+            y: ((y % u32::from(cell_h)) as usize).min(available / band * band - h) as u16,
+        };
         if self.grab.is_none() && self.features.contains(&Feature::Roam) {
             self.life.manual_origin = None;
         }
-        let whale = Area::new((col - 1, row - 1).into(), (size.width, size.height).into());
+        let visible_size = metrics
+            .size_for_pixels(
+                w as u32 + u32::from(offset.x),
+                h as u32 + u32::from(offset.y),
+            )
+            .unwrap();
+        let whale = Area::new((col - 1, row - 1).into(), visible_size);
         let menu = self
             .menu_open
             .then(|| Menu::place(whale, cols, rows))
@@ -639,7 +706,7 @@ impl<'a> Pet<'a> {
             }
             self.dirty = true;
         }
-        let bubble_size = (size.width, size.height);
+        let bubble_size = (visible_size.width, visible_size.height);
         let bubble = if self.menu_open {
             None
         } else if self.hint_until.is_some_and(|until| Instant::now() < until) {
@@ -679,6 +746,7 @@ impl<'a> Pet<'a> {
             None
         };
         let key = FrameKey {
+            offset,
             origin: (col, row),
             cell_pixels: (cell_w, cell_h),
             side: w,
@@ -692,47 +760,61 @@ impl<'a> Pet<'a> {
             }
             return Ok(());
         }
-        self.last_frame = Some(key);
-        let mut pixels = Vec::with_capacity(w * h);
-        let tile = animation::pixels(frame);
-        for y in 0..h {
-            let sy = (2 * y + 1) * SIDE / (2 * h);
-            for x in 0..w {
-                let x = if leftward { w - 1 - x } else { x };
-                let sx = (2 * x + 1) * SIDE / (2 * w);
-                let i = (sy * SIDE + sx) * 4;
-                let c = if let Some(ink) = bite.and_then(|b| b.pixel(sx, sy)) {
-                    ink
-                } else {
-                    tile[i..i + 4].try_into().unwrap()
-                };
-                pixels.push(c);
+        let same_sprite = self.last_frame.as_ref().is_some_and(|old| {
+            (old.side, old.frame, old.leftward, old.bite) == (w, frame, leftward, bite)
+        });
+        let repaint_fish = fish_changed || self.dirty || self.kitty.is_none();
+        let pixels = if let Some(old) = self.previous.as_ref().filter(|_| same_sprite) {
+            Rc::clone(&old.pixels)
+        } else {
+            let mut pixels = Vec::with_capacity(w * h);
+            let tile = animation::pixels(frame);
+            for y in 0..h {
+                let sy = (2 * y + 1) * SIDE / (2 * h);
+                for x in 0..w {
+                    let x = if leftward { w - 1 - x } else { x };
+                    let sx = (2 * x + 1) * SIDE / (2 * w);
+                    let i = (sy * SIDE + sx) * 4;
+                    let c = if let Some(ink) = bite.and_then(|b| b.pixel(sx, sy)) {
+                        ink
+                    } else {
+                        tile[i..i + 4].try_into().unwrap()
+                    };
+                    pixels.push(c);
+                }
             }
-        }
+            pixels.into()
+        };
         let image = Image {
             col,
             row,
+            offset,
             cell_w,
             cell_h,
             w,
             pixels,
         };
-        if !self.dirty && !fish_changed && self.previous.as_ref() == Some(&image) {
-            return Ok(());
-        }
-        let repaint_fish = fish_changed || self.dirty || self.kitty.is_none();
-        self.dirty = false;
         if let Some(kitty) = self.kitty {
             write!(out, "\x1b[{row};{col}H")?;
-            kitty
-                .whale
-                .draw(out, w as u16, h as u16, &image.pixels, kitty::WHALE_Z)?;
+            if same_sprite && !self.dirty {
+                kitty.whale.place_offset(out, kitty::WHALE_Z, offset)?;
+            } else {
+                kitty.whale.draw_offset(
+                    out,
+                    (w as u16, h as u16).into(),
+                    &image.pixels,
+                    kitty::WHALE_Z,
+                    offset,
+                )?;
+            }
         } else {
             if let Some(old) = &self.previous {
                 old.clear_uncovered(Some(&image), cols, rows, self.screen.as_ref(), out);
             }
-            sixel::draw(col, row, w, &image.pixels, out);
+            sixel::draw_offset(col, row, w, &image.pixels, offset, out);
         }
+        self.dirty = false;
+        self.last_frame = Some(key);
         self.previous = Some(image);
         if let Some(b) = bubble {
             if let Some(kitty) = self.kitty {
@@ -801,6 +883,118 @@ mod tests {
     use std::time::Instant;
 
     #[test]
+    fn slow_swim_crosses_a_cell_in_six_pixel_steps_on_both_backends() {
+        let kitty = KittySprites::new().unwrap();
+        let catalog = Default::default();
+        for backend in [None, Some(&kitty)] {
+            let mut pet = Pet::new(&catalog, [Feature::Roam].into());
+            pet.kitty = backend;
+            pet.life.mood = Mood::Swim;
+            let mut out = Vec::new();
+            pet.draw_frame(0, 80, 24, 12, 20, &mut out).unwrap();
+            let start = u32::from(pet.previous.as_ref().unwrap().col - 1) * 12;
+            for (step, frame) in (6..12).enumerate() {
+                out.clear();
+                pet.draw_frame(frame, 80, 24, 12, 20, &mut out).unwrap();
+                let image = pet.previous.as_ref().unwrap();
+                let x = u32::from(image.col - 1) * 12 + u32::from(image.offset.x);
+                assert_eq!(x, start - (step as u32 + 1) * 2);
+                assert_eq!(pet.life.age, (frame / FRAMES_PER_TICK) as u16);
+                if backend.is_some() && frame == 7 {
+                    let command = std::str::from_utf8(&out).unwrap();
+                    assert!(command.contains(&format!("X=8,Y={}", image.offset.y)));
+                    assert!(command.contains("a=p,") && !command.contains("a=t,"));
+                }
+                out.clear();
+                pet.draw_frame(frame, 80, 24, 12, 20, &mut out).unwrap();
+                assert!(out.is_empty());
+            }
+        }
+    }
+
+    fn displayed_y(pet: &Pet<'_>) -> u32 {
+        let image = pet.previous.as_ref().unwrap();
+        u32::from(image.row - 1) * u32::from(image.cell_h) + u32::from(image.offset.y)
+    }
+
+    #[test]
+    fn swim_bobs_through_a_whole_row_over_the_full_cycle() {
+        let kitty = KittySprites::new().unwrap();
+        let catalog = Default::default();
+        for backend in [None, Some(&kitty)] {
+            let mut pet = Pet::new(&catalog, [Feature::Roam].into());
+            pet.kitty = backend;
+            pet.life.mood = Mood::Swim;
+            let mut heights = Vec::new();
+            for frame in 0..=12 * FRAMES_PER_TICK {
+                pet.draw_frame(frame, 80, 24, 10, 20, &mut Vec::new())
+                    .unwrap();
+                heights.push(displayed_y(&pet));
+                assert!(pet.moving(frame));
+            }
+            assert_eq!(heights[0], heights[36]);
+            assert_eq!(heights[0] - heights[18], 20);
+            assert!(heights[..=18].windows(2).all(|w| w[0] >= w[1]));
+            assert!(heights[18..].windows(2).all(|w| w[0] <= w[1]));
+            assert!(heights.windows(2).all(|w| w[0].abs_diff(w[1]) <= 2));
+            assert!(heights.chunk_by(|a, b| a == b).all(|run| run.len() <= 3));
+        }
+    }
+
+    #[test]
+    fn menu_freezes_the_visible_point_on_the_arc() {
+        let mut pet = Pet::default();
+        pet.life.mood = Mood::Swoop;
+        pet.life.choice = 8; // Exercise the tallest swoop.
+        for frame in 0..=11 {
+            pet.draw_frame(frame, 80, 24, 10, 20, &mut Vec::new())
+                .unwrap();
+        }
+        let y = displayed_y(&pet);
+        let (col, row) = pet.last_frame.as_ref().unwrap().origin;
+        pet.mouse_event(MouseKind::RightPress, col + 6, row + 3);
+        assert!(pet.menu_open);
+        for frame in [12, 40, 63] {
+            pet.draw_frame(frame, 80, 24, 10, 20, &mut Vec::new())
+                .unwrap();
+            assert_eq!(displayed_y(&pet), y);
+            assert!(!pet.moving(frame));
+        }
+        pet.mouse_event(MouseKind::RightPress, 1, 1);
+        pet.draw_frame(64, 80, 24, 10, 20, &mut Vec::new()).unwrap();
+        assert!(displayed_y(&pet).abs_diff(y) <= 3);
+        assert!(pet.moving(64));
+    }
+
+    #[test]
+    fn shifting_ink_across_a_cell_boundary_updates_hits_and_erases_the_old_cell() {
+        let mut image = Image {
+            col: 3,
+            row: 2,
+            cell_w: 4,
+            cell_h: 6,
+            offset: (3, 5).into(),
+            w: 2,
+            pixels: Rc::from([[0; 4], [0; 4], [0; 4], [255; 4]]),
+        };
+        assert!(image.covers_cell(4, 3));
+        assert!(!image.covers_cell(3, 2));
+        assert!(image.opaque_at(12, 12));
+        let mut out = Vec::new();
+        let old = Image {
+            offset: (2, 4).into(),
+            pixels: image.pixels.clone(),
+            ..image
+        };
+        old.clear_uncovered(Some(&image), 80, 24, None, &mut out);
+        assert!(std::str::from_utf8(&out).unwrap().contains("\x1b[2;3H"));
+        image.offset = old.offset;
+        out.clear();
+        old.clear_uncovered(Some(&image), 80, 24, None, &mut out);
+        assert!(out.is_empty());
+    }
+
+    #[test]
     fn mouse_enables_petting_and_dragging_on_both_backends() {
         let catalog = crate::deepseek_pet::dialogue::Catalog::default();
         let kitty = KittySprites::new().unwrap();
@@ -818,7 +1012,10 @@ mod tests {
                 pet.mouse_event(MouseKind::LeftPress, origin.0 + 6, origin.1 + 3);
                 pet.mouse_event(MouseKind::LeftDrag, 20, 10);
                 pet.mouse_event(MouseKind::LeftRelease, 20, 10);
-                pet.draw(1, 80, 24, 10, 20, &mut Vec::new()).unwrap();
+                for frame in 3..6 {
+                    pet.draw_frame(frame, 80, 24, 10, 20, &mut Vec::new())
+                        .unwrap();
+                }
                 assert_eq!(
                     pet.last_frame.as_ref().unwrap().origin,
                     if enabled { (14, 7) } else { origin }
@@ -842,6 +1039,7 @@ mod tests {
         pet.mouse_event(MouseKind::LeftPress, hit.0, hit.1);
         pet.mouse_event(MouseKind::LeftDrag, 16, 8);
         pet.mouse_event(MouseKind::LeftRelease, 16, 8);
+        pet.draw_frame(3, 80, 24, 10, 20, &mut Vec::new()).unwrap();
         for tick in [1, 2, 42] {
             pet.draw(tick, 80, 24, 10, 20, &mut Vec::new()).unwrap();
             assert_eq!(pet.last_frame.as_ref().unwrap().origin, (10, 5));
