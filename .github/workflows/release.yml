@@ -73,27 +73,12 @@ jobs:
         run: |
           packages=()
           metadata=$(cargo metadata --no-deps --format-version 1)
-          version_info="$RUNNER_TEMP/crate-version.json"
           for name in rsille-render rsille-canvas rsille-tui rsille; do
             version=$(jq -er --arg name "$name" '.packages[] | select(.name == $name).version' <<< "$metadata")
             status=$(curl -sS --retry 3 -A "rsille release ($GITHUB_SERVER_URL/$GITHUB_REPOSITORY)" \
-              -o "$version_info" -w '%{http_code}' "https://crates.io/api/v1/crates/$name/$version")
+              -o /dev/null -w '%{http_code}' "https://crates.io/api/v1/crates/$name/$version")
             case "$status" in
-              200)
-                echo "$name $version is already published"
-                if [[ "$name" == rsille ]]; then
-                  # Cargo.lock is untracked. A later rerun can resolve different dependencies.
-                  # Attach the exact bytes from crates.io after checking the release commit.
-                  archive="$name-$version.crate"
-                  checksum=$(jq -er '.version.checksum | select(test("^[0-9a-f]{64}$"))' "$version_info")
-                  curl -fsSL --retry 3 "https://static.crates.io/crates/$name/$archive" -o "$RUNNER_TEMP/$archive"
-                  (cd "$RUNNER_TEMP" && echo "$checksum  $archive" | sha256sum -c -)
-                  tar -xzOf "$RUNNER_TEMP/$archive" "$name-$version/.cargo_vcs_info.json" |
-                    jq -e --arg commit "$(git rev-parse HEAD)" '.git.sha1 == $commit and .git.dirty != true' >/dev/null ||
-                    { echo "::error::Published $archive does not match the release commit"; exit 1; }
-                  cp "$RUNNER_TEMP/$archive" "target/package/$archive"
-                fi
-                ;;
+              200) echo "$name $version is already published" ;;
               404) packages+=(-p "$name") ;;
               *) echo "::error::Failed to check $name $version (HTTP $status)"; exit 1 ;;
             esac
@@ -106,9 +91,24 @@ jobs:
             cargo publish "${packages[@]}" --all-features --registry crates-io
           fi
 
-      - name: Write package checksum
+      - name: Prepare release assets from crates.io
+        shell: bash
         working-directory: target/package
-        run: sha256sum "rsille-${RELEASE_TAG#v}.crate" > SHA256SUMS
+        run: |
+          version=${RELEASE_TAG#v}
+          archive="rsille-$version.crate"
+          # Workspace packaging can write a different Cargo.lock from the uploaded archive.
+          # Fetch the published bytes on the first run as well as on retries.
+          curl_flags=(-fsSL --retry 5 --retry-all-errors --retry-max-time 90
+            -A "rsille release ($GITHUB_SERVER_URL/$GITHUB_REPOSITORY)")
+          checksum=$(curl "${curl_flags[@]}" "https://crates.io/api/v1/crates/rsille/$version" |
+            jq -er '.version.checksum | select(test("^[0-9a-f]{64}$"))')
+          curl "${curl_flags[@]}" "https://static.crates.io/crates/rsille/$archive" -o "$archive"
+          echo "$checksum  $archive" > SHA256SUMS
+          sha256sum -c SHA256SUMS
+          tar -xzOf "$archive" "rsille-$version/.cargo_vcs_info.json" |
+            jq -e --arg commit "$(git rev-parse HEAD)" '.git.sha1 == $commit and .git.dirty != true' >/dev/null ||
+            { echo "::error::Published $archive does not match the release commit"; exit 1; }
 
       - name: Publish GitHub Release
         shell: bash
