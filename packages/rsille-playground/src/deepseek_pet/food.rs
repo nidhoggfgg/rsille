@@ -60,9 +60,6 @@ impl Food {
             saved_absolute: [true; 2],
         }
     }
-    pub fn resize(&mut self) {
-        self.cursor = None;
-    }
 
     // None: no change; Some(None): withdraw; Some(Some(cell)): fresh glyph.
     pub fn feed(&mut self, bytes: &[u8], cols: u16, rows: u16) -> Option<Option<Cell>> {
@@ -193,8 +190,7 @@ mod tests {
         assert_eq!(f.feed(b"\n", 8, 2), Some(None));
         assert_eq!(f.feed(b"\x1b[2", 8, 2), None);
         assert_eq!(f.feed(b";3HX", 8, 2), Some(Some((3, 2))));
-        f.resize();
-        assert_eq!(f.feed(b"x", 8, 2), Some(None));
+        assert_eq!(f.feed(b"\x1b[2J\x1b[Hx", 8, 2), Some(Some((1, 1))));
         assert_eq!(f.feed(b"\x1b[?6h\x1b[Hx", 8, 2), Some(None));
     }
 }

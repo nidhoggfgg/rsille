@@ -17,6 +17,11 @@ enum State {
     },
 }
 
+pub enum Event {
+    MouseHandoff,
+    Clear,
+}
+
 #[derive(Default)]
 pub struct Boundary {
     state: State,
@@ -25,6 +30,7 @@ pub struct Boundary {
     kitty_header: Vec<u8>,
     uploading: bool,
     synchronized: bool,
+    clear_pending: [bool; 2],
     saved_cursor: [bool; 2],
     pub mouse: MouseModes,
     pub alternate: bool,
@@ -92,15 +98,28 @@ impl Boundary {
 
     /// Reports an audible BEL in ordinary output. BEL also terminates OSC strings.
     pub fn feed(&mut self, bytes: &[u8]) -> bool {
-        self.feed_with_mouse(bytes, |_, _| {})
+        self.feed_with(bytes, |_, _, _| {})
     }
 
-    /// Notify the relay immediately after a mode change transfers the mouse.
-    pub fn feed_with_mouse(&mut self, bytes: &[u8], mut handoff: impl FnMut(usize, &Self)) -> bool {
+    pub fn resized(&mut self) {
+        // A hidden primary screen can reflow too. Clear it when the child returns.
+        self.clear_pending = [true, self.alternate];
+    }
+
+    fn clear_if_ready(&mut self, offset: usize, notify: &mut impl FnMut(usize, &Self, Event)) {
+        let screen = usize::from(self.alternate);
+        if self.clear_pending[screen] && self.ready() {
+            self.clear_pending[screen] = false;
+            notify(offset, self, Event::Clear);
+        }
+    }
+
+    pub fn feed_with(&mut self, bytes: &[u8], mut notify: impl FnMut(usize, &Self, Event)) -> bool {
         use self::State::*;
         let mut rang = false;
         self.screen_selected = false;
         for (idx, &b) in bytes.iter().enumerate() {
+            self.clear_if_ready(idx, &mut notify);
             rang |= b == 7 && self.ready();
             // A continuation byte can look exactly like an eight-bit C1 control.
             if self.continuation != 0 && matches!(b, 0x80..=0xbf) {
@@ -125,7 +144,7 @@ impl Boundary {
                         }
                         self.csi = csi;
                         if mouse_changed || alternate != self.alternate {
-                            handoff(idx + 1, self);
+                            notify(idx + 1, self, Event::MouseHandoff);
                         }
                     }
                 } else if self.csi.len() < 128 {
@@ -175,6 +194,7 @@ impl Boundary {
                 (s, _) => s,
             };
         }
+        self.clear_if_ready(bytes.len(), &mut notify);
         rang
     }
 }

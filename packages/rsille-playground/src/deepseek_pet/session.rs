@@ -28,63 +28,7 @@ fn size(fd: i32) -> io::Result<libc::winsize> {
     }
 }
 
-fn cursor_position(reply: &[u8]) -> Option<(u16, u16)> {
-    reply
-        .windows(2)
-        .enumerate()
-        .filter(|(_, prefix)| *prefix == b"\x1b[")
-        .find_map(|(i, _)| {
-            let fields = reply[i + 2..]
-                .split_inclusive(|&b| b == b'R')
-                .next()?
-                .strip_suffix(b"R")?;
-            let (row, col) = std::str::from_utf8(fields).ok()?.split_once(';')?;
-            let (row, col) = (row.parse().ok()?, col.parse().ok()?);
-            (row > 0 && col > 0).then_some((col, row))
-        })
-}
-
-fn probe_cursor(original: &libc::termios) -> io::Result<Option<(u16, u16)>> {
-    let mut raw = *original;
-    unsafe { libc::cfmakeraw(&mut raw) };
-    check(unsafe { libc::tcsetattr(0, libc::TCSANOW, &raw) })?;
-    let result = (|| {
-        let mut out = io::stdout().lock();
-        out.write_all(b"\x1b[6n")?;
-        out.flush()?;
-        let deadline = Instant::now() + Duration::from_millis(500);
-        let mut reply = [0u8; 256];
-        let mut used = 0;
-        let mut poll = libc::pollfd {
-            fd: 0,
-            events: libc::POLLIN,
-            revents: 0,
-        };
-        while used < reply.len() {
-            let ms = deadline
-                .saturating_duration_since(Instant::now())
-                .as_millis() as i32;
-            if ms == 0 || check(unsafe { libc::poll(&mut poll, 1, ms) })? == 0 {
-                break;
-            }
-            let buf = &mut reply[used..];
-            let n = unsafe { libc::read(0, buf.as_mut_ptr().cast(), buf.len()) };
-            if n < 0 {
-                return Err(io::Error::last_os_error());
-            }
-            if n == 0 {
-                break;
-            }
-            used += n as usize;
-            if let Some(cursor) = cursor_position(&reply[..used]) {
-                return Ok(Some(cursor));
-            }
-        }
-        Ok(None)
-    })();
-    check(unsafe { libc::tcsetattr(0, libc::TCSANOW, original) })?;
-    result
-}
+const CLEAR_VIEWPORT: &[u8] = b"\x1b[2J\x1b[H";
 
 struct Terminal<'a> {
     kitty: Option<&'a crate::deepseek_pet::pet::KittySprites>,
@@ -227,11 +171,6 @@ pub fn run(options: crate::deepseek_pet::Options) -> io::Result<i32> {
     let mut s = size(1)?;
     let mut original = unsafe { std::mem::zeroed() };
     check(unsafe { libc::tcgetattr(0, &mut original) })?;
-    let cursor = if (forage || !options.no_restore) && !options.alt_screen {
-        probe_cursor(&original)?
-    } else {
-        None
-    };
     let mut fd = -1;
     let pid =
         check(unsafe { libc::forkpty(&mut fd, std::ptr::null_mut(), &mut original, &mut s) })?;
@@ -279,22 +218,16 @@ pub fn run(options: crate::deepseek_pet::Options) -> io::Result<i32> {
     let mut decoder = crate::deepseek_pet::mouse::Mouse::default();
     let mut buttons = crate::deepseek_pet::mouse::Buttons::default();
     let mut input_deadline = None;
-    let cursor = if options.alt_screen {
-        Some((1, 1))
-    } else {
-        cursor
-    }
-    .filter(|&(col, row)| col <= s.ws_col && row <= s.ws_row);
     if !options.no_restore {
-        pet.screen = cursor
-            .and_then(|pos| crate::deepseek_pet::screen::Screen::new(s.ws_row, s.ws_col, pos));
+        pet.screen = crate::deepseek_pet::screen::Screen::new(s.ws_row, s.ws_col, (1, 1));
     }
-    let mut food = forage.then(|| crate::deepseek_pet::food::Food::new(cursor));
+    let mut food = forage.then(|| crate::deepseek_pet::food::Food::new(Some((1, 1))));
     let mut food_deadline = None;
     let mut out = io::stdout().lock();
     if options.alt_screen {
-        out.write_all(b"\x1b[?1049h\x1b[2J\x1b[H")?;
+        out.write_all(b"\x1b[?1049h")?;
     }
+    out.write_all(CLEAR_VIEWPORT)?;
     if capture_mouse {
         out.write_all(b"\x1b[?1006h\x1b[?1003h")?;
     }
@@ -374,9 +307,7 @@ pub fn run(options: crate::deepseek_pet::Options) -> io::Result<i32> {
                 {
                     pixels = measured;
                 }
-                if let Some(food) = &mut food {
-                    food.resize();
-                }
+                boundary.resized();
                 if let Some(screen) = &mut pet.screen {
                     if !screen.resize(s.ws_row, s.ws_col) {
                         pet.screen = None;
@@ -407,7 +338,7 @@ pub fn run(options: crate::deepseek_pet::Options) -> io::Result<i32> {
             forwarded.clear();
             if relay_modes(
                 &mut boundary,
-                &batch,
+                &mut batch,
                 capture_mouse,
                 kitty.is_some(),
                 &mut forwarded,
@@ -621,12 +552,19 @@ pub fn run(options: crate::deepseek_pet::Options) -> io::Result<i32> {
     if start {
         pet.hide(s.ws_col, s.ws_row, &mut update);
     }
-    boundary.feed(&batch);
+    forwarded.clear();
+    relay_modes(
+        &mut boundary,
+        &mut batch,
+        false,
+        kitty.is_some(),
+        &mut forwarded,
+    );
     terminal.child_alternate = boundary.alternate;
     render_batch(
         &mut out,
         &update,
-        &batch,
+        &forwarded,
         &[],
         start && boundary.can_draw() && !boundary.screen_selected,
     )?;
@@ -642,18 +580,26 @@ pub fn run(options: crate::deepseek_pet::Options) -> io::Result<i32> {
     }
 }
 
-// Insert mode changes at the CSI final byte, so later Vim mode requests in
-// the same read take effect normally (also when the CSI spans two reads).
+// Relay the child output, inserting mouse handoffs and resize clears at their
+// exact terminal sequence boundaries, even when a sequence spans two reads.
 fn relay_modes(
     boundary: &mut crate::deepseek_pet::boundary::Boundary,
-    bytes: &[u8],
+    bytes: &mut Vec<u8>,
     capture: bool,
     kitty: bool,
     out: &mut Vec<u8>,
 ) -> bool {
     let mut start = 0;
     let mut was_child = boundary.child_mouse();
-    let bell = boundary.feed_with_mouse(bytes, |end, state| {
+    let mut clears = Vec::new();
+    let bell = boundary.feed_with(bytes, |end, state, event| {
+        if matches!(event, crate::deepseek_pet::boundary::Event::Clear) {
+            out.extend_from_slice(&bytes[start..end]);
+            out.extend_from_slice(CLEAR_VIEWPORT);
+            start = end;
+            clears.push(end);
+            return;
+        }
         if capture && (kitty || !state.child_mouse() || !was_child) {
             let (tracking, encoding) = if kitty {
                 let encoding = if state.mouse.encoding == 1016 {
@@ -680,6 +626,10 @@ fn relay_modes(
         was_child = state.child_mouse();
     });
     out.extend_from_slice(&bytes[start..]);
+    // Replay the same clears in the text and forage models, in PTY output order.
+    for offset in clears.into_iter().rev() {
+        bytes.splice(offset..offset, CLEAR_VIEWPORT.iter().copied());
+    }
     bell
 }
 
@@ -738,12 +688,24 @@ mod tests {
     fn kitty_tracks_hover_across_screen_switches_and_preserves_child_encoding() {
         let mut b = crate::deepseek_pet::boundary::Boundary::default();
         let mut out = Vec::new();
-        relay_modes(&mut b, b"\x1b[?1049h", true, true, &mut out);
+        relay_modes(&mut b, &mut b"\x1b[?1049h".to_vec(), true, true, &mut out);
         assert!(out.ends_with(b"\x1b[?1006h\x1b[?1003h"));
         assert_eq!(b.mouse.tracking, 0);
-        relay_modes(&mut b, b"\x1b[?1000h\x1b[?1016h", true, true, &mut out);
+        relay_modes(
+            &mut b,
+            &mut b"\x1b[?1000h\x1b[?1016h".to_vec(),
+            true,
+            true,
+            &mut out,
+        );
         assert!(out.ends_with(b"\x1b[?1016h\x1b[?1003h"));
-        relay_modes(&mut b, b"\x1b[?1016l\x1b[?1049l", true, true, &mut out);
+        relay_modes(
+            &mut b,
+            &mut b"\x1b[?1016l\x1b[?1049l".to_vec(),
+            true,
+            true,
+            &mut out,
+        );
         assert!(out.ends_with(b"\x1b[?1006h\x1b[?1003h"));
         assert_eq!(b.mouse.tracking, 1000);
     }
@@ -753,7 +715,7 @@ mod tests {
         let mut b = crate::deepseek_pet::boundary::Boundary::default();
         let mut out = Vec::new();
         for byte in b"\x1b[?1049h\x1b[?1002h\x1b[?1006h" {
-            relay_modes(&mut b, &[*byte], true, false, &mut out);
+            relay_modes(&mut b, &mut vec![*byte], true, false, &mut out);
         }
         assert!(b.child_mouse());
         assert_eq!(
@@ -763,7 +725,7 @@ mod tests {
         out.clear();
         relay_modes(
             &mut b,
-            b"\x1b[?1049l\x1b[?1002l\x1b[?1006l",
+            &mut b"\x1b[?1049l\x1b[?1002l\x1b[?1006l".to_vec(),
             true,
             false,
             &mut out,
@@ -773,11 +735,29 @@ mod tests {
     }
 
     #[test]
-    fn reads_one_based_cursor_position_alongside_device_attributes() {
-        assert_eq!(cursor_position(b"\x1b[?62;4c\x1b[21;7R"), Some((7, 21)));
-        assert_eq!(cursor_position(b"\x1b[21;7R\x1b[?62;4c"), Some((7, 21)));
-        assert_eq!(cursor_position(b"\x1b[0;7R"), None);
-        assert_eq!(cursor_position(b"\x1b[21;7"), None);
+    fn resize_clears_after_split_output_and_before_new_text_on_each_screen() {
+        let mut boundary = crate::deepseek_pet::boundary::Boundary::default();
+        boundary.feed(b"primary\x1b[?1049halt\x1b[3");
+        boundary.resized();
+        let mut batch = b"1mnew alt\x1b[?1049lnew primary".to_vec();
+        let mut out = Vec::new();
+        relay_modes(&mut boundary, &mut batch, false, false, &mut out);
+        assert_eq!(
+            out,
+            b"1m\x1b[2J\x1b[Hnew alt\x1b[?1049l\x1b[2J\x1b[Hnew primary"
+        );
+        assert_eq!(batch, out);
+    }
+
+    #[test]
+    fn idle_resize_clears_once_even_without_child_output() {
+        let mut boundary = crate::deepseek_pet::boundary::Boundary::default();
+        boundary.resized();
+        let mut out = Vec::new();
+        for _ in 0..2 {
+            relay_modes(&mut boundary, &mut Vec::new(), false, false, &mut out);
+        }
+        assert_eq!(out, CLEAR_VIEWPORT);
     }
 
     #[test]
