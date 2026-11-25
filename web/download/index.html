@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="直接下载 rsille Playground，在终端体验函数绘图和像素动画。">
+  <title>下载 rsille Playground</title>
+  <style>
+    :root { color-scheme: light; --ink: #201e28; --accent: #493a9d; --line: #d7d3df; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #faf9f7; color: var(--ink); font: 16px/1.6 "DM Sans", system-ui, sans-serif; }
+    main { max-width: 1100px; margin: auto; padding: 28px clamp(18px, 5vw, 58px) 48px; }
+    header, footer, .button { display: flex; align-items: center; justify-content: space-between; gap: 1em; }
+    header { border-bottom: 1px solid var(--line); padding-bottom: 14px; }
+    .brand, code, .version { font-family: "IBM Plex Mono", ui-monospace, monospace; }
+    .brand { font-size: 20px; font-weight: 700; }
+    .brand b { color: var(--accent); }
+    a { color: var(--accent); text-underline-offset: 4px; }
+    a:focus-visible { outline: 3px solid #715ace; outline-offset: 4px; }
+    .hero { display: grid; grid-template-columns: 1fr 1fr; align-items: center; gap: 2em; padding: clamp(30px, 7vw, 82px) 0; }
+    h1, h2, h3, p { margin: 0; }
+    h1 { font-size: clamp(40px, 6vw, 70px); line-height: 1.07; letter-spacing: -.045em; margin: .2em 0; }
+    .hero p { color: #53505e; }
+    .hero img { width: 100%; image-rendering: pixelated; mix-blend-mode: multiply; }
+    .version { font-size: 13px; color: var(--accent); }
+    h2 { font-size: 22px; margin-bottom: 14px; }
+    .cards { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 12px; }
+    article, .waiting { background: white; border: 1px solid var(--line); border-radius: 12px; padding: 20px; }
+    article { display: flex; flex-direction: column; }
+    article.current { border-color: var(--accent); }
+    h3 { font-size: 24px; }
+    .hint { margin: 2px 0 16px; color: #625f6b; font-size: 14px; }
+    .links { display: grid; gap: 9px; }
+    .button { padding: 10px 14px; background: #efeef6; border-radius: 6px; color: var(--accent); text-decoration: none; font-weight: 600; }
+    .button:hover, .current .button { color: white; background: var(--accent); }
+    .current .button:hover { background: #35297d; }
+    .run { margin-top: auto; padding-top: 22px; font-size: 13px; color: #625f6b; }
+    pre { margin: .45em 0 0; font-size: 13px; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+    footer { justify-content: flex-start; flex-wrap: wrap; margin-top: 20px; font-size: 14px; }
+    .waiting p { margin-bottom: 12px; }
+    @media (max-width: 740px) { .cards { grid-template-columns: 1fr; } .hero { grid-template-columns: 1fr; gap: 20px; } .hero img { max-width: 340px; } }
+  </style>
+</head>
+<body>
+  <main>
+    <header><span class="brand"><b aria-hidden="true">⠿</b> rsille</span><a href="https://github.com/nidhoggfgg/rsille">项目源码 ↗</a></header>
+    <section class="hero">
+      <div>{{version}}<h1>rsille<br>Playground</h1><p>把函数曲线和像素角色带进终端。<br>下载即可运行，无需安装 Rust 或 Cargo。</p></div>
+      <img src="/characters.png" width="576" height="192" style="height:auto" alt="Playground 内置的三位像素角色">
+    </section>
+    {{downloads}}
+  </main>
+  <script>
+    const platform = navigator.userAgentData?.platform || navigator.platform || '';
+    const mobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ||
+      (/Mac/i.test(platform) && navigator.maxTouchPoints > 1);
+    const system = /Win/i.test(platform) ? 'windows' : /Mac/i.test(platform) ? 'macos' : /Linux/i.test(platform) ? 'linux' : '';
+    const card = document.getElementById(system);
+    if (card && !mobile) {
+      card.parentElement.prepend(card);
+      card.classList.add('current');
+    }
+  </script>
+</body>
+</html>

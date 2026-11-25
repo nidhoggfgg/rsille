@@ -1,0 +1,16 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "installCommand": "",
+  "buildCommand": "node web/download/build.mjs",
+  "outputDirectory": "target/playground-site",
+  "redirects": [{ "source": "/", "destination": "/download", "permanent": false }],
+  "rewrites": [{ "source": "/download", "destination": "/download/index.html" }],
+  "headers": [{
+    "source": "/files/(.*)",
+    "headers": [
+      { "key": "Content-Disposition", "value": "attachment" },
+      { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+    ]
+  }]
+}

@@ -186,3 +186,15 @@ jobs:
           fi
           bash scripts/finish-github-release.sh "$PACKAGE" "$VERSION" \
             "releases/$PACKAGE/$VERSION.md" "SHA256SUMS-$PACKAGE" false "${files[@]}"
+
+      - name: Refresh the Playground download site
+        if: env.PACKAGE == 'rsille-playground'
+        env:
+          DEPLOY_HOOK: ${{ secrets.PLAYGROUND_VERCEL_DEPLOY_HOOK }}
+        run: |
+          if [[ -n "$DEPLOY_HOOK" ]]; then
+            curl --fail --silent --show-error --retry 3 --max-time 30 \
+              --request POST "$DEPLOY_HOOK" --output /dev/null
+          else
+            echo "Download site hook is not configured. Skipping refresh."
+          fi
