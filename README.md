@@ -66,7 +66,7 @@ npx skills add nidhoggfgg/rsille.skills --skill rsille
 
 ## Try the terminal playground
 
-Run `cargo run -p rsille-playground` from the repository root to see the available commands. To launch a demo, append a subcommand such as `-- draw` or `-- pet`. See the [playground guide](packages/rsille-playground/README.md).
+Download the executable for your system from the [Playground releases](https://github.com/nidhoggfgg/rsille/releases?q=rsille-playground-v) (versions after 0.1.2). On Linux or macOS, rename it to `rsille`, run `chmod +x rsille`, then `./rsille --help`. On Windows, run `.\rsille.exe --help` in PowerShell. To build from the repository, run `cargo run -p rsille-playground`. See the [playground guide](packages/rsille-playground/README.md).
 
 ## Installation
 

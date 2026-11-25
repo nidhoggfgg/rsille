@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Attach the exact crates.io archive to the tag's GitHub Release.
+# Attach the crates.io archive and any packaged binaries to the tag's GitHub Release.
 set -euo pipefail
 
 package=$1
@@ -7,6 +7,7 @@ version=$2
 notes=$3
 checksum_file=$4
 latest=$5
+shift 5
 
 (
   cd target/package
@@ -19,6 +20,9 @@ latest=$5
     jq -er '.version.checksum | select(test("^[0-9a-f]{64}$"))')
   curl "${curl_flags[@]}" "https://static.crates.io/crates/$package/$archive" -o "$archive"
   echo "$checksum  $archive" > "$checksum_file"
+  for file in "$@"; do
+    sha256sum "${file##*/}" >> "$checksum_file"
+  done
   sha256sum -c "$checksum_file"
   tar -xzOf "$archive" "$package-$version/.cargo_vcs_info.json" |
     jq -e --arg commit "$(git rev-parse HEAD)" '.git.sha1 == $commit and .git.dirty != true' >/dev/null ||
@@ -35,7 +39,7 @@ if [[ "$release" == null ]]; then
 fi
 
 draft=$(jq -r 'if . == null then true else .draft end' <<< "$release")
-for file in "target/package/$package-$version.crate" "target/package/$checksum_file"; do
+for file in "target/package/$package-$version.crate" "target/package/$checksum_file" "$@"; do
   name=${file##*/}
   asset=$(jq -c --arg name "$name" 'first(.assets[]? | select(.name == $name)) // null' <<< "$release")
   if [[ "$asset" == null ]]; then
@@ -46,8 +50,16 @@ for file in "target/package/$package-$version.crate" "target/package/$checksum_f
   else
     id=$(jq -er '.id' <<< "$asset")
     gh api "repos/$GH_REPO/releases/assets/$id" -H 'Accept: application/octet-stream' > "$RUNNER_TEMP/existing-asset"
-    cmp -s "$file" "$RUNNER_TEMP/existing-asset" ||
-      { echo "::error::Existing release asset $name differs"; exit 1; }
+    if ! cmp -s "$file" "$RUNNER_TEMP/existing-asset"; then
+      # A full retry can rebuild binaries with different bytes. Refresh the
+      # binaries and their manifest together while the release is a draft.
+      if [[ "$draft" == true && $# -gt 0 && "$name" != "$package-$version.crate" ]]; then
+        gh release upload "$RELEASE_TAG" "$file" --clobber
+      else
+        echo "::error::Existing release asset $name differs"
+        exit 1
+      fi
+    fi
   fi
 done
 if [[ "$draft" == true ]]; then

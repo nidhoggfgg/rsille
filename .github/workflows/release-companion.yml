@@ -10,18 +10,21 @@ on:
 permissions:
   contents: read
 
+env:
+  RELEASE_TAG: ${{ github.ref_name }}
+
 concurrency:
   group: release-companion-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  release:
+  publish-crate:
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    permissions:
-      contents: write
+    outputs:
+      package: ${{ steps.metadata.outputs.package }}
+      version: ${{ steps.metadata.outputs.version }}
     env:
-      RELEASE_TAG: ${{ github.ref_name }}
       CARGO_TERM_COLOR: always
       CARGO_BUILD_JOBS: "2"
       CARGO_PROFILE_DEV_DEBUG: "0"
@@ -34,6 +37,7 @@ jobs:
           persist-credentials: false
 
       - name: Check release version, notes and main ancestry
+        id: metadata
         run: |
           python3 - <<'PY'
           import os
@@ -47,6 +51,9 @@ jobs:
           with open(os.environ['GITHUB_ENV'], 'a') as env:
               print(f'PACKAGE={name}', file=env)
               print(f'VERSION={version}', file=env)
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as outputs:
+              print(f'package={name}', file=outputs)
+              print(f'version={version}', file=outputs)
           PY
           git merge-base --is-ancestor HEAD origin/main
 
@@ -92,10 +99,90 @@ jobs:
             *) echo "::error::Failed to check $PACKAGE $VERSION (HTTP $status)"; exit 1 ;;
           esac
 
+  playground-binaries:
+    needs: publish-crate
+    if: needs.publish-crate.outputs.package == 'rsille-playground'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-musl
+            asset: rsille-linux-x64
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+            asset: rsille-linux-arm64
+          - os: macos-15
+            target: aarch64-apple-darwin
+            asset: rsille-macos-apple-silicon
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            asset: rsille-macos-intel
+          - os: windows-2022
+            target: x86_64-pc-windows-msvc
+            asset: rsille.exe
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    env:
+      VERSION: ${{ needs.publish-crate.outputs.version }}
+      TARGET: ${{ matrix.target }}
+      ASSET: ${{ matrix.asset }}
+    steps:
+      - name: Build and test the release executable
+        shell: bash
+        run: |
+          rustup toolchain install stable --profile minimal --target "$TARGET"
+          cargo +stable install rsille-playground --version "=$VERSION" --locked --target "$TARGET" --root install
+          mkdir dist
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            cp install/bin/rsille.exe "dist/$ASSET"
+          else
+            cp install/bin/rsille "dist/$ASSET"
+          fi
+          cd dist
+          "./$ASSET" --help
+          "./$ASSET" draw --headless
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: playground-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+
+  github-release:
+    needs: [publish-crate, playground-binaries]
+    if: >-
+      ${{ !cancelled() && needs.publish-crate.result == 'success' &&
+          (needs.publish-crate.outputs.package == 'rsille-syntect' || needs.playground-binaries.result == 'success') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      PACKAGE: ${{ needs.publish-crate.outputs.package }}
+      VERSION: ${{ needs.publish-crate.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@v4
+        if: env.PACKAGE == 'rsille-playground'
+        with:
+          pattern: playground-*
+          path: target/package
+          merge-multiple: true
+
       - name: Publish verified GitHub Release assets
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
+          mkdir -p target/package
+          files=()
+          if [[ "$PACKAGE" == rsille-playground ]]; then
+            cp LICENCE target/package/
+            files=(target/package/rsille-linux-{x64,arm64} target/package/rsille-macos-{intel,apple-silicon}
+                   target/package/rsille.exe target/package/LICENCE)
+          fi
           bash scripts/finish-github-release.sh "$PACKAGE" "$VERSION" \
-            "releases/$PACKAGE/$VERSION.md" "SHA256SUMS-$PACKAGE" false
+            "releases/$PACKAGE/$VERSION.md" "SHA256SUMS-$PACKAGE" false "${files[@]}"

@@ -11,10 +11,41 @@
 
 ## 安装
 
-发布到 crates.io 后可按包名安装，可执行文件名为 `rsille`。
+### 下载可执行文件（无需 Rust 或 Cargo）
+
+在 [Playground 发布列表](https://github.com/nidhoggfgg/rsille/releases?q=rsille-playground-v) 打开最新的 `rsille-playground-v…` 版本，在 **Assets** 中按下表选择下载文件。可执行文件从 `0.1.2` 之后的版本开始提供。
+
+| 系统 | 处理器 | 下载文件 |
+| --- | --- | --- |
+| Linux（含 WSL） | Intel / AMD 64 位 | `rsille-linux-x64` |
+| Linux（含 WSL） | ARM64 | `rsille-linux-arm64` |
+| macOS | Apple 芯片 | `rsille-macos-apple-silicon` |
+| macOS | Intel 芯片 | `rsille-macos-intel` |
+| Windows | Intel / AMD 64 位 | `rsille.exe` |
+
+**Linux / macOS** 可以用 `uname -m` 查看处理器架构。在下载目录运行以下命令。第一行以 Linux x64 为例，其他平台请换成上表对应的文件名。
 
 ```sh
-cargo install rsille-playground
+mv rsille-linux-x64 rsille
+chmod +x rsille
+./rsille --help
+```
+
+要在任意目录运行 `rsille`，可以把它安装到自己的命令目录：
+
+```sh
+mkdir -p "$HOME/.local/bin"
+install -m 755 rsille "$HOME/.local/bin/rsille"
+```
+
+如果该目录还未加入 `PATH`，在 shell 配置文件中加入 `export PATH="$HOME/.local/bin:$PATH"`，然后重新打开终端。
+
+**Windows** 在下载目录打开 PowerShell，运行 `.\rsille.exe --help`。要在任意目录运行，把 `rsille.exe` 所在目录加入用户的 `Path`，重新打开终端即可。要体验 `rsille pet`，请在 WSL 中下载并运行对应架构的 Linux 可执行文件。
+
+### 通过 Cargo 安装
+
+```sh
+cargo install rsille-playground --locked
 rsille --help
 ```
 
@@ -32,4 +63,4 @@ cargo run -p rsille-playground -- pet --help
 
 ## 发布
 
-Playground 独立发版。确认依赖的 `rsille` 版本已发布到 crates.io，将本包的版本号和 `releases/rsille-playground/<版本号>.md` 合入 `main`，然后在该提交上打 `rsille-playground-v<版本号>` tag 并推送。例如，`0.1.2` 对应 `rsille-playground-v0.1.2`。
+Playground 独立发版。确认依赖的 `rsille` 版本已发布到 crates.io，将本包的版本号和 `releases/rsille-playground/<版本号>.md` 合入 `main`，然后在该提交上打 `rsille-playground-v<版本号>` tag 并推送。工作流从已发布的 crate 构建各平台的可执行文件，运行 `rsille --help` 和 `rsille draw --headless` 后，将可执行文件、许可证和 `SHA256SUMS-rsille-playground` 校验文件附到该 tag 的 GitHub Release。

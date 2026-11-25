@@ -64,7 +64,7 @@ npx skills add nidhoggfgg/rsille.skills --skill rsille
 
 ## 体验终端游乐场
 
-在仓库根目录运行 `cargo run -p rsille-playground` 查看可用命令。在命令末尾加上 `-- draw` 或 `-- pet` 即可启动对应模式，详见 [playground 使用指南](packages/rsille-playground/README.md)。
+从 [Playground 发布列表](https://github.com/nidhoggfgg/rsille/releases?q=rsille-playground-v) 下载对应系统的可执行文件（从 0.1.2 之后的版本开始提供）。Linux 或 macOS 用户将文件改名为 `rsille`，执行 `chmod +x rsille` 后运行 `./rsille --help`。Windows 用户在 PowerShell 运行 `.\rsille.exe --help`。也可以在仓库根目录运行 `cargo run -p rsille-playground`。详见 [Playground 安装与使用指南](packages/rsille-playground/README.md)。
 
 ## 在应用中引入 rsille
 
