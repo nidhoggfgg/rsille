@@ -1,0 +1,721 @@
+<!doctype html>
+<html lang="zh-CN" data-lang="zh" data-title-zh="rsille — 让你的终端，真正活起来" data-title-en="rsille — Make your terminal come alive">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="rsille 是跨 Linux、macOS 与 Windows 的 Rust 终端图形与 TUI 框架：Live Shell 悬浮层、Kitty/Sixel 像素画布、浮窗组件与 Unicode Canvas，并提供开箱即用的 rsille Playground 下载。">
+  <meta property="og:title" content="rsille — Make your terminal come alive">
+  <meta property="og:description" content="Float an animated pet or clickable widgets over your live shell, plot 3D math surfaces with Kitty & Sixel, and build animated Rust TUI workspaces.">
+  <meta property="og:type" content="website">
+  <meta property="og:image" content="/media/lumen-desk.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <title>rsille — 让你的终端，真正活起来</title>
+  <script>
+    (function(){
+      try {
+        var q = new URLSearchParams(location.search).get('lang');
+        var saved = localStorage.getItem('rsille-lang');
+        var pref = q === 'en' || q === 'zh' ? q : (saved === 'en' || saved === 'zh' ? saved : ((navigator.language || '').toLowerCase().startsWith('zh') ? 'zh' : 'en'));
+        document.documentElement.dataset.lang = pref;
+        document.documentElement.lang = pref === 'en' ? 'en' : 'zh-CN';
+      } catch (e) {}
+    })();
+  </script>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="container topbar-inner">
+      <a class="brand" href="/">
+        <span class="brand-glyph" aria-hidden="true">⠿</span>
+        <span>rsille</span>
+        <span class="ver-pill">v{{coreVersion}}</span>
+      </a>
+      <nav class="nav-links" aria-label="Primary">
+        <a href="#showcase"><span data-i18n-zh>能力展示</span><span data-i18n-en>Showcase</span></a>
+        <a href="#overlay"><span data-i18n-zh>Shell 叠加层</span><span data-i18n-en>Overlay</span></a>
+        <a href="#download"><span data-i18n-zh>直接下载</span><span data-i18n-en>Download</span></a>
+        <a href="#quickstart"><span data-i18n-zh>快速上手</span><span data-i18n-en>Quickstart</span></a>
+        <a href="/download"><span data-i18n-zh>下载页 ↗</span><span data-i18n-en>Downloads ↗</span></a>
+      </nav>
+      <div class="nav-actions">
+        <div class="lang-toggle" role="group" aria-label="Language">
+          <button type="button" data-lang-btn="zh" class="is-active" aria-pressed="true">中文</button>
+          <button type="button" data-lang-btn="en" aria-pressed="false">EN</button>
+        </div>
+        <a class="nav-gh" href="https://github.com/nidhoggfgg/rsille" target="_blank" rel="noopener">GitHub ↗</a>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <!-- Hero -->
+    <section class="hero">
+      <div class="container hero-grid">
+        <div>
+          <div class="eyebrow">
+            <span class="dot" aria-hidden="true"></span>
+            <span>Rust · Linux / macOS / Windows</span>
+          </div>
+          <h1>
+            <span data-i18n-zh>让你的终端，<br><span class="accent">真正活起来。</span></span>
+            <span data-i18n-en>Make your terminal<br><span class="accent">come alive.</span></span>
+          </h1>
+          <p class="hero-lead">
+            <span data-i18n-zh>把会互动的终端宠物或可点击挂件<strong>直接浮在你正在用的 shell 上</strong>（甚至在 <code>vim</code> 里）；内联画出旋转的三维函数曲面；或用 Rust 构建带浮窗、特效与像素图形的现代 TUI 工作台。</span>
+            <span data-i18n-en>Float an animated pet or clickable widgets <strong>directly over your live shell</strong> (even over <code>vim</code>). Plot rotating 3D math surfaces inline with <strong>Kitty &amp; Sixel</strong>, or build animated TUI workspaces with floating windows and Unicode Canvas graphics.</span>
+          </p>
+
+          <div class="hero-actions">
+            <a class="btn btn-primary" href="#download">
+              <span data-i18n-zh>下载 Playground</span>
+              <span data-i18n-en>Download Playground</span>
+              <span id="hero-os-label"></span>
+              <span aria-hidden="true">↓</span>
+            </a>
+            <a class="btn btn-secondary" href="#quickstart">
+              <span data-i18n-zh>Rust 快速上手</span>
+              <span data-i18n-en>Rust Quickstart</span>
+            </a>
+          </div>
+
+          <div class="cmd-bar">
+            <div class="cmd-bar-text"><span class="prompt">$</span><code>cargo install rsille-playground --locked</code></div>
+            <button type="button" class="copy-btn" data-copy="cargo install rsille-playground --locked">
+              <span data-i18n-zh>复制</span><span data-i18n-en>Copy</span>
+            </button>
+          </div>
+
+          <div class="hero-meta">
+            <span>MIT License</span>
+            <a href="/download"><span data-i18n-zh>独立下载页 →</span><span data-i18n-en>All downloads →</span></a>
+            <a href="https://crates.io/crates/rsille" target="_blank" rel="noopener">crates.io ↗</a>
+            <a href="https://docs.rs/rsille" target="_blank" rel="noopener">docs.rs ↗</a>
+            <a href="https://github.com/nidhoggfgg/rsille/blob/main/examples/README.md" target="_blank" rel="noopener">
+              <span data-i18n-zh>示例目录 ↗</span><span data-i18n-en>Examples ↗</span>
+            </a>
+          </div>
+        </div>
+
+        <!-- Interactive Multi-Tab Terminal Showcase -->
+        <div class="term-window">
+          <div class="term-bar">
+            <span class="term-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+            <div class="term-tabs" role="tablist" aria-label="Terminal previews">
+              <button type="button" class="term-tab is-active" role="tab" aria-selected="true" data-term-tab="pet">rsille pet</button>
+              <button type="button" class="term-tab" role="tab" aria-selected="false" data-term-tab="draw">rsille draw</button>
+              <button type="button" class="term-tab" role="tab" aria-selected="false" data-term-tab="jellyfish">jellyfish</button>
+              <button type="button" class="term-tab" role="tab" aria-selected="false" data-term-tab="lumen">lumen TUI</button>
+            </div>
+          </div>
+
+          <div class="term-stage">
+            <!-- Tab 1: Live shell overlay simulation with actual whale sprite -->
+            <div class="term-pane is-active" data-term-pane="pet" role="tabpanel">
+              <div class="shell-sim">
+                <div class="shell-lines">
+                  <div class="shell-line"><span class="s-dir">~/rsille</span> <span class="s-git">main</span> $ rsille pet</div>
+                  <div class="shell-line"><span class="s-ok">●</span> <span class="s-dim">rsille-overlay attached · Kitty / Sixel · Ctrl+] to exit</span></div>
+                  <div id="shell-dynamic">
+                    <div class="shell-line"><span class="s-dir">~/rsille</span> <span class="s-git">main</span> $ git status -s</div>
+                    <div class="shell-line"><span class="s-ok">M</span> <span class="s-dim">packages/rsille-overlay/src/session.rs</span></div>
+                  </div>
+                  <div class="shell-line"><span class="s-dir">~/rsille</span> <span class="s-git">main</span> $<span class="cursor-blink" aria-hidden="true"></span></div>
+                </div>
+
+                <div class="pet-float">
+                  <div class="pet-bubble" id="pet-bubble">
+                    <span data-i18n-zh>我就浮在你正在用的 shell 上！点下面的命令或点我试试。</span>
+                    <span data-i18n-en>I float right over your real shell! Click a command below or boop me.</span>
+                  </div>
+                  <button type="button" class="pet-sprite-btn" data-sim-action="pet" aria-label="Interact with whale pet">
+                    <img class="pet-sprite" src="/media/whale-level.png" width="112" height="112" alt="rsille whale pet">
+                  </button>
+                </div>
+
+                <div class="sim-controls">
+                  <span class="sim-controls-label"><span data-i18n-zh>试试敲命令：</span><span data-i18n-en>Try command:</span></span>
+                  <button type="button" class="sim-chip" data-sim-action="git">git push</button>
+                  <button type="button" class="sim-chip" data-sim-action="cargo">cargo test</button>
+                  <button type="button" class="sim-chip" data-sim-action="vim">vim README.md</button>
+                </div>
+              </div>
+              <div class="term-caption">
+                <span class="tag">rsille-overlay</span>
+                <span><span data-i18n-zh>Unix PTY &amp; Windows ConPTY 实时透传</span><span data-i18n-en>Live Unix PTY &amp; Windows ConPTY passthrough</span></span>
+              </div>
+            </div>
+
+            <!-- Tab 2: Function Plotter -->
+            <div class="term-pane" data-term-pane="draw" role="tabpanel">
+              <div class="term-media-pane">
+                <div class="term-media-wrap">
+                  <img data-src="/media/function-plotter.gif" alt="3D mathematical surfaces, helix and trefoil knot rendered by rsille draw">
+                </div>
+                <div class="term-caption">
+                  <span class="tag">rsille draw</span>
+                  <span><span data-i18n-zh>Kitty / Sixel · 2D/3D 函数绘图 REPL</span><span data-i18n-en>Kitty / Sixel · 2D/3D Math Plotter REPL</span></span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Tab 3: Jellyfish -->
+            <div class="term-pane" data-term-pane="jellyfish" role="tabpanel">
+              <div class="term-media-pane">
+                <div class="term-media-wrap">
+                  <img data-src="/media/jellyfish.gif" alt="Luminous deep-sea jellyfish rendered with Unicode Half-Block cells">
+                </div>
+                <div class="term-caption">
+                  <span class="tag">rsille jellyfish</span>
+                  <span><span data-i18n-zh>Unicode 半块编码 · 任意真彩色终端可运行</span><span data-i18n-en>Unicode Half-Block · Any True Color terminal</span></span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Tab 4: Lumen -->
+            <div class="term-pane" data-term-pane="lumen" role="tabpanel">
+              <div class="term-media-pane">
+                <div class="term-media-wrap">
+                  <img data-src="/media/lumen-desk.png" alt="Lumen TUI workspace with 3D Braille canvas and draggable floating windows">
+                </div>
+                <div class="term-caption">
+                  <span class="tag">examples/lumen</span>
+                  <span><span data-i18n-zh>可拖动浮窗 · Flex/Grid · 3D 盲文画布</span><span data-i18n-en>Floating windows · Flex/Grid · 3D Braille canvas</span></span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Showcase 2x2 -->
+    <section class="section" id="showcase">
+      <div class="container">
+        <div class="section-head">
+          <div>
+            <div class="section-kicker">01 / Showcase</div>
+            <h2>
+              <span data-i18n-zh>一个终端，可以有多少种模样？</span>
+              <span data-i18n-en>One terminal. Many possibilities.</span>
+            </h2>
+            <p class="section-desc">
+              <span data-i18n-zh>从像素级 Kitty / Sixel 曲线与公式，到带浮窗的桌面式 TUI 工作台，再到纯 Unicode 字符格驱动的连续动画与 3D 交互场景——全部基于同一套 Rust 运行时。</span>
+              <span data-i18n-en>From pixel-accurate Kitty &amp; Sixel curves and math formulas to desktop-style floating TUI workspaces and pure Unicode animated 3D scenes — all driven by one cohesive Rust runtime.</span>
+            </p>
+          </div>
+          <a class="btn btn-secondary" href="https://github.com/nidhoggfgg/rsille/blob/main/examples/README.md" target="_blank" rel="noopener">
+            <span data-i18n-zh>浏览全部示例 ↗</span>
+            <span data-i18n-en>Full example gallery ↗</span>
+          </a>
+        </div>
+
+        <div class="showcase-grid">
+          <article class="showcase-card">
+            <a class="showcase-media contain" href="https://github.com/nidhoggfgg/rsille/blob/main/packages/rsille-playground/function-plotter/README_cn.md" target="_blank" rel="noopener">
+              <img src="/media/function-plotter.gif" loading="lazy" width="996" height="516" alt="Function Plotter: 3D surfaces, helix and trefoil knot">
+            </a>
+            <div class="showcase-body">
+              <div class="showcase-meta">
+                <span>Kitty &amp; Sixel</span>
+                <span class="badge-violet">RasterCanvas</span>
+              </div>
+              <h3>
+                <span data-i18n-zh>像素级图形，不再受字符形状限制</span>
+                <span data-i18n-en>Pixel graphics beyond character shapes</span>
+              </h3>
+              <p>
+                <span data-i18n-zh>RGB 像素画布通过 Kitty 或 Sixel 输出，支持布局、裁剪、滚动与不透明遮挡；将精细曲线、3D 绘图、图像与 Typst 数学公式自然嵌入界面。</span>
+                <span data-i18n-en>RGB pixel canvases output through Kitty or Sixel with layout, clipping, scrolling, and opaque coverage — embedding fine curves, 3D plots, images, and Typst math directly in your UI.</span>
+              </p>
+            </div>
+          </article>
+
+          <article class="showcase-card">
+            <a class="showcase-media" href="https://github.com/nidhoggfgg/rsille/blob/main/examples/lumen/README_cn.md" target="_blank" rel="noopener">
+              <img src="/media/lumen-desk.png" loading="lazy" width="1232" height="912" alt="Lumen workspace with 3D canvas, live signal curves, and draggable floating windows">
+            </a>
+            <div class="showcase-body">
+              <div class="showcase-meta">
+                <span>Desktop-style TUI</span>
+                <span class="badge-violet">Flex / Grid</span>
+              </div>
+              <h3>
+                <span data-i18n-zh>桌面式布局，不必只有固定面板</span>
+                <span data-i18n-en>More than fixed terminal panels</span>
+              </h3>
+              <p>
+                <span data-i18n-zh>用 Flex / Grid 组合编辑器、表格、目录树与画布；支持可拖动、可缩放、可收起的浮窗，配合焦点管理与命令面板构建多区域工作台。</span>
+                <span data-i18n-en>Compose editors, tables, trees, and canvases with Flex/Grid layouts. Draggable, resizable, collapsible floating windows, focus management, and command palettes power multi-pane workspaces.</span>
+              </p>
+            </div>
+          </article>
+
+          <article class="showcase-card">
+            <a class="showcase-media contain" href="https://github.com/nidhoggfgg/rsille/blob/main/examples/clockwork/README_cn.md" target="_blank" rel="noopener">
+              <img src="/media/clockwork.gif" loading="lazy" width="720" height="440" alt="Clockwork: 132 parts disassembling and assembling into mechanical creatures">
+            </a>
+            <div class="showcase-body">
+              <div class="showcase-meta">
+                <span>Unicode Canvas</span>
+                <span class="badge-violet">Braille · HalfBlock · Quadrant</span>
+              </div>
+              <h3>
+                <span data-i18n-zh>字符格也能承载流畅的动态场景</span>
+                <span data-i18n-en>Character cells carry continuous 3D motion</span>
+              </h3>
+              <p>
+                <span data-i18n-zh>盲文（2×4）、半块（1×2）与四分块（2×2）彩色采样编码，让任意真彩色终端都能流畅呈现程序化动画与三维投影场景。</span>
+                <span data-i18n-en>Braille (2×4), Half-Block (1×2), and Quadrant (2×2) color encodings bring procedural animation and projected 3D scenes to any True Color terminal.</span>
+              </p>
+            </div>
+          </article>
+
+          <article class="showcase-card">
+            <a class="showcase-media" href="https://github.com/nidhoggfgg/rsille/blob/main/examples/pokemon-battle/README_cn.md" target="_blank" rel="noopener">
+              <img src="/media/pokemon-battle.png" loading="lazy" width="1440" height="900" alt="Pokémon Battle 3D arena with Pikachu, Blastoise, and native TUI move buttons">
+            </a>
+            <div class="showcase-body">
+              <div class="showcase-meta">
+                <span>Unified Events</span>
+                <span class="badge-violet">Visual Effects</span>
+              </div>
+              <h3>
+                <span data-i18n-zh>图形与组件，共用同一套交互</span>
+                <span data-i18n-en>Canvas &amp; widgets share one event system</span>
+              </h3>
+              <p>
+                <span data-i18n-zh>画布不是界面里的孤岛：图形与按钮、状态条共用布局与指针坐标转换，还可直接叠加渐变、扫光、溶解、毛玻璃与过渡动画。</span>
+                <span data-i18n-en>A canvas is part of the interface: graphics, buttons, and status bars share layout and pointer transforms, plus gradients, light sweeps, dissolves, and frosted backdrops.</span>
+              </p>
+            </div>
+          </article>
+        </div>
+
+        <p class="showcase-note">
+          <span data-i18n-zh>* Function Plotter 为离线 RGB 预览（不含 Sixel 量化与终端刷新行为）；其余预览由渲染后的终端字符格导出，Clockwork GIF 做了加速。</span>
+          <span data-i18n-en>* Function Plotter is an offline RGB preview (excluding Sixel quantization and terminal refresh); other previews are exported from rendered terminal cells; Clockwork is sped up.</span>
+        </p>
+
+        <div class="mini-gallery">
+          <a class="mini-card" href="https://github.com/nidhoggfgg/rsille/blob/main/examples/minecraft/README.md" target="_blank" rel="noopener">
+            <div class="mini-card-thumb"><img src="/media/minecraft.png" loading="lazy" width="1440" height="880" alt="First-person voxel sandbox"></div>
+            <div class="mini-card-info">
+              <strong>Minecraft</strong>
+              <span data-i18n-zh>第一人称方块沙盒</span>
+              <span data-i18n-en>First-person voxel sandbox</span>
+            </div>
+          </a>
+          <a class="mini-card" href="https://github.com/nidhoggfgg/rsille/blob/main/examples/orbit-files/README.md" target="_blank" rel="noopener">
+            <div class="mini-card-thumb"><img src="/media/orbit-files.png" loading="lazy" width="1232" height="872" alt="Orbit Files drag-and-drop file manager"></div>
+            <div class="mini-card-info">
+              <strong>Orbit Files</strong>
+              <span data-i18n-zh>支持拖放的文件管理器</span>
+              <span data-i18n-en>Drag-and-drop file manager</span>
+            </div>
+          </a>
+          <a class="mini-card" href="https://github.com/nidhoggfgg/rsille/blob/main/packages/rsille-playground/jellyfish/README.md" target="_blank" rel="noopener">
+            <div class="mini-card-thumb"><img src="/media/jellyfish.gif" loading="lazy" width="672" height="336" alt="Deep-sea jellyfish aquarium"></div>
+            <div class="mini-card-info">
+              <strong>Jellyfish</strong>
+              <span data-i18n-zh>半块字符深海发光水母</span>
+              <span data-i18n-en>Half-Block luminous aquarium</span>
+            </div>
+          </a>
+          <a class="mini-card" href="https://github.com/nidhoggfgg/rsille/blob/main/examples/tui-showcase/README.md" target="_blank" rel="noopener">
+            <div class="mini-card-thumb"><img src="/media/clockwork-poster.png" loading="lazy" width="1296" height="792" alt="More examples and seven-page widget showcase"></div>
+            <div class="mini-card-info">
+              <strong><span data-i18n-zh>更多示例 ↗</span><span data-i18n-en>More Examples ↗</span></strong>
+              <span data-i18n-zh>Folded Harbor · 七页组件展厅</span>
+              <span data-i18n-en>Folded Harbor · 7-page showcase</span>
+            </div>
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <!-- Live Shell Overlay -->
+    <section class="section" id="overlay">
+      <div class="container split-grid">
+        <div>
+          <div class="section-kicker">02 / rsille-overlay</div>
+          <h2>
+            <span data-i18n-zh>直接在你正在用的 shell 上作画</span>
+            <span data-i18n-en>Draw directly over your live shell</span>
+          </h2>
+          <p class="section-desc">
+            <span data-i18n-zh>大多数终端框架只能接管整个屏幕。<strong>rsille-overlay</strong> 在 Unix PTY 或原生 Windows ConPTY 中运行你原本的 shell，原样透传输出，把可交互组件或 Kitty / Sixel 图像直接浮在上方；移动或隐藏时，被遮挡的文字自动还原。</span>
+            <span data-i18n-en>Most terminal libraries take over the whole screen. <strong>rsille-overlay</strong> runs your real shell inside a Unix PTY or Windows ConPTY, passes output through untouched, and floats interactive widgets or Kitty/Sixel graphics right on top — cleanly restoring underlying text whenever an overlay moves or hides.</span>
+          </p>
+          <ul class="feature-list">
+            <li>
+              <div>
+                <strong><span data-i18n-zh>感知你的 shell 活动：</span><span data-i18n-en>Reacts to shell events:</span></strong>
+                <span data-i18n-zh> 为 <code>bash</code>、<code>fish</code>、<code>zsh</code> 提供会话级钩子，实时捕获 <code>Prompt</code> / <code>Edit</code> / <code>Exec</code> / <code>Done</code> / <code>Read</code>。</span>
+                <span data-i18n-en> Session hooks for <code>bash</code>, <code>fish</code>, and <code>zsh</code> emit <code>Prompt</code>, <code>Edit</code>, <code>Exec</code>, <code>Done</code>, and <code>Read</code>.</span>
+              </div>
+            </li>
+            <li>
+              <div>
+                <strong><span data-i18n-zh>可交互的浮动挂件：</span><span data-i18n-en>Interactive floating widgets:</span></strong>
+                <span data-i18n-zh> 复用全部 <code>rsille-tui</code> 组件，支持标题栏拖动、点击向 shell 发送命令（如浮动目录树一键 <code>cd</code>、待办清单、确认按钮）。</span>
+                <span data-i18n-en> Reuse regular <code>rsille-tui</code> widgets — drag panels, send commands back into the shell, auto-hide on fullscreen apps, or stay interactive over <code>vim</code> in Kitty.</span>
+              </div>
+            </li>
+            <li>
+              <div>
+                <strong><span data-i18n-zh>原生跨平台：</span><span data-i18n-en>Native Unix &amp; Windows:</span></strong>
+                <span data-i18n-zh> Linux / macOS / WSL 使用 PTY，Windows 10 (1809+) 使用原生 ConPTY。<code>rsille pet</code> 正是基于它构建。</span>
+                <span data-i18n-en> Unix PTYs on Linux/macOS/WSL and native ConPTY on Windows 10 (1809+). <code>rsille pet</code> itself is built on it.</span>
+              </div>
+            </li>
+          </ul>
+          <a class="btn btn-secondary" href="https://github.com/nidhoggfgg/rsille/blob/main/packages/rsille-overlay/README_cn.md" target="_blank" rel="noopener">
+            <span data-i18n-zh>查看 rsille-overlay 文档 ↗</span>
+            <span data-i18n-en>Read rsille-overlay guide ↗</span>
+          </a>
+        </div>
+
+        <div class="code-box">
+          <div class="code-head">
+            <span>overlay_widget.rs · features = ["overlay"]</span>
+            <button type="button" class="copy-btn" data-copy="use rsille::overlay::{Anchor, Session, ShellEvent, WidgetOverlay};
+use rsille::tui::prelude::*;
+
+fn main() -> std::io::Result<()> {
+    let app = App::new(String::new())
+        .update(|last: &mut String, msg: Option<String>, _ctx| *last = msg.unwrap_or_default())
+        .view(|last: &String| {
+            row::<Option<String>>()
+                .child(label(last.clone()).width(20))
+                .child(button(&quot;×&quot;).on_click(|| None))
+        })
+        .build();
+
+    let overlay = WidgetOverlay::new(app, (24, 1))
+        .anchor(Anchor::TopRight)
+        .on_shell(|event| match event {
+            ShellEvent::Exec(line) => Some(Some(line.to_owned())),
+            _ => None,
+        });
+
+    Session::new().mouse(true).run(overlay)?;
+    Ok(())
+}">
+              <span data-i18n-zh>复制</span><span data-i18n-en>Copy</span>
+            </button>
+          </div>
+          <pre><code><span class="tok-kw">use</span> rsille::overlay::{<span class="tok-ty">Anchor</span>, <span class="tok-ty">Session</span>, <span class="tok-ty">ShellEvent</span>, <span class="tok-ty">WidgetOverlay</span>};
+<span class="tok-kw">use</span> rsille::tui::prelude::*;
+
+<span class="tok-kw">fn</span> <span class="tok-fn">main</span>() -> std::io::<span class="tok-ty">Result</span>&lt;()&gt; {
+    <span class="tok-kw">let</span> app = <span class="tok-ty">App</span>::<span class="tok-fn">new</span>(<span class="tok-ty">String</span>::<span class="tok-fn">new</span>())
+        .<span class="tok-fn">update</span>(|last: &amp;<span class="tok-kw">mut</span> <span class="tok-ty">String</span>, msg: <span class="tok-ty">Option</span>&lt;<span class="tok-ty">String</span>&gt;, _| {
+            *last = msg.<span class="tok-fn">unwrap_or_default</span>();
+        })
+        .<span class="tok-fn">view</span>(|last: &amp;<span class="tok-ty">String</span>| {
+            <span class="tok-fn">row</span>::&lt;<span class="tok-ty">Option</span>&lt;<span class="tok-ty">String</span>&gt;&gt;()
+                .<span class="tok-fn">child</span>(<span class="tok-fn">label</span>(last.<span class="tok-fn">clone</span>()).<span class="tok-fn">width</span>(<span class="tok-num">20</span>))
+                .<span class="tok-fn">child</span>(<span class="tok-fn">button</span>(<span class="tok-str">"×"</span>).<span class="tok-fn">on_click</span>(|| <span class="tok-ty">None</span>))
+        })
+        .<span class="tok-fn">build</span>();
+
+    <span class="tok-kw">let</span> overlay = <span class="tok-ty">WidgetOverlay</span>::<span class="tok-fn">new</span>(app, (<span class="tok-num">24</span>, <span class="tok-num">1</span>))
+        .<span class="tok-fn">anchor</span>(<span class="tok-ty">Anchor</span>::TopRight)
+        .<span class="tok-fn">on_shell</span>(|event| <span class="tok-kw">match</span> event {
+            <span class="tok-ty">ShellEvent</span>::Exec(line) => <span class="tok-ty">Some</span>(<span class="tok-ty">Some</span>(line.<span class="tok-fn">to_owned</span>())),
+            _ => <span class="tok-ty">None</span>,
+        });
+
+    <span class="tok-ty">Session</span>::<span class="tok-fn">new</span>().<span class="tok-fn">mouse</span>(<span class="tok-kw">true</span>).<span class="tok-fn">run</span>(overlay)?;
+    <span class="tok-ty">Ok</span>(())
+}</code></pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- Playground & Download -->
+    <section class="section" id="download">
+      <div class="container">
+        <div class="section-head">
+          <div>
+            <div class="section-kicker">03 / Try in 10 seconds · Direct Download</div>
+            <h2>
+              <span data-i18n-zh>下载 rsille Playground，无需安装 Rust</span>
+              <span data-i18n-en>Download rsille Playground — no Rust required</span>
+            </h2>
+            <p class="section-desc">
+              <span data-i18n-zh>单个可执行文件打包了四个终端互动体验。二进制由 GitHub Release 经 SHA-256 校验镜像至此站，下载后直接运行。</span>
+              <span data-i18n-en>One standalone executable bundles four interactive terminal experiences. Binaries are SHA-256 verified from GitHub Releases and mirrored directly on Vercel CDN.</span>
+            </p>
+          </div>
+          <a class="btn btn-secondary" href="/download">
+            <span data-i18n-zh>打开独立下载页 ↗</span>
+            <span data-i18n-en>Standalone download page ↗</span>
+          </a>
+        </div>
+
+        <div class="play-grid">
+          <div class="play-card">
+            <span class="play-cmd">rsille pet</span>
+            <p>
+              <span data-i18n-zh>在你日常的 shell（或 <code>vim</code> 等任意程序）上方养一只会游动的小鲸鱼，响应 <code>git</code>/<code>cargo</code>/<code>npm</code>、追鼠标、吹泡泡。</span>
+              <span data-i18n-en>Float a swimming whale pet over your live shell (or wrap <code>vim</code>). Reacts to <code>git</code>/<code>cargo</code>/<code>npm</code>, chases your cursor, blows bubbles.</span>
+            </p>
+            <div class="play-proto">Kitty / Sixel · Ctrl+] exit</div>
+          </div>
+          <div class="play-card">
+            <span class="play-cmd">rsille draw</span>
+            <p>
+              <span data-i18n-zh>内联数学函数绘图 REPL：支持 2D 笛卡尔、极坐标、参数曲线、实时旋转的 3D 曲面与 <code>:grid</code> 多图排版。</span>
+              <span data-i18n-en>Inline math plotter REPL for 2D Cartesian, polar, parametric curves, rotating 3D surfaces, and <code>:grid</code> multi-panel layouts.</span>
+            </p>
+            <div class="play-proto">Kitty / Sixel</div>
+          </div>
+          <div class="play-card">
+            <span class="play-cmd">rsille ai-babies</span>
+            <p>
+              <span data-i18n-zh>三位动态像素角色，加上 <code>--animate</code> 播放动作；支持 <code>--kitty</code>、<code>--sixel</code> 或纯字符四分块模式。</span>
+              <span data-i18n-en>Three animated pixel characters with <code>--animate</code>; supports <code>--kitty</code>, <code>--sixel</code>, or pure Unicode Quadrant cells.</span>
+            </p>
+            <div class="play-proto">Kitty / Sixel / Quadrant</div>
+          </div>
+          <div class="play-card">
+            <span class="play-cmd">rsille jellyfish</span>
+            <p>
+              <span data-i18n-zh>用 Unicode 半块字符渲染的深海发光水母水族箱，直接在任意真彩色终端流畅播放。</span>
+              <span data-i18n-en>A luminous deep-sea aquarium rendered smoothly inline with Unicode Half-Block cells in any True Color terminal.</span>
+            </p>
+            <div class="play-proto">Any True Color terminal</div>
+          </div>
+        </div>
+
+        {{downloads}}
+      </div>
+    </section>
+
+    <!-- Rust Quickstart & Crate Ecosystem -->
+    <section class="section" id="quickstart">
+      <div class="container">
+        <div class="section-head">
+          <div>
+            <div class="section-kicker">04 / Built for Rust Developers</div>
+            <h2>
+              <span data-i18n-zh>声明界面，不手写事件循环</span>
+              <span data-i18n-en>Describe the UI, not the event loop</span>
+            </h2>
+            <p class="section-desc">
+              <span data-i18n-zh><code>view</code> 描述组件，<code>update</code> 处理状态与消息；全屏、<code>Mode::Inline</code> 内联和 live shell 叠加层共用一套 API，并支持无 TTY 内存自动化测试。</span>
+              <span data-i18n-en><code>view</code> describes widgets, <code>update</code> handles state and messages. Fullscreen, <code>Mode::Inline</code>, and live shell overlays share one API — plus deterministic headless testing without a TTY.</span>
+            </p>
+          </div>
+        </div>
+
+        <div class="qs-tabs" role="tablist" aria-label="Quickstart examples">
+          <button type="button" class="qs-tab is-active" role="tab" aria-selected="true" data-qs-tab="inline">
+            <span data-i18n-zh>带动画的内联应用</span><span data-i18n-en>Animated inline app</span>
+          </button>
+          <button type="button" class="qs-tab" role="tab" aria-selected="false" data-qs-tab="cargo">
+            <span>Cargo.toml</span>
+          </button>
+          <button type="button" class="qs-tab" role="tab" aria-selected="false" data-qs-tab="skill">
+            <span data-i18n-zh>AI 编程助手 Skill</span><span data-i18n-en>AI Coding Agent Skill</span>
+          </button>
+        </div>
+
+        <!-- Panel 1: Animated inline app -->
+        <div class="qs-panel is-active" data-qs-panel="inline" role="tabpanel">
+          <div class="code-box">
+            <div class="code-head">
+              <span>src/main.rs · Mode::Inline + visual effects</span>
+              <button type="button" class="copy-btn" data-copy="use std::time::Duration;
+use rsille::tui::prelude::*;
+
+fn main() -> WidgetResult<()> {
+    let exit = App::new(0_u32)
+        .mode(Mode::Inline)
+        .update(|count, (), _ctx| *count += 1)
+        .view(|count| {
+            visual(
+                button(format!(&quot;Count: {count}&quot;))
+                    .variant(ButtonVariant::Ghost)
+                    .on_click(|| ()),
+            )
+            .gradient(
+                Color::Rgb(70, 220, 255),
+                Color::Rgb(240, 110, 255),
+                GradientDirection::Horizontal,
+            )
+            .highlight_sweep()
+            .animation(looping_visual_spec(Duration::from_secs(2)))
+        })
+        .run()?;
+
+    println!(&quot;Final count: {}&quot;, exit.state);
+    Ok(())
+}">
+                <span data-i18n-zh>复制</span><span data-i18n-en>Copy</span>
+              </button>
+            </div>
+            <pre><code><span class="tok-kw">use</span> std::time::<span class="tok-ty">Duration</span>;
+<span class="tok-kw">use</span> rsille::tui::prelude::*;
+
+<span class="tok-kw">fn</span> <span class="tok-fn">main</span>() -> <span class="tok-ty">WidgetResult</span>&lt;()&gt; {
+    <span class="tok-kw">let</span> exit = <span class="tok-ty">App</span>::<span class="tok-fn">new</span>(<span class="tok-num">0_u32</span>)
+        .<span class="tok-fn">mode</span>(<span class="tok-ty">Mode</span>::Inline)
+        .<span class="tok-fn">update</span>(|count, (), _| *count += <span class="tok-num">1</span>)
+        .<span class="tok-fn">view</span>(|count| {
+            <span class="tok-fn">visual</span>(
+                <span class="tok-fn">button</span>(<span class="tok-fn">format!</span>(<span class="tok-str">"Count: {count}"</span>))
+                    .<span class="tok-fn">variant</span>(<span class="tok-ty">ButtonVariant</span>::Ghost)
+                    .<span class="tok-fn">on_click</span>(|| ()),
+            )
+            .<span class="tok-fn">gradient</span>(<span class="tok-ty">Color</span>::Rgb(<span class="tok-num">70</span>, <span class="tok-num">220</span>, <span class="tok-num">255</span>), <span class="tok-ty">Color</span>::Rgb(<span class="tok-num">240</span>, <span class="tok-num">110</span>, <span class="tok-num">255</span>), <span class="tok-ty">GradientDirection</span>::Horizontal)
+            .<span class="tok-fn">highlight_sweep</span>()
+            .<span class="tok-fn">animation</span>(<span class="tok-fn">looping_visual_spec</span>(<span class="tok-ty">Duration</span>::<span class="tok-fn">from_secs</span>(<span class="tok-num">2</span>)))
+        })
+        .<span class="tok-fn">run</span>()?;
+
+    <span class="tok-fn">println!</span>(<span class="tok-str">"Final count: {}"</span>, exit.state);
+    <span class="tok-ty">Ok</span>(())
+}</code></pre>
+          </div>
+          <div class="qs-side-card">
+            <h4>
+              <span data-i18n-zh>组合特效，不重写组件</span>
+              <span data-i18n-en>Compose effects without rewriting widgets</span>
+            </h4>
+            <p>
+              <span data-i18n-zh><code>visual(...)</code> 直接给任意字符组件叠加渐变、扫光、溶解与波浪动画，同时保留完整的焦点与键鼠交互。</span>
+              <span data-i18n-en><code>visual(...)</code> layers gradients, light sweeps, dissolves, and waves onto character widgets while preserving focus and pointer interaction.</span>
+            </p>
+            <div class="counter-preview">
+              <img data-i18n-zh src="/media/counter-cn.gif" loading="lazy" width="848" height="224" alt="渐变计数按钮的循环扫光预览">
+              <img data-i18n-en src="/media/counter-en.gif" loading="lazy" width="848" height="224" alt="Gradient counter button with looping light sweep">
+            </div>
+          </div>
+        </div>
+
+        <!-- Panel 2: Cargo.toml -->
+        <div class="qs-panel" data-qs-panel="cargo" role="tabpanel">
+          <div class="code-box">
+            <div class="code-head">
+              <span>Cargo.toml</span>
+              <button type="button" class="copy-btn" data-copy="[dependencies]
+rsille = &quot;{{coreVersion}}&quot;
+# Optional: float widgets or graphics over a live shell
+# rsille = { version = &quot;{{coreVersion}}&quot;, features = [&quot;overlay&quot;] }
+# Text + Unicode Canvas only (no raster/Kitty/Sixel)
+# rsille = { version = &quot;{{coreVersion}}&quot;, default-features = false }">
+                <span data-i18n-zh>复制</span><span data-i18n-en>Copy</span>
+              </button>
+            </div>
+            <pre><code>[dependencies]
+rsille = <span class="tok-str">"{{coreVersion}}"</span>
+
+<span class="tok-com"># Optional: live shell overlays (re-exports rsille-overlay)</span>
+<span class="tok-com"># rsille = { version = "{{coreVersion}}", features = ["overlay"] }</span>
+
+<span class="tok-com"># Text + Unicode Canvas only (without Kitty/Sixel raster)</span>
+<span class="tok-com"># rsille = { version = "{{coreVersion}}", default-features = false }</span></code></pre>
+          </div>
+          <div class="qs-side-card">
+            <h4>
+              <span data-i18n-zh>按需开启能力</span>
+              <span data-i18n-en>Feature-gated &amp; modular</span>
+            </h4>
+            <p>
+              <span data-i18n-zh>默认包含 TUI、Unicode Canvas 与 Kitty/Sixel 栅格输出；需要实时 shell 悬浮层开启 <code>overlay</code>，只需纯字符画布可关闭默认 features。</span>
+              <span data-i18n-en>Default features bundle TUI, Unicode Canvas, and Kitty/Sixel raster output. Enable <code>overlay</code> for live shell widgets, or disable defaults for a minimal text/Unicode build.</span>
+            </p>
+            <a class="btn btn-secondary" href="https://docs.rs/rsille" target="_blank" rel="noopener">docs.rs/rsille ↗</a>
+          </div>
+        </div>
+
+        <!-- Panel 3: AI Skill -->
+        <div class="qs-panel" data-qs-panel="skill" role="tabpanel">
+          <div class="code-box">
+            <div class="code-head">
+              <span>Install rsille skill for AI coding agents</span>
+              <button type="button" class="copy-btn" data-copy="npx skills add nidhoggfgg/rsille.skills --skill rsille">
+                <span data-i18n-zh>复制</span><span data-i18n-en>Copy</span>
+              </button>
+            </div>
+            <pre><code><span class="tok-fn">npx</span> skills add nidhoggfgg/rsille.skills --skill rsille</code></pre>
+          </div>
+          <div class="qs-side-card">
+            <h4>
+              <span data-i18n-zh>让 AI 编程助手直接掌握 v3 API</span>
+              <span data-i18n-en>Teach your coding agent the v3 API</span>
+            </h4>
+            <p>
+              <span data-i18n-zh>涵盖组件与布局、后台任务、Canvas 图形、动画特效与无终端测试，附带完整组件索引与独立应用模板。</span>
+              <span data-i18n-en>Covers widgets, layouts, async tasks, Canvas graphics, animations, and headless tests — complete with a component catalog and starter template.</span>
+            </p>
+            <a class="btn btn-secondary" href="https://github.com/nidhoggfgg/rsille.skills/blob/main/rsille/SKILL.md" target="_blank" rel="noopener">SKILL.md ↗</a>
+          </div>
+        </div>
+
+        <!-- Crate Ecosystem -->
+        <div class="crate-grid">
+          <a class="crate-card" href="https://github.com/nidhoggfgg/rsille/blob/main/src/lib.rs" target="_blank" rel="noopener">
+            <div class="crate-name">rsille <span>v{{coreVersion}}</span></div>
+            <p><span data-i18n-zh>聚合入口：统一重新导出 tui、render、canvas、raster 与可选 overlay。</span><span data-i18n-en>Umbrella crate re-exporting tui, render, canvas, raster, and optional overlay.</span></p>
+          </a>
+          <a class="crate-card" href="https://github.com/nidhoggfgg/rsille/tree/main/packages/rsille-tui" target="_blank" rel="noopener">
+            <div class="crate-name">rsille-tui <span>widget</span></div>
+            <p><span data-i18n-zh>状态化应用、Flex/Grid 布局、焦点、手势、特效与无终端测试运行时。</span><span data-i18n-en>Stateful apps, Flex/Grid layouts, focus, gestures, effects &amp; headless runtime.</span></p>
+          </a>
+          <a class="crate-card" href="https://github.com/nidhoggfgg/rsille/tree/main/packages/rsille-render" target="_blank" rel="noopener">
+            <div class="crate-name">rsille-render <span>raster</span></div>
+            <p><span data-i18n-zh>终端 Buffer、带样式 Unicode 文本、Kitty/Sixel 栅格输出与事件循环。</span><span data-i18n-en>Terminal buffers, styled Unicode text, Kitty &amp; Sixel raster output, event loops.</span></p>
+          </a>
+          <a class="crate-card" href="https://github.com/nidhoggfgg/rsille/tree/main/packages/rsille-canvas" target="_blank" rel="noopener">
+            <div class="crate-name">rsille-canvas <span>2D/3D</span></div>
+            <p><span data-i18n-zh>盲文、半块与四分块彩色采样画布，适配任意真彩色终端。</span><span data-i18n-en>Braille, Half-Block, and Quadrant sampled color graphics for any True Color TTY.</span></p>
+          </a>
+          <a class="crate-card" href="https://github.com/nidhoggfgg/rsille/tree/main/packages/rsille-overlay" target="_blank" rel="noopener">
+            <div class="crate-name">rsille-overlay <span>PTY</span></div>
+            <p><span data-i18n-zh>在 Unix PTY 与 Windows ConPTY 实时 shell 上浮动组件与图像。</span><span data-i18n-en>Float widgets and Kitty/Sixel graphics over live Unix PTY &amp; Windows ConPTY shells.</span></p>
+          </a>
+          <a class="crate-card" href="https://github.com/nidhoggfgg/rsille/tree/main/packages/rsille-typst" target="_blank" rel="noopener">
+            <div class="crate-name">rsille-typst <span>math</span></div>
+            <p><span data-i18n-zh>进程内将 Typst 数学公式直接渲染为 RasterCanvas。</span><span data-i18n-en>In-process Typst math formula rendering directly into RasterCanvas.</span></p>
+          </a>
+          <a class="crate-card" href="https://github.com/nidhoggfgg/rsille/tree/main/packages/rsille-syntect" target="_blank" rel="noopener">
+            <div class="crate-name">rsille-syntect <span>code</span></div>
+            <p><span data-i18n-zh>基于 Syntect 的 CodeViewer 语法高亮扩展。</span><span data-i18n-en>Syntax highlighting extension for CodeViewer powered by Syntect.</span></p>
+          </a>
+          <a class="crate-card" href="/download">
+            <div class="crate-name">rsille-playground <span>CLI</span></div>
+            <p><span data-i18n-zh>独立命令行体验包，内置 pet、draw、ai-babies 与 jellyfish。</span><span data-i18n-en>Standalone CLI bundling pet, draw, ai-babies, and jellyfish.</span></p>
+          </a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-inner">
+      <div>
+        <span class="mono" style="color:var(--mint)">⠿</span>
+        <strong style="color:var(--ink)">rsille</strong>
+        <span> · MIT License</span>
+      </div>
+      <div class="footer-links">
+        <a href="/download"><span data-i18n-zh>下载 Playground</span><span data-i18n-en>Download</span></a>
+        <a href="https://github.com/nidhoggfgg/rsille" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://crates.io/crates/rsille" target="_blank" rel="noopener">crates.io</a>
+        <a href="https://docs.rs/rsille" target="_blank" rel="noopener">docs.rs</a>
+        <a href="https://github.com/nidhoggfgg/rsille/releases" target="_blank" rel="noopener">Releases</a>
+      </div>
+    </div>
+  </footer>
+
+  <script src="/app.js" defer></script>
+</body>
+</html>

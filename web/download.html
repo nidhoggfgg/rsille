@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="zh-CN" data-lang="zh" data-title-zh="下载 rsille Playground" data-title-en="Download rsille Playground">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="直接下载 rsille Playground 可执行文件（Linux、macOS、Windows），在终端体验 shell 宠物、2D/3D 函数绘图、像素角色与深海水母。">
+  <meta property="og:title" content="Download rsille Playground">
+  <meta property="og:description" content="Standalone rsille CLI binaries for Linux, macOS, and Windows — no Rust or Cargo required.">
+  <meta property="og:type" content="website">
+  <meta property="og:image" content="/media/lumen-desk.png">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <title>下载 rsille Playground</title>
+  <script>
+    (function(){
+      try {
+        var q = new URLSearchParams(location.search).get('lang');
+        var saved = localStorage.getItem('rsille-lang');
+        var pref = q === 'en' || q === 'zh' ? q : (saved === 'en' || saved === 'zh' ? saved : ((navigator.language || '').toLowerCase().startsWith('zh') ? 'zh' : 'en'));
+        document.documentElement.dataset.lang = pref;
+        document.documentElement.lang = pref === 'en' ? 'en' : 'zh-CN';
+      } catch (e) {}
+    })();
+  </script>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="container topbar-inner">
+      <a class="brand" href="/">
+        <span class="brand-glyph" aria-hidden="true">⠿</span>
+        <span>rsille</span>
+        <span class="ver-pill">v{{coreVersion}}</span>
+      </a>
+      <nav class="nav-links" aria-label="Primary">
+        <a href="/"><span data-i18n-zh>← 返回项目主页</span><span data-i18n-en>← Project Home</span></a>
+        <a class="active" href="/download"><span data-i18n-zh>下载 Playground</span><span data-i18n-en>Download</span></a>
+        <a href="https://github.com/nidhoggfgg/rsille/blob/main/packages/rsille-playground/README.md" target="_blank" rel="noopener">
+          <span data-i18n-zh>使用指南 ↗</span><span data-i18n-en>Guide ↗</span>
+        </a>
+      </nav>
+      <div class="nav-actions">
+        <div class="lang-toggle" role="group" aria-label="Language">
+          <button type="button" data-lang-btn="zh" class="is-active" aria-pressed="true">中文</button>
+          <button type="button" data-lang-btn="en" aria-pressed="false">EN</button>
+        </div>
+        <a class="nav-gh" href="https://github.com/nidhoggfgg/rsille" target="_blank" rel="noopener">GitHub ↗</a>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section class="dl-hero">
+      <div class="container dl-hero-grid">
+        <div>
+          <a class="dl-back-link" href="/">
+            <span data-i18n-zh>← 返回 rsille 项目主页</span>
+            <span data-i18n-en>← Back to rsille home</span>
+          </a>
+          <div class="eyebrow">
+            <span class="dot" aria-hidden="true"></span>
+            <span>{{playgroundBadge}}</span>
+          </div>
+          <h1>
+            <span data-i18n-zh>下载 rsille Playground</span>
+            <span data-i18n-en>Download rsille Playground</span>
+          </h1>
+          <p class="hero-lead">
+            <span data-i18n-zh>把 <strong>shell 悬浮鲸鱼宠物</strong>、<strong>2D/3D 函数绘图器</strong>、<strong>动态像素角色</strong>与<strong>深海发光水母</strong>装进单个可执行文件。下载即可运行，无需安装 Rust 或 Cargo。</span>
+            <span data-i18n-en>A <strong>live shell whale pet</strong>, <strong>2D/3D math plotter</strong>, <strong>animated pixel characters</strong>, and <strong>deep-sea jellyfish</strong> in one binary. Download and run — no Rust or Cargo needed.</span>
+          </p>
+          <div class="cmd-bar">
+            <div class="cmd-bar-text"><span class="prompt">$</span><code>cargo install rsille-playground --locked</code></div>
+            <button type="button" class="copy-btn" data-copy="cargo install rsille-playground --locked">
+              <span data-i18n-zh>复制</span><span data-i18n-en>Copy</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="trio-stage">
+          <div class="trio-row">
+            <img src="/media/baby-deepseek.gif" width="140" height="112" alt="DeepSeek pixel character">
+            <img src="/media/baby-claude.gif" width="140" height="112" alt="Claude pixel character">
+            <img src="/media/baby-pet.gif" width="140" height="112" alt="Animated pixel character">
+          </div>
+          <div class="trio-caption">
+            <span data-i18n-zh>内置四项体验：rsille pet · draw · ai-babies · jellyfish</span>
+            <span data-i18n-en>Four modes inside: rsille pet · draw · ai-babies · jellyfish</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" style="padding-top: 28px;">
+      <div class="container">
+        {{downloads}}
+
+        <div style="margin-top: 36px;">
+          <div class="section-kicker">Included Commands</div>
+          <div class="play-grid" style="margin-top: 12px; margin-bottom: 0;">
+            <div class="play-card">
+              <span class="play-cmd">rsille pet</span>
+              <p><span data-i18n-zh>浮在真实 shell（或 <code>vim</code>）上方的互动小鲸鱼，按 <code>Ctrl+]</code> 退出。</span><span data-i18n-en>Interactive whale floating over your shell (or <code>vim</code>). Press <code>Ctrl+]</code> to exit.</span></p>
+              <div class="play-proto">Kitty / Sixel</div>
+            </div>
+            <div class="play-card">
+              <span class="play-cmd">rsille draw</span>
+              <p><span data-i18n-zh>内联 2D/3D 函数绘图 REPL，支持 <code>:grid</code> 多图布局。</span><span data-i18n-en>Inline 2D/3D math plotting REPL with <code>:grid</code> multi-panel layouts.</span></p>
+              <div class="play-proto">Kitty / Sixel</div>
+            </div>
+            <div class="play-card">
+              <span class="play-cmd">rsille ai-babies --animate</span>
+              <p><span data-i18n-zh>播放三位像素角色动画，支持 Kitty、Sixel 或纯四分块字符。</span><span data-i18n-en>Animate three pixel characters via Kitty, Sixel, or pure Unicode Quadrants.</span></p>
+              <div class="play-proto">Kitty / Sixel / Quadrant</div>
+            </div>
+            <div class="play-card">
+              <span class="play-cmd">rsille jellyfish</span>
+              <p><span data-i18n-zh>Unicode 半块字符渲染的深海水母水族箱，任意真彩色终端可用。</span><span data-i18n-en>Unicode Half-Block deep-sea jellyfish aquarium for any True Color terminal.</span></p>
+              <div class="play-proto">Any True Color terminal</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-inner">
+      <div>
+        <span class="mono" style="color:var(--mint)">⠿</span>
+        <strong style="color:var(--ink)">rsille</strong>
+        <span> · MIT License</span>
+      </div>
+      <div class="footer-links">
+        <a href="/"><span data-i18n-zh>项目主页</span><span data-i18n-en>Home</span></a>
+        <a href="https://github.com/nidhoggfgg/rsille" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://crates.io/crates/rsille-playground" target="_blank" rel="noopener">crates.io</a>
+        <a href="https://github.com/nidhoggfgg/rsille/releases?q=rsille-playground-v" target="_blank" rel="noopener">GitHub Releases</a>
+      </div>
+    </div>
+  </footer>
+
+  <script src="/app.js" defer></script>
+</body>
+</html>

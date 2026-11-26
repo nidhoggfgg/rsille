@@ -65,12 +65,12 @@ cargo run -p rsille-playground -- pet --help
 
 Playground 独立发版。确认依赖的 `rsille` 版本已发布到 crates.io，将本包的版本号和 `releases/rsille-playground/<版本号>.md` 合入 `main`，然后在该提交上打 `rsille-playground-v<版本号>` tag 并推送。工作流从已发布的 crate 构建各平台的可执行文件，运行 `rsille --help` 和 `rsille draw --headless` 后，将可执行文件、许可证和 `SHA256SUMS-rsille-playground` 校验文件附到该 tag 的 GitHub Release。
 
-### Vercel 下载页
+### Vercel 项目主页与下载页
 
-将本仓库导入 Vercel，项目根目录选仓库根目录，生产分支选 `main`。仓库中的 `vercel.json` 已配置静态构建。部署后，在项目的生产域名后加 `/download` 即可访问下载页；访问域名根路径也会进入此页。可以把这个固定地址放在仓库的 Website 栏或分享给用户。
+将本仓库导入 Vercel，项目根目录选仓库根目录，生产分支选 `main`。仓库中的 `vercel.json` 已配置零框架静态构建。部署后，根路径 `/` 展示 `rsille` 项目主页（含中英双语切换与下载入口），`/download` 提供独立的 Playground 直达下载页。可以把主页或下载页固定地址放在仓库的 Website 栏或分享给用户。
 
-在 Vercel 项目的 **Settings → Git → Deploy Hooks** 为 `main` 创建一个 hook，将完整 URL 存入 GitHub 仓库的 Actions secret `PLAYGROUND_VERCEL_DEPLOY_HOOK`。每次 Playground 正式发版完成后，GitHub Actions 会触发重新构建。也可以在 Vercel 手动重新部署。
+在 Vercel 项目的 **Settings → Git → Deploy Hooks** 为 `main` 创建一个 hook，将完整 URL 存入 GitHub 仓库的 Actions secret `PLAYGROUND_VERCEL_DEPLOY_HOOK`。每次 Playground 正式发版完成后，GitHub Actions 会触发重新构建；建议同时在 Vercel 环境变量里配置只读 `GITHUB_TOKEN`，避免 GitHub API 匿名限流。
 
 构建会从 GitHub 读取最新稳定版 Playground 的五个可执行文件和许可证，按该 Release 的 SHA-256 清单核对后写入静态站点。用户从 Vercel 直接下载。首个含二进制的版本发布前，页面显示发布状态；下载或校验失败会中止构建。
 
-在仓库根目录运行 `node web/download/build.mjs`（Node.js 22 或更新版本），再运行 `python3 -m http.server --directory target/playground-site`，可在本机打开 `http://localhost:8000/download/` 预览。
+在仓库根目录运行 `node web/build.mjs`（Node.js 22 或更新版本；本地离线调试样式可加 `--offline`），再运行 `python3 -m http.server --directory target/site`，可在本机打开 `http://localhost:8000/` 和 `http://localhost:8000/download/` 预览。
