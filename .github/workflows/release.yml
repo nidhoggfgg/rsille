@@ -49,7 +49,7 @@ jobs:
 
       - name: Check formatting and workspace
         run: |
-          cargo fmt -p rsille -p rsille-render -p rsille-canvas -p rsille-tui -p rsille-typst -p rsille-syntect --check
+          cargo fmt -p rsille -p rsille-render -p rsille-canvas -p rsille-tui -p rsille-overlay -p rsille-typst -p rsille-syntect --check
           cargo test --workspace --exclude rsille-playground --all-features
           cargo check --workspace --exclude rsille-playground --all-targets --all-features
 
@@ -58,7 +58,7 @@ jobs:
           RUSTDOCFLAGS: "-D warnings"
         run: |
           cargo doc -p rsille -p rsille-render -p rsille-canvas -p rsille-tui --no-default-features --no-deps
-          cargo doc -p rsille -p rsille-render -p rsille-canvas -p rsille-tui --all-features --no-deps
+          cargo doc -p rsille -p rsille-render -p rsille-canvas -p rsille-tui -p rsille-overlay --all-features --no-deps
 
       - name: Verify package and independent consumers
         run: python3 scripts/check-release.py
@@ -73,7 +73,7 @@ jobs:
         run: |
           packages=()
           metadata=$(cargo metadata --no-deps --format-version 1)
-          for name in rsille-render rsille-canvas rsille-tui rsille; do
+          for name in rsille-render rsille-canvas rsille-tui rsille-overlay rsille; do
             version=$(jq -er --arg name "$name" '.packages[] | select(.name == $name).version' <<< "$metadata")
             status=$(curl -sS --retry 3 -A "rsille release ($GITHUB_SERVER_URL/$GITHUB_REPOSITORY)" \
               -o /dev/null -w '%{http_code}' "https://crates.io/api/v1/crates/$name/$version")

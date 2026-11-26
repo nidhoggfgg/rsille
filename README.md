@@ -75,7 +75,7 @@ Download the executable for your system from the [Playground releases](https://g
 
 ```toml
 [dependencies]
-rsille = "3.3.1"
+rsille = "3.4.0"
 ```
 
 The default `raster` feature provides `RasterCanvas`, the `raster_canvas` widget,

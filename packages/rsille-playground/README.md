@@ -40,7 +40,7 @@ install -m 755 rsille "$HOME/.local/bin/rsille"
 
 如果该目录还未加入 `PATH`，在 shell 配置文件中加入 `export PATH="$HOME/.local/bin:$PATH"`，然后重新打开终端。
 
-**Windows** 在下载目录打开 PowerShell，运行 `.\rsille.exe --help`。要在任意目录运行，把 `rsille.exe` 所在目录加入用户的 `Path`，重新打开终端即可。要从当前源码体验原生 Windows 宠物，在 Windows Terminal 1.22 或更新版本中运行 `cargo run -p rsille-playground -- pet`。
+**Windows** 在下载目录打开 PowerShell，运行 `.\rsille.exe --help`。要在任意目录运行，把 `rsille.exe` 所在目录加入用户的 `Path`，重新打开终端即可。在 Windows Terminal 1.22 或更新版本中运行 `.\rsille.exe pet` 即可启动宠物。
 
 ### 通过 Cargo 安装
 

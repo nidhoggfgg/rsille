@@ -14,7 +14,7 @@ Add these dependencies to your application's `Cargo.toml`:
 
 ```toml
 [dependencies]
-rsille-typst = "0.1.0"
+rsille-typst = "0.1.1"
 # Optional font source used by the example below; you can supply your own fonts.
 typst-assets = { version = "=0.13.1", features = ["fonts"] }
 ```
@@ -51,7 +51,7 @@ This creates pixels, not terminal output. No TTY is needed. Reuse the renderer f
 
 ### Features and versions
 
-The 0.1.0 release depends on `rsille` **3.1.0** with default features enabled. This extension defines no Cargo features; Sixel encoding is always available. The core does not depend on Typst.
+The 0.1.1 release depends on `rsille` **3.4.0** with default features enabled. This extension defines no Cargo features; Sixel encoding is always available. The core does not depend on Typst.
 
 `typst` and `typst-render` are pinned to **0.13.1**; use matching `typst-assets = "=0.13.1"` if choosing that font source. Keep your application's lockfile to pin transitive dependencies.
 
@@ -61,8 +61,8 @@ For terminal output, add a direct core dependency:
 
 ```toml
 [dependencies]
-rsille-typst = "0.1.0"
-rsille = "3.1.0"
+rsille-typst = "0.1.1"
+rsille = "3.4.0"
 ```
 
 This helper accepts the rendered canvas and the actual backend's validated cell metrics:
@@ -107,7 +107,7 @@ It uses `RasterScale::Original`, reserving the formula's rows plus a title, with
 
 ### Terminal compatibility and cell size
 
-The demo assumes that **both the terminal and any multiplexer** support Sixel, local EL 2 graphics erasure, images scrolling with text, stable palettes, non-scrolling positioned output, and transparent padding in partial final six-pixel bands. It sets `reliable_inline_erase: true`, not full-screen `reliable_erase`. **Capabilities are not automatically detected.** See [`RasterCapabilities`](https://docs.rs/rsille/3.1.0/rsille/render/raster_output/struct.RasterCapabilities.html) for the contract.
+The demo assumes that **both the terminal and any multiplexer** support Sixel, local EL 2 graphics erasure, images scrolling with text, stable palettes, non-scrolling positioned output, and transparent padding in partial final six-pixel bands. It sets `reliable_inline_erase: true`, not full-screen `reliable_erase`. **Capabilities are not automatically detected.** See [`RasterCapabilities`](https://docs.rs/rsille/3.4.0/rsille/render/raster_output/struct.RasterCapabilities.html) for the contract.
 
 Without an override, `CellPixels::resolve(None)` probes before the input reader starts: OS metrics first, then a CSI 16 t query on Unix or Windows with a 500 ms timeout. Queries require terminal stdin/stdout. If discovery fails, supply `--cell-pixels WxH` using **measured physical pixels per character cell**, not columns × rows, window pixels, or font points. For example, a 960×648 text area with 120 columns and 36 rows has 8×18 pixels per cell.
 
@@ -189,7 +189,7 @@ Use `--offline` only when the required registry dependencies are cached.
 For a release, update this crate's version and documentation, add
 `releases/rsille-typst/<version>.md`, and merge the changes into `main`.
 Ensure the required core version is already published, then create and push
-`rsille-typst-v<version>` (for example, `rsille-typst-v0.1.0`).
+`rsille-typst-v<version>` (for example, `rsille-typst-v0.1.1`).
 The `Release rsille-typst` workflow validates the tag, runs checks, publishes
 using the repository's `CARGO_REGISTRY_TOKEN` secret, and attaches the crate
 and checksum to a GitHub Release without replacing the core's Latest release.

@@ -14,7 +14,7 @@
 
 ```toml
 [dependencies]
-rsille-typst = "0.1.0"
+rsille-typst = "0.1.1"
 # 下方示例使用的可选字体来源；也可以提供自己的字体。
 typst-assets = { version = "=0.13.1", features = ["fonts"] }
 ```
@@ -51,7 +51,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ### Feature 与版本
 
-0.1.0 版本依赖 `rsille` **3.1.0**，并启用其默认 features。本扩展不定义任何 Cargo feature；Sixel 编码始终可用。核心不依赖 Typst。
+0.1.1 版本依赖 `rsille` **3.4.0**，并启用其默认 features。本扩展不定义任何 Cargo feature；Sixel 编码始终可用。核心不依赖 Typst。
 
 `typst` 和 `typst-render` 固定为 **0.13.1**；若使用字体资产包，请选择匹配的 `typst-assets = "=0.13.1"`。应用应保留自己的 lockfile，以固定传递依赖。
 
@@ -61,8 +61,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ```toml
 [dependencies]
-rsille-typst = "0.1.0"
-rsille = "3.1.0"
+rsille-typst = "0.1.1"
+rsille = "3.4.0"
 ```
 
 以下函数接收已渲染的 canvas，以及实际后端使用的、已验证的字符格像素尺寸：
@@ -107,7 +107,7 @@ cargo run -p rsille-typst --example formula -- --headless --cell-pixels 10x20
 
 ### 终端兼容性与字符格尺寸
 
-演示要求**终端及任何复用器**均支持 Sixel、局部 EL 2 图形清除、图像随文本滚动、稳定调色板、不滚屏的定位输出，以及最后不足六像素带的透明补齐。配置使用 `reliable_inline_erase: true`，而非全屏 `reliable_erase`。**不会自动检测这些能力。** 具体约定见 [`RasterCapabilities`](https://docs.rs/rsille/3.1.0/rsille/render/raster_output/struct.RasterCapabilities.html)。
+演示要求**终端及任何复用器**均支持 Sixel、局部 EL 2 图形清除、图像随文本滚动、稳定调色板、不滚屏的定位输出，以及最后不足六像素带的透明补齐。配置使用 `reliable_inline_erase: true`，而非全屏 `reliable_erase`。**不会自动检测这些能力。** 具体约定见 [`RasterCapabilities`](https://docs.rs/rsille/3.4.0/rsille/render/raster_output/struct.RasterCapabilities.html)。
 
 未提供 override 时，`CellPixels::resolve(None)` 在输入 reader 启动前探测：先读取 OS 指标，再尝试 Unix 或 Windows 终端的 CSI 16 t 查询，超时为 500 ms。查询要求 stdin/stdout 连接到终端。探测失败时，通过 `--cell-pixels WxH` 提供**实测的单个字符格物理像素尺寸**，不是列数×行数、窗口像素或字体点数。例如，960×648 像素的文本区域有 120 列、36 行，则每格为 8×18 像素。
 
@@ -187,7 +187,7 @@ headless 示例。仅当所需 registry 依赖均已缓存时使用 `--offline`�
 
 发布前更新本 crate 的版本号和文档，新增 `releases/rsille-typst/<版本号>.md`，
 并将修改合入 `main`。确认所需核心版本已经发布后，创建并推送
-`rsille-typst-v<版本号>`（例如 `rsille-typst-v0.1.0`）。
+`rsille-typst-v<版本号>`（例如 `rsille-typst-v0.1.1`）。
 `Release rsille-typst` workflow 会校验 tag、执行检查，使用仓库的
 `CARGO_REGISTRY_TOKEN` secret 发布，并将 crate 和校验文件附加到 GitHub Release，
 不会替换核心的 Latest release。推送发布 tag 会真正发布到 crates.io；本地检查

@@ -72,7 +72,7 @@ npx skills add nidhoggfgg/rsille.skills --skill rsille
 
 ```toml
 [dependencies]
-rsille = "3.3.1"
+rsille = "3.4.0"
 ```
 
 默认启用 `raster`，提供 `RasterCanvas`、`raster_canvas` 组件以及 Kitty 和 Sixel 输出。

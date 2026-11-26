@@ -22,7 +22,7 @@ def main():
         ["cargo", "metadata", "--no-deps", "--format-version", "1"], cwd=root))
     target = Path(metadata["target_directory"])
     packages = {package["name"]: package for package in metadata["packages"]}
-    archives = ("rsille-render", "rsille-canvas", "rsille-tui", "rsille", "rsille-syntect")
+    archives = ("rsille-render", "rsille-canvas", "rsille-tui", "rsille-overlay", "rsille", "rsille-syntect")
     selection = [arg for name in archives for arg in ("-p", name)]
     for name in archives:
         registries = packages[name]["publish"]
@@ -76,6 +76,7 @@ rsille = {{ version = "={packages["rsille"]["version"]}", default-features = fal
 tokio = {{ version = "1", features = ["rt", "time", "net"] }}
 [features]
 raster = ["rsille/raster"]
+overlay = ["rsille/overlay"]
 ''')
         workflow = root / "packages/rsille-tui/examples/basics/workflow.rs"
         program = workflow.read_text().replace("use rsille_tui::", "use rsille::tui::")

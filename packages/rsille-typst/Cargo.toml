@@ -1,6 +1,6 @@
 [package]
 name = "rsille-typst"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 authors = ["nidhoggfgg <nidhoggfgg@gmail.com>"]
 license = "MIT"
@@ -14,7 +14,7 @@ include = ["src/**", "examples/**", "tests/**", "/README.md", "/README_cn.md", "
 
 
 [dependencies]
-rsille = { version = "3.1.0", path = "../.." }
+rsille = { version = "3.4.0", path = "../.." }
 typst = "=0.13.1"
 typst-render = "=0.13.1"
 
