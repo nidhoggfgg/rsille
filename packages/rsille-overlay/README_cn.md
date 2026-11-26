@@ -52,7 +52,16 @@ Session::new().mouse(true).run(overlay)?;
 cargo run -p rsille-overlay --example status_badge     # 上一条命令的结果
 cargo run -p rsille-overlay --example click_counter    # shell 上的两个方框
 cargo run -p rsille-overlay --example click_counter -- top
+cargo run -p rsille-overlay --example yes_engineer     # 点击输入 "yes, continue" 并回车
+cargo run -p rsille-overlay --example todolist
+cargo run -p rsille-overlay --example folder_tree
 ```
+
+待办清单内置三条英文任务。点击任务可勾选或取消勾选，点击 **Clear done** 可清除本次会话中已完成的任务。
+
+目录树从启动示例时的工作目录开始，点击文件夹即可展开或收起，条目较多时可用滚轮浏览。在空白 shell 提示符下，选中目录并点击 **cd here**，当前 shell 就会切换到该目录。拖动标题可以移动面板。
+
+目录树通过 `WidgetOverlay::primary_screen_only()` 只在主屏幕显示。子程序进入备用屏幕时，目录树隐藏并停止接收点击。回到主屏幕后恢复原来的位置和展开状态。这个设置在 Kitty 图形会话中同样生效。
 
 随时按 **Ctrl+]** 退出会话，也可以在 shell 中输入 `exit`。
 

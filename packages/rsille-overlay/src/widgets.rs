@@ -42,6 +42,10 @@ pub struct WidgetOverlay<S, M: Send + 'static> {
     stale: bool,
     poke: bool,
     hovered: bool,
+    drag_title: bool,
+    drag_column: Option<u16>,
+    primary_screen_only: bool,
+    suspended: bool,
 }
 
 impl<S, M: Send + 'static> WidgetOverlay<S, M> {
@@ -62,12 +66,42 @@ impl<S, M: Send + 'static> WidgetOverlay<S, M> {
             stale: true,
             poke: true,
             hovered: false,
+            drag_title: false,
+            drag_column: None,
+            primary_screen_only: false,
+            suspended: false,
         }
     }
 
     pub fn anchor(mut self, anchor: Anchor) -> Self {
         self.anchor = anchor;
         self
+    }
+
+    /// Reserve the top row as a handle for moving the box with the left mouse button.
+    pub fn draggable_title(mut self) -> Self {
+        self.drag_title = true;
+        self
+    }
+
+    /// Hide this widget and suspend its pointer interactions while the child
+    /// uses the alternate screen, including in Kitty graphics sessions.
+    pub fn primary_screen_only(mut self) -> Self {
+        self.primary_screen_only = true;
+        self
+    }
+
+    fn select_screen(&mut self, alternate: bool) {
+        let suspend = self.primary_screen_only && alternate;
+        if suspend && !self.suspended {
+            // The session erases the old frame before forwarding the switch.
+            // Drop its hit area and any clicks still waiting for a widget step.
+            self.painted = None;
+            self.events.clear();
+            self.pointer_reset();
+            self.stale = true;
+        }
+        self.suspended = suspend;
     }
 
     /// Cells kept free between the box and the anchored edges (default `(1, 0)`).
@@ -174,6 +208,10 @@ fn modifiers(button: u16) -> KeyModifiers {
 
 impl<S, M: Send + 'static> Overlay for WidgetOverlay<S, M> {
     fn draw(&mut self, cx: &mut Context<'_>, out: &mut Vec<u8>) -> io::Result<()> {
+        self.select_screen(cx.alternate);
+        if self.suspended {
+            return Ok(());
+        }
         let events = std::mem::take(&mut self.events);
         let step = self.runtime.step(&events).map_err(io::Error::other)?;
         self.poke = false;
@@ -209,6 +247,9 @@ impl<S, M: Send + 'static> Overlay for WidgetOverlay<S, M> {
     }
 
     fn wake_at(&mut self, now: Instant) -> Option<Instant> {
+        if self.suspended {
+            return None;
+        }
         if self.poke || !self.events.is_empty() {
             return Some(now);
         }
@@ -220,8 +261,27 @@ impl<S, M: Send + 'static> Overlay for WidgetOverlay<S, M> {
     }
 
     fn pointer(&mut self, pointer: Pointer) {
-        let Some(area) = self.painted else { return };
         let inside = self.local(&pointer);
+        if self.drag_title && pointer.kind == MouseKind::LeftPress {
+            self.drag_column = inside.and_then(|(x, y)| (y == 0).then_some(x));
+            if self.drag_column.is_some() {
+                return;
+            }
+        }
+        if let Some(x) = self.drag_column {
+            if matches!(pointer.kind, MouseKind::LeftDrag | MouseKind::LeftRelease) {
+                self.anchor = Anchor::At(
+                    pointer.col.saturating_sub(1).saturating_sub(x),
+                    pointer.row.saturating_sub(1),
+                );
+                self.poke = true;
+                if pointer.kind == MouseKind::LeftRelease {
+                    self.drag_column = None;
+                }
+                return;
+            }
+        }
+        let Some(area) = self.painted else { return };
         let kind = match pointer.kind {
             MouseKind::LeftPress => MouseEventKind::Down(MouseButton::Left),
             MouseKind::LeftDrag => MouseEventKind::Drag(MouseButton::Left),
@@ -260,6 +320,7 @@ impl<S, M: Send + 'static> Overlay for WidgetOverlay<S, M> {
     }
 
     fn pointer_reset(&mut self) {
+        self.drag_column = None;
         if self.hovered {
             self.hovered = false;
             self.events.push(Event::Mouse(MouseEvent {
@@ -269,6 +330,11 @@ impl<S, M: Send + 'static> Overlay for WidgetOverlay<S, M> {
                 modifiers: KeyModifiers::empty(),
             }));
         }
+    }
+
+    fn output(&mut self, _bytes: &[u8], cx: &mut Context<'_>) {
+        // Mouse input can arrive between the screen switch and the next draw.
+        self.select_screen(cx.alternate);
     }
 
     fn shell(&mut self, event: ShellEvent<'_>) {
@@ -361,6 +427,31 @@ mod tests {
         assert!(grid.grid().contents().contains("n=1"));
         // Nothing changed: no bytes.
         assert!(draw(&mut overlay, &mut screen).is_empty());
+    }
+
+    #[test]
+    fn dragging_the_title_restores_the_old_area_and_moves_the_hit_target() {
+        let mut overlay = counter().draggable_title();
+        let mut screen = crate::Screen::new(5, 20, (1, 1));
+        let mut grid = crate::Screen::new(5, 20, (1, 1)).unwrap();
+        let background = b"\x1b[5;12Horiginal";
+        screen.as_mut().unwrap().feed(background);
+        grid.feed(background);
+        grid.feed(&draw(&mut overlay, &mut screen));
+        overlay.pointer(click(14, 5));
+        overlay.pointer(Pointer {
+            kind: MouseKind::LeftDrag,
+            ..click(4, 2)
+        });
+        overlay.pointer(Pointer {
+            kind: MouseKind::LeftRelease,
+            ..click(4, 2)
+        });
+        grid.feed(&draw(&mut overlay, &mut screen));
+        assert_eq!(grid.grid().contents_between(4, 11, 4, 19), "original");
+        assert!(grid.grid().contents_between(1, 1, 1, 9).contains("n=0"));
+        assert!(overlay.hit(&click(4, 2)));
+        assert!(!overlay.hit(&click(14, 5)));
     }
 
     #[test]

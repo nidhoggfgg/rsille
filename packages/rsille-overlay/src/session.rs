@@ -41,7 +41,11 @@ fn measured_pixels() -> Option<CellPixels> {
 }
 
 /// Requires exclusive use of stdin, stdout and the spawned child's wait status.
-pub fn run<O: Overlay + ?Sized>(options: Session, overlay: &mut O) -> io::Result<i32> {
+pub fn run<O: Overlay + ?Sized>(
+    options: Session,
+    overlay: &mut O,
+    widget_input: Option<std::sync::mpsc::Receiver<Vec<u8>>>,
+) -> io::Result<i32> {
     let direct = !options.command.is_empty();
     let program = options
         .command
@@ -289,6 +293,11 @@ pub fn run<O: Overlay + ?Sized>(options: Session, overlay: &mut O) -> io::Result
             }
         }
         out.flush()?;
+        if pending.is_empty() {
+            if let Some(bytes) = widget_input.as_ref().and_then(|rx| rx.try_recv().ok()) {
+                pending.extend(bytes);
+            }
+        }
         let reading = pending.is_empty();
         let next_tick = epoch + TICK * (tick_index as u32 + 1);
         let timeout = [due, wake, input_deadline]
@@ -366,7 +375,11 @@ pub fn run<O: Overlay + ?Sized>(options: Session, overlay: &mut O) -> io::Result
                         let (col, row) = report.cell(modes.encoding, (pixels.width, pixels.height));
                         let pixel = (modes.encoding == 1016).then_some((report.x, report.y));
                         let p = pointer(col, row, pixel);
-                        if buttons.overlay_owns(report, overlay.hit(&p)) {
+                        let hit = overlay.hit(&p);
+                        // Text widgets scroll in cells on both PTY backends.
+                        // Shared Kitty images leave the wheel with the child.
+                        let widget_scroll = cfg!(windows) && !shared && hit && p.scroll().is_some();
+                        if widget_scroll || buttons.overlay_owns(report, hit) {
                             overlay.pointer(p);
                         } else {
                             if report.is_hover() {

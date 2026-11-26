@@ -34,6 +34,57 @@ fn session_child() {
     let Some(mode) = std::env::var_os(CHILD) else {
         return;
     };
+    if mode == "kitty-screen-switch" {
+        use rsille_overlay::{CellPixels, InlineRasterSession, Stack};
+
+        let counter = App::new(0)
+            .update(|n, (), _| *n += 1)
+            .view(|n| button(format!("count={n}")).on_click(|| ()))
+            .build();
+        let marker = App::new(())
+            .update(|_, (), _| {})
+            .view(|_| label("marker"))
+            .build();
+        let layers = Stack::new()
+            .push(WidgetOverlay::new(counter, (12, 1)).primary_screen_only())
+            .push(WidgetOverlay::new(marker, (6, 1)).anchor(Anchor::TopLeft));
+        let child = r#"
+            stty -echo
+            read -r start
+            printf '\033[?1049h\033[?1000h\033[?1006h\033[3;1Halt-child'
+            IFS= read -r click
+            [ "$click" = "$(printf '\033[<0;56;12M\033[<0;56;12m')" ] || exit 3
+            printf '\033[?1000l\033[?1006l\033[?1049l\r\nmouse-delivered\r\n'
+            read -r finish
+        "#;
+        let status = Session::new()
+            .raster_session(InlineRasterSession::Kitty(CellPixels {
+                width: 8,
+                height: 16,
+            }))
+            .command(["/bin/sh", "-c", child])
+            .mouse(true)
+            .run(layers)
+            .unwrap();
+        std::process::exit(status);
+    }
+    if mode == "widget-input" {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let app = App::new(())
+            .update(move |_, (), _| tx.send(b"yes, continue".to_vec()).unwrap())
+            .view(|_| button("Yes").on_click(|| ()))
+            .build();
+        let status = Session::new()
+            .command([
+                "/bin/sh",
+                "-c",
+                "read -r line && printf '<%s>\\n' \"$line\"",
+            ])
+            .mouse(true)
+            .run_with_input(WidgetOverlay::new(app, (7, 1)), rx)
+            .unwrap();
+        std::process::exit(status);
+    }
     // Shows "<status> <command line>" for the last command.
     let app = App::new(String::new())
         .update(|log: &mut String, msg, _ctx| match msg {
@@ -251,6 +302,44 @@ fn zsh_commands_reach_widgets_and_clicks_stay_out_of_the_shell() {
     check_shell("zsh", "$?", |home| {
         std::fs::write(home.join(".zshrc"), "PROMPT='$ '\n").unwrap();
     });
+}
+
+#[test]
+fn widget_input_reaches_the_child_without_submitting_the_line() {
+    let home = tempfile::tempdir().unwrap();
+    let mut term = Terminal::spawn("widget-input", "/bin/sh", home.path());
+    term.wait_for("the button", |s| s.contains("Yes"));
+    term.send(b"prefix-\x1b[<0;56;12M\x1b[<0;56;12m");
+    term.wait_for("the typed text", |s| s.contains("prefix-yes, continue"));
+    term.send(b"-suffix\r");
+    term.wait_for("the submitted line", |s| {
+        s.contains("<prefix-yes, continue-suffix>")
+    });
+    assert_eq!(term.exit_status(), 0);
+}
+
+#[test]
+fn primary_screen_only_widget_hides_and_relinquishes_clicks_in_a_kitty_session() {
+    let home = tempfile::tempdir().unwrap();
+    let mut term = Terminal::spawn("kitty-screen-switch", "/bin/sh", home.path());
+    let click = b"\x1b[<0;56;12M\x1b[<0;56;12m";
+    term.wait_for("the primary widget", |s| s.contains("count=0"));
+    term.send(click);
+    term.wait_for("the changed state", |s| s.contains("count=1"));
+    term.send(b"\r");
+    // The other layer repainting proves the Kitty alternate-screen draw ran.
+    term.wait_for("only the unrestricted layer", |s| {
+        s.contains("alt-child") && s.contains("marker") && !s.contains("count=")
+    });
+    term.send(click);
+    term.send(b"\r");
+    term.wait_for("the restored primary widget", |s| {
+        s.contains("mouse-delivered") && s.contains("count=1")
+    });
+    term.send(click);
+    term.wait_for("the restored hit target", |s| s.contains("count=2"));
+    term.send(b"\r");
+    assert_eq!(term.exit_status(), 0);
 }
 
 #[test]

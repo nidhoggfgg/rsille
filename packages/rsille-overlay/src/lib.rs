@@ -404,14 +404,32 @@ impl Session {
     /// status of a [`Session::command`] that exited on its own, otherwise 0.
     ///
     /// Requires exclusive use of stdin and stdout.
-    pub fn run(self, mut overlay: impl Overlay) -> io::Result<i32> {
+    pub fn run(self, overlay: impl Overlay) -> io::Result<i32> {
+        self.run_inner(overlay, None)
+    }
+
+    /// Run as in [`Self::run`], also forwarding bytes from widget callbacks to
+    /// the child. Messages are queued verbatim, with no implicit newline.
+    pub fn run_with_input(
+        self,
+        overlay: impl Overlay,
+        input: std::sync::mpsc::Receiver<Vec<u8>>,
+    ) -> io::Result<i32> {
+        self.run_inner(overlay, Some(input))
+    }
+
+    fn run_inner(
+        self,
+        mut overlay: impl Overlay,
+        input: Option<std::sync::mpsc::Receiver<Vec<u8>>>,
+    ) -> io::Result<i32> {
         #[cfg(any(unix, windows))]
         {
-            session::run(self, &mut overlay)
+            session::run(self, &mut overlay, input)
         }
         #[cfg(not(any(unix, windows)))]
         {
-            let _ = &mut overlay;
+            let _ = (&mut overlay, input);
             Err(io::Error::new(
                 io::ErrorKind::Unsupported,
                 "overlay sessions require Unix PTYs or Windows ConPTY",

@@ -64,7 +64,23 @@ Run the examples from bash, fish or zsh:
 cargo run -p rsille-overlay --example status_badge     # last command's status
 cargo run -p rsille-overlay --example click_counter    # two boxes over your shell
 cargo run -p rsille-overlay --example click_counter -- top
+cargo run -p rsille-overlay --example yes_engineer     # click to send "yes, continue" and Enter
+cargo run -p rsille-overlay --example todolist
+cargo run -p rsille-overlay --example folder_tree
 ```
+
+The checklist starts with three English tasks. Click to toggle a task and use
+**Clear done** to remove completed tasks for this session.
+
+The folder tree starts in the directory where you launched the example. Click
+a directory to expand or collapse it, and use the mouse wheel to browse longer
+listings. At an empty shell prompt, select a directory and click **cd here** to
+change the shell's working directory. Drag the title to reposition the panel.
+
+The folder tree uses `WidgetOverlay::primary_screen_only()`. Switching to the
+child's alternate screen hides the tree and disables its hit area, including
+in Kitty graphics sessions. Returning to the primary screen restores its
+position and expanded folders.
 
 Press **Ctrl+]** to leave a session at any time, or `exit` the shell.
 
