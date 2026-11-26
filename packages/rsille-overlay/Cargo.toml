@@ -1,0 +1,28 @@
+[package]
+name = "rsille-overlay"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Draw rsille graphics and widgets over a live shell session"
+repository = "https://github.com/nidhoggfgg/rsille.git"
+readme = "README.md"
+keywords = ["terminal", "overlay", "pty", "shell", "tui"]
+categories = ["command-line-interface"]
+
+[dependencies]
+crossterm = { workspace = true }
+rsille-render = { workspace = true, features = ["raster"] }
+rsille-tui = { workspace = true, features = ["raster"] }
+vt100 = "0.18.1"
+
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true }
+tempfile = "3"
+
+[[example]]
+name = "status_badge"
+path = "examples/status_badge.rs"
+
+[[example]]
+name = "click_counter"
+path = "examples/click_counter.rs"

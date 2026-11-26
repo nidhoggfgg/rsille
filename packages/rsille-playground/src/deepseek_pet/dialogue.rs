@@ -164,6 +164,27 @@ impl Catalog {
         }
     }
 
+    /// The rule for a command line about to run: `None` for pipelines,
+    /// compound or very long lines, `Some(0)` for other simple commands.
+    pub fn running(&self, line: &str) -> Option<usize> {
+        let line = simple_command(line)?;
+        let mut words = line.as_str();
+        loop {
+            if let Some(id) = self.commands.get(words) {
+                return Some(*id);
+            }
+            match words.rsplit_once(' ') {
+                Some((rest, _)) => words = rest,
+                None => return Some(0),
+            }
+        }
+    }
+
+    /// The rule previewed for a whole command line being edited.
+    pub fn editing_line(&self, line: &str) -> Option<usize> {
+        self.editing(&simple_command(line)?)
+    }
+
     pub fn event(&self, phase: u8, id: usize) -> Option<CommandEvent<'_>> {
         let rule = id.checked_sub(1).and_then(|i| self.rules.get(i));
         let (phase, pool, lines) = match (rule, phase) {
@@ -192,7 +213,17 @@ impl Catalog {
     }
 }
 
-// Both shell hooks embed these literal words in case statements.
+/// Collapse whitespace in a simple foreground command. Exit statuses are
+/// attributed only to these, so pipelines and compound lines are rejected.
+fn simple_command(line: &str) -> Option<String> {
+    if line.chars().count() > 4096 || line.contains([';', '&', '|', '(', ')', '<', '>', '`', '\n'])
+    {
+        return None;
+    }
+    Some(line.split_whitespace().collect::<Vec<_>>().join(" "))
+}
+
+// Patterns are plain words, so typed-prefix matching stays unambiguous.
 fn valid_pattern(name: &str) -> bool {
     name.split(' ').all(|word| {
         !word.is_empty()
@@ -275,6 +306,33 @@ groups:
         }
         assert_ne!(catalog.commands["git diff"], catalog.commands["git status"]);
         assert!(catalog.event(b'+', catalog.families["task"]).is_none());
+    }
+
+    #[test]
+    fn classifies_command_lines_like_the_shell_hooks_did() {
+        let catalog = Catalog::load(None).unwrap();
+        let status = catalog.commands["git status"];
+        let git = catalog.families["git"];
+        assert_eq!(catalog.running("  git \t status   -s "), Some(status));
+        assert_eq!(catalog.running("git statusx"), Some(0));
+        assert_eq!(catalog.running("frobnicate --now"), Some(0));
+        assert_eq!(catalog.running(""), Some(0));
+        for compound in [
+            "git status | cat",
+            "ls; pwd",
+            "a && b",
+            "echo `x`",
+            "a\nb",
+            "cat < f",
+        ] {
+            assert_eq!(catalog.running(compound), None, "{compound}");
+            assert_eq!(catalog.editing_line(compound), None, "{compound}");
+        }
+        assert_eq!(catalog.running(&"x".repeat(4097)), None);
+        assert_eq!(catalog.editing_line("git  sta"), Some(git));
+        assert_eq!(catalog.editing_line("git status "), Some(status));
+        assert_eq!(catalog.editing_line("frobnicate"), None);
+        assert_eq!(catalog.editing_line(""), None);
     }
 
     #[test]

@@ -1,7 +1,7 @@
 use crate::deepseek_pet::{
     animation::{self, Clip},
     food::{Foraging, Treat},
-    mouse::Pursuit,
+    pursuit::Pursuit,
     Feature,
 };
 use std::collections::BTreeSet;

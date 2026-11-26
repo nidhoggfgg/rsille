@@ -42,6 +42,8 @@ Function Plotter 为离线 RGB 预览，非终端录屏，
   不需要组件树时，也能直接使用 Canvas 和渲染器。
 - **交互和异步逻辑也能自动化测试。** 无需真实终端即可回放输入、检查渲染帧，
   用手动时钟和执行器控制计时器与后台任务。
+- **直接在你的 shell 上作画。** [rsille-overlay](packages/rsille-overlay/README.md)
+  在 PTY 中运行 shell，把组件或图像浮在上面，并随你执行的命令做出反应。`rsille pet` 就基于它。
 
 **更多示例**：
 [方块沙盒](examples/minecraft/README_cn.md)、

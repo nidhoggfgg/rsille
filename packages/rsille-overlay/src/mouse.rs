@@ -106,7 +106,7 @@ impl Report<'_> {
 pub struct Buttons(u16);
 
 impl Buttons {
-    pub fn pet_owns(&mut self, r: Report<'_>, hit: bool) -> bool {
+    pub fn overlay_owns(&mut self, r: Report<'_>, hit: bool) -> bool {
         let wheel = r.button & 64 != 0;
         let hover = r.button & 32 != 0 && r.button & 3 == 3;
         // The overlay handles clicks and drags. The child keeps its subscribed
@@ -133,47 +133,18 @@ impl Buttons {
     }
 }
 
+/// The gesture a pointer report represents.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MouseKind {
     LeftPress,
+    /// Motion with the left button held.
     LeftDrag,
     LeftRelease,
     RightPress,
+    /// Motion without the left button held (hover, or other buttons dragging).
     Motion,
+    /// Wheel, middle button, right release and other reports.
     Other,
-}
-
-/// Tracks the latest pointer position once curiosity starts a pursuit.
-#[derive(Default)]
-pub struct Pursuit {
-    pub target: Option<(u16, u16)>,
-    pub curiosity: u32,
-}
-
-impl Pursuit {
-    pub fn motion(&mut self, cell: (u16, u16), receptive: bool, cooldown: &mut u16) {
-        if self.target.is_some() {
-            self.target = Some(cell);
-        } else if receptive && *cooldown == 0 {
-            self.curiosity = self
-                .curiosity
-                .wrapping_mul(1664525)
-                .wrapping_add(1013904223);
-            *cooldown = 8;
-            // A quarter of eligible pointer movements start a chase.
-            if self.curiosity >> 30 == 0 {
-                *cooldown = 48;
-                self.target = Some(cell);
-            }
-        }
-    }
-
-    pub fn new(curiosity: u32) -> Self {
-        Self {
-            curiosity,
-            ..Self::default()
-        }
-    }
 }
 
 impl Mouse {
@@ -281,13 +252,18 @@ mod tests {
         let mut mouse = Mouse::default();
         let mut buttons = Buttons::default();
         let mut out = VecDeque::new();
-        let pet_drag = b"\x1b[<0;10;1M\x1b[<32;2;1M\x1b[<0;2;1m";
+        let overlay_drag = b"\x1b[<0;10;1M\x1b[<32;2;1M\x1b[<0;2;1m";
         let app_drag = b"\x1b[<4;2;1M\x1b[<36;10;1M\x1b[<4;10;1m";
         let wheel = b"\x1b[<64;10;1M";
         let paste = b"\x1b[200~\x1b[<0;10;1M\x1b[201~";
-        for &byte in pet_drag.iter().chain(app_drag).chain(wheel).chain(paste) {
+        for &byte in overlay_drag
+            .iter()
+            .chain(app_drag)
+            .chain(wheel)
+            .chain(paste)
+        {
             mouse.feed(&[byte], &mut out, |r, out| {
-                if !buttons.pet_owns(r, r.x == 10) {
+                if !buttons.overlay_owns(r, r.x == 10) {
                     r.forward(
                         MouseModes {
                             tracking: 1002,

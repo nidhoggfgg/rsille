@@ -9,15 +9,15 @@ mod speech;
 use crate::deepseek_pet::{
     animation::{self, SIDE},
     food::{Treat, TreatState},
-    mouse::MouseKind,
     Feature,
 };
 use behavior::{Life, Mood};
 use fish::{FishBite, FishIcon};
 use menu::{Action, Menu};
 use motion::{Motion, Movement};
+use rsille_overlay::{screen::erase_area, MouseKind};
 
-use rsille::render::area::{Area, Position, Size};
+use rsille::render::area::{Area, Position};
 use speech::{Bubble, Speech};
 use std::{
     collections::BTreeSet,
@@ -30,25 +30,6 @@ use std::{
 pub(super) const FRAMES_PER_TICK: u64 = 3;
 const MAX_SIDE: usize = 192;
 const FISH_FRAME_INTERVAL: Duration = Duration::from_nanos(1_000_000_000u64.div_ceil(30));
-
-fn erase_area(
-    area: Area,
-    cols: u16,
-    rows: u16,
-    screen: Option<&crate::deepseek_pet::screen::Screen>,
-    out: &mut Vec<u8>,
-) {
-    let viewport = Area::from(Size::from((cols, rows)));
-    let Some(visible) = area.clamp_to(&viewport) else {
-        return;
-    };
-    let col = visible.x() + 1;
-    let width = visible.width();
-    out.extend_from_slice(b"\x1b[0m");
-    for y in visible.y()..visible.y() + visible.height() {
-        crate::deepseek_pet::screen::clear_span(screen, col, y + 1, width, out);
-    }
-}
 
 /// Return (column, row, SGR-colored text) runs for a cleared viewport.
 /// Transparent cells and the rightmost column are never painted.
@@ -139,7 +120,7 @@ impl Image {
         next: Option<&Image>,
         cols: u16,
         rows: u16,
-        screen: Option<&crate::deepseek_pet::screen::Screen>,
+        screen: Option<&rsille_overlay::screen::Screen>,
         out: &mut Vec<u8>,
     ) {
         if self.col > cols || self.row > rows {
@@ -168,7 +149,7 @@ impl Image {
                     if out.len() == start {
                         out.extend_from_slice(b"\x1b[0m");
                     }
-                    crate::deepseek_pet::screen::clear_span(
+                    rsille_overlay::screen::clear_span(
                         screen,
                         col as u16,
                         row,
@@ -251,7 +232,7 @@ struct WhaleGrab {
 
 pub struct Pet<'a> {
     pub kitty: Option<&'a KittySprites>,
-    pub(crate) screen: Option<crate::deepseek_pet::screen::Screen>,
+    pub(crate) screen: Option<rsille_overlay::screen::Screen>,
     catalog: &'a crate::deepseek_pet::dialogue::Catalog,
     features: BTreeSet<Feature>,
     speech: Option<Speech<'a>>,
@@ -1105,7 +1086,8 @@ mod tests {
         let commands = std::str::from_utf8(&out).unwrap();
         assert!(commands.contains("z=2147483647,c=14,r=5,"));
         assert!(commands.is_ascii());
-        let mut grid = vt100::Parser::new(24.try_into().unwrap(), 80.try_into().unwrap(), 0);
+        let mut grid =
+            rsille_overlay::vt100::Parser::new(24.try_into().unwrap(), 80.try_into().unwrap(), 0);
         for row in 1..=24 {
             grid.process(format!("\x1b[{row};1H{}", "v".repeat(79)).as_bytes());
         }
@@ -1137,7 +1119,11 @@ mod tests {
             )
             .unwrap();
             assert_eq!(pet.life.mood, Mood::Burp);
-            let mut grid = vt100::Parser::new(24.try_into().unwrap(), 80.try_into().unwrap(), 0);
+            let mut grid = rsille_overlay::vt100::Parser::new(
+                24.try_into().unwrap(),
+                80.try_into().unwrap(),
+                0,
+            );
             grid.process(b"\x1b[20;69Habc");
             grid.process(&out);
             grid.process(b"\x1b[1;1Hunrelated");
@@ -1151,9 +1137,10 @@ mod tests {
     fn moving_and_hiding_the_pet_and_bubble_restores_shell_text() {
         let catalog = crate::deepseek_pet::dialogue::Catalog::load(None).unwrap();
         let mut pet = Pet::new(&catalog, [Feature::Speech, Feature::Roam].into());
-        let backing = crate::deepseek_pet::screen::Screen::new(24, 80, (1, 1)).unwrap();
+        let backing = rsille_overlay::screen::Screen::new(24, 80, (1, 1)).unwrap();
         pet.screen = Some(backing);
-        let mut visible = vt100::Parser::new(24.try_into().unwrap(), 80.try_into().unwrap(), 0);
+        let mut visible =
+            rsille_overlay::vt100::Parser::new(24.try_into().unwrap(), 80.try_into().unwrap(), 0);
         let mut shell = Vec::new();
         for row in 1..=24 {
             use std::io::Write;
@@ -1200,8 +1187,7 @@ mod tests {
                 let mut pet = Pet::new(&catalog, [Feature::Roam].into());
                 pet.life.choice = 0;
                 if restore {
-                    let mut screen =
-                        crate::deepseek_pet::screen::Screen::new(40, 120, (1, 1)).unwrap();
+                    let mut screen = rsille_overlay::screen::Screen::new(40, 120, (1, 1)).unwrap();
                     screen.feed(shell.as_bytes());
                     pet.screen = Some(screen);
                 }
@@ -1394,9 +1380,10 @@ mod tests {
         let area = open_menu(&mut pet, 0);
         let (x, y) = (area.x() + 1, area.y() + 2);
         let shell = format!("\x1b[{y};{x}H\x1b[32;45m鲸鱼在这里");
-        pet.screen = crate::deepseek_pet::screen::Screen::new(24, 80, (1, 1));
+        pet.screen = rsille_overlay::screen::Screen::new(24, 80, (1, 1));
         pet.screen.as_mut().unwrap().feed(shell.as_bytes());
-        let mut visible = vt100::Parser::new(24.try_into().unwrap(), 80.try_into().unwrap(), 0);
+        let mut visible =
+            rsille_overlay::vt100::Parser::new(24.try_into().unwrap(), 80.try_into().unwrap(), 0);
         visible.process(shell.as_bytes());
         let expected = visible.screen().clone();
         pet.invalidate();
@@ -1407,11 +1394,11 @@ mod tests {
         for row in area.y()..area.real_size().height {
             for col in area.x()..area.real_size().width {
                 let cell = visible.screen().cell(row, col).unwrap();
-                assert_eq!(cell.bgcolor(), vt100::Color::Default);
+                assert_eq!(cell.bgcolor(), rsille_overlay::vt100::Color::Default);
             }
         }
         let label = visible.screen().cell(y - 1, area.x() + 2).unwrap();
-        assert_eq!(label.fgcolor(), vt100::Color::Default);
+        assert_eq!(label.fgcolor(), rsille_overlay::vt100::Color::Default);
         out.clear();
         pet.hide(80, 24, &mut out);
         visible.process(&out);
@@ -1456,11 +1443,12 @@ mod tests {
     #[test]
     fn whale_follows_a_held_treat_then_eats_it_without_erasing_shell_text() {
         let mut pet = Pet::default();
-        let mut screen = crate::deepseek_pet::screen::Screen::new(24, 80, (1, 1)).unwrap();
+        let mut screen = rsille_overlay::screen::Screen::new(24, 80, (1, 1)).unwrap();
         let shell = "\x1b[8;20H\x1b[32m鲸鱼\x1b[0m";
         screen.feed(shell.as_bytes());
         pet.screen = Some(screen);
-        let mut visible = vt100::Parser::new(24.try_into().unwrap(), 80.try_into().unwrap(), 0);
+        let mut visible =
+            rsille_overlay::vt100::Parser::new(24.try_into().unwrap(), 80.try_into().unwrap(), 0);
         visible.process(shell.as_bytes());
         let expected = visible.screen().clone();
         let mut draw = |pet: &mut Pet<'_>, tick| {

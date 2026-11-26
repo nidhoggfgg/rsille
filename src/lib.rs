@@ -175,3 +175,7 @@ pub use rsille_canvas as canvas;
 /// Pass styled lines from `rsille-syntect` to [`CodeViewer::from_lines`](tui::widgets::CodeViewer::from_lines).
 #[doc(inline)]
 pub use rsille_tui as tui;
+
+#[cfg(feature = "overlay")]
+#[doc(inline)]
+pub use rsille_overlay as overlay;

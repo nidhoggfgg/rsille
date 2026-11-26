@@ -25,13 +25,15 @@ rsille = { version = "3.3.1", path = "../..", features = ["raster"] }
 
 [target.'cfg(unix)'.dependencies]
 fastrand = "2"
-libc.workspace = true
+rsille-overlay.workspace = true
 serde = { version = "1", features = ["derive"] }
-tempfile = "3"
 unicode-normalization = "0.1"
 unifont = "1.1"
-vt100 = "0.18.1"
 yaml_serde = "0.10"
+
+[target.'cfg(unix)'.dev-dependencies]
+libc.workspace = true
+tempfile = "3"
 
 [build-dependencies]
 png = "0.18"

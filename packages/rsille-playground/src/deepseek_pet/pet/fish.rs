@@ -1,6 +1,6 @@
-use crate::deepseek_pet::screen::{clear_span, Screen};
 use rsille::render::area::Area;
 use rsille::render::raster_output::CellPixels;
+use rsille_overlay::screen::{clear_span, Screen};
 
 // Each dot leaves the shell visible through the sprite.
 const TILE: [&[u8; 24]; 12] = [

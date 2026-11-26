@@ -46,6 +46,9 @@ encoding, widgets, rendering and event loop.
 - **Test interaction and async logic without a terminal.** Replay input and inspect
   rendered frames in memory. Control timers and background tasks with a manual
   clock and executor.
+- **Draw over the shell you already use.** [rsille-overlay](packages/rsille-overlay/README.md)
+  runs your shell in a PTY and floats widgets or images over it, reacting to the
+  commands you run. `rsille pet` is built on it.
 
 The **[example gallery](examples/README.md)** includes a
 [voxel sandbox](examples/minecraft/README.md),

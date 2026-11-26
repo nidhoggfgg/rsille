@@ -1,4 +1,4 @@
-# This temporary .zshenv is used only by the interactive pet shell.
+# This temporary .zshenv is used only by the interactive overlay shell.
 _rsille_startup_dir=$ZDOTDIR
 if (( ${+_RSILLE_ORIG_ZDOTDIR} )); then
   export ZDOTDIR=$_RSILLE_ORIG_ZDOTDIR

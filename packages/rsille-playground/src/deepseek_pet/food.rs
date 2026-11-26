@@ -1,5 +1,5 @@
 //! A deliberately partial cursor model. Never inspect the renderer's own bytes.
-use crate::deepseek_pet::boundary::Boundary;
+use rsille_overlay::boundary::Boundary;
 
 type Cell = (u16, u16); // one-based terminal coordinates
 
@@ -99,7 +99,7 @@ impl Food {
                     {
                         continue;
                     }
-                    let saved = &mut self.saved_absolute[usize::from(self.syntax.alternate)];
+                    let saved = &mut self.saved_absolute[usize::from(self.syntax.alternate())];
                     if seq == b"\x1b7" {
                         *saved = self.absolute_safe;
                         continue;

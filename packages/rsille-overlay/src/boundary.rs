@@ -1,6 +1,11 @@
 //! Track safe output boundaries and child screen changes across PTY reads.
+//!
+//! [`Boundary`] is a small state machine over terminal output. It knows when
+//! the stream is between escape sequences and UTF-8 characters, and when no
+//! Kitty upload, synchronized update or saved cursor of the child is open, so
+//! an overlay can write its own sequences without corrupting the child's.
 
-use super::mouse::MouseModes;
+use crate::mouse::MouseModes;
 
 #[derive(Clone, Copy, Default)]
 enum State {
@@ -17,11 +22,12 @@ enum State {
     },
 }
 
-pub enum Event {
+pub(crate) enum Event {
     MouseHandoff,
     Clear,
 }
 
+/// Parser state for one output stream. Feed every byte the child writes.
 #[derive(Default)]
 pub struct Boundary {
     state: State,
@@ -32,17 +38,19 @@ pub struct Boundary {
     synchronized: bool,
     clear_pending: [bool; 2],
     saved_cursor: [bool; 2],
-    pub mouse: MouseModes,
-    pub alternate: bool,
+    pub(crate) mouse: MouseModes,
+    pub(crate) alternate: bool,
     /// The last batch included a screen selection, even if it switched back.
-    pub screen_selected: bool,
+    pub(crate) screen_selected: bool,
 }
 
 impl Boundary {
+    /// Between escape sequences and UTF-8 characters.
     pub fn ready(&self) -> bool {
         matches!(self.state, State::Ground) && self.continuation == 0
     }
 
+    /// [`Self::ready`], and no upload, synchronized update or saved cursor is open.
     pub fn can_draw(&self) -> bool {
         self.ready()
             && !self.uploading
@@ -50,7 +58,12 @@ impl Boundary {
             && !self.saved_cursor[usize::from(self.alternate)]
     }
 
-    pub fn child_mouse(&self) -> bool {
+    /// The child shows its alternate screen.
+    pub fn alternate(&self) -> bool {
+        self.alternate
+    }
+
+    pub(crate) fn child_mouse(&self) -> bool {
         self.alternate || self.mouse.tracking != 0
     }
 
@@ -101,7 +114,7 @@ impl Boundary {
         self.feed_with(bytes, |_, _, _| {})
     }
 
-    pub fn resized(&mut self) {
+    pub(crate) fn resized(&mut self) {
         // A hidden primary screen can reflow too. Clear it when the child returns.
         self.clear_pending = [true, self.alternate];
     }
@@ -114,7 +127,11 @@ impl Boundary {
         }
     }
 
-    pub fn feed_with(&mut self, bytes: &[u8], mut notify: impl FnMut(usize, &Self, Event)) -> bool {
+    pub(crate) fn feed_with(
+        &mut self,
+        bytes: &[u8],
+        mut notify: impl FnMut(usize, &Self, Event),
+    ) -> bool {
         use self::State::*;
         let mut rang = false;
         self.screen_selected = false;

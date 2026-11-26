@@ -5,19 +5,15 @@
 #[cfg(unix)]
 mod animation;
 #[cfg(unix)]
-mod boundary;
-#[cfg(unix)]
 mod commands;
 #[cfg(unix)]
 mod dialogue;
 #[cfg(unix)]
 mod food;
 #[cfg(unix)]
-mod mouse;
-#[cfg(unix)]
 mod pet;
 #[cfg(unix)]
-mod screen;
+mod pursuit;
 #[cfg(unix)]
 mod session;
 

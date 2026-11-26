@@ -1,10 +1,14 @@
-//! The shell's visible text, independent of the pet overlay.
+//! The child's visible text, independent of anything drawn over it.
+use rsille_render::area::{Area, Size};
 use std::{io::Write, num::NonZeroU16};
 use vt100::{Cell, Color, Parser};
 
+/// A terminal emulator fed with the child's output, without scrollback.
 pub struct Screen(Parser);
 
 impl Screen {
+    /// A blank grid with the cursor at one-based `(col, row)`. `None` for an
+    /// empty grid or one larger than 256 Ki cells.
     pub fn new(rows: u16, cols: u16, (col, row): (u16, u16)) -> Option<Self> {
         let (rows, cols) = dimensions(rows, cols)?;
         let mut parser = Parser::new(rows, cols, 0);
@@ -12,6 +16,7 @@ impl Screen {
         Some(Self(parser))
     }
 
+    /// Returns false when the new size is unsupported; drop the screen then.
     pub fn resize(&mut self, rows: u16, cols: u16) -> bool {
         let Some((rows, cols)) = dimensions(rows, cols) else {
             return false;
@@ -20,12 +25,15 @@ impl Screen {
         true
     }
 
+    /// Apply child output.
     pub fn feed(&mut self, bytes: &[u8]) {
         self.0.process(bytes);
     }
 
-    // Apply a deliberate bite to the backing text too. Do not disturb the
-    // child's DECSC save slot by injecting another save/restore pair here.
+    /// Apply bytes the overlay deliberately wrote into the child's grid (for
+    /// example erasing a character), keeping the child's cursor and pen.
+    // Do not disturb the child's DECSC save slot by injecting another
+    // save/restore pair here.
     pub fn consume(&mut self, erase: &[u8]) {
         let screen = self.0.screen();
         let cursor = screen.cursor_state_formatted();
@@ -33,6 +41,11 @@ impl Screen {
         self.feed(erase);
         self.feed(cursor.as_bytes());
         self.feed(attrs.as_bytes());
+    }
+
+    /// The underlying emulator, for reading cells and contents.
+    pub fn grid(&self) -> &vt100::Screen {
+        self.0.screen()
     }
 
     fn restore(&self, col: u16, row: u16, width: u16, out: &mut Vec<u8>) {
@@ -82,10 +95,25 @@ fn dimensions(rows: u16, cols: u16) -> Option<(NonZeroU16, NonZeroU16)> {
     Some((NonZeroU16::new(rows)?, NonZeroU16::new(cols)?))
 }
 
+/// Clear `width` cells from one-based `(col, row)` and repaint the child's text there.
 pub fn clear_span(screen: Option<&Screen>, col: u16, row: u16, width: u16, out: &mut Vec<u8>) {
     write!(out, "\x1b[{row};{col}H\x1b[{width}X").unwrap();
     if let Some(screen) = screen {
         screen.restore(col, row, width, out);
+    }
+}
+
+/// Clear a zero-based area clipped to the viewport, restoring the child's text.
+pub fn erase_area(area: Area, cols: u16, rows: u16, screen: Option<&Screen>, out: &mut Vec<u8>) {
+    let viewport = Area::from(Size::from((cols, rows)));
+    let Some(visible) = area.clamp_to(&viewport) else {
+        return;
+    };
+    let col = visible.x() + 1;
+    let width = visible.width();
+    out.extend_from_slice(b"\x1b[0m");
+    for y in visible.y()..visible.y() + visible.height() {
+        clear_span(screen, col, y + 1, width, out);
     }
 }
 
