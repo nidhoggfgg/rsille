@@ -4,6 +4,7 @@ English · [中文](README_cn.md)
 
 [![crates.io](https://img.shields.io/crates/v/rsille.svg)](https://crates.io/crates/rsille)
 [![docs.rs](https://docs.rs/rsille/badge.svg)](https://docs.rs/rsille)
+[![homepage](https://img.shields.io/badge/homepage-rsille.vercel.app-6be8c4.svg)](https://rsille.vercel.app)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENCE)
 [![platforms](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-informational.svg)](#try-it-in-10-seconds)
 
@@ -42,7 +43,7 @@ Want to try it in your own terminal right now? You don't need to write a line of
 
 ### Download a binary (no Rust required)
 
-Grab the prebuilt executable for your platform from [Playground Releases](https://github.com/nidhoggfgg/rsille/releases?q=rsille-playground-v) (Linux `x64`/`ARM64`, macOS `Apple Silicon`/`Intel`, Windows `rsille.exe` — Sixel works out of the box in Windows Terminal 1.22+):
+Download the prebuilt executable directly from the **[rsille Download Page](https://rsille.vercel.app/download)** (or [GitHub Releases](https://github.com/nidhoggfgg/rsille/releases?q=rsille-playground-v)) for Linux `x64`/`ARM64`, macOS `Apple Silicon`/`Intel`, or Windows `rsille.exe` (Sixel works out of the box in Windows Terminal 1.22+):
 
 ```sh
 # Linux / macOS (example: Linux x64)

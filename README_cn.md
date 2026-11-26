@@ -4,6 +4,7 @@
 
 [![crates.io](https://img.shields.io/crates/v/rsille.svg)](https://crates.io/crates/rsille)
 [![docs.rs](https://docs.rs/rsille/badge.svg)](https://docs.rs/rsille)
+[![homepage](https://img.shields.io/badge/homepage-rsille.vercel.app-6be8c4.svg)](https://rsille.vercel.app)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENCE)
 [![platforms](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-informational.svg)](#10-秒体验)
 
@@ -42,7 +43,7 @@
 
 ### 直接下载可执行文件（无需安装 Rust）
 
-前往 [Playground 发布列表](https://github.com/nidhoggfgg/rsille/releases?q=rsille-playground-v) 下载对应平台的可执行文件（提供 Linux `x64`/`ARM64`、macOS `Apple 芯片`/`Intel`、Windows `rsille.exe`；Windows Terminal 1.22+ 开箱支持 Sixel）：
+前往 **[rsille 下载页](https://rsille.vercel.app/download)**（或 [GitHub 发布列表](https://github.com/nidhoggfgg/rsille/releases?q=rsille-playground-v)）直接下载对应平台的可执行文件（提供 Linux `x64`/`ARM64`、macOS `Apple 芯片`/`Intel`、Windows `rsille.exe`；Windows Terminal 1.22+ 开箱支持 Sixel）：
 
 ```sh
 # Linux / macOS（以 Linux x64 为例）

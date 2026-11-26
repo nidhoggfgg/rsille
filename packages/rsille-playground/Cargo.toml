@@ -4,6 +4,7 @@ version = "0.1.3"
 edition = "2021"
 description = "An interactive playground for rsille terminal graphics"
 license = "MIT"
+homepage = "https://rsille.vercel.app/download"
 repository = "https://github.com/nidhoggfgg/rsille"
 readme = "README.md"
 include = [

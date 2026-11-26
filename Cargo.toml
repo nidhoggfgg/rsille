@@ -8,6 +8,7 @@ keywords = ["terminal", "tui", "graphics", "animation", "braille"]
 categories = ["command-line-interface", "graphics"]
 readme = "README.md"
 license = "MIT"
+homepage = "https://rsille.vercel.app"
 repository = "https://github.com/nidhoggfgg/rsille.git"
 include = ["src/**", "/README.md", "/README_cn.md", "LICENCE", "Cargo.toml"]
 

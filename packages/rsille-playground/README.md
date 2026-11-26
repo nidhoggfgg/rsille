@@ -13,7 +13,7 @@
 
 ### 下载可执行文件（无需 Rust 或 Cargo）
 
-在 [Playground 发布列表](https://github.com/nidhoggfgg/rsille/releases?q=rsille-playground-v) 打开最新的 `rsille-playground-v…` 版本，在 **Assets** 中按下表选择下载文件。可执行文件从 `0.1.2` 之后的版本开始提供。
+可直接前往 **[rsille 下载页](https://rsille.vercel.app/download)** 选择对应系统下载（所有文件均经 SHA-256 校验镜像），或在 [Playground 发布列表](https://github.com/nidhoggfgg/rsille/releases?q=rsille-playground-v) 打开最新的 `rsille-playground-v…` 版本，在 **Assets** 中按下表选择下载文件。可执行文件从 `0.1.2` 之后的版本开始提供。
 
 | 系统 | 处理器 | 下载文件 |
 | --- | --- | --- |
