@@ -109,7 +109,7 @@ cargo run -p rsille-typst --example formula -- --headless --cell-pixels 10x20
 
 演示要求**终端及任何复用器**均支持 Sixel、局部 EL 2 图形清除、图像随文本滚动、稳定调色板、不滚屏的定位输出，以及最后不足六像素带的透明补齐。配置使用 `reliable_inline_erase: true`，而非全屏 `reliable_erase`。**不会自动检测这些能力。** 具体约定见 [`RasterCapabilities`](https://docs.rs/rsille/3.1.0/rsille/render/raster_output/struct.RasterCapabilities.html)。
 
-未提供 override 时，`CellPixels::resolve(None)` 在输入 reader 启动前探测：先读取 OS 指标，再尝试 Unix（含 WSL）CSI 16 t 查询，超时为 500 ms。查询要求 stdin/stdout 为控制终端上的 TTY；原生 Windows 没有查询 fallback。探测失败时，通过 `--cell-pixels WxH` 提供**实测的单个字符格物理像素尺寸**，不是列数×行数、窗口像素或字体点数。例如，960×648 像素的文本区域有 120 列、36 行，则每格为 8×18 像素。
+未提供 override 时，`CellPixels::resolve(None)` 在输入 reader 启动前探测：先读取 OS 指标，再尝试 Unix 或 Windows 终端的 CSI 16 t 查询，超时为 500 ms。查询要求 stdin/stdout 连接到终端。探测失败时，通过 `--cell-pixels WxH` 提供**实测的单个字符格物理像素尺寸**，不是列数×行数、窗口像素或字体点数。例如，960×648 像素的文本区域有 120 列、36 行，则每格为 8×18 像素。
 
 - 显式 override 跳过全部探测。每轴必须在 `1..=1024` 内，面积不超过 65536。与终端列行数相同的 override 还需 `--force-cell-pixels` 确认。
 - 指标仅在启动时保存；更改字体或 DPI 后需重启。查询不是 Sixel 能力检测，可能消耗同时输入的按键，迟到的响应也可能进入输入 reader。

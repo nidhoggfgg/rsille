@@ -95,4 +95,10 @@ Session::new().run(Clock(None))?;
 
 rsille-playground 中的 `rsille pet` 就构建在这个 crate 之上。
 
-会话需要 Unix PTY。
+Windows 10 1809 及以上版本使用 ConPTY。在 Windows Terminal 中可以这样给原生 PowerShell 加上计数挂件：
+
+```powershell
+cargo run -p rsille-overlay --example click_counter -- powershell.exe -NoLogo
+```
+
+Windows 默认启动 `%COMSPEC%`（通常是 `cmd.exe`）。命令执行和退出状态等 shell 事件由 Unix 上的 bash、fish、zsh 钩子提供。在 Windows 上，可见挂件通过 `Overlay::hit` 认领按下事件，其余点击按字符格坐标交给 ConPTY，再由子程序的输入模式决定如何处理。Windows Terminal 1.22 及以上版本支持 Sixel。更改字体或 DPI 后，重新启动图形会话即可重新测量字符格尺寸。

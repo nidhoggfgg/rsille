@@ -19,6 +19,9 @@ vt100 = "0.18.1"
 libc = { workspace = true }
 tempfile = "3"
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_System_Console", "Win32_System_Threading", "Win32_Security", "Win32_System_Pipes"] }
+
 [[example]]
 name = "status_badge"
 path = "examples/status_badge.rs"

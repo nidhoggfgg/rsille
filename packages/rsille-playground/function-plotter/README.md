@@ -48,7 +48,7 @@ UI state holds an immutable parsed plot source, not a pre-layout image. Its sing
 
 The Sixel backend requires the terminal and any multiplexer to support **EL2 graphics erase**, graphics following text scrolling, stable palettes, and non-scrolling positioned output. The protocol probe cannot verify these erasure and scrolling properties. The application sets `reliable_inline_erase` and rejects unsupported raster output, never silently falling back. **Image retention in scrollback is terminal dependent**; committing a frame does not guarantee Sixel images survive scrolling.
 
-Cell pixels are measured before input starts; failure is an error. Override with `--cell-pixels WxH` only using **actual pixels per character cell**, not terminal columns/rows. Native Windows has no query fallback. Restart after font/DPI changes. See [`CellPixels`](../../rsille-render/src/raster/output.rs) for probing requirements.
+Cell pixels are measured before input starts; failure is an error. Override with `--cell-pixels WxH` only using **actual pixels per character cell**, not terminal columns/rows. Windows Terminal supports the cell-size query. Restart after font/DPI changes. See [`CellPixels`](../../rsille-render/src/raster/output.rs) for probing requirements.
 
 ## Interactive independent panels
 

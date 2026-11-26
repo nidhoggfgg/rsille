@@ -23,7 +23,7 @@ meval = "0.2"
 png = "0.18"
 rsille = { version = "3.3.1", path = "../..", features = ["raster"] }
 
-[target.'cfg(unix)'.dependencies]
+[target.'cfg(any(unix, windows))'.dependencies]
 fastrand = "2"
 rsille-overlay.workspace = true
 serde = { version = "1", features = ["derive"] }
@@ -33,6 +33,8 @@ yaml_serde = "0.10"
 
 [target.'cfg(unix)'.dev-dependencies]
 libc.workspace = true
+
+[dev-dependencies]
 tempfile = "3"
 
 [build-dependencies]

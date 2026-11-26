@@ -111,4 +111,16 @@ Session::new().run(Clock(None))?;
 
 `rsille pet` from rsille-playground is built on this crate.
 
-Sessions require Unix PTYs.
+On Windows 10 version 1809 and later, sessions use ConPTY. Start a native
+PowerShell session with the counter in Windows Terminal:
+
+```powershell
+cargo run -p rsille-overlay --example click_counter -- powershell.exe -NoLogo
+```
+
+The default Windows shell is `%COMSPEC%` (usually `cmd.exe`). Shell events
+are available for bash, fish and zsh on Unix. On Windows, a visible overlay
+claims mouse presses through `Overlay::hit`. ConPTY receives the other presses
+in cell coordinates and delivers them according to the child’s input mode.
+Windows Terminal 1.22 and later supports Sixel. Restart a raster session after
+changing the terminal font or DPI so it can measure the new cell size.

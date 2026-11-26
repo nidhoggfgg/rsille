@@ -71,7 +71,7 @@ Inline Sixel requires that your terminal/multiplexer supports Sixel and EL2
  positioned output. Image scrollback retention is terminal dependent. No capability
  detection can verify those erasure and scrolling properties. Cell metrics are resolved before input starts; restart
  after font/DPI changes. If automatic measurement fails, supply measured cell
- pixels (native Windows has no query fallback). Never guess the dimensions.";
+ pixels. Never guess the dimensions.";
 
 #[derive(Default)]
 struct Options {

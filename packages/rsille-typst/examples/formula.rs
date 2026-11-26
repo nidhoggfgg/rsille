@@ -32,9 +32,8 @@ Sixel support is built in. Unsupported raster output errors rather than degradin
 Cell pixels are ONE character cell's physical width x height, NOT columns x rows,
 window pixels or font points. Dimensions: 1..=1024, area <=65536.
 Without an override, CellPixels::resolve calls CellPixels::probe before any input
-reader: OS metrics first, then a Unix CSI 16 t query with a 500 ms timeout.
-Queries require controlling-terminal stdin/stdout TTYs; native Windows has no
-query fallback. If discovery fails, supply measured --cell-pixels WxH.
+reader: OS metrics first, then a CSI 16 t query on Unix or Windows with a 500 ms timeout.
+Queries require terminal stdin/stdout. If discovery fails, supply measured --cell-pixels WxH.
 Overrides skip probing. A grid-sized override requires --force-cell-pixels.
 Metrics are stored once; restart after font/DPI changes. Queries do not detect
 Sixel support and may consume unrelated input; late replies may reach the reader.

@@ -35,17 +35,19 @@
 //! # Ok::<(), std::io::Error>(())
 //! ```
 //!
-//! Sessions require Unix PTYs. On other platforms [`Session::run`] returns
+//! Sessions use Unix PTYs or Windows ConPTY. On other platforms [`Session::run`] returns
 //! [`std::io::ErrorKind::Unsupported`].
 
 pub mod boundary;
 pub(crate) mod mouse;
 pub mod screen;
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 mod session;
 #[cfg(unix)]
 mod shell;
 mod stack;
+#[cfg(any(unix, windows))]
+mod sys;
 mod widgets;
 
 pub use mouse::MouseKind;
@@ -314,7 +316,7 @@ impl Default for Session {
 }
 
 impl Session {
-    /// Run `$SHELL -i` (or `/bin/sh`), with text-only graphics and shell events.
+    /// Run the interactive shell (`$SHELL` or `/bin/sh` on Unix, `%COMSPEC%` or `cmd.exe` on Windows), with text-only graphics and shell events.
     pub fn new() -> Self {
         Self {
             command: Vec::new(),
@@ -371,13 +373,14 @@ impl Session {
     /// With Kitty graphics the mouse is shared: claimed presses go to the
     /// overlay and everything else is forwarded in the child's own mode. With
     /// text or Sixel the overlay receives the mouse only while the child has
-    /// not enabled mouse tracking itself.
+    /// not enabled mouse tracking itself on Unix. Windows routes unclaimed
+    /// presses to ConPTY in cell coordinates for the child to handle.
     pub fn mouse(mut self, enabled: bool) -> Self {
         self.mouse = enabled;
         self
     }
 
-    /// Install bash, fish or zsh hooks reporting [`ShellEvent`]s (default on).
+    /// On Unix, install bash, fish or zsh hooks reporting [`ShellEvent`]s (default on).
     /// Has no effect for other shells or with [`Session::command`].
     pub fn shell_events(mut self, enabled: bool) -> Self {
         self.shell_events = enabled;
@@ -402,16 +405,16 @@ impl Session {
     ///
     /// Requires exclusive use of stdin and stdout.
     pub fn run(self, mut overlay: impl Overlay) -> io::Result<i32> {
-        #[cfg(unix)]
+        #[cfg(any(unix, windows))]
         {
             session::run(self, &mut overlay)
         }
-        #[cfg(not(unix))]
+        #[cfg(not(any(unix, windows)))]
         {
             let _ = &mut overlay;
             Err(io::Error::new(
                 io::ErrorKind::Unsupported,
-                "overlay sessions require a Unix terminal with PTY support",
+                "overlay sessions require Unix PTYs or Windows ConPTY",
             ))
         }
     }

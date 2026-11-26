@@ -20,9 +20,12 @@ unicode-width = { workspace = true }
 [target.'cfg(unix)'.dependencies]
 libc = { workspace = true, optional = true }
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_System_Console", "Win32_System_Threading"], optional = true }
+
 [features]
 default = ["raster"]
-raster = ["dep:base64", "dep:libc"]
+raster = ["dep:base64", "dep:libc", "dep:windows-sys"]
 
 [dev-dependencies]
 criterion = { version = "0.7", features = ["html_reports"] }

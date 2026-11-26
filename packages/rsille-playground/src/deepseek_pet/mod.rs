@@ -2,19 +2,19 @@
 //! the pointer, petting the whale, and dragging treats. In that mode a literal escape prefix may be delayed
 //! briefly while checking for a mouse report.
 //! Food is inferred only from recent ASCII glyphs at known terminal positions.
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 mod animation;
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 mod commands;
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 mod dialogue;
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 mod food;
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 mod pet;
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 mod pursuit;
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 mod session;
 
 mod features;
@@ -67,7 +67,7 @@ impl Options {
             .collect()
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     pub fn run(self) -> std::io::Result<()> {
         let direct = !self.command.is_empty();
         let status = session::run(self)?;
@@ -77,11 +77,11 @@ impl Options {
         Ok(())
     }
 
-    #[cfg(not(unix))]
+    #[cfg(not(any(unix, windows)))]
     pub fn run(self) -> std::io::Result<()> {
         Err(std::io::Error::new(
             std::io::ErrorKind::Unsupported,
-            "deepseek-pet requires a Unix terminal with PTY support",
+            "deepseek-pet requires Unix PTYs or Windows ConPTY",
         ))
     }
 }

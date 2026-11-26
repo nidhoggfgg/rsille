@@ -140,8 +140,8 @@ fn main() -> WidgetResult<()> {
 全屏应用可以在 `.update(...)` 前设置 `.raster_backend(RasterBackend::Auto)`。
 启动时优先选 Kitty，其次选 Sixel。
 显式指定 `Kitty` 或 `Sixel` 会在启动时报告错误。Auto 允许先绘制文本，在首次需要图像时才报告协商失败。
-Kitty 保留原始 RGB 和透明像素，拖动时可以复用已上传的图像。启动探测支持 macOS、Linux 和 WSL。
-原生 Windows 和自定义 writer 可以通过 `.raster_session(...)` 传入已验证的全屏协议与字符像素尺寸。
+Kitty 保留原始 RGB 和透明像素，拖动时可以复用已上传的图像。启动探测支持 macOS、Linux、WSL 和原生 Windows 控制台。
+使用自定义 writer 时可以通过 `.raster_session(...)` 传入已验证的全屏协议与字符像素尺寸。
 全屏 Sixel 要求 ED 2 能擦除图像、调色板稳定、补齐像素透明且定位输出不会滚屏。
 inline Sixel 沿用 `.raster_output(...)`，由宿主确认整行擦除和图像随文字滚动。
 inline 应用也可在读取输入前调用 `RasterBackend::Auto.negotiate_inline(...)`，将结果传给 `.inline_raster_session(...)`。inline 的 Auto 优先选择 Kitty，终端仅声明支持 Sixel 时自动使用 Sixel。探测检查协议支持，逐行擦除图像、图像随文字滚动和定位输出效果取决于终端。

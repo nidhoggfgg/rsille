@@ -2,35 +2,13 @@
 use crate::{
     boundary::Boundary,
     mouse::{Buttons, Mouse},
-    shell::{self, Hooks},
+    sys::{self, Pty, TerminalMode},
     Attach, CellPixels, Context, Graphics, InlineRasterSession, Overlay, Pointer, Screen, Session,
 };
 use std::{
-    ffi::CString,
-    fs::File,
-    io::{self, Read, Write},
-    os::{
-        fd::{AsRawFd, FromRawFd},
-        unix::ffi::OsStrExt,
-    },
+    io::{self, Write},
     time::{Duration, Instant},
 };
-
-fn check(n: libc::c_int) -> io::Result<libc::c_int> {
-    if n < 0 {
-        Err(io::Error::last_os_error())
-    } else {
-        Ok(n)
-    }
-}
-
-fn size(fd: i32) -> io::Result<libc::winsize> {
-    unsafe {
-        let mut s = std::mem::zeroed::<libc::winsize>();
-        check(libc::ioctl(fd, libc::TIOCGWINSZ, &mut s))?;
-        Ok(s)
-    }
-}
 
 const CLEAR_VIEWPORT: &[u8] = b"\x1b[2J\x1b[H";
 /// Overlays redraw at least this often while visible. Resizes are noticed per tick.
@@ -38,61 +16,23 @@ const TICK: Duration = Duration::from_millis(100);
 
 struct Terminal {
     cleanup: Vec<u8>,
-    original: libc::termios,
+    _mode: TerminalMode,
     alt_screen: bool,
     child_alternate: bool,
 }
 impl Drop for Terminal {
     fn drop(&mut self) {
         // The detach key can also interrupt a child application that enabled mouse tracking.
-        let _ =
-            io::stdout().write_all(b"\x18\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1016l");
         let mut out = io::stdout().lock();
+        let _ = out.write_all(b"\x18\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1016l");
+        #[cfg(windows)]
+        let _ = out.write_all(b"\x1b[?9001l\x1b[?1004l");
         let _ = out.write_all(&self.cleanup);
         let _ = out.write_all(b"\x1b[0m");
         if self.alt_screen || self.child_alternate {
             let _ = out.write_all(b"\x1b[?1049l");
         }
         let _ = out.flush();
-        unsafe {
-            libc::tcsetattr(0, libc::TCSANOW, &self.original);
-        }
-    }
-}
-
-struct Child(i32);
-
-impl Child {
-    fn wait(&mut self) -> io::Result<i32> {
-        let mut status = 0;
-        loop {
-            if unsafe { libc::waitpid(self.0, &mut status, 0) } >= 0 {
-                self.0 = -1;
-                return Ok(if libc::WIFEXITED(status) {
-                    libc::WEXITSTATUS(status)
-                } else {
-                    128 + libc::WTERMSIG(status)
-                });
-            }
-            let error = io::Error::last_os_error();
-            if error.kind() != io::ErrorKind::Interrupted {
-                return Err(error);
-            }
-        }
-    }
-}
-impl Drop for Child {
-    fn drop(&mut self) {
-        if self.0 < 0 {
-            return;
-        }
-        // The master is dropped first (hangup). Don't block on a shell that ignores it.
-        unsafe {
-            libc::kill(self.0, libc::SIGKILL);
-            while libc::waitpid(self.0, std::ptr::null_mut(), 0) < 0
-                && io::Error::last_os_error().kind() == io::ErrorKind::Interrupted
-            {}
-        }
     }
 }
 
@@ -107,50 +47,19 @@ pub fn run<O: Overlay + ?Sized>(options: Session, overlay: &mut O) -> io::Result
         .command
         .first()
         .cloned()
-        .unwrap_or_else(|| std::env::var_os("SHELL").unwrap_or_else(|| "/bin/sh".into()));
+        .unwrap_or_else(sys::default_shell);
     if program.is_empty() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "empty program path",
         ));
     }
-    let hooks = if !direct && options.shell_events {
-        Hooks::prepare(program.as_ref())?
+    #[cfg(unix)]
+    let mut hooks = if !direct && options.shell_events {
+        sys::Hooks::prepare(program.as_ref())?
     } else {
         None
     };
-    let environment = hooks
-        .as_ref()
-        .and_then(|(hooks, _)| hooks.environment.as_ref())
-        .map(|environment| {
-            environment
-                .iter()
-                .map(|v| v.as_ptr())
-                .chain(std::iter::once(std::ptr::null()))
-                .collect::<Vec<_>>()
-        });
-    let program = CString::new(program.as_bytes())?;
-    let arguments = options
-        .command
-        .iter()
-        .skip(1)
-        .map(|arg| CString::new(arg.as_bytes()))
-        .collect::<Result<Vec<_>, _>>()?;
-    let mut args = vec![program.as_ptr()];
-    if direct {
-        args.extend(arguments.iter().map(|arg| arg.as_ptr()));
-    } else {
-        if let Some((hooks, _)) = &hooks {
-            args.extend(hooks.args.iter().map(|arg| arg.as_ptr()));
-        }
-        args.push(c"-i".as_ptr());
-    }
-    args.push(std::ptr::null());
-    // Prepared before forking: the child only calls async-signal-safe functions.
-    let mut exec_error = format!("{}: cannot execute ", options.name).into_bytes();
-    exec_error.extend_from_slice(program.as_bytes());
-    exec_error.extend_from_slice(b"\r\n");
-
     let raster = match (options.raster, options.backend) {
         (Some(session), _) => Some(session),
         (None, Some(backend)) => Some(
@@ -182,55 +91,40 @@ pub fn run<O: Overlay + ?Sized>(options: Session, overlay: &mut O) -> io::Result
     // Kitty placements float above the text, so the pointer can be shared and
     // the overlay can stay on the child's alternate screen.
     let shared = graphics == Graphics::Kitty;
-    let mut s = size(1)?;
+    let mut s = sys::size()?;
     let epoch = Instant::now();
     overlay.attach(&Attach {
         epoch,
         graphics,
         cell: pixels,
-        cols: s.ws_col,
-        rows: s.ws_row,
-        shell: hooks.as_ref().map(|(hooks, _)| hooks.shell),
+        cols: s.cols,
+        rows: s.rows,
+        #[cfg(unix)]
+        shell: hooks.as_ref().map(sys::Hooks::shell),
+        #[cfg(windows)]
+        shell: None,
     })?;
     let mut cleanup = Vec::new();
     overlay.cleanup(&mut cleanup);
 
-    let mut original = unsafe { std::mem::zeroed() };
-    check(unsafe { libc::tcgetattr(0, &mut original) })?;
-    let mut fd = -1;
-    let pid = check(unsafe { libc::forkpty(&mut fd, std::ptr::null_mut(), &original, &s) })?;
-    if pid == 0 {
-        unsafe {
-            if let Some((_, sender)) = &hooks {
-                if libc::fcntl(sender.as_raw_fd(), libc::F_SETFD, 0) < 0 {
-                    libc::_exit(127);
-                }
-            }
-            if let Some(env) = &environment {
-                libc::execve(program.as_ptr(), args.as_ptr(), env.as_ptr());
-            } else if direct {
-                libc::execvp(program.as_ptr(), args.as_ptr());
-            } else {
-                libc::execv(program.as_ptr(), args.as_ptr());
-            }
-            libc::write(2, exec_error.as_ptr().cast(), exec_error.len());
-            libc::_exit(127);
-        }
-    }
-    let mut child = Child(pid);
-    // Drop the parent's copy of the sending socket.
-    let hooks = hooks.map(|(hooks, _)| hooks);
-    let mut master = unsafe { File::from_raw_fd(fd) };
-    let flags = check(unsafe { libc::fcntl(fd, libc::F_GETFL) })?;
-    check(unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) })?;
-    let mut raw = original;
-    unsafe {
-        libc::cfmakeraw(&mut raw);
-    }
-    check(unsafe { libc::tcsetattr(0, libc::TCSANOW, &raw) })?;
+    let mode = TerminalMode::save()?;
+    let spawn = sys::Spawn {
+        program: &program,
+        args: options.command.get(1..).unwrap_or_default(),
+        size: s,
+        #[cfg(unix)]
+        direct,
+        #[cfg(unix)]
+        name: &options.name,
+    };
+    #[cfg(unix)]
+    let mut pty = Pty::spawn(&spawn, hooks.as_mut(), &mode)?;
+    #[cfg(windows)]
+    let mut pty = Pty::spawn(&spawn)?;
+    mode.enter_raw()?;
     let mut terminal = Terminal {
         cleanup,
-        original,
+        _mode: mode,
         alt_screen: options.alt_screen,
         child_alternate: false,
     };
@@ -239,7 +133,7 @@ pub fn run<O: Overlay + ?Sized>(options: Session, overlay: &mut O) -> io::Result
     let mut buttons = Buttons::default();
     let mut input_deadline = None;
     let mut screen = if options.restore_text {
-        Screen::new(s.ws_row, s.ws_col, (1, 1))
+        Screen::new(s.rows, s.cols, (1, 1))
     } else {
         None
     };
@@ -248,8 +142,8 @@ pub fn run<O: Overlay + ?Sized>(options: Session, overlay: &mut O) -> io::Result
             Context {
                 now: $now,
                 epoch,
-                cols: s.ws_col,
-                rows: s.ws_row,
+                cols: s.cols,
+                rows: s.rows,
                 cell: pixels,
                 graphics,
                 alternate: $alternate,
@@ -269,7 +163,8 @@ pub fn run<O: Overlay + ?Sized>(options: Session, overlay: &mut O) -> io::Result
     let mut delivered = Vec::new();
     let mut input = [0u8; 4096];
     let mut output = [0u8; 8192];
-    let mut event = vec![0u8; shell::MAX_EVENT];
+    #[cfg(unix)]
+    let mut event = vec![0u8; crate::shell::MAX_EVENT];
     let mut forwarded = Vec::new();
     let mut update = Vec::new();
     let mut sprite = Vec::new();
@@ -285,11 +180,12 @@ pub fn run<O: Overlay + ?Sized>(options: Session, overlay: &mut O) -> io::Result
             decoder.flush(&mut pending);
             input_deadline = None;
         }
+        #[cfg(unix)]
         if let Some(hooks) = &hooks {
             for _ in 0..64 {
-                match hooks.events.recv(&mut event) {
+                match hooks.recv(&mut event) {
                     Ok(n) => {
-                        if let Some(event) = shell::parse(&event[..n]) {
+                        if let Some(event) = crate::shell::parse(&event[..n]) {
                             overlay.shell(event);
                         }
                     }
@@ -301,11 +197,9 @@ pub fn run<O: Overlay + ?Sized>(options: Session, overlay: &mut O) -> io::Result
         let tick_index = now.duration_since(epoch).as_nanos() / TICK.as_nanos();
         let tick = last_tick != Some(tick_index);
         if tick {
-            let new = size(1)?;
-            if (s.ws_col, s.ws_row, s.ws_xpixel, s.ws_ypixel)
-                != (new.ws_col, new.ws_row, new.ws_xpixel, new.ws_ypixel)
-            {
-                check(unsafe { libc::ioctl(master.as_raw_fd(), libc::TIOCSWINSZ, &new) })?;
+            let new = sys::size()?;
+            if s != new {
+                pty.resize(new)?;
                 s = new;
                 if let Some(measured) = measured_pixels() {
                     pixels = measured;
@@ -313,11 +207,11 @@ pub fn run<O: Overlay + ?Sized>(options: Session, overlay: &mut O) -> io::Result
                 boundary.resized();
                 if screen
                     .as_mut()
-                    .is_some_and(|screen| !screen.resize(s.ws_row, s.ws_col))
+                    .is_some_and(|screen| !screen.resize(s.rows, s.cols))
                 {
                     screen = None;
                 }
-                overlay.resized(s.ws_col, s.ws_row);
+                overlay.resized(s.cols, s.rows);
                 overlay.invalidate();
             }
             last_tick = Some(tick_index);
@@ -396,35 +290,16 @@ pub fn run<O: Overlay + ?Sized>(options: Session, overlay: &mut O) -> io::Result
         }
         out.flush()?;
         let reading = pending.is_empty();
-        let mut fds = [
-            libc::pollfd {
-                fd: if reading { 0 } else { -1 },
-                events: libc::POLLIN,
-                revents: 0,
-            },
-            libc::pollfd {
-                fd,
-                events: libc::POLLIN | if reading { 0 } else { libc::POLLOUT },
-                revents: 0,
-            },
-        ];
         let next_tick = epoch + TICK * (tick_index as u32 + 1);
-        let ms = [due, wake, input_deadline]
+        let timeout = [due, wake, input_deadline]
             .into_iter()
             .flatten()
             .fold(next_tick, Instant::min)
-            .saturating_duration_since(Instant::now())
-            .as_nanos()
-            .div_ceil(1_000_000) as i32;
-        if let Err(e) = check(unsafe { libc::poll(fds.as_mut_ptr(), 2, ms) }) {
-            if e.kind() == io::ErrorKind::Interrupted {
-                continue;
-            }
-            return Err(e);
-        }
-        if fds[1].revents & (libc::POLLIN | libc::POLLHUP | libc::POLLERR) != 0 {
+            .saturating_duration_since(Instant::now());
+        let ready = pty.poll(reading, !reading, timeout)?;
+        if ready.output {
             let room = output.len().min(CAP - batch.len());
-            match master.read(&mut output[..room]) {
+            match pty.read_output(&mut output[..room]) {
                 Ok(0) => {
                     child_eof = true;
                     break;
@@ -433,16 +308,12 @@ pub fn run<O: Overlay + ?Sized>(options: Session, overlay: &mut O) -> io::Result
                     batch.extend_from_slice(&output[..n]);
                     due.get_or_insert_with(|| Instant::now() + Duration::from_millis(20));
                 }
-                Err(e) if e.raw_os_error() == Some(libc::EIO) => {
-                    child_eof = true;
-                    break;
-                }
                 Err(e) if retry(&e) => {}
                 Err(e) => return Err(e),
             }
         }
-        if fds[1].revents & libc::POLLOUT != 0 {
-            match master.write(pending.as_slices().0) {
+        if ready.writable {
+            match pty.write_input(pending.as_slices().0) {
                 Ok(n) => {
                     delivered.clear();
                     delivered.extend(pending.drain(..n));
@@ -454,24 +325,24 @@ pub fn run<O: Overlay + ?Sized>(options: Session, overlay: &mut O) -> io::Result
                 Err(e) => return Err(e),
             }
         }
-        if fds[0].revents != 0 {
-            let n = unsafe { libc::read(0, input.as_mut_ptr().cast(), input.len()) };
-            if n == 0 {
-                break;
-            }
-            if n < 0 {
-                let e = io::Error::last_os_error();
-                if retry(&e) {
-                    continue;
-                }
-                return Err(e);
-            }
-            let bytes = &input[..n as usize];
+        if ready.input {
+            #[cfg(windows)]
+            let read = pty.read_input(&mut input, options.detach_key);
+            #[cfg(unix)]
+            let read = pty.read_input(&mut input);
+            let n = match read {
+                Ok(0) => break,
+                Ok(n) => n,
+                Err(e) if retry(&e) => continue,
+                Err(e) => return Err(e),
+            };
+            let bytes = &input[..n];
+            #[cfg(unix)]
             if options.detach_key.is_some_and(|key| bytes.contains(&key)) {
                 break;
             }
             if capture_mouse && (shared || !boundary.child_mouse()) {
-                let (cols, rows) = (s.ws_col, s.ws_row);
+                let (cols, rows) = (s.cols, s.rows);
                 decoder.feed(bytes, &mut pending, |report, out| {
                     let pointer = |col, row, pixel| Pointer {
                         kind: report.kind(),
@@ -480,8 +351,18 @@ pub fn run<O: Overlay + ?Sized>(options: Session, overlay: &mut O) -> io::Result
                         pixel,
                         button: report.button,
                     };
-                    if shared {
-                        let modes = boundary.mouse;
+                    if shared || cfg!(windows) {
+                        // ConPTY handles the child's mouse subscription internally.
+                        // Offer visible overlay hits first and send other reports
+                        // in SGR cell coordinates for ConPTY to translate.
+                        let modes = if cfg!(windows) {
+                            crate::mouse::MouseModes {
+                                tracking: 1003,
+                                encoding: 1006,
+                            }
+                        } else {
+                            boundary.mouse
+                        };
                         let (col, row) = report.cell(modes.encoding, (pixels.width, pixels.height));
                         let pixel = (modes.encoding == 1016).then_some((report.x, report.y));
                         let p = pointer(col, row, pixel);
@@ -530,7 +411,7 @@ pub fn run<O: Overlay + ?Sized>(options: Session, overlay: &mut O) -> io::Result
     out.flush()?;
     drop(terminal);
     if direct && child_eof {
-        child.wait()
+        pty.wait()
     } else {
         Ok(0)
     }

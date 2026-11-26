@@ -90,15 +90,21 @@ impl Terminal {
         .map(|v| CString::new(v).unwrap());
         let mut envp: Vec<_> = env.iter().map(|v| v.as_ptr()).collect();
         envp.push(std::ptr::null());
-        let size = libc::winsize {
+        let mut size = libc::winsize {
             ws_row: 12,
             ws_col: 60,
             ws_xpixel: 0,
             ws_ypixel: 0,
         };
         let mut fd = -1;
-        let pid =
-            unsafe { libc::forkpty(&mut fd, std::ptr::null_mut(), std::ptr::null_mut(), &size) };
+        let pid = unsafe {
+            libc::forkpty(
+                &mut fd,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                &raw mut size,
+            )
+        };
         assert!(pid >= 0);
         if pid == 0 {
             unsafe {

@@ -216,10 +216,10 @@ impl CellPixels {
 
     /// Measures physical pixels per character cell once, before starting input.
     ///
-    /// Reads OS window pixels first. If unavailable or invalid, Unix/WSL falls
+    /// Reads OS window pixels first. If unavailable or invalid, Unix and Windows fall
     /// back to `CSI 16 t`, returning on the first valid reply or after `timeout`.
     /// The timeout bounds the terminal exchange, not a mandatory waiting period.
-    /// Native Windows currently has no pixel-size discovery implementation.
+    /// Windows Terminal reports its current cell size through this query.
     /// Store the returned snapshot as `Some(pixels)` in the raster configuration;
     /// font, DPI, and window changes do not automatically update it.
     ///
@@ -374,12 +374,12 @@ pub struct RasterCapabilities {
 }
 
 impl RasterCapabilities {
-    /// Queries primary device attributes (DA1) on Unix, including WSL.
+    /// Queries primary device attributes (DA1) on Unix and Windows.
     ///
     /// Returns whether the terminal advertises Sixel. This does not test erase,
     /// palette, or scrolling behavior. Call before any input reader as described
     /// in [`CellPixels::probe`]. A missing reply produces a timeout error.
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     pub fn probe_sixel(timeout: Duration) -> io::Result<bool> {
         crate::terminal_probe::sixel(timeout)
     }

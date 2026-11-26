@@ -145,8 +145,8 @@ For managed fullscreen apps, opt in with `.raster_backend(RasterBackend::Auto)`
 before `.update(...)`. Startup prefers Kitty, then Sixel. Explicit `Kitty` or `Sixel` selections
 report startup errors immediately. Auto allows text frames until an image is needed.
 Kitty retains full RGB and transparency and reuses uploaded surfaces during drags.
-Negotiation uses the controlling terminal on Unix, including macOS and WSL.
-Native Windows and custom writers can pass a verified `RasterSession`. Fullscreen
+Negotiation uses the controlling terminal on Unix and the console on Windows.
+Hosts with custom writers can pass a verified `RasterSession`. Fullscreen
 Sixel requires graphics erasure with ED 2, stable palettes, transparent padding
 and positioned output without scrolling. Inline Sixel uses `.raster_output(...)`
 with explicit row-erasure and scrolling capabilities. Inline apps can also use

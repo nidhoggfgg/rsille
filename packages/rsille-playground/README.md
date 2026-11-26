@@ -5,7 +5,7 @@
 | 命令 | 功能 |
 | --- | --- |
 | [`rsille draw`](function-plotter/README_cn.md) | 打开函数绘图器，支持 Kitty 和 Sixel。`draw` 是 `function-plotter` 的别名。 |
-| [`rsille pet`](deepseek-pet/README.md) | 在 Unix 交互终端启动 DeepSeek 宠物。 |
+| [`rsille pet`](deepseek-pet/README.md) | 在支持 Kitty 或 Sixel 的交互终端启动 DeepSeek 宠物。 |
 | [`rsille ai-babies`](ai-babies/README_cn.md) | 显示三位像素角色，加 `--animate` 播放动画。 |
 | [`rsille jellyfish`](jellyfish/README_cn.md) | 在终端观看水母游动。 |
 
@@ -40,7 +40,7 @@ install -m 755 rsille "$HOME/.local/bin/rsille"
 
 如果该目录还未加入 `PATH`，在 shell 配置文件中加入 `export PATH="$HOME/.local/bin:$PATH"`，然后重新打开终端。
 
-**Windows** 在下载目录打开 PowerShell，运行 `.\rsille.exe --help`。要在任意目录运行，把 `rsille.exe` 所在目录加入用户的 `Path`，重新打开终端即可。要体验 `rsille pet`，请在 WSL 中下载并运行对应架构的 Linux 可执行文件。
+**Windows** 在下载目录打开 PowerShell，运行 `.\rsille.exe --help`。要在任意目录运行，把 `rsille.exe` 所在目录加入用户的 `Path`，重新打开终端即可。要从当前源码体验原生 Windows 宠物，在 Windows Terminal 1.22 或更新版本中运行 `cargo run -p rsille-playground -- pet`。
 
 ### 通过 Cargo 安装
 
