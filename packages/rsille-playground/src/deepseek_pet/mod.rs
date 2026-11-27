@@ -3,7 +3,7 @@
 //! briefly while checking for a mouse report.
 //! Food is inferred only from recent ASCII glyphs at known terminal positions.
 #[cfg(any(unix, windows))]
-mod animation;
+pub(crate) mod animation;
 #[cfg(any(unix, windows))]
 mod commands;
 #[cfg(any(unix, windows))]

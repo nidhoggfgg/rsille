@@ -1,4 +1,4 @@
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 #[test]
 fn no_arguments_prints_help() {
@@ -10,6 +10,24 @@ fn no_arguments_prints_help() {
     assert!(help.status.success());
     assert!(output.stderr.is_empty());
     assert!(String::from_utf8_lossy(&help.stdout).contains("Usage: rsille"));
+    assert_eq!(output.stdout, help.stdout);
+}
+
+#[test]
+fn no_arguments_with_piped_stdin_prints_help() {
+    let output = Command::new(env!("CARGO_BIN_EXE_rsille"))
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .unwrap();
+    let help = Command::new(env!("CARGO_BIN_EXE_rsille"))
+        .arg("--help")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
     assert_eq!(output.stdout, help.stdout);
 }
 

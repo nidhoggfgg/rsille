@@ -2,7 +2,7 @@
 mod export;
 mod options;
 mod raster;
-mod scene;
+pub(crate) mod scene;
 mod static_image;
 
 use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};

@@ -1,6 +1,6 @@
 use std::{io::Cursor, sync::OnceLock};
 
-pub(super) const SIDE: usize = 320;
+pub(crate) const SIDE: usize = 320;
 
 struct Frame {
     png: &'static [u8],
@@ -16,7 +16,7 @@ impl Frame {
     }
 }
 
-pub(super) fn pixels(id: usize) -> &'static [u8] {
+pub(crate) fn pixels(id: usize) -> &'static [u8] {
     let frame = &FRAMES[id];
     frame.rgba.get_or_init(|| {
         let mut reader = png::Decoder::new(Cursor::new(frame.png))
@@ -30,7 +30,7 @@ pub(super) fn pixels(id: usize) -> &'static [u8] {
     })
 }
 
-pub(super) struct Clip {
+pub(crate) struct Clip {
     pub duration: u16,
     // Each entry holds an exclusive end tick and an index into the shared frame pool.
     timeline: &'static [(u16, usize)],

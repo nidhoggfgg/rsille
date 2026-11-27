@@ -1,7 +1,7 @@
 mod export;
 mod grid;
 mod notebook;
-mod plot;
+pub(crate) mod plot;
 
 use notebook::{application, State};
 
@@ -9,7 +9,7 @@ use plot::Plot;
 use rsille::tui::prelude::*;
 use std::error::Error;
 
-const X_RANGE: [f64; 2] = [-10.0, 10.0];
+pub(crate) const X_RANGE: [f64; 2] = [-10.0, 10.0];
 #[cfg(test)]
 const BOUNDS: [f64; 4] = [-10.0, 10.0, -3.0, 3.0];
 const HELP: &str = "Function plotter — 2D curves and shaded 3D surfaces

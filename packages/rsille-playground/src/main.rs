@@ -2,6 +2,7 @@ mod ai_babies;
 mod deepseek_pet;
 mod function_plotter;
 mod jellyfish;
+mod launcher;
 
 use clap::{CommandFactory, Parser, Subcommand};
 use std::error::Error;
@@ -79,6 +80,9 @@ fn require_terminal() -> Result<(), Box<dyn Error>> {
 fn main() -> Result<(), Box<dyn Error>> {
     if let Some(experience) = Args::parse().experience {
         return experience.run();
+    }
+    if io::stdin().is_terminal() && io::stdout().is_terminal() {
+        return launcher::run();
     }
     Args::command().print_help()?;
     Ok(())

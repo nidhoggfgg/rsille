@@ -42,7 +42,7 @@ fn main() {
             timeline.push((duration, id));
         }
         let ident = name.to_ascii_uppercase();
-        writeln!(output, "pub(super) static {ident}: Clip = Clip {{ duration: {duration}, timeline: &{timeline:?} }};").unwrap();
+        writeln!(output, "pub(crate) static {ident}: Clip = Clip {{ duration: {duration}, timeline: &{timeline:?} }};").unwrap();
     }
     let count = images.len();
     writeln!(output, "static FRAMES: [Frame; {count}] = [{frames}];").unwrap();

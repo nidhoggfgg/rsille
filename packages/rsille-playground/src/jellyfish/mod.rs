@@ -1,6 +1,6 @@
 //! A quiet, self-playing aquarium using only rsille's public drawing API.
 mod export;
-mod sea;
+pub(crate) mod sea;
 
 use std::{error::Error, time::Instant};
 
