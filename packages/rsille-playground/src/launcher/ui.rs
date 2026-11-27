@@ -324,7 +324,14 @@ impl LauncherRenderer {
         if emblem_w > 0 {
             let pw = emblem_w as usize;
             let ph = 4usize; // 2 cell rows * 2 HalfBlock vertical pixels
-            fx::render_emblem(pw, ph, state.time, accent, secondary, &mut self.emblem_pixels);
+            fx::render_emblem(
+                pw,
+                ph,
+                state.time,
+                accent,
+                secondary,
+                &mut self.emblem_pixels,
+            );
             let emblem_area = local_area(chunk, margin_x, 0, emblem_w, 2);
             let emblem_chunk = chunk.from_area(emblem_area)?;
             blit_halfblock(
@@ -394,7 +401,9 @@ impl LauncherRenderer {
         let target = state.current_launch_target();
         let cmd_text = target.display_command;
         let max_cmd_w = if w >= 76 {
-            (w as usize).saturating_sub(title_x as usize + 22).clamp(16, 48)
+            (w as usize)
+                .saturating_sub(title_x as usize + 22)
+                .clamp(16, 48)
         } else {
             (w as usize).saturating_sub(title_x as usize + margin_x as usize + 2)
         };
@@ -414,12 +423,7 @@ impl LauncherRenderer {
                 let cmd_bg = fx::lerp_rgb(BG_CMD_PILL, accent, 0.08);
                 chunk.fill(cmd_start_x, 1, box_w, 1, ' ', bg_style(cmd_bg))?;
                 let _ = chunk.set_char(cmd_start_x + 1, 1, '$', fg_bg_bold(accent, cmd_bg));
-                let _ = chunk.set_string(
-                    cmd_start_x + 3,
-                    1,
-                    &shown_cmd,
-                    fg_bg(FG_PRIMARY, cmd_bg),
-                );
+                let _ = chunk.set_string(cmd_start_x + 3, 1, &shown_cmd, fg_bg(FG_PRIMARY, cmd_bg));
             }
         }
 
@@ -501,14 +505,25 @@ impl LauncherRenderer {
             let exp_secondary = exp.secondary_rgb();
 
             let card_bg = if is_selected {
-                fx::lerp_rgb([15, 21, 35], exp_accent, 0.14 + 0.04 * breath + 0.08 * pulse)
+                fx::lerp_rgb(
+                    [15, 21, 35],
+                    exp_accent,
+                    0.14 + 0.04 * breath + 0.08 * pulse,
+                )
             } else if is_hovered {
                 BG_CARD_HOVER
             } else {
                 BG_CARD
             };
 
-            chunk.fill(card.x(), card.y(), card.width(), card.height(), ' ', bg_style(card_bg))?;
+            chunk.fill(
+                card.x(),
+                card.y(),
+                card.width(),
+                card.height(),
+                ' ',
+                bg_style(card_bg),
+            )?;
 
             // Left luminous gradient pillar on active card; refined hairline on inactive cards.
             for dy in 0..card.height() {
@@ -526,7 +541,8 @@ impl LauncherRenderer {
                     let bar_col = fx::lerp_rgb(BORDER_DIM, exp_accent, 0.55);
                     let _ = chunk.set_char(card.x(), card.y() + dy, '▎', fg_bg(bar_col, card_bg));
                 } else {
-                    let _ = chunk.set_char(card.x(), card.y() + dy, '│', fg_bg(BORDER_DIM, card_bg));
+                    let _ =
+                        chunk.set_char(card.x(), card.y() + dy, '│', fg_bg(BORDER_DIM, card_bg));
                 }
             }
 
@@ -607,21 +623,24 @@ impl LauncherRenderer {
                     let arrow_fg = fx::lerp_rgb(exp_accent, exp_secondary, 0.35);
                     let count = exp.variant_count().max(1);
                     let text = if count > 1 {
-                        format!(" ◂ {} ▸ ", truncate_with_ellipsis(vlabel, budget.saturating_sub(6)))
+                        format!(
+                            " ◂ {} ▸ ",
+                            truncate_with_ellipsis(vlabel, budget.saturating_sub(6))
+                        )
                     } else {
-                        format!(" {} ", truncate_with_ellipsis(vlabel, budget.saturating_sub(2)))
+                        format!(
+                            " {} ",
+                            truncate_with_ellipsis(vlabel, budget.saturating_sub(2))
+                        )
                     };
                     let tw = display_width(&text).min(budget) as u16;
                     if tw > 0 {
                         chunk.fill(card.x() + 4, row2, tw, 1, ' ', bg_style(chip_bg))?;
-                        let _ = chunk.set_string(card.x() + 4, row2, &text, fg_bg(chip_fg, chip_bg));
+                        let _ =
+                            chunk.set_string(card.x() + 4, row2, &text, fg_bg(chip_fg, chip_bg));
                         if count > 1 && tw >= 5 {
-                            let _ = chunk.set_char(
-                                card.x() + 5,
-                                row2,
-                                '◂',
-                                fg_bg(arrow_fg, chip_bg),
-                            );
+                            let _ =
+                                chunk.set_char(card.x() + 5, row2, '◂', fg_bg(arrow_fg, chip_bg));
                             let _ = chunk.set_char(
                                 card.x() + 4 + tw - 2,
                                 row2,
@@ -632,7 +651,10 @@ impl LauncherRenderer {
                     }
                 } else {
                     let badge_bg = fx::lerp_rgb(card_bg, [30, 40, 62], 0.5);
-                    let badge_text = format!(" {} ", truncate_with_ellipsis(spec.badge, budget.saturating_sub(2)));
+                    let badge_text = format!(
+                        " {} ",
+                        truncate_with_ellipsis(spec.badge, budget.saturating_sub(2))
+                    );
                     let bw = display_width(&badge_text).min(budget) as u16;
                     if bw > 0 {
                         chunk.fill(card.x() + 4, row2, bw, 1, ' ', bg_style(badge_bg))?;
@@ -655,7 +677,14 @@ impl LauncherRenderer {
             let last_card = layout.regions.cards[3];
             if y >= last_card.y() + last_card.height() + 2 && ftr.width() > 2 {
                 let rule_col = fx::lerp_rgb(BG_SHELL, BORDER_DIM, 0.75);
-                chunk.fill(x + 1, y - 1, ftr.width() - 2, 1, '─', fg_bg(rule_col, BG_SHELL))?;
+                chunk.fill(
+                    x + 1,
+                    y - 1,
+                    ftr.width() - 2,
+                    1,
+                    '─',
+                    fg_bg(rule_col, BG_SHELL),
+                )?;
             }
             let key_bg = fx::lerp_rgb(BG_KEYCAP, accent, 0.25);
             let _ = chunk.set_string(x + 1, y, " ↵ Enter ", fg_bg_bold(FG_PRIMARY, key_bg));
@@ -781,12 +810,7 @@ impl LauncherRenderer {
         // Rounded outer bezel: top, bottom, and side edges.
         let _ = chunk.set_char(sx, sy, '╭', fg_bg(border_color_at(0.0), BG_SHELL));
         let _ = chunk.set_char(sx + sw - 1, sy, '╮', fg_bg(border_color_at(1.0), BG_SHELL));
-        let _ = chunk.set_char(
-            sx,
-            sy + sh - 1,
-            '╰',
-            fg_bg(border_color_at(0.25), BG_SHELL),
-        );
+        let _ = chunk.set_char(sx, sy + sh - 1, '╰', fg_bg(border_color_at(0.25), BG_SHELL));
         let _ = chunk.set_char(
             sx + sw - 1,
             sy + sh - 1,

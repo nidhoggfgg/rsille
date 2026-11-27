@@ -558,7 +558,9 @@ mod tests {
         state.advance(0.06);
         state.advance(0.06);
         assert_eq!(state.selected, ExperienceId::FunctionPlotter);
-        let tr = state.transition.expect("auto-tour switch starts transition");
+        let tr = state
+            .transition
+            .expect("auto-tour switch starts transition");
         assert_eq!(tr.from, ExperienceId::Jellyfish);
         assert_eq!(tr.to, ExperienceId::FunctionPlotter);
 
@@ -601,7 +603,10 @@ mod tests {
         assert_eq!(info.action_count, 1);
         assert_eq!(info.action_pulse, 2.5);
         assert!(state.active_pulse_strength() > 0.99);
-        assert_eq!(info.variant, 1 % ExperienceId::AiBabies.variant_count().max(1));
+        assert_eq!(
+            info.variant,
+            1 % ExperienceId::AiBabies.variant_count().max(1)
+        );
 
         let after_space = info.variant;
         state.handle_event(&press(KeyCode::Left), &regions);

@@ -301,10 +301,7 @@ impl SceneEngine {
         let variant = interaction.variant % ExperienceId::Jellyfish.variant_count();
         let pulse = pulse_age(time, interaction).filter(|&dt| dt < 1.8);
         // Gentle motion surge during a bioluminescent pulse.
-        let sea_time = time
-            + pulse.map_or(0.0, |dt| {
-                0.55 * (1.0 - (-dt * 2.5).exp())
-            });
+        let sea_time = time + pulse.map_or(0.0, |dt| 0.55 * (1.0 - (-dt * 2.5).exp()));
 
         // 2x2 supersampling keeps delicate tentacles silky at terminal HalfBlock resolution;
         // cap only for pathologically huge synthetic test viewports.
@@ -369,8 +366,7 @@ impl SceneEngine {
                     let d_inner = (dist - (ring_r * 0.66 - wobble * 0.7)) / 0.036;
                     let outer_ring = (-d_outer * d_outer).exp();
                     let inner_ring = (-d_inner * d_inner).exp() * 0.52;
-                    let sparkle =
-                        0.72 + 0.28 * (angle * 11.0 - dt * 6.5).sin().powi(2);
+                    let sparkle = 0.72 + 0.28 * (angle * 11.0 - dt * 6.5).sin().powi(2);
                     let wave = (outer_ring + inner_ring) * fade * sparkle;
                     let luma = rgb[0] * 0.3 + rgb[1] * 0.55 + rgb[2] * 0.15;
                     for c in 0..3 {
@@ -452,7 +448,7 @@ impl SceneEngine {
                 let bg_dist = ((r - 18.0 / 255.0).abs()
                     + (g - 22.0 / 255.0).abs()
                     + (b - 30.0 / 255.0).abs())
-                    .min(1.0);
+                .min(1.0);
 
                 // Radial optical-lab backdrop vignette behind the math geometry.
                 let dx = (u - 0.5) * 1.45;
@@ -498,15 +494,18 @@ impl SceneEngine {
                         }
                     }
 
-                    r = (studio_bg[0] * (1.0 - fg_strength) + fr * fg_strength) * (0.84 + 0.16 * vignette);
-                    g = (studio_bg[1] * (1.0 - fg_strength) + fg * fg_strength) * (0.84 + 0.16 * vignette);
-                    b = (studio_bg[2] * (1.0 - fg_strength) + fb * fg_strength) * (0.84 + 0.16 * vignette);
+                    r = (studio_bg[0] * (1.0 - fg_strength) + fr * fg_strength)
+                        * (0.84 + 0.16 * vignette);
+                    g = (studio_bg[1] * (1.0 - fg_strength) + fg * fg_strength)
+                        * (0.84 + 0.16 * vignette);
+                    b = (studio_bg[2] * (1.0 - fg_strength) + fb * fg_strength)
+                        * (0.84 + 0.16 * vignette);
 
                     // Travelling luminous harmonic shimmer on the 2D polar preset so it breathes at 30 FPS.
                     if !preset.is_spatial && fg_strength > 0.35 {
                         let theta = (v - 0.5).atan2((u - 0.5) * (width as f32 * inv_h));
-                        let shimmer =
-                            ((theta * 2.0 - t * 2.6).sin() * 0.5 + 0.5).powi(3) * (0.24 + 0.35 * glow_pulse);
+                        let shimmer = ((theta * 2.0 - t * 2.6).sin() * 0.5 + 0.5).powi(3)
+                            * (0.24 + 0.35 * glow_pulse);
                         r += 0.30 * shimmer;
                         g += 0.24 * shimmer;
                         b += 0.36 * shimmer;
@@ -687,9 +686,7 @@ impl SceneEngine {
                     ((t * 3.2 + i as f32 * 1.9).sin() * 0.45).round()
                 };
                 let center_x = (width as f32 * cx_frac).round() as isize;
-                let foot_y = (floor_y + 1.0 + bob)
-                    .max(sprite_side as f32)
-                    .round() as isize;
+                let foot_y = (floor_y + 1.0 + bob).max(sprite_side as f32).round() as isize;
                 blit_ai_baby_with_reflection(
                     out,
                     width,
@@ -720,9 +717,7 @@ impl SceneEngine {
                 -((p * PI).sin() * (height as f32 * 0.075))
             });
             let center_x = (width / 2) as isize;
-            let foot_y = (floor_y + 2.0 + lift)
-                .max(sprite_side as f32 + 1.0)
-                .round() as isize;
+            let foot_y = (floor_y + 2.0 + lift).max(sprite_side as f32 + 1.0).round() as isize;
             blit_ai_baby_with_reflection(
                 out,
                 width,
@@ -953,7 +948,8 @@ impl SceneEngine {
             let u = (hash01(i + 433) + 0.03 * (t * 1.5 + i as f32 * 1.3).sin()).rem_euclid(1.0);
             let v = (hash01(i + 467) - t * speed).rem_euclid(1.0);
             let radius = 0.016 + hash01(i + 503) * 0.014;
-            let alpha = (0.35 + 0.35 * (t * 2.2 + i as f32).sin().powi(2)) * (1.0 - (1.0 - v).powi(4));
+            let alpha =
+                (0.35 + 0.35 * (t * 2.2 + i as f32).sin().powi(2)) * (1.0 - (1.0 - v).powi(4));
             draw_soft_sparkle(out, width, height, u, v, radius, [130, 238, 255], alpha);
         }
 
@@ -1054,7 +1050,8 @@ fn apply_subtle_bloom(pixels: &mut [[u8; 3]], width: usize, height: usize, stren
             ] {
                 let nb = snapshot[(y as isize + oy) as usize * width + (x as isize + ox) as usize];
                 // Only bloom genuinely bright curve pixels above the dark studio floor.
-                let luma = f32::from(nb[0]) * 0.299 + f32::from(nb[1]) * 0.587 + f32::from(nb[2]) * 0.114;
+                let luma =
+                    f32::from(nb[0]) * 0.299 + f32::from(nb[1]) * 0.587 + f32::from(nb[2]) * 0.114;
                 if luma > 105.0 {
                     let excess = (luma - 105.0) / 150.0;
                     acc[0] += f32::from(nb[0]) * w * excess;
@@ -1073,10 +1070,7 @@ fn apply_subtle_bloom(pixels: &mut [[u8; 3]], width: usize, height: usize, stren
 }
 
 fn spotlight_action_at(time: f64) -> babies_scene::Action {
-    let total: f64 = BABIES_SPOTLIGHT_ACTIONS
-        .iter()
-        .map(|a| a.duration())
-        .sum();
+    let total: f64 = BABIES_SPOTLIGHT_ACTIONS.iter().map(|a| a.duration()).sum();
     let mut rem = time.rem_euclid(total);
     for action in BABIES_SPOTLIGHT_ACTIONS {
         if rem + 1e-9 < action.duration() {
@@ -1219,7 +1213,8 @@ fn draw_deepseek_whale(
             PetClip::Nap => &pet_anim::PREVIEW_NAP,
         };
         // clips.yaml durations are in 100ms ticks (10 ticks per second).
-        let tick = ((clip_time.max(0.0) * 10.0).floor() as u64 % u64::from(clip_ref.duration)) as u16;
+        let tick =
+            ((clip_time.max(0.0) * 10.0).floor() as u64 % u64::from(clip_ref.duration)) as u16;
         let frame_id = clip_ref.frame(tick);
         let rgba = pet_anim::pixels(frame_id);
         let dest_x0 = center_x - (sprite_side as isize) / 2;
@@ -1285,12 +1280,10 @@ fn draw_procedural_whale_fallback(
 
             // Rounded whale body + curving tail fluke.
             let body_d = (nx / 0.85).powi(2) + ((ny + 0.04) / 0.68).powi(2);
-            let tail_d = ((nx + 0.86) / 0.34).powi(2)
-                + ((ny - 0.16 - tail_wag) / 0.24).powi(2);
-            let fluke_d = ((nx + 0.96) / 0.24).powi(2)
-                + ((ny + 0.20 - tail_wag) / 0.26).powi(2);
-            let fin_d = ((nx - 0.08) / 0.26).powi(2)
-                + ((ny - 0.48 - tail_wag * 0.4) / 0.18).powi(2);
+            let tail_d = ((nx + 0.86) / 0.34).powi(2) + ((ny - 0.16 - tail_wag) / 0.24).powi(2);
+            let fluke_d = ((nx + 0.96) / 0.24).powi(2) + ((ny + 0.20 - tail_wag) / 0.26).powi(2);
+            let fin_d =
+                ((nx - 0.08) / 0.26).powi(2) + ((ny - 0.48 - tail_wag * 0.4) / 0.18).powi(2);
 
             let inside = body_d < 1.0 || tail_d < 1.0 || fluke_d < 1.0 || fin_d < 1.0;
             if !inside {
@@ -1431,7 +1424,12 @@ fn sample_rgba_box(
         return (0.0, 0.0, 0.0, 0.0);
     }
     let inv_a = 1.0 / sum_a;
-    (sum_r * inv_a, sum_g * inv_a, sum_b * inv_a, (sum_a / total).clamp(0.0, 1.0))
+    (
+        sum_r * inv_a,
+        sum_g * inv_a,
+        sum_b * inv_a,
+        (sum_a / total).clamp(0.0, 1.0),
+    )
 }
 
 fn draw_terminal_diorama_lines(out: &mut [[u8; 3]], width: usize, height: usize, t: f32) {
@@ -1447,7 +1445,11 @@ fn draw_terminal_diorama_lines(out: &mut [[u8; 3]], width: usize, height: usize,
         if px < width && dot_y < height {
             blend_over(
                 &mut out[dot_y * width + px],
-                [f32::from(color[0]), f32::from(color[1]), f32::from(color[2])],
+                [
+                    f32::from(color[0]),
+                    f32::from(color[1]),
+                    f32::from(color[2]),
+                ],
                 0.42,
             );
         }
@@ -1457,11 +1459,34 @@ fn draw_terminal_diorama_lines(out: &mut [[u8; 3]], width: usize, height: usize,
     type TerminalSegment = (f32, f32, [u8; 3]);
     type TerminalLine = (f32, &'static [TerminalSegment]);
     let lines: [TerminalLine; 5] = [
-        (0.24, &[(0.07, 0.11, [90, 235, 210]), (0.14, 0.30, [110, 175, 240]), (0.33, 0.45, [155, 130, 235])]),
-        (0.36, &[(0.10, 0.22, [95, 165, 225]), (0.25, 0.38, [88, 220, 195])]),
-        (0.48, &[(0.07, 0.11, [90, 235, 210]), (0.14, 0.27, [230, 180, 115]), (0.30, 0.41, [115, 175, 235])]),
-        (0.60, &[(0.10, 0.25, [145, 140, 235]), (0.28, 0.36, [95, 215, 225])]),
-        (0.74, &[(0.07, 0.11, [98, 245, 210]), (0.14, 0.24, [120, 190, 245])]),
+        (
+            0.24,
+            &[
+                (0.07, 0.11, [90, 235, 210]),
+                (0.14, 0.30, [110, 175, 240]),
+                (0.33, 0.45, [155, 130, 235]),
+            ],
+        ),
+        (
+            0.36,
+            &[(0.10, 0.22, [95, 165, 225]), (0.25, 0.38, [88, 220, 195])],
+        ),
+        (
+            0.48,
+            &[
+                (0.07, 0.11, [90, 235, 210]),
+                (0.14, 0.27, [230, 180, 115]),
+                (0.30, 0.41, [115, 175, 235]),
+            ],
+        ),
+        (
+            0.60,
+            &[(0.10, 0.25, [145, 140, 235]), (0.28, 0.36, [95, 215, 225])],
+        ),
+        (
+            0.74,
+            &[(0.07, 0.11, [98, 245, 210]), (0.14, 0.24, [120, 190, 245])],
+        ),
     ];
 
     for (line_idx, &(y_frac, segs)) in lines.iter().enumerate() {
@@ -1474,7 +1499,11 @@ fn draw_terminal_diorama_lines(out: &mut [[u8; 3]], width: usize, height: usize,
             for x in x0..x1 {
                 blend_over(
                     &mut out[row + x],
-                    [f32::from(color[0]), f32::from(color[1]), f32::from(color[2])],
+                    [
+                        f32::from(color[0]),
+                        f32::from(color[1]),
+                        f32::from(color[2]),
+                    ],
                     shimmer,
                 );
             }
@@ -1588,7 +1617,10 @@ mod tests {
         for (i, exp) in ExperienceId::ALL.into_iter().enumerate() {
             assert_eq!(exp.index(), i);
             assert_eq!(ExperienceId::from_index(i), exp);
-            assert_eq!(ExperienceId::from_index(i + ExperienceId::ALL.len() * 3), exp);
+            assert_eq!(
+                ExperienceId::from_index(i + ExperienceId::ALL.len() * 3),
+                exp
+            );
             assert!(exp.variant_count() >= 3);
             assert!(!SceneEngine::interaction_hint(exp).is_empty());
             assert_ne!(exp.accent_rgb(), exp.secondary_rgb());
@@ -1608,9 +1640,23 @@ mod tests {
                 assert_eq!(out.len(), w * h, "{exp:?} {w}x{h}");
             }
             // Non-finite timestamps must never panic.
-            engine.render_into(exp, 20, 12, f64::NAN, PreviewInteraction::default(), &mut out);
+            engine.render_into(
+                exp,
+                20,
+                12,
+                f64::NAN,
+                PreviewInteraction::default(),
+                &mut out,
+            );
             assert_eq!(out.len(), 240);
-            engine.render_into(exp, 20, 12, f64::INFINITY, PreviewInteraction::default(), &mut out);
+            engine.render_into(
+                exp,
+                20,
+                12,
+                f64::INFINITY,
+                PreviewInteraction::default(),
+                &mut out,
+            );
             assert_eq!(out.len(), 240);
         }
     }
@@ -1630,13 +1676,14 @@ mod tests {
             assert_ne!(a, b, "{exp:?} must animate over time");
             // Ensure rich visual diversity (not a flat solid color).
             let unique: std::collections::HashSet<_> = a.iter().copied().collect();
-            assert!(unique.len() > 25, "{exp:?} has too few colors: {}", unique.len());
+            assert!(
+                unique.len() > 25,
+                "{exp:?} has too few colors: {}",
+                unique.len()
+            );
 
             // Switching variants visibly changes the stage.
-            let alt = PreviewInteraction {
-                variant: 1,
-                ..base
-            };
+            let alt = PreviewInteraction { variant: 1, ..base };
             engine.render_into(exp, w, h, 0.5, alt, &mut b);
             assert_ne!(a, b, "{exp:?} variant 1 must differ from variant 0");
 

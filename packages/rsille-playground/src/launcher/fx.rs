@@ -263,10 +263,16 @@ mod tests {
     #[test]
     fn lerp_and_gradient_handle_endpoints_midpoints_and_nonfinite() {
         assert_eq!(lerp_rgb([10, 20, 30], [210, 120, 230], 0.0), [10, 20, 30]);
-        assert_eq!(lerp_rgb([10, 20, 30], [210, 120, 230], 1.0), [210, 120, 230]);
+        assert_eq!(
+            lerp_rgb([10, 20, 30], [210, 120, 230], 1.0),
+            [210, 120, 230]
+        );
         assert_eq!(lerp_rgb([0, 100, 200], [100, 200, 0], 0.5), [50, 150, 100]);
         assert_eq!(lerp_rgb([10, 20, 30], [200, 200, 200], -2.0), [10, 20, 30]);
-        assert_eq!(lerp_rgb([10, 20, 30], [200, 200, 200], 4.5), [200, 200, 200]);
+        assert_eq!(
+            lerp_rgb([10, 20, 30], [200, 200, 200], 4.5),
+            [200, 200, 200]
+        );
         assert_eq!(
             lerp_rgb([10, 20, 30], [200, 200, 200], f32::NAN),
             [10, 20, 30]

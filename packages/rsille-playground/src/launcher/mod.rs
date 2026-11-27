@@ -18,10 +18,7 @@ use crossterm::{
     terminal::{Clear, ClearType},
 };
 use rsille::render::{
-    area::Size,
-    buffer::Buffer,
-    chunk::Chunk,
-    Builder, Draw, DrawErr, InlineMouseMode, Update,
+    area::Size, buffer::Buffer, chunk::Chunk, Builder, Draw, DrawErr, InlineMouseMode, Update,
 };
 
 use self::{
@@ -243,7 +240,9 @@ fn handoff_launch(target: &LaunchTarget) -> Result<(), Box<dyn Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+    use crossterm::event::{
+        KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+    };
     use scenes::ExperienceId;
 
     #[test]
