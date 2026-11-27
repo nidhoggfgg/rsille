@@ -1,6 +1,6 @@
 [package]
 name = "rsille"
-version = "3.4.1"
+version = "3.4.2"
 edition = "2021"
 authors = ["nidhoggfgg <nidhoggfgg@gmail.com>"]
 description = "A terminal UI framework with widgets, layouts, animation, and Unicode, Sixel, and Kitty graphics"
@@ -41,10 +41,10 @@ resolver = "3"
 exclude = ["examples"]
 
 [workspace.dependencies]
-rsille-render = { version = "0.1.2", path = "packages/rsille-render", default-features = false }
+rsille-render = { version = "0.1.3", path = "packages/rsille-render", default-features = false }
 rsille-canvas = { version = "0.1.0", path = "packages/rsille-canvas" }
 rsille-tui = { version = "0.1.0", path = "packages/rsille-tui", default-features = false }
-rsille-overlay = { version = "0.1.1", path = "packages/rsille-overlay" }
+rsille-overlay = { version = "0.1.2", path = "packages/rsille-overlay" }
 base64 = "0.22"
 crossterm = { version = "0.28.1", features = ["event-stream"] }
 futures = { version = "0.3.31", default-features = false, features = ["std", "async-await"] }

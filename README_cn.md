@@ -103,11 +103,11 @@ cargo run -p rsille-overlay --example status_badge   # 实时显示上一条命�
 
 ```toml
 [dependencies]
-rsille = "3.4.1"
+rsille = "3.4.2"
 # 可选：启用 live shell 叠加层（重新导出 rsille-overlay）
-# rsille = { version = "3.4.1", features = ["overlay"] }
+# rsille = { version = "3.4.2", features = ["overlay"] }
 # 仅使用文本与 Unicode 字符画布（不引入像素图形支持）：
-# rsille = { version = "3.4.1", default-features = false }
+# rsille = { version = "3.4.2", default-features = false }
 ```
 
 ### 第一个应用，就带动画

@@ -103,11 +103,11 @@ Add `rsille` to `Cargo.toml`:
 
 ```toml
 [dependencies]
-rsille = "3.4.1"
+rsille = "3.4.2"
 # Optional: float widgets or graphics over a live shell (re-exports rsille-overlay)
-# rsille = { version = "3.4.1", features = ["overlay"] }
+# rsille = { version = "3.4.2", features = ["overlay"] }
 # Text + Unicode Canvas only (no raster/Kitty/Sixel):
-# rsille = { version = "3.4.1", default-features = false }
+# rsille = { version = "3.4.2", default-features = false }
 ```
 
 ### An animated inline app
