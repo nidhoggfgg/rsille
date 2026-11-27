@@ -250,6 +250,7 @@ pub struct Pet<'a> {
     previous: Option<Image>,
     last_frame: Option<FrameKey>,
     dirty: bool,
+    placements_dirty: bool,
 }
 
 #[cfg(test)]
@@ -292,6 +293,7 @@ impl<'a> Pet<'a> {
             previous: None,
             last_frame: None,
             dirty: false,
+            placements_dirty: false,
         }
     }
 
@@ -509,8 +511,17 @@ impl<'a> Pet<'a> {
         self.dirty = true;
     }
 
+    pub fn invalidate_placements(&mut self) {
+        if self.kitty.is_some() {
+            self.placements_dirty = true;
+        } else {
+            self.dirty = true;
+        }
+    }
+
     /// Remove the visible sprite while its original coordinates are still valid.
     pub fn hide(&mut self, cols: u16, rows: u16, out: &mut Vec<u8>) {
+        self.placements_dirty = false;
         if let Some(old) = self.painted_menu.take() {
             self.erase_panel(old.area, cols, rows, out);
         }
@@ -735,7 +746,7 @@ impl<'a> Pet<'a> {
             bite,
             leftward,
         };
-        if !self.dirty && self.last_frame.as_ref() == Some(&key) {
+        if !self.dirty && !self.placements_dirty && self.last_frame.as_ref() == Some(&key) {
             if fish_changed {
                 self.paint_fish(fish, out)?;
             }
@@ -744,6 +755,7 @@ impl<'a> Pet<'a> {
         let same_sprite = self.last_frame.as_ref().is_some_and(|old| {
             (old.side, old.frame, old.leftward, old.bite) == (w, frame, leftward, bite)
         });
+        let re_place = self.placements_dirty;
         let repaint_fish = fish_changed || self.dirty || self.kitty.is_none();
         let pixels = if let Some(old) = self.previous.as_ref().filter(|_| same_sprite) {
             Rc::clone(&old.pixels)
@@ -795,12 +807,15 @@ impl<'a> Pet<'a> {
             sixel::draw_offset(col, row, w, &image.pixels, offset, out);
         }
         self.dirty = false;
+        self.placements_dirty = false;
         self.last_frame = Some(key);
         self.previous = Some(image);
         if let Some(b) = bubble {
             if let Some(kitty) = self.kitty {
                 if repaint_panel {
                     kitty.draw_panel(b.area, b, out)?;
+                } else if re_place {
+                    kitty.place_panel(b.area, out)?;
                 }
             } else {
                 b.render(out)?;
@@ -809,11 +824,17 @@ impl<'a> Pet<'a> {
         self.bubble = bubble;
         if repaint_fish {
             self.paint_fish(fish, out)?;
+        } else if re_place {
+            if let (Some(kitty), Some(icon)) = (self.kitty, fish) {
+                icon.place_kitty(&kitty.fish, out)?;
+            }
         }
         if let Some(menu) = menu {
             if let Some(kitty) = self.kitty {
                 if repaint_panel {
                     kitty.draw_panel(menu.area, menu, out)?;
+                } else if re_place {
+                    kitty.place_panel(menu.area, out)?;
                 }
             } else {
                 menu.render(out)?;
@@ -1862,5 +1883,38 @@ mod tests {
             assert_ne!(initial, frame(tick + phase, 120, 32));
             assert_eq!(initial, frame(tick + 384, 120, 32));
         }
+    }
+
+    #[test]
+    fn kitty_invalidate_placements_replaces_whale_panel_and_fish_without_reuploading() {
+        let kitty = KittySprites::new().unwrap();
+        let catalog = crate::deepseek_pet::dialogue::Catalog::load(None).unwrap();
+        let mut pet = Pet::new(&catalog, [Feature::Mouse, Feature::Speech].into());
+        pet.kitty = Some(&kitty);
+        pet.notice_command(b'+', catalog.commands["ls"]);
+        pet.draw(0, 80, 24, 10, 20, &mut Vec::new()).unwrap();
+        assert!(pet.bubble.is_some());
+        choose_fish(&mut pet, 0);
+        pet.mouse_event(MouseKind::Motion, 2, 2);
+        pet.draw(0, 80, 24, 10, 20, &mut Vec::new()).unwrap();
+        assert!(pet.fish_icon.is_some());
+
+        // Placement-only invalidation (e.g. Vim scroll or ED 2) re-places whale, bubble,
+        // and fish using only a=p without deleting or re-uploading pixels.
+        pet.invalidate_placements();
+        let mut out = Vec::new();
+        pet.draw(0, 80, 24, 10, 20, &mut out).unwrap();
+        let placed = std::str::from_utf8(&out).unwrap();
+        assert_eq!(placed.matches("\x1b_Ga=p,").count(), 3, "{placed}");
+        assert!(!placed.contains("a=t,"), "{placed}");
+        assert!(!placed.contains("a=d,"), "{placed}");
+
+        // Full invalidation (e.g. child Kitty a=d or resize) re-uploads via double-buffering.
+        pet.invalidate();
+        out.clear();
+        pet.draw(0, 80, 24, 10, 20, &mut out).unwrap();
+        let uploaded = std::str::from_utf8(&out).unwrap();
+        assert_eq!(uploaded.matches("\x1b_Ga=t,").count(), 3, "{uploaded}");
+        assert_eq!(uploaded.matches("\x1b_Ga=p,").count(), 3, "{uploaded}");
     }
 }

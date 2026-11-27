@@ -25,6 +25,10 @@ enum State {
 pub(crate) enum Event {
     MouseHandoff,
     Clear,
+    SyncReset {
+        csi_start: Option<usize>,
+        replacement: Option<Vec<u8>>,
+    },
 }
 
 /// Parser state for one output stream. Feed every byte the child writes.
@@ -42,6 +46,10 @@ pub struct Boundary {
     pub(crate) alternate: bool,
     /// The last batch included a screen selection, even if it switched back.
     pub(crate) screen_selected: bool,
+    /// The last batch may have scrolled or cleared placements on screen.
+    pub(crate) placement_disturbed: bool,
+    /// The last batch may have deleted uploaded Kitty graphics data.
+    pub(crate) graphics_deleted: bool,
 }
 
 impl Boundary {
@@ -61,6 +69,10 @@ impl Boundary {
     /// The child shows its alternate screen.
     pub fn alternate(&self) -> bool {
         self.alternate
+    }
+
+    pub(crate) fn synchronized(&self) -> bool {
+        self.synchronized
     }
 
     pub(crate) fn child_mouse(&self) -> bool {
@@ -104,7 +116,10 @@ impl Boundary {
         }
         match action {
             b"t" | b"T" | b"f" => self.uploading = more,
-            b"d" => self.uploading = false,
+            b"d" => {
+                self.uploading = false;
+                self.graphics_deleted = true;
+            }
             _ => {}
         }
     }
@@ -123,6 +138,7 @@ impl Boundary {
         let screen = usize::from(self.alternate);
         if self.clear_pending[screen] && self.ready() {
             self.clear_pending[screen] = false;
+            self.placement_disturbed = true;
             notify(offset, self, Event::Clear);
         }
     }
@@ -135,6 +151,10 @@ impl Boundary {
         use self::State::*;
         let mut rang = false;
         self.screen_selected = false;
+        self.placement_disturbed = false;
+        self.graphics_deleted = false;
+        let mut esc_idx = None;
+        let mut csi_start = None;
         for (idx, &b) in bytes.iter().enumerate() {
             self.clear_if_ready(idx, &mut notify);
             rang |= b == 7 && self.ready();
@@ -156,13 +176,34 @@ impl Boundary {
                         let alternate = self.alternate;
                         let csi = std::mem::take(&mut self.csi);
                         let mut mouse_changed = false;
+                        let mut sync_reset = false;
                         for param in csi[1..].split(|&c| c == b';') {
                             mouse_changed |= self.private_mode(param, b == b'h');
+                            sync_reset |= b == b'l' && param == b"2026";
+                        }
+                        if sync_reset {
+                            let replacement = strip_sync_param(&csi[1..]);
+                            notify(
+                                idx + 1,
+                                self,
+                                Event::SyncReset {
+                                    csi_start,
+                                    replacement,
+                                },
+                            );
                         }
                         self.csi = csi;
                         if mouse_changed || alternate != self.alternate {
                             notify(idx + 1, self, Event::MouseHandoff);
                         }
+                    } else if b == b'J'
+                        || (matches!(b, b'S' | b'T' | b'L' | b'M')
+                            && !self.csi.starts_with(b"?")
+                            && !self.csi.starts_with(b">"))
+                    {
+                        self.placement_disturbed = true;
+                    } else if b == b'p' && self.csi == b"!" {
+                        self.graphics_deleted = true;
                     }
                 } else if self.csi.len() < 128 {
                     self.csi.push(b);
@@ -170,8 +211,17 @@ impl Boundary {
             } else {
                 self.csi.clear();
             }
-            if matches!(self.state, Escape) && matches!(b, b'7' | b'8') {
-                self.saved_cursor[usize::from(self.alternate)] = b == b'7';
+            if matches!(self.state, Escape) {
+                if matches!(b, b'7' | b'8') {
+                    self.saved_cursor[usize::from(self.alternate)] = b == b'7';
+                } else if matches!(b, b'D' | b'E' | b'M') {
+                    self.placement_disturbed = true;
+                } else if b == b'c' {
+                    self.graphics_deleted = true;
+                }
+            }
+            if self.ready() && matches!(b, b'\n' | 0x0b | 0x0c | 0x84 | 0x85 | 0x8d) {
+                self.placement_disturbed = true;
             }
             if matches!(self.state, KittyHeader) {
                 if matches!(b, b';' | 0x1b | 0x9c) {
@@ -180,6 +230,7 @@ impl Boundary {
                     self.kitty_header.push(b);
                 }
             }
+            let prev_state = self.state;
             self.state = match (self.state, b) {
                 (_, 0x18 | 0x1a | 0x9c) => Ground, // CAN, SUB, ST
                 (String { osc: true, .. }, 7) | (String { esc: true, .. }, b'\\') => Ground,
@@ -210,10 +261,49 @@ impl Boundary {
                 (Escape | Intermediate, 0x30..=0x7e) | (Csi, 0x40..=0x7e) => Ground,
                 (s, _) => s,
             };
+            match self.state {
+                Escape => {
+                    esc_idx = Some(idx);
+                    csi_start = None;
+                }
+                Csi => {
+                    if matches!(prev_state, Escape) && b == b'[' {
+                        csi_start = esc_idx.take();
+                    } else if b == 0x9b {
+                        self.csi.clear();
+                        csi_start = Some(idx);
+                        esc_idx = None;
+                    }
+                }
+                _ => {
+                    esc_idx = None;
+                    csi_start = None;
+                }
+            }
         }
         self.clear_if_ready(bytes.len(), &mut notify);
         rang
     }
+}
+
+fn strip_sync_param(params: &[u8]) -> Option<Vec<u8>> {
+    let mut kept = params
+        .split(|&c| c == b';')
+        .filter(|&p| p != b"2026")
+        .peekable();
+    kept.peek()?;
+    let mut out = Vec::with_capacity(params.len() + 4);
+    out.extend_from_slice(b"\x1b[?");
+    let mut first = true;
+    for param in kept {
+        if !first {
+            out.push(b';');
+        }
+        first = false;
+        out.extend_from_slice(param);
+    }
+    out.push(b'l');
+    Some(out)
 }
 
 fn decimal(digits: &[u8]) -> u16 {
@@ -323,5 +413,48 @@ mod tests {
         assert!(!b.ready());
         b.feed(b"mtext");
         assert!(b.ready());
+    }
+
+    #[test]
+    fn distinguishes_ordinary_edits_placement_disturbances_and_graphics_deletes() {
+        let mut b = Boundary::default();
+        b.feed(b"\x1b[?1049h");
+
+        // Cursor movement, SGR, EL, plain text, UTF-8 containing 0x84/0x85/0x8d bytes,
+        // and XTSMGRAPHICS (?..S) do not disturb Kitty placements.
+        for benign in [
+            b"\x1b[5;10Hhello\x1b[32m\x1b[K".as_slice(),
+            "\u{2014}\u{2015}\u{201d}鲸鱼".as_bytes(),
+            b"\x1b[?2;1;0S",
+            b"\x1b[>0T",
+        ] {
+            b.feed(benign);
+            assert!(!b.placement_disturbed, "{benign:?}");
+            assert!(!b.graphics_deleted, "{benign:?}");
+        }
+
+        // Clearing and scrolling disturb placements without deleting uploaded image data.
+        for disturb in [
+            b"\x1b[2J".as_slice(),
+            b"\x1b[J",
+            b"\n",
+            b"\x1bD",
+            b"\x1bE",
+            b"\x1bM",
+            b"\x1b[S",
+            b"\x1b[2T",
+            b"\x1b[L",
+            b"\x1b[3M",
+        ] {
+            b.feed(disturb);
+            assert!(b.placement_disturbed, "{disturb:?}");
+            assert!(!b.graphics_deleted, "{disturb:?}");
+        }
+
+        // Terminal resets and child Kitty deletes may drop uploaded pixel data.
+        for delete in [b"\x1b_Ga=d,d=A\x1b\\".as_slice(), b"\x1bc", b"\x1b[!p"] {
+            b.feed(delete);
+            assert!(b.graphics_deleted, "{delete:?}");
+        }
     }
 }

@@ -128,6 +128,16 @@ impl FishIcon {
         }
     }
 
+    pub(super) fn place_kitty(
+        self,
+        image: &rsille::render::raster_output::KittyImage,
+        out: &mut Vec<u8>,
+    ) -> std::io::Result<()> {
+        use std::io::Write;
+        write!(out, "\x1b[{};{}H", self.row, self.col)?;
+        image.place_offset(out, super::kitty::FISH_Z, Default::default())
+    }
+
     pub(super) fn draw(
         self,
         kitty: Option<&rsille::render::raster_output::KittyImage>,

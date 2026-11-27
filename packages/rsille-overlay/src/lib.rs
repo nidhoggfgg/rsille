@@ -205,9 +205,19 @@ pub trait Overlay {
     /// Remove everything drawn so far while its coordinates are still valid.
     fn hide(&mut self, cx: &mut Context<'_>, out: &mut Vec<u8>);
 
-    /// What was drawn may be gone (the child scrolled or cleared the screen).
-    /// Repaint fully on the next draw.
+    /// What was drawn may be gone (the child scrolled, cleared the screen or
+    /// deleted graphics). Repaint fully on the next draw.
     fn invalidate(&mut self) {}
+
+    /// What was drawn on screen may have moved or been cleared (for example by
+    /// scrolling or `ED 2`), while resident graphics data (such as uploaded
+    /// Kitty images) is still intact.
+    ///
+    /// Overlays that can cheaply re-place existing images may override this to
+    /// avoid re-uploading pixel data. The default delegates to [`Self::invalidate`].
+    fn invalidate_placements(&mut self) {
+        self.invalidate();
+    }
 
     /// When the overlay next wants to draw, if before the next 100 ms tick.
     fn wake_at(&mut self, _now: Instant) -> Option<Instant> {
@@ -262,6 +272,9 @@ impl<O: Overlay + ?Sized> Overlay for &mut O {
     }
     fn invalidate(&mut self) {
         (**self).invalidate()
+    }
+    fn invalidate_placements(&mut self) {
+        (**self).invalidate_placements()
     }
     fn wake_at(&mut self, now: Instant) -> Option<Instant> {
         (**self).wake_at(now)

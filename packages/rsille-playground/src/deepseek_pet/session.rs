@@ -167,6 +167,10 @@ impl Overlay for PetOverlay<'_> {
         self.pet.invalidate();
     }
 
+    fn invalidate_placements(&mut self) {
+        self.pet.invalidate_placements();
+    }
+
     fn wake_at(&mut self, now: Instant) -> Option<Instant> {
         let frame = self.frame(now);
         let next = (self.soon || self.pet.moving(frame)).then(|| self.deadline(frame + 1));

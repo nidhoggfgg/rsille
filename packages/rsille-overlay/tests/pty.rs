@@ -34,6 +34,62 @@ fn session_child() {
     let Some(mode) = std::env::var_os(CHILD) else {
         return;
     };
+    if mode == "kitty-alt-sync" {
+        use rsille_overlay::{CellPixels, Context, InlineRasterSession, Overlay};
+
+        struct ProbeOverlay {
+            uploaded: bool,
+            dirty: bool,
+            placements_dirty: bool,
+        }
+        impl Overlay for ProbeOverlay {
+            fn draw(&mut self, _cx: &mut Context<'_>, out: &mut Vec<u8>) -> std::io::Result<()> {
+                if !self.uploaded || self.dirty {
+                    out.extend_from_slice(b"\x1b_Ga=t,q=2;AA==\x1b\\\x1b_Ga=p,q=2\x1b\\");
+                    self.uploaded = true;
+                    self.dirty = false;
+                    self.placements_dirty = false;
+                } else if self.placements_dirty {
+                    out.extend_from_slice(b"\x1b_Ga=p,q=2\x1b\\");
+                    self.placements_dirty = false;
+                }
+                Ok(())
+            }
+            fn hide(&mut self, _cx: &mut Context<'_>, _out: &mut Vec<u8>) {
+                self.uploaded = false;
+                self.dirty = true;
+                self.placements_dirty = false;
+            }
+            fn invalidate(&mut self) {
+                self.dirty = true;
+            }
+            fn invalidate_placements(&mut self) {
+                self.placements_dirty = true;
+            }
+        }
+        let child = r#"
+            stty -echo
+            printf '\033[?1049h\033[1;1Hready'
+            read -r step1
+            printf '\033[?2026h\033[2J\033[1;1Hcleared\033[?2026l'
+            read -r step2
+            printf '\033_Ga=d,d=A\033\\\033[1;1Hdeleted'
+            read -r step3
+        "#;
+        let status = Session::new()
+            .raster_session(InlineRasterSession::Kitty(CellPixels {
+                width: 8,
+                height: 16,
+            }))
+            .command(["/bin/sh", "-c", child])
+            .run(ProbeOverlay {
+                uploaded: false,
+                dirty: true,
+                placements_dirty: false,
+            })
+            .unwrap();
+        std::process::exit(status);
+    }
     if mode == "kitty-screen-switch" {
         use rsille_overlay::{CellPixels, InlineRasterSession, Stack};
 
@@ -115,6 +171,7 @@ fn session_child() {
 struct Terminal {
     master: File,
     grid: vt100::Parser,
+    raw: Vec<u8>,
     pid: i32,
 }
 
@@ -170,6 +227,7 @@ impl Terminal {
         Self {
             master: unsafe { File::from_raw_fd(fd) },
             grid: vt100::Parser::new(12.try_into().unwrap(), 60.try_into().unwrap(), 0),
+            raw: Vec::new(),
             pid,
         }
     }
@@ -179,7 +237,10 @@ impl Terminal {
         loop {
             match self.master.read(&mut buffer) {
                 Ok(0) | Err(_) => break,
-                Ok(n) => self.grid.process(&buffer[..n]),
+                Ok(n) => {
+                    self.raw.extend_from_slice(&buffer[..n]);
+                    self.grid.process(&buffer[..n]);
+                }
             }
         }
     }
@@ -354,5 +415,77 @@ fn direct_commands_keep_their_output_and_exit_status() {
     assert!(first.contains("[]"), "{first:?}");
     // End of input: cat exits 0, and the session reports it.
     term.send(b"\x04");
+    assert_eq!(term.exit_status(), 0);
+}
+
+#[test]
+fn kitty_alt_screen_clear_replaces_inside_sync_and_graphics_delete_reuploads() {
+    let home = tempfile::tempdir().unwrap();
+    let mut term = Terminal::spawn("kitty-alt-sync", "/bin/sh", home.path());
+    let wait_raw = |term: &mut Terminal, needle: &[u8]| {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < deadline {
+            term.pump();
+            if term.raw.windows(needle.len()).any(|w| w == needle) {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        panic!(
+            "timed out waiting for {:?}; raw={:?}",
+            String::from_utf8_lossy(needle),
+            String::from_utf8_lossy(&term.raw)
+        );
+    };
+    term.wait_for("ready", |s| s.contains("ready"));
+    // Wait for the initial upload/placement emitted AFTER switching to the alternate screen.
+    let wait_after = |term: &mut Terminal, after: &[u8], needle: &[u8]| {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < deadline {
+            term.pump();
+            if let Some(pos) = term.raw.windows(after.len()).position(|w| w == after) {
+                if term.raw[pos + after.len()..]
+                    .windows(needle.len())
+                    .any(|w| w == needle)
+                {
+                    return;
+                }
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        panic!(
+            "timed out waiting for {:?} after {:?}; raw={:?}",
+            String::from_utf8_lossy(needle),
+            String::from_utf8_lossy(after),
+            String::from_utf8_lossy(&term.raw)
+        );
+    };
+    wait_after(
+        &mut term,
+        b"ready",
+        b"\x1b_Ga=t,q=2;AA==\x1b\\\x1b_Ga=p,q=2\x1b\\",
+    );
+    term.raw.clear();
+
+    // Synchronized ED 2 clear: overlay must re-place (not re-upload) BEFORE ?2026l.
+    term.send(b"\r");
+    wait_raw(&mut term, b"\x1b[?2026l");
+    let wire = String::from_utf8_lossy(&term.raw);
+    let cleared = wire.find("cleared").expect("child output");
+    let place = wire[cleared..]
+        .find("\x1b_Ga=p,q=2\x1b\\")
+        .expect("placement refreshed");
+    let sync_end = wire[cleared..].find("\x1b[?2026l").expect("sync closed");
+    assert!(place < sync_end, "placement must precede ?2026l: {wire:?}");
+    assert!(
+        !wire[cleared..].contains("a=t,"),
+        "unexpected re-upload: {wire:?}"
+    );
+    term.raw.clear();
+
+    // Child Kitty graphics delete: overlay must perform a full re-upload.
+    term.send(b"\r");
+    wait_raw(&mut term, b"\x1b_Ga=t,q=2;AA==\x1b\\");
+    term.send(b"\r");
     assert_eq!(term.exit_status(), 0);
 }

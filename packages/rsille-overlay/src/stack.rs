@@ -55,6 +55,12 @@ impl Overlay for Stack<'_> {
         self.layers.iter_mut().for_each(|l| l.invalidate());
     }
 
+    fn invalidate_placements(&mut self) {
+        self.layers
+            .iter_mut()
+            .for_each(|l| l.invalidate_placements());
+    }
+
     fn wake_at(&mut self, now: Instant) -> Option<Instant> {
         self.layers.iter_mut().filter_map(|l| l.wake_at(now)).min()
     }

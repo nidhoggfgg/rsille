@@ -22,9 +22,11 @@ struct Terminal {
 }
 impl Drop for Terminal {
     fn drop(&mut self) {
-        // The detach key can also interrupt a child application that enabled mouse tracking.
+        // The detach key can also interrupt a child application that enabled
+        // mouse tracking or synchronized updates.
         let mut out = io::stdout().lock();
-        let _ = out.write_all(b"\x18\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1016l");
+        let _ = out
+            .write_all(b"\x18\x1b[?2026l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1016l");
         #[cfg(windows)]
         let _ = out.write_all(b"\x1b[?9001l\x1b[?1004l");
         let _ = out.write_all(&self.cleanup);
@@ -155,7 +157,7 @@ pub fn run<O: Overlay + ?Sized>(
             }
         };
     }
-    let mut out = io::stdout().lock();
+    let mut out = io::BufWriter::with_capacity(64 * 1024, io::stdout().lock());
     if options.alt_screen {
         out.write_all(b"\x1b[?1049h")?;
     }
@@ -170,6 +172,7 @@ pub fn run<O: Overlay + ?Sized>(
     #[cfg(unix)]
     let mut event = vec![0u8; crate::shell::MAX_EVENT];
     let mut forwarded = Vec::new();
+    let mut sync_resets = Vec::new();
     let mut update = Vec::new();
     let mut sprite = Vec::new();
     let mut last_tick = None;
@@ -177,6 +180,7 @@ pub fn run<O: Overlay + ?Sized>(
     let mut batch = Vec::with_capacity(CAP);
     let mut due = None;
     let mut boundary = Boundary::default();
+    let mut alt_repaint_pending = false;
     let mut child_eof = false;
     loop {
         let now = Instant::now();
@@ -228,16 +232,19 @@ pub fn run<O: Overlay + ?Sized>(
         let woken = wake.is_some_and(|w| now >= w);
         if tick || woken || due.is_some_and(|d| now >= d) || batch.len() == CAP {
             let start = boundary.can_draw();
+            let was_sync = boundary.synchronized();
             let was_alternate = boundary.alternate;
             let was_child_mouse = boundary.child_mouse();
             forwarded.clear();
-            if relay_modes(
+            let relay = relay_modes(
                 &mut boundary,
                 &mut batch,
                 capture_mouse,
                 shared,
                 &mut forwarded,
-            ) {
+                &mut sync_resets,
+            );
+            if relay.bell {
                 overlay.bell();
             }
             if !shared
@@ -251,18 +258,27 @@ pub fn run<O: Overlay + ?Sized>(
             }
             let end = boundary.can_draw();
             update.clear();
-            if !batch.is_empty() {
-                if start && (!was_alternate || boundary.screen_selected) {
-                    overlay.hide(&mut cx!(now, was_alternate), &mut update);
-                }
-                if was_alternate {
-                    // Scrolling, clearing or plugin deletes may remove or move a placement.
+            if !batch.is_empty() && start && (!was_alternate || boundary.screen_selected) {
+                overlay.hide(&mut cx!(now, was_alternate), &mut update);
+            }
+            if was_alternate {
+                // Only scrolling, clearing or graphics deletes disturb Kitty placements.
+                if boundary.graphics_deleted {
                     overlay.invalidate();
+                    alt_repaint_pending = true;
+                } else if boundary.placement_disturbed {
+                    overlay.invalidate_placements();
+                    alt_repaint_pending = true;
                 }
+            }
+            if !batch.is_empty() {
                 if let Some(screen) = &mut screen {
                     screen.feed(&batch);
                 }
                 overlay.output(&batch, &mut cx!(now, boundary.alternate));
+            }
+            if !boundary.alternate || boundary.screen_selected {
+                alt_repaint_pending = false;
             }
             sprite.clear();
             terminal.child_alternate = boundary.alternate;
@@ -274,16 +290,31 @@ pub fn run<O: Overlay + ?Sized>(
                 && !boundary.screen_selected
                 && (tick
                     || (woken && batch.is_empty())
-                    || (!boundary.alternate && batch.len() < CAP))
+                    || ((!boundary.alternate || alt_repaint_pending) && batch.len() < CAP))
             {
                 overlay.draw(&mut cx!(now, boundary.alternate), &mut sprite)?;
+                alt_repaint_pending = false;
             }
+            let sync_mode = if start && end && !boundary.screen_selected && !relay.split_sync_reset
+            {
+                SyncMode::WrapAll
+            } else if was_sync
+                && end
+                && !boundary.screen_selected
+                && !sprite.is_empty()
+                && !relay.split_sync_reset
+            {
+                SyncMode::ContinueOpen
+            } else {
+                SyncMode::Separate
+            };
             render_batch(
                 &mut out,
                 &update,
                 &forwarded,
                 &sprite,
-                start && end && !boundary.screen_selected,
+                sync_mode,
+                &sync_resets,
             )?;
             batch.clear();
             due = None;
@@ -409,25 +440,51 @@ pub fn run<O: Overlay + ?Sized>(
         overlay.hide(&mut cx!(Instant::now(), boundary.alternate), &mut update);
     }
     forwarded.clear();
-    relay_modes(&mut boundary, &mut batch, false, shared, &mut forwarded);
+    let relay = relay_modes(
+        &mut boundary,
+        &mut batch,
+        false,
+        shared,
+        &mut forwarded,
+        &mut sync_resets,
+    );
     terminal.child_alternate = boundary.alternate;
-    render_batch(
-        &mut out,
-        &update,
-        &forwarded,
-        &[],
-        start && boundary.can_draw() && !boundary.screen_selected,
-    )?;
+    let sync_mode =
+        if start && boundary.can_draw() && !boundary.screen_selected && !relay.split_sync_reset {
+            SyncMode::WrapAll
+        } else {
+            SyncMode::Separate
+        };
+    render_batch(&mut out, &update, &forwarded, &[], sync_mode, &sync_resets)?;
     if !boundary.ready() {
         out.write_all(b"\x18")?; // Cancel unfinished child output before terminal teardown.
     }
     out.flush()?;
+    drop(out);
     drop(terminal);
     if direct && child_eof {
         pty.wait()
     } else {
         Ok(0)
     }
+}
+
+struct SyncReset {
+    start: usize,
+    end: usize,
+    replacement: Option<Vec<u8>>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SyncMode {
+    Separate,
+    WrapAll,
+    ContinueOpen,
+}
+
+struct Relay {
+    bell: bool,
+    split_sync_reset: bool,
 }
 
 // Relay the child output, inserting mouse handoffs and resize clears at their
@@ -438,49 +495,75 @@ fn relay_modes(
     capture: bool,
     kitty: bool,
     out: &mut Vec<u8>,
-) -> bool {
+    sync_resets: &mut Vec<SyncReset>,
+) -> Relay {
     let mut start = 0;
     let mut was_child = boundary.child_mouse();
     let mut clears = Vec::new();
-    let bell = boundary.feed_with(bytes, |end, state, event| {
-        if matches!(event, crate::boundary::Event::Clear) {
+    let mut split_sync_reset = false;
+    sync_resets.clear();
+    let bell = boundary.feed_with(bytes, |end, state, event| match event {
+        crate::boundary::Event::Clear => {
             out.extend_from_slice(&bytes[start..end]);
             out.extend_from_slice(CLEAR_VIEWPORT);
             start = end;
             clears.push(end);
-            return;
         }
-        if capture && (kitty || !state.child_mouse() || !was_child) {
-            let (tracking, encoding) = if kitty {
-                let encoding = if state.mouse.encoding == 1016 {
-                    1016
-                } else {
-                    1006
-                };
-                (1003, encoding)
-            } else if state.child_mouse() {
-                (state.mouse.tracking, state.mouse.encoding)
+        crate::boundary::Event::SyncReset {
+            csi_start,
+            replacement,
+        } => {
+            if let Some(csi_start) = csi_start {
+                out.extend_from_slice(&bytes[start..csi_start]);
+                let fwd_start = out.len();
+                out.extend_from_slice(&bytes[csi_start..end]);
+                let fwd_end = out.len();
+                start = end;
+                sync_resets.push(SyncReset {
+                    start: fwd_start,
+                    end: fwd_end,
+                    replacement,
+                });
             } else {
-                (1003, 1006)
-            };
-            out.extend_from_slice(&bytes[start..end]);
-            start = end;
-
-            out.extend_from_slice(b"\x1b[?1003l\x1b[?1006l");
-            for mode in [encoding, tracking] {
-                if mode != 0 {
-                    write!(out, "\x1b[?{mode}h").expect("Vec write");
-                }
+                split_sync_reset = true;
             }
         }
-        was_child = state.child_mouse();
+        crate::boundary::Event::MouseHandoff => {
+            if capture && (kitty || !state.child_mouse() || !was_child) {
+                let (tracking, encoding) = if kitty {
+                    let encoding = if state.mouse.encoding == 1016 {
+                        1016
+                    } else {
+                        1006
+                    };
+                    (1003, encoding)
+                } else if state.child_mouse() {
+                    (state.mouse.tracking, state.mouse.encoding)
+                } else {
+                    (1003, 1006)
+                };
+                out.extend_from_slice(&bytes[start..end]);
+                start = end;
+
+                out.extend_from_slice(b"\x1b[?1003l\x1b[?1006l");
+                for mode in [encoding, tracking] {
+                    if mode != 0 {
+                        write!(out, "\x1b[?{mode}h").expect("Vec write");
+                    }
+                }
+            }
+            was_child = state.child_mouse();
+        }
     });
     out.extend_from_slice(&bytes[start..]);
     // Replay the same clears in the text and forage models, in PTY output order.
     for offset in clears.into_iter().rev() {
         bytes.splice(offset..offset, CLEAR_VIEWPORT.iter().copied());
     }
-    bell
+    Relay {
+        bell,
+        split_sync_reset,
+    }
 }
 
 fn render_batch(
@@ -488,21 +571,47 @@ fn render_batch(
     erase: &[u8],
     bytes: &[u8],
     sprite: &[u8],
-    group_update: bool,
+    sync_mode: SyncMode,
+    sync_resets: &[SyncReset],
 ) -> io::Result<()> {
-    if !group_update {
-        write_update(out, erase)?;
-        out.write_all(bytes)?;
-        return write_update(out, sprite);
+    match sync_mode {
+        SyncMode::Separate => {
+            write_update(out, erase)?;
+            out.write_all(bytes)?;
+            write_update(out, sprite)
+        }
+        SyncMode::WrapAll => {
+            if erase.is_empty() && sprite.is_empty() {
+                return out.write_all(bytes);
+            }
+            out.write_all(b"\x1b[?2026h")?;
+            cursor_update(out, erase)?;
+            write_deferring_sync_resets(out, bytes, sync_resets)?;
+            cursor_update(out, sprite)?;
+            out.write_all(b"\x1b[?2026l")
+        }
+        SyncMode::ContinueOpen => {
+            write_deferring_sync_resets(out, bytes, sync_resets)?;
+            cursor_update(out, sprite)?;
+            out.write_all(b"\x1b[?2026l")
+        }
     }
-    if erase.is_empty() && sprite.is_empty() {
-        return out.write_all(bytes);
+}
+
+fn write_deferring_sync_resets(
+    out: &mut impl Write,
+    bytes: &[u8],
+    sync_resets: &[SyncReset],
+) -> io::Result<()> {
+    let mut pos = 0;
+    for reset in sync_resets {
+        out.write_all(&bytes[pos..reset.start])?;
+        if let Some(replacement) = &reset.replacement {
+            out.write_all(replacement)?;
+        }
+        pos = reset.end;
     }
-    out.write_all(b"\x1b[?2026h")?;
-    cursor_update(out, erase)?;
-    out.write_all(bytes)?;
-    cursor_update(out, sprite)?;
-    out.write_all(b"\x1b[?2026l")
+    out.write_all(&bytes[pos..])
 }
 
 fn retry(e: &io::Error) -> bool {
@@ -538,7 +647,15 @@ mod tests {
     fn kitty_tracks_hover_across_screen_switches_and_preserves_child_encoding() {
         let mut b = crate::boundary::Boundary::default();
         let mut out = Vec::new();
-        relay_modes(&mut b, &mut b"\x1b[?1049h".to_vec(), true, true, &mut out);
+        let mut sync = Vec::new();
+        relay_modes(
+            &mut b,
+            &mut b"\x1b[?1049h".to_vec(),
+            true,
+            true,
+            &mut out,
+            &mut sync,
+        );
         assert!(out.ends_with(b"\x1b[?1006h\x1b[?1003h"));
         assert_eq!(b.mouse.tracking, 0);
         relay_modes(
@@ -547,6 +664,7 @@ mod tests {
             true,
             true,
             &mut out,
+            &mut sync,
         );
         assert!(out.ends_with(b"\x1b[?1016h\x1b[?1003h"));
         relay_modes(
@@ -555,6 +673,7 @@ mod tests {
             true,
             true,
             &mut out,
+            &mut sync,
         );
         assert!(out.ends_with(b"\x1b[?1006h\x1b[?1003h"));
         assert_eq!(b.mouse.tracking, 1000);
@@ -564,8 +683,9 @@ mod tests {
     fn mouse_handoff_survives_split_switches_and_vims_teardown_order() {
         let mut b = crate::boundary::Boundary::default();
         let mut out = Vec::new();
+        let mut sync = Vec::new();
         for byte in b"\x1b[?1049h\x1b[?1002h\x1b[?1006h" {
-            relay_modes(&mut b, &mut vec![*byte], true, false, &mut out);
+            relay_modes(&mut b, &mut vec![*byte], true, false, &mut out, &mut sync);
         }
         assert!(b.child_mouse());
         assert_eq!(
@@ -579,6 +699,7 @@ mod tests {
             true,
             false,
             &mut out,
+            &mut sync,
         );
         assert!(!b.child_mouse());
         assert!(out.ends_with(b"\x1b[?1006h\x1b[?1003h"));
@@ -591,7 +712,8 @@ mod tests {
         boundary.resized();
         let mut batch = b"1mnew alt\x1b[?1049lnew primary".to_vec();
         let mut out = Vec::new();
-        relay_modes(&mut boundary, &mut batch, false, false, &mut out);
+        let mut sync = Vec::new();
+        relay_modes(&mut boundary, &mut batch, false, false, &mut out, &mut sync);
         assert_eq!(
             out,
             b"1m\x1b[2J\x1b[Hnew alt\x1b[?1049l\x1b[2J\x1b[Hnew primary"
@@ -604,8 +726,16 @@ mod tests {
         let mut boundary = crate::boundary::Boundary::default();
         boundary.resized();
         let mut out = Vec::new();
+        let mut sync = Vec::new();
         for _ in 0..2 {
-            relay_modes(&mut boundary, &mut Vec::new(), false, false, &mut out);
+            relay_modes(
+                &mut boundary,
+                &mut Vec::new(),
+                false,
+                false,
+                &mut out,
+                &mut sync,
+            );
         }
         assert_eq!(out, CLEAR_VIEWPORT);
     }
@@ -613,7 +743,15 @@ mod tests {
     #[test]
     fn editing_and_scrolling_share_one_transaction() {
         let mut out = Vec::new();
-        render_batch(&mut out, b"erase", b"\x1b[K\r\n", b"draw", true).unwrap();
+        render_batch(
+            &mut out,
+            b"erase",
+            b"\x1b[K\r\n",
+            b"draw",
+            SyncMode::WrapAll,
+            &[],
+        )
+        .unwrap();
         assert_eq!(
             out,
             b"\x1b[?2026h\x1b7erase\x1b8\x1b[K\r\n\x1b7draw\x1b8\x1b[?2026l"
@@ -627,8 +765,8 @@ mod tests {
             (&[0xe9][..], &[0xb2, 0xb8][..]),
         ] {
             let mut out = Vec::new();
-            render_batch(&mut out, b"erase", a, b"", false).unwrap();
-            render_batch(&mut out, b"", b, b"draw", false).unwrap();
+            render_batch(&mut out, b"erase", a, b"", SyncMode::Separate, &[]).unwrap();
+            render_batch(&mut out, b"", b, b"draw", SyncMode::Separate, &[]).unwrap();
             let raw = [b"\x1b[?2026l".as_slice(), a, b, b"\x1b[?2026h"].concat();
             assert!(out.windows(raw.len()).any(|w| w == raw));
         }
@@ -641,5 +779,78 @@ mod tests {
         assert!(out.is_empty());
         write_update(&mut out, b"\x1bP\xff\x1b\\").unwrap();
         assert_eq!(out, b"\x1b[?2026h\x1b7\x1bP\xff\x1b\\\x1b8\x1b[?2026l");
+    }
+
+    #[test]
+    fn defers_child_sync_end_until_after_overlay_draw_in_single_and_split_batches() {
+        // Single-batch synchronized Vim redraw with a compound ?25;2026l reset.
+        let mut b = crate::boundary::Boundary::default();
+        b.feed(b"\x1b[?1049h");
+        let mut forwarded = Vec::new();
+        let mut sync = Vec::new();
+        let mut batch = b"\x1b[?2026h\x1b[2Jvim\x1b[?25;2026l".to_vec();
+        let relay = relay_modes(&mut b, &mut batch, true, true, &mut forwarded, &mut sync);
+        assert!(!relay.split_sync_reset);
+        assert!(b.placement_disturbed);
+        assert!(!b.graphics_deleted);
+        let mut out = Vec::new();
+        render_batch(&mut out, b"", &forwarded, b"PET", SyncMode::WrapAll, &sync).unwrap();
+        assert_eq!(
+            out,
+            b"\x1b[?2026h\x1b[?2026h\x1b[2Jvim\x1b[?25l\x1b7PET\x1b8\x1b[?2026l"
+        );
+
+        // Multi-batch synchronized Vim redraw: batch 1 opens ?2026h, batch 2 closes it.
+        forwarded.clear();
+        let mut part1 = b"\x1b[?2026h\x1b[2Jhalf1".to_vec();
+        relay_modes(&mut b, &mut part1, true, true, &mut forwarded, &mut sync);
+        assert!(b.synchronized());
+        assert!(b.placement_disturbed);
+        let mut wire = Vec::new();
+        render_batch(&mut wire, b"", &forwarded, b"", SyncMode::Separate, &sync).unwrap();
+
+        forwarded.clear();
+        let mut part2 = b"half2\x1b[?2026l".to_vec();
+        let relay2 = relay_modes(&mut b, &mut part2, true, true, &mut forwarded, &mut sync);
+        assert!(!b.synchronized());
+        assert!(!relay2.split_sync_reset);
+        render_batch(
+            &mut wire,
+            b"",
+            &forwarded,
+            b"PET",
+            SyncMode::ContinueOpen,
+            &sync,
+        )
+        .unwrap();
+        assert_eq!(
+            wire,
+            b"\x1b[?2026h\x1b[2Jhalf1half2\x1b7PET\x1b8\x1b[?2026l"
+        );
+    }
+
+    #[test]
+    fn compound_mouse_and_sync_reset_preserves_mouse_handoff() {
+        let mut b = crate::boundary::Boundary::default();
+        b.feed(b"\x1b[?1049h\x1b[?1000h\x1b[?2026h");
+        let mut forwarded = Vec::new();
+        let mut sync = Vec::new();
+        let mut batch = b"body\x1b[?1000;2026l".to_vec();
+        let relay = relay_modes(&mut b, &mut batch, true, true, &mut forwarded, &mut sync);
+        assert!(!relay.split_sync_reset);
+        let mut out = Vec::new();
+        render_batch(
+            &mut out,
+            b"",
+            &forwarded,
+            b"PET",
+            SyncMode::ContinueOpen,
+            &sync,
+        )
+        .unwrap();
+        assert_eq!(
+            out,
+            b"body\x1b[?1000l\x1b[?1003l\x1b[?1006l\x1b[?1006h\x1b[?1003h\x1b7PET\x1b8\x1b[?2026l"
+        );
     }
 }

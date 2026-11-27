@@ -335,6 +335,9 @@ impl<S, M: Send + 'static> Overlay for WidgetOverlay<S, M> {
     fn output(&mut self, _bytes: &[u8], cx: &mut Context<'_>) {
         // Mouse input can arrive between the screen switch and the next draw.
         self.select_screen(cx.alternate);
+        if cx.alternate && !self.suspended {
+            self.stale = true;
+        }
     }
 
     fn shell(&mut self, event: ShellEvent<'_>) {

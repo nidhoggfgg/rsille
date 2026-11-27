@@ -72,4 +72,9 @@ impl KittySprites {
         self.panel
             .draw_sized(out, (width, height).into(), &bitmap, i32::MAX, Some(cells))
     }
+
+    pub(super) fn place_panel(&self, area: Area, out: &mut Vec<u8>) -> io::Result<()> {
+        write!(out, "\x1b[{};{}H", area.y() + 1, area.x() + 1)?;
+        self.panel.place_sized(out, i32::MAX, area.size())
+    }
 }

@@ -13,7 +13,7 @@ use std::{
     hash::{BuildHasher, RandomState},
     io::{self, Write},
     sync::{
-        atomic::{AtomicU32, Ordering},
+        atomic::{AtomicBool, AtomicU32, Ordering},
         OnceLock,
     },
 };
@@ -441,13 +441,26 @@ fn upload(
 
 /// A single Kitty image owned by an application that manages its own terminal
 /// I/O (for example, a PTY overlay). Call [`Self::delete`] before teardown.
+///
+/// Re-uploads alternate between two image numbers so the replacement is
+/// transmitted and placed before the previous image is deleted.
 #[derive(Debug)]
-pub struct KittyImage(u32);
+pub struct KittyImage {
+    slots: [u32; 2],
+    active: AtomicBool,
+}
 
 impl KittyImage {
-    /// Allocate a nonzero image number for use on a shared terminal.
+    /// Allocate nonzero image numbers for atomic replacement on a shared terminal.
     pub fn new() -> io::Result<Self> {
-        image_id().map(Self)
+        Ok(Self {
+            slots: [image_id()?, image_id()?],
+            active: AtomicBool::new(false),
+        })
+    }
+
+    fn active_number(&self) -> u32 {
+        self.slots[usize::from(self.active.load(Ordering::Relaxed))]
     }
 
     /// Replace the image at the cursor with unscaled RGBA pixels. The cursor
@@ -516,25 +529,31 @@ impl KittyImage {
                 "Kitty RGBA dimensions do not match",
             ));
         }
-        // Use an image number (I) so the terminal chooses a free image ID.
-        // Reusing a number creates a fresh image, so release the old one first.
-        let number = self.0;
+        // Use image numbers (I) so the terminal chooses free image IDs.
+        // Upload and place into the inactive slot first, then release the
+        // previous slot so there is no blank gap while pixel chunks stream.
+        let old_slot = usize::from(self.active.load(Ordering::Relaxed));
+        let new_slot = old_slot ^ 1;
+        let old = self.slots[old_slot];
+        let new = self.slots[new_slot];
         let header = format!(
-            "\x1b_Ga=d,d=N,I={number},q=2\x1b\\\x1b_Ga=t,f=32,t=d,I={number},s={width},v={height},"
+            "\x1b_Ga=d,d=N,I={new},q=2\x1b\\\x1b_Ga=t,f=32,t=d,I={new},s={width},v={height},"
         );
-        let placement = self.placement(z_index, &placement_size, offset);
-        transmit(out, &header, rgba.as_flattened(), placement.as_bytes())
+        let placement = format!(
+            "{}\x1b_Ga=d,d=N,I={old},q=2\x1b\\",
+            Self::placement_for(new, z_index, &placement_size, offset)
+        );
+        transmit(out, &header, rgba.as_flattened(), placement.as_bytes())?;
+        self.active.store(new_slot != 0, Ordering::Relaxed);
+        Ok(())
     }
 
-    fn placement(&self, z_index: i32, size: &str, offset: Position) -> String {
+    fn placement_for(number: u32, z_index: i32, size: &str, offset: Position) -> String {
         let Position { x, y } = offset;
-        format!(
-            "\x1b_Ga=p,I={},p=1,z={z_index},{size}X={x},Y={y},C=1,q=2\x1b\\",
-            self.0
-        )
+        format!("\x1b_Ga=p,I={number},p=1,z={z_index},{size}X={x},Y={y},C=1,q=2\x1b\\")
     }
 
-    /// Move the previously uploaded image to the cursor cell without uploading it again.
+    /// Move or restore the previously uploaded image at the cursor cell without uploading it again.
     /// The placement uses the image's natural size and the given in-cell pixel offset.
     pub fn place_offset(
         &self,
@@ -542,12 +561,31 @@ impl KittyImage {
         z_index: i32,
         offset: Position,
     ) -> io::Result<()> {
-        out.write_all(self.placement(z_index, "", offset).as_bytes())
+        out.write_all(Self::placement_for(self.active_number(), z_index, "", offset).as_bytes())
+    }
+
+    /// Move or restore the previously uploaded image at the cursor cell, scaling it to `cells`.
+    pub fn place_sized(&self, out: &mut impl Write, z_index: i32, cells: Size) -> io::Result<()> {
+        if cells.width == 0 || cells.height == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "empty Kitty placement",
+            ));
+        }
+        let size = format!("c={},r={},", cells.width, cells.height);
+        out.write_all(
+            Self::placement_for(self.active_number(), z_index, &size, Position::default())
+                .as_bytes(),
+        )
     }
 
     /// Remove this image's placements and pixel data from the terminal.
     pub fn delete(&self, out: &mut impl Write) -> io::Result<()> {
-        write!(out, "\x1b_Ga=d,d=N,I={},q=2\x1b\\", self.0)
+        write!(
+            out,
+            "\x1b_Ga=d,d=N,I={},q=2\x1b\\\x1b_Ga=d,d=N,I={},q=2\x1b\\",
+            self.slots[0], self.slots[1]
+        )
     }
 }
 
@@ -615,9 +653,15 @@ mod tests {
         image
             .draw(&mut commands, 769, 1, &pixels, i32::MIN)
             .unwrap();
+        // Flip back to the initial slot so the next draw targets the same slot as `commands`.
+        image
+            .draw(&mut Vec::new(), 769, 1, &pixels, i32::MIN)
+            .unwrap();
+        let active_before = image.active_number();
         let prefix_len = MAX_FRAME_BYTES - commands.len();
         out.resize(prefix_len + 1, 7);
         assert!(image.draw(&mut out, 769, 1, &pixels, i32::MIN).is_err());
+        assert_eq!(image.active_number(), active_before);
         assert_eq!(out.len(), prefix_len + 1);
         assert!(out.starts_with(b"previous commands"));
         assert!(out[b"previous commands".len()..].iter().all(|&c| c == 7));
@@ -625,6 +669,48 @@ mod tests {
         image.draw(&mut out, 769, 1, &pixels, i32::MIN).unwrap();
         assert_eq!(out.len(), MAX_FRAME_BYTES);
         assert_eq!(&out[prefix_len..], commands);
+    }
+
+    #[test]
+    fn double_buffered_draw_places_new_image_before_deleting_previous() {
+        let image = KittyImage::new().unwrap();
+        let [a, b] = image.slots;
+        assert_ne!(a, b);
+        let pixel = [[10, 20, 30, 255]];
+
+        let mut first = Vec::new();
+        image.draw(&mut first, 1, 1, &pixel, 5).unwrap();
+        let s1 = std::str::from_utf8(&first).unwrap();
+        let place_b = s1.find(&format!("a=p,I={b},p=1,z=5,")).unwrap();
+        let del_a = s1.rfind(&format!("a=d,d=N,I={a},q=2")).unwrap();
+        assert!(place_b < del_a, "{s1}");
+
+        let mut placed = Vec::new();
+        image.place_offset(&mut placed, 5, (3, 4).into()).unwrap();
+        assert_eq!(
+            std::str::from_utf8(&placed).unwrap(),
+            format!("\x1b_Ga=p,I={b},p=1,z=5,X=3,Y=4,C=1,q=2\x1b\\")
+        );
+        placed.clear();
+        image.place_sized(&mut placed, 7, (4, 2).into()).unwrap();
+        assert_eq!(
+            std::str::from_utf8(&placed).unwrap(),
+            format!("\x1b_Ga=p,I={b},p=1,z=7,c=4,r=2,X=0,Y=0,C=1,q=2\x1b\\")
+        );
+
+        let mut second = Vec::new();
+        image.draw(&mut second, 1, 1, &pixel, 5).unwrap();
+        let s2 = std::str::from_utf8(&second).unwrap();
+        let upload_a = s2.find(&format!("a=t,f=32,t=d,I={a},")).unwrap();
+        let place_a = s2.find(&format!("a=p,I={a},p=1,z=5,")).unwrap();
+        let del_b = s2.rfind(&format!("a=d,d=N,I={b},q=2")).unwrap();
+        assert!(upload_a < place_a && place_a < del_b, "{s2}");
+
+        let mut deleted = Vec::new();
+        image.delete(&mut deleted).unwrap();
+        let sd = std::str::from_utf8(&deleted).unwrap();
+        assert!(sd.contains(&format!("a=d,d=N,I={a},q=2")));
+        assert!(sd.contains(&format!("a=d,d=N,I={b},q=2")));
     }
 
     #[test]
