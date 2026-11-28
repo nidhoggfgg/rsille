@@ -14,7 +14,7 @@ use rsille::{
 const SOURCE_WIDTH: usize = 240;
 const SOURCE_HEIGHT: usize = 80;
 const RGB: &[u8; SOURCE_WIDTH * SOURCE_HEIGHT * 3] =
-    include_bytes!("../../ai-babies/assets/chibi-trio-240x80.rgb");
+    include_bytes!("../assets/chibi-trio-240x80.rgb");
 // Canvas mask order: bottom left, bottom right, top left, top right.
 const SYMBOLS: &str = " ▖▗▄▘▌▚▙▝▞▐▟▀▛▜█";
 

@@ -30,6 +30,7 @@ cargo run --release --manifest-path examples/lumen/Cargo.toml
 | [Minecraft](minecraft/README_cn.md) | `minecraft` | 支持挖掘、搭建和飞行的第一人称方块沙盒。 |
 | [Clockwork](clockwork/README_cn.md) | `clockwork` | 132 个零件自动组装成三种机械生物。 |
 | [Pokémon Battle](pokemon-battle/README_cn.md) | `pokemon-battle` | 皮卡丘对战水箭龟的 3D 回合制游戏。 |
+| [AI Babies](ai-babies/README_cn.md) | `ai-babies` | 三位动态像素角色，支持 Quadrant、Kitty 与 Sixel 渲染。 |
 
 交互演示需要 TTY。建议使用支持 True Color 的终端和 Unicode 等宽字体；鼠标交互需要
 终端支持鼠标事件。窗口尺寸、按键、数据持久化和导出选项见各示例文档。

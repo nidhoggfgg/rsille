@@ -3,7 +3,7 @@
 //! The 320px frames are upscaled directly from native 256px source cells using
 //! the packers' stable motion/palette rules, not newly authored 320px detail.
 //! Python is only needed to rebuild assets, never for runtime playback.
-use crate::ai_babies::scene;
+use crate::scene;
 use rsille::raster::{RasterCanvas, Rgb};
 use std::{error::Error, io::Cursor};
 
@@ -25,13 +25,13 @@ impl Frames {
     ) -> Result<Self, Box<dyn Error>> {
         let atlas: &[u8] = match character {
             scene::Character::ChatGpt => {
-                include_bytes!("../../ai-babies/assets/chatgpt-actions-v2-320x320.png")
+                include_bytes!("../assets/chatgpt-actions-v2-320x320.png")
             }
             scene::Character::DeepSeek => {
-                include_bytes!("../../ai-babies/assets/deepseek-actions-320x320.png")
+                include_bytes!("../assets/deepseek-actions-320x320.png")
             }
             scene::Character::Claude => {
-                include_bytes!("../../ai-babies/assets/claude-actions-320x320.png")
+                include_bytes!("../assets/claude-actions-320x320.png")
             }
         };
         Self::from_png(atlas, background)
@@ -268,7 +268,7 @@ mod tests {
         );
         assert!(Frames::from_png(&bytes, background).is_err());
         assert!(Frames::from_png(b"not a PNG", background).is_err());
-        let bytes = include_bytes!("../../ai-babies/assets/chatgpt-actions-v2-320x320.png");
+        let bytes = include_bytes!("../assets/chatgpt-actions-v2-320x320.png");
         assert!(Frames::from_png(&bytes[..bytes.len() / 2], background).is_err());
     }
 }

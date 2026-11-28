@@ -8,7 +8,7 @@ pub(crate) mod ui;
 use std::{
     error::Error,
     io::{self, Write},
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use crossterm::{
@@ -21,14 +21,16 @@ use rsille::render::{
     area::Size, buffer::Buffer, chunk::Chunk, Builder, Draw, DrawErr, InlineMouseMode, Update,
 };
 
+use crate::doctor::{self, TerminalCaps};
+
 use self::{
     scenes::SceneEngine,
     state::{HitRegions, LaunchTarget, LauncherOutcome, LauncherState},
     ui::LauncherRenderer,
 };
 
-const INLINE_MAX_HEIGHT: u16 = 24;
-const TARGET_INLINE_HEIGHT: u16 = 22;
+const INLINE_MAX_HEIGHT: u16 = 26;
+const TARGET_INLINE_HEIGHT: u16 = 24;
 const FRAME_RATE_FPS: u16 = 30;
 
 /// Interactive inline launcher application driving the 30 FPS showcase loop.
@@ -49,8 +51,12 @@ impl Default for Launcher {
 
 impl Launcher {
     pub(crate) fn new() -> Self {
+        Self::with_caps(TerminalCaps::default())
+    }
+
+    pub(crate) fn with_caps(caps: TerminalCaps) -> Self {
         Self {
-            state: LauncherState::new(),
+            state: LauncherState::with_caps(caps),
             scenes: SceneEngine::new(),
             renderer: LauncherRenderer::new(),
             regions: HitRegions::default(),
@@ -158,6 +164,8 @@ impl Draw for Launcher {
 /// Runs the inline interactive launcher and cleanly hands off to any selected experience.
 pub fn run() -> Result<(), Box<dyn Error>> {
     crate::require_terminal()?;
+    // Probe terminal protocol capabilities before starting managed input.
+    let caps = doctor::probe_fast(Duration::from_millis(120));
     let (width, height) = crossterm::terminal::size()?;
     let buf_h = height.clamp(1, INLINE_MAX_HEIGHT);
     let used_h = height.clamp(1, TARGET_INLINE_HEIGHT);
@@ -174,7 +182,7 @@ pub fn run() -> Result<(), Box<dyn Error>> {
         .disable_exit_code()
         .frame_limit(FRAME_RATE_FPS);
 
-    let mut event_loop = builder.build_event_loop(Launcher::new());
+    let mut event_loop = builder.build_event_loop(Launcher::with_caps(caps));
     event_loop.set_initial_used_height(used_h);
     let launcher = event_loop.run_returning()?;
 
@@ -249,17 +257,17 @@ mod tests {
     fn render_frame_for_test_populates_buffer_and_hit_regions() {
         let mut launcher = Launcher::new();
         launcher.advance(0.5);
-        let buffer = render_frame_for_test(&mut launcher, (110, 24).into()).unwrap();
-        assert_eq!(buffer.size(), Size::from((110, 24)));
+        let buffer = render_frame_for_test(&mut launcher, (112, 24).into()).unwrap();
+        assert_eq!(buffer.size(), Size::from((112, 24)));
         assert_eq!(launcher.last_rendered_height(), 24);
 
-        // Clicking inside card 2 (FunctionPlotter) selects it using the computed hit regions.
-        let card2 = launcher.hit_regions().cards[ExperienceId::FunctionPlotter.index()];
-        assert!(card2.width() > 0 && card2.height() > 0);
+        // Clicking inside card 6 (FunctionPlotter) selects it using the computed hit regions.
+        let card = launcher.hit_regions().cards[ExperienceId::FunctionPlotter.index()];
+        assert!(card.width() > 0 && card.height() > 0);
         let click = Event::Mouse(MouseEvent {
             kind: MouseEventKind::Down(MouseButton::Left),
-            column: card2.x() + 2,
-            row: card2.y() + 1,
+            column: card.x() + 2,
+            row: card.y(),
             modifiers: KeyModifiers::NONE,
         });
         assert!(launcher.handle_event(&click));

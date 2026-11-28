@@ -4,11 +4,11 @@ pub const WIDTH: usize = 128;
 pub const HEIGHT: usize = 64;
 pub const FRAME_BYTES: usize = WIDTH * HEIGHT * 4;
 pub const SPRITES: &[u8; FRAME_BYTES * 24] =
-    include_bytes!("../../ai-babies/assets/chatgpt-actions-v2-128x64.rgba");
+    include_bytes!("../assets/chatgpt-actions-v2-128x64.rgba");
 pub const SMALL_WIDTH: usize = 96;
 pub const SMALL_HEIGHT: usize = 48;
 pub const SMALL_SPRITES: &[u8; SMALL_WIDTH * SMALL_HEIGHT * 4 * 24] =
-    include_bytes!("../../ai-babies/assets/chatgpt-actions-v2-96x48.rgba");
+    include_bytes!("../assets/chatgpt-actions-v2-96x48.rgba");
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Character {
@@ -46,13 +46,13 @@ impl Character {
 
     pub fn atlas(self, display_height: usize) -> (&'static [u8], usize) {
         const DEEPSEEK: &[u8; FRAME_BYTES * 24] =
-            include_bytes!("../../ai-babies/assets/deepseek-actions-128x64.rgba");
+            include_bytes!("../assets/deepseek-actions-128x64.rgba");
         const DEEPSEEK_SMALL: &[u8; SMALL_WIDTH * SMALL_HEIGHT * 4 * 24] =
-            include_bytes!("../../ai-babies/assets/deepseek-actions-96x48.rgba");
+            include_bytes!("../assets/deepseek-actions-96x48.rgba");
         const CLAUDE: &[u8; FRAME_BYTES * 24] =
-            include_bytes!("../../ai-babies/assets/claude-actions-128x64.rgba");
+            include_bytes!("../assets/claude-actions-128x64.rgba");
         const CLAUDE_SMALL: &[u8; SMALL_WIDTH * SMALL_HEIGHT * 4 * 24] =
-            include_bytes!("../../ai-babies/assets/claude-actions-96x48.rgba");
+            include_bytes!("../assets/claude-actions-96x48.rgba");
         if display_height <= SMALL_HEIGHT {
             (
                 match self {

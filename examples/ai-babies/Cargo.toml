@@ -1,0 +1,12 @@
+[package]
+name = "rsille-ai-babies"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[dependencies]
+rsille = { path = "../..", features = ["raster"] }
+crossterm = "0.28.1"
+png = "0.18"

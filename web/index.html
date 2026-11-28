@@ -449,8 +449,8 @@ fn main() -> std::io::Result<()> {
               <span data-i18n-en>Download rsille Playground — no Rust required</span>
             </h2>
             <p class="section-desc">
-              <span data-i18n-zh>单个可执行文件打包了四个终端互动体验。二进制由 GitHub Release 经 SHA-256 校验镜像至此站，下载后直接运行。</span>
-              <span data-i18n-en>One standalone executable bundles four interactive terminal experiences. Binaries are SHA-256 verified from GitHub Releases and mirrored directly on Vercel CDN.</span>
+              <span data-i18n-zh>单个可执行文件内置八种终端互动体验，直接运行 <code>rsille</code> 即可进入 30 FPS 内联展台。二进制由 GitHub Release 经 SHA-256 校验镜像至此站，下载后直接运行。</span>
+              <span data-i18n-en>One standalone executable bundles eight interactive terminal experiences with an interactive 30 FPS launcher. Binaries are SHA-256 verified from GitHub Releases and mirrored directly on Vercel CDN.</span>
             </p>
           </div>
           <a class="btn btn-secondary" href="/download">
@@ -461,10 +461,42 @@ fn main() -> std::io::Result<()> {
 
         <div class="play-grid">
           <div class="play-card">
+            <span class="play-cmd">rsille voxel</span>
+            <p>
+              <span data-i18n-zh>第一人称 3D 终端方块沙盒：探索草地、湖泊与木屋，挖掘搭建、飞行与昼夜切换。</span>
+              <span data-i18n-en>First-person 3D voxel sandbox in terminal cells: explore, mine, build, fly, and toggle day/night.</span>
+            </p>
+            <div class="play-proto">Any True Color terminal</div>
+          </div>
+          <div class="play-card">
+            <span class="play-cmd">rsille clockwork</span>
+            <p>
+              <span data-i18n-zh>132 个机械零件自动拆解重组为步行机、扑翼机与机械花，支持磁力脉冲震散与爆炸视图。</span>
+              <span data-i18n-en>132 mechanical parts assembling into a walker, ornithopter, and flower with magnetic pulses &amp; orbit camera.</span>
+            </p>
+            <div class="play-proto">Any True Color terminal</div>
+          </div>
+          <div class="play-card">
+            <span class="play-cmd">rsille desk</span>
+            <p>
+              <span data-i18n-zh>桌面式 TUI 工作台：可拖拽缩放浮窗、Dock、动态曲线、视觉扫光特效与命令面板。</span>
+              <span data-i18n-en>Desktop-style TUI workspace with draggable floating windows, Dock, live curves, visual FX, and themes.</span>
+            </p>
+            <div class="play-proto">Any True Color terminal</div>
+          </div>
+          <div class="play-card">
+            <span class="play-cmd">rsille hud</span>
+            <p>
+              <span data-i18n-zh>浮在真实 shell 上方的实用工具栏：目录树一键 <code>cd here</code>、命令耗时状态、待办与快捷宏。</span>
+              <span data-i18n-en>Draggable HUD over your live shell: folder tree with <code>cd here</code>, live command timer, tasks &amp; macros.</span>
+            </p>
+            <div class="play-proto">Any terminal · Ctrl+] exit</div>
+          </div>
+          <div class="play-card">
             <span class="play-cmd">rsille pet</span>
             <p>
-              <span data-i18n-zh>在你日常的 shell（或 <code>vim</code> 等任意程序）上方养一只会游动的小鲸鱼，响应 <code>git</code>/<code>cargo</code>/<code>npm</code>、追鼠标、吹泡泡。</span>
-              <span data-i18n-en>Float a swimming whale pet over your live shell (or wrap <code>vim</code>). Reacts to <code>git</code>/<code>cargo</code>/<code>npm</code>, chases your cursor, blows bubbles.</span>
+              <span data-i18n-zh>在你日常的 shell（或 <code>vim</code> 等任意程序）上方养一只会游动的小鲸鱼，响应命令输入、追鼠标、吹泡泡。</span>
+              <span data-i18n-en>Float a swimming whale pet over your live shell (or wrap <code>vim</code>). Reacts to commands, chases cursor, blows bubbles.</span>
             </p>
             <div class="play-proto">Kitty / Sixel · Ctrl+] exit</div>
           </div>
@@ -477,20 +509,20 @@ fn main() -> std::io::Result<()> {
             <div class="play-proto">Kitty / Sixel</div>
           </div>
           <div class="play-card">
-            <span class="play-cmd">rsille ai-babies</span>
-            <p>
-              <span data-i18n-zh>三位动态像素角色，加上 <code>--animate</code> 播放动作；支持 <code>--kitty</code>、<code>--sixel</code> 或纯字符四分块模式。</span>
-              <span data-i18n-en>Three animated pixel characters with <code>--animate</code>; supports <code>--kitty</code>, <code>--sixel</code>, or pure Unicode Quadrant cells.</span>
-            </p>
-            <div class="play-proto">Kitty / Sixel / Quadrant</div>
-          </div>
-          <div class="play-card">
             <span class="play-cmd">rsille jellyfish</span>
             <p>
               <span data-i18n-zh>用 Unicode 半块字符渲染的深海发光水母水族箱，直接在任意真彩色终端流畅播放。</span>
               <span data-i18n-en>A luminous deep-sea aquarium rendered smoothly inline with Unicode Half-Block cells in any True Color terminal.</span>
             </p>
             <div class="play-proto">Any True Color terminal</div>
+          </div>
+          <div class="play-card">
+            <span class="play-cmd">rsille doctor</span>
+            <p>
+              <span data-i18n-zh>探测终端 Kitty / Sixel / 单元格像素能力，同屏四路对比 Braille、HalfBlock、Quadrant 与原生像素渲染。</span>
+              <span data-i18n-en>Probe Kitty, Sixel &amp; cell pixel metrics, then compare Braille, Half-Block, Quadrant, and native raster side-by-side.</span>
+            </p>
+            <div class="play-proto">Any terminal · --plain</div>
           </div>
         </div>
 
@@ -692,7 +724,7 @@ rsille = <span class="tok-str">"{{coreVersion}}"</span>
           </a>
           <a class="crate-card" href="/download">
             <div class="crate-name">rsille-playground <span>CLI</span></div>
-            <p><span data-i18n-zh>独立命令行体验包，内置 pet、draw、ai-babies 与 jellyfish。</span><span data-i18n-en>Standalone CLI bundling pet, draw, ai-babies, and jellyfish.</span></p>
+            <p><span data-i18n-zh>独立命令行体验包，内置 voxel、clockwork、desk、hud、pet、draw、jellyfish 与 doctor。</span><span data-i18n-en>Standalone CLI bundling voxel, clockwork, desk, hud, pet, draw, jellyfish, and doctor.</span></p>
           </a>
         </div>
       </div>

@@ -8,7 +8,7 @@ English · [中文](README_cn.md)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENCE)
 [![platforms](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-informational.svg)](#try-it-in-10-seconds)
 
-<img align="right" src="packages/rsille-playground/ai-babies/preview-deepseek.gif" width="108" alt="DeepSeek terminal pet">
+<img align="right" src="examples/ai-babies/preview-deepseek.gif" width="108" alt="DeepSeek terminal pet">
 
 **Make your terminal come alive.**
 
@@ -32,14 +32,18 @@ Explore the full **[example gallery](examples/README.md)**, including a [first-p
 
 ## Try it in 10 seconds
 
-Want to try it in your own terminal right now? You don't need to write a line of Rust. The standalone **`rsille` Playground** ships four interactive terminal experiences in a single binary:
+Want to try it in your own terminal right now? You don't need to write a line of Rust. Run **`rsille`** with no arguments to open the interactive 30 FPS showcase launcher, or jump straight into any of the **eight built-in terminal experiences**:
 
 | Command | What happens in your terminal |
 | --- | --- |
-| **`rsille pet`** | A whale pet swims directly over your live shell (`bash`, `zsh`, `fish`, PowerShell) — or wrap any app with `rsille pet -- vim README.md`. It reacts to `git`/`cargo`/`npm` commands as you type, chases your cursor, blows bubbles, eats fish treats, and even nibbles terminal text. *(Kitty / Sixel)* |
+| **`rsille voxel`** | Explore, mine, build, and fly in a first-person 3D voxel sandbox rendered with Unicode Half-Block cells — works in any True Color terminal. *(Alias: `craft`)* |
+| **`rsille clockwork`** | Watch 132 brass, steel, and porcelain parts assemble into a walker, ornithopter, and mechanical flower; scatter parts with magnetic pulses or drag to orbit. *(Any True Color terminal)* |
+| **`rsille desk`** | Desktop-style TUI workspace with draggable/resizable floating windows, Dock, live curves, visual effects, command palette (`Ctrl+K`), and themes. *(Alias: `lumen`, any True Color terminal)* |
+| **`rsille hud`** | Float a practical draggable HUD over your live shell — expandable folder tree with one-click `cd here`, live command timer & exit badge, task checklist, and quick macros. *(Works in any terminal)* |
+| **`rsille pet`** | A whale pet swims directly over your live shell (`bash`, `zsh`, `fish`, PowerShell) — or wrap any app with `rsille pet -- vim README.md`. Reacts to commands, chases your cursor, blows bubbles, eats treats, and nibbles text. *(Kitty / Sixel)* |
 | **`rsille draw`** | Inline math plotter for 2D Cartesian, polar, and parametric curves plus rotating 3D surfaces and space curves, with an interactive `:grid` multi-panel composer. *(Kitty / Sixel)* |
-| **`rsille ai-babies --animate`** | Three animated pixel characters with `--kitty`, `--sixel`, or pure Unicode Quadrant rendering that works in any True Color terminal. |
-| **`rsille jellyfish`** | A luminous deep-sea aquarium rendered smoothly inline with Unicode Half-Block cells. |
+| **`rsille jellyfish`** | A luminous deep-sea aquarium rendered smoothly inline with Unicode Half-Block cells. *(Any True Color terminal)* |
+| **`rsille doctor`** | Probe Kitty, Sixel, cell pixel metrics, and TrueColor support, then compare Braille, Half-Block, Quadrant, and native pixel pipelines side-by-side (`--plain` for bug reports). |
 
 ### Download a binary (no Rust required)
 
@@ -60,9 +64,11 @@ mv rsille-linux-x64 rsille && chmod +x rsille
 
 ```sh
 cargo install rsille-playground --locked
-rsille pet          # Live shell pet (press Ctrl+] to exit)
-rsille draw         # Inline 2D/3D function plotter
-rsille jellyfish    # Terminal aquarium
+rsille              # Interactive 30 FPS showcase launcher
+rsille voxel        # First-person 3D block sandbox
+rsille desk         # Floating-window TUI workspace
+rsille hud          # Floating files, tasks & timer over your shell (Ctrl+] to exit)
+rsille pet          # Live shell whale pet (Kitty / Sixel)
 ```
 
 Building from this repo? Run `cargo run -p rsille-playground -- pet`. See the [Playground guide](packages/rsille-playground/README.md) and [DeepSeek Pet guide](packages/rsille-playground/deepseek-pet/README.md) for custom command reactions, `--features` toggles, and controls.
@@ -88,7 +94,7 @@ Press **Ctrl+]** to leave any overlay session. See the [rsille-overlay guide](pa
 
 ## Built for Rust developers
 
-<img align="right" src="packages/rsille-playground/ai-babies/preview-pet.gif" width="96" alt="">
+<img align="right" src="examples/ai-babies/preview-pet.gif" width="96" alt="">
 
 Underneath the demos, **`rsille`** is a cohesive Rust framework combining widget layouts, colorful graphics, animated effects, live shell overlays, and keyboard/mouse interaction in one API:
 
@@ -179,9 +185,9 @@ fn main() -> std::io::Result<()> {
 
 `Canvas` draws colorful sampled graphics standalone or inside any TUI layout. `Encoding::Quadrant` divides each terminal cell into **2 × 2 samples** with fitted foreground/background colors: 120 × 20 cells deliver a 240 × 40 pixel grid.
 
-[![Pixel characters rendered with 2 × 2 quadrant encoding in 120 × 20 terminal cells](imgs/readme-canvas-quadrant.png)](packages/rsille-playground/ai-babies/README.md)
+[![Pixel characters rendered with 2 × 2 quadrant encoding in 120 × 20 terminal cells](imgs/readme-canvas-quadrant.png)](examples/ai-babies/README.md)
 
-*Actual Canvas output from [AI Babies' static mode](packages/rsille-playground/ai-babies/README.md) using **20 terminal rows**, enlarged while preserving cell proportions.*
+*Actual Canvas output from [AI Babies' static mode](examples/ai-babies/README.md) using **20 terminal rows**, enlarged while preserving cell proportions.*
 
 | Encoding | Samples per cell | Best for |
 | --- | --- | --- |
@@ -220,7 +226,7 @@ npx skills add nidhoggfgg/rsille.skills --skill rsille
 | `rsille-overlay` / `rsille::overlay` | Floating widgets & Kitty/Sixel graphics over live Unix PTY / Windows ConPTY shells | [packages/rsille-overlay](packages/rsille-overlay/README.md) |
 | `rsille-syntect` | Syntax highlighting for `CodeViewer` via Syntect (`CodeViewer::from_lines`) | [packages/rsille-syntect](packages/rsille-syntect/README.md) |
 | `rsille-typst` | In-process Typst math rendering to `RasterCanvas` without adding Typst to core | [packages/rsille-typst](packages/rsille-typst/README.md) |
-| `rsille-playground` | Standalone `rsille` CLI bundling `pet`, `draw`, `ai-babies`, and `jellyfish` | [packages/rsille-playground](packages/rsille-playground/README.md) |
+| `rsille-playground` | Standalone `rsille` CLI bundling `voxel`, `clockwork`, `desk`, `hud`, `pet`, `draw`, `jellyfish`, and `doctor` | [packages/rsille-playground](packages/rsille-playground/README.md) |
 
 ## Resources
 

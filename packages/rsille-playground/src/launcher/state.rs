@@ -5,7 +5,9 @@ use crossterm::event::{
 };
 use rsille::render::area::{Area, Size};
 
-use super::scenes::{ExperienceId, PreviewInteraction};
+use crate::doctor::TerminalCaps;
+
+use super::scenes::{ExperienceId, PreviewInteraction, EXPERIENCE_COUNT};
 
 pub const AUTO_TOUR_INTERVAL_SECS: f64 = 6.5;
 pub const TRANSITION_DURATION_SECS: f64 = 0.65;
@@ -29,34 +31,53 @@ pub struct ExperienceSpec {
     pub compact_title: &'static str,
     pub subtitle: &'static str,
     pub badge: &'static str,
+    pub requires_raster: bool,
 }
 
 impl ExperienceSpec {
     pub fn for_id(id: ExperienceId) -> Self {
         match id {
-            ExperienceId::Jellyfish => Self {
+            ExperienceId::Voxel => Self {
                 id,
-                icon: "◎",
-                title: "Jellyfish",
-                compact_title: "Jellyfish",
-                subtitle: "Bioluminescent deep-sea drift",
-                badge: "HalfBlock",
+                icon: "▣",
+                title: "Voxel Sandbox",
+                compact_title: "Voxel",
+                subtitle: "First-person 3D block world",
+                badge: "HalfBlock 3D",
+                requires_raster: false,
             },
-            ExperienceId::FunctionPlotter => Self {
+            ExperienceId::Clockwork => Self {
                 id,
-                icon: "ƒ",
-                title: "Function Plotter",
-                compact_title: "Plotter",
-                subtitle: "3D surfaces, curves & REPL",
-                badge: "Kitty/Sixel",
+                icon: "◈",
+                title: "Clockwork",
+                compact_title: "Clock",
+                subtitle: "132-part kinetic creatures",
+                badge: "3D Spring",
+                requires_raster: false,
             },
-            ExperienceId::AiBabies => Self {
+            ExperienceId::Desk => Self {
                 id,
-                icon: "✦",
-                title: "AI Babies",
-                compact_title: "AI Babies",
-                subtitle: "Animated pixel trio studio",
-                badge: "Quadrant",
+                icon: "⊞",
+                title: "Lumen Desk",
+                compact_title: "Desk",
+                subtitle: "Floating windows & TUI FX",
+                badge: "Desktop TUI",
+                requires_raster: false,
+            },
+            ExperienceId::ShellHud => Self {
+                id,
+                icon: "▤",
+                title: "Shell HUD",
+                compact_title: "HUD",
+                subtitle: "Files, tasks & live timer",
+                badge: if cfg!(unix) {
+                    "Unix PTY"
+                } else if cfg!(windows) {
+                    "Win ConPTY"
+                } else {
+                    "Overlay"
+                },
+                requires_raster: false,
             },
             ExperienceId::DeepseekPet => Self {
                 id,
@@ -64,13 +85,35 @@ impl ExperienceSpec {
                 title: "DeepSeek Pet",
                 compact_title: "Pet",
                 subtitle: "Interactive shell whale pet",
-                badge: if cfg!(unix) {
-                    "Unix PTY"
-                } else if cfg!(windows) {
-                    "Win ConPTY"
-                } else {
-                    "Unsupported"
-                },
+                badge: "Kitty/Sixel",
+                requires_raster: true,
+            },
+            ExperienceId::FunctionPlotter => Self {
+                id,
+                icon: "ƒ",
+                title: "Function Plotter",
+                compact_title: "Plot",
+                subtitle: "3D surfaces, curves & REPL",
+                badge: "Kitty/Sixel",
+                requires_raster: true,
+            },
+            ExperienceId::Jellyfish => Self {
+                id,
+                icon: "◎",
+                title: "Jellyfish",
+                compact_title: "Jelly",
+                subtitle: "Bioluminescent deep-sea drift",
+                badge: "HalfBlock",
+                requires_raster: false,
+            },
+            ExperienceId::Doctor => Self {
+                id,
+                icon: "✦",
+                title: "Terminal Doctor",
+                compact_title: "Doctor",
+                subtitle: "Probe Kitty, Sixel & backends",
+                badge: "Diagnostics",
+                requires_raster: false,
             },
         }
     }
@@ -88,7 +131,30 @@ impl LaunchTarget {
         let count = exp.variant_count().max(1);
         let variant = variant % count;
         let args: Vec<String> = match exp {
-            ExperienceId::Jellyfish => vec!["jellyfish".to_owned()],
+            ExperienceId::Voxel => match variant {
+                1 => vec!["voxel".to_owned(), "--night".to_owned()],
+                _ => vec!["voxel".to_owned()],
+            },
+            ExperienceId::Clockwork => match variant {
+                1 => vec!["clockwork".to_owned(), "--form".to_owned(), "2".to_owned()],
+                2 => vec!["clockwork".to_owned(), "--form".to_owned(), "3".to_owned()],
+                _ => vec!["clockwork".to_owned()],
+            },
+            ExperienceId::Desk => match variant {
+                1 => vec!["desk".to_owned(), "--page".to_owned(), "motion".to_owned()],
+                2 => vec![
+                    "desk".to_owned(),
+                    "--page".to_owned(),
+                    "overview".to_owned(),
+                ],
+                _ => vec!["desk".to_owned()],
+            },
+            ExperienceId::ShellHud => match variant {
+                1 => vec!["hud".to_owned(), "--tab".to_owned(), "tasks".to_owned()],
+                2 => vec!["hud".to_owned(), "--tab".to_owned(), "quick".to_owned()],
+                _ => vec!["hud".to_owned()],
+            },
+            ExperienceId::DeepseekPet => vec!["pet".to_owned()],
             ExperienceId::FunctionPlotter => {
                 if let Some(&expr) = FUNCTION_PLOTTER_PRESETS.get(variant) {
                     vec!["draw".to_owned(), "--expr".to_owned(), expr.to_owned()]
@@ -96,28 +162,8 @@ impl LaunchTarget {
                     vec!["draw".to_owned()]
                 }
             }
-            ExperienceId::AiBabies => match variant {
-                1 => vec![
-                    "ai-babies".to_owned(),
-                    "--animate".to_owned(),
-                    "--character".to_owned(),
-                    "chatgpt".to_owned(),
-                ],
-                2 => vec![
-                    "ai-babies".to_owned(),
-                    "--animate".to_owned(),
-                    "--character".to_owned(),
-                    "deepseek".to_owned(),
-                ],
-                3 => vec![
-                    "ai-babies".to_owned(),
-                    "--animate".to_owned(),
-                    "--character".to_owned(),
-                    "claude".to_owned(),
-                ],
-                _ => vec!["ai-babies".to_owned(), "--animate".to_owned()],
-            },
-            ExperienceId::DeepseekPet => vec!["pet".to_owned()],
+            ExperienceId::Jellyfish => vec!["jellyfish".to_owned()],
+            ExperienceId::Doctor => vec!["doctor".to_owned()],
         };
 
         let display_command = format_display_command(&args);
@@ -161,7 +207,7 @@ pub struct TransitionState {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct HitRegions {
     pub size: Size,
-    pub cards: [Area; 4],
+    pub cards: [Area; EXPERIENCE_COUNT],
     pub stage: Area,
     pub tour_pill: Area,
 }
@@ -200,11 +246,12 @@ pub struct LauncherState {
     pub time: f64,
     pub auto_tour: bool,
     pub tour_elapsed: f64,
-    pub interactions: [PreviewInteraction; 4],
+    pub interactions: [PreviewInteraction; EXPERIENCE_COUNT],
     pub transition: Option<TransitionState>,
     pub hovered_card: Option<ExperienceId>,
     pub hovered_stage: bool,
     pub outcome: Option<LauncherOutcome>,
+    pub caps: TerminalCaps,
 }
 
 impl Default for LauncherState {
@@ -215,21 +262,26 @@ impl Default for LauncherState {
 
 impl LauncherState {
     pub fn new() -> Self {
+        Self::with_caps(TerminalCaps::default())
+    }
+
+    pub fn with_caps(caps: TerminalCaps) -> Self {
         let initial = PreviewInteraction {
             variant: 0,
             action_pulse: INITIAL_PULSE_TIME,
             action_count: 0,
         };
         Self {
-            selected: ExperienceId::Jellyfish,
+            selected: ExperienceId::Voxel,
             time: 0.0,
             auto_tour: true,
             tour_elapsed: 0.0,
-            interactions: [initial; 4],
+            interactions: [initial; EXPERIENCE_COUNT],
             transition: None,
             hovered_card: None,
             hovered_stage: false,
             outcome: None,
+            caps,
         }
     }
 
@@ -288,7 +340,7 @@ impl LauncherState {
             self.tour_elapsed += dt;
             if self.tour_elapsed >= AUTO_TOUR_INTERVAL_SECS {
                 self.tour_elapsed %= AUTO_TOUR_INTERVAL_SECS;
-                let next = ExperienceId::from_index((self.selected.index() + 1) % 4);
+                let next = ExperienceId::from_index((self.selected.index() + 1) % EXPERIENCE_COUNT);
                 self.switch_to(next);
             }
         }
@@ -305,12 +357,14 @@ impl LauncherState {
     }
 
     pub fn select_next(&mut self) {
-        let next = ExperienceId::from_index((self.selected.index() + 1) % 4);
+        let next = ExperienceId::from_index((self.selected.index() + 1) % EXPERIENCE_COUNT);
         self.select(next, true);
     }
 
     pub fn select_prev(&mut self) {
-        let prev = ExperienceId::from_index((self.selected.index() + 3) % 4);
+        let prev = ExperienceId::from_index(
+            (self.selected.index() + EXPERIENCE_COUNT - 1) % EXPERIENCE_COUNT,
+        );
         self.select(prev, true);
     }
 
@@ -460,7 +514,7 @@ impl LauncherState {
                 self.toggle_auto_tour();
                 true
             }
-            KeyCode::Char(d @ '1'..='4') if is_press => {
+            KeyCode::Char(d @ '1'..='8') if is_press => {
                 let idx = (d as u8 - b'1') as usize;
                 self.select(ExperienceId::from_index(idx), true);
                 true
@@ -526,15 +580,14 @@ mod tests {
     }
 
     fn sample_regions() -> HitRegions {
+        let mut cards = [Area::default(); EXPERIENCE_COUNT];
+        for (i, slot) in cards.iter_mut().enumerate() {
+            *slot = Area::new((1, 4 + i as u16 * 2).into(), (34, 2).into());
+        }
         HitRegions {
-            size: (110, 22).into(),
-            cards: [
-                Area::new((1, 4).into(), (34, 3).into()),
-                Area::new((1, 8).into(), (34, 3).into()),
-                Area::new((1, 12).into(), (34, 3).into()),
-                Area::new((1, 16).into(), (34, 3).into()),
-            ],
-            stage: Area::new((37, 3).into(), (72, 18).into()),
+            size: (112, 24).into(),
+            cards,
+            stage: Area::new((37, 3).into(), (74, 20).into()),
             tour_pill: Area::new((90, 0).into(), (18, 1).into()),
         }
     }
@@ -542,29 +595,26 @@ mod tests {
     #[test]
     fn starts_in_auto_tour_with_clean_pulse_and_advances_worlds() {
         let mut state = LauncherState::new();
-        assert_eq!(state.selected, ExperienceId::Jellyfish);
+        assert_eq!(state.selected, ExperienceId::Voxel);
         assert!(state.auto_tour);
         assert_eq!(state.active_pulse_strength(), 0.0);
         assert!(state.transition.is_none());
 
-        // Advance smoothly up to just before AUTO_TOUR_INTERVAL_SECS.
         for _ in 0..64 {
             state.advance(0.1);
         }
-        assert_eq!(state.selected, ExperienceId::Jellyfish);
+        assert_eq!(state.selected, ExperienceId::Voxel);
         assert!(state.tour_progress() > 0.9);
 
-        // Two 0.06s steps cleanly cross the 6.5s threshold without f64 0.1 drift.
         state.advance(0.06);
         state.advance(0.06);
-        assert_eq!(state.selected, ExperienceId::FunctionPlotter);
+        assert_eq!(state.selected, ExperienceId::Clockwork);
         let tr = state
             .transition
             .expect("auto-tour switch starts transition");
-        assert_eq!(tr.from, ExperienceId::Jellyfish);
-        assert_eq!(tr.to, ExperienceId::FunctionPlotter);
+        assert_eq!(tr.from, ExperienceId::Voxel);
+        assert_eq!(tr.to, ExperienceId::Clockwork);
 
-        // Complete transition over TRANSITION_DURATION_SECS.
         for _ in 0..8 {
             state.advance(0.1);
         }
@@ -577,14 +627,17 @@ mod tests {
         let regions = sample_regions();
 
         assert!(state.handle_event(&press(KeyCode::Up), &regions));
-        assert_eq!(state.selected, ExperienceId::DeepseekPet);
+        assert_eq!(state.selected, ExperienceId::Doctor);
         assert!(!state.auto_tour);
 
         assert!(state.handle_event(&press(KeyCode::Tab), &regions));
-        assert_eq!(state.selected, ExperienceId::Jellyfish);
+        assert_eq!(state.selected, ExperienceId::Voxel);
 
-        assert!(state.handle_event(&press(KeyCode::Char('3')), &regions));
-        assert_eq!(state.selected, ExperienceId::AiBabies);
+        assert!(state.handle_event(&press(KeyCode::Char('4')), &regions));
+        assert_eq!(state.selected, ExperienceId::ShellHud);
+
+        assert!(state.handle_event(&press(KeyCode::Char('8')), &regions));
+        assert_eq!(state.selected, ExperienceId::Doctor);
 
         assert!(state.handle_event(&press(KeyCode::Char('a')), &regions));
         assert!(state.auto_tour);
@@ -596,17 +649,14 @@ mod tests {
         let mut state = LauncherState::new();
         let regions = sample_regions();
         state.set_time(2.5);
-        state.select_immediate(ExperienceId::AiBabies);
+        state.select_immediate(ExperienceId::Desk);
 
         assert!(state.handle_event(&press(KeyCode::Char(' ')), &regions));
         let info = state.active_interaction();
         assert_eq!(info.action_count, 1);
         assert_eq!(info.action_pulse, 2.5);
         assert!(state.active_pulse_strength() > 0.99);
-        assert_eq!(
-            info.variant,
-            1 % ExperienceId::AiBabies.variant_count().max(1)
-        );
+        assert_eq!(info.variant, 1 % ExperienceId::Desk.variant_count().max(1));
 
         let after_space = info.variant;
         state.handle_event(&press(KeyCode::Left), &regions);
@@ -645,24 +695,23 @@ mod tests {
             })
         };
 
-        // Click card 3 (AI Babies): selects it, does not launch yet.
-        assert!(state.handle_event(&click(10, 13), &regions));
-        assert_eq!(state.selected, ExperienceId::AiBabies);
+        // Click card 4 (ShellHud at y=10..12): selects it, does not launch yet.
+        assert!(state.handle_event(&click(10, 10), &regions));
+        assert_eq!(state.selected, ExperienceId::ShellHud);
         assert!(!state.auto_tour);
         assert!(state.outcome.is_none());
 
-        // Click live stage: triggers interaction & cycles variant to ChatGPT (1).
+        // Click live stage: triggers interaction & cycles variant to Tasks (1).
         assert!(state.handle_event(&click(55, 10), &regions));
         assert_eq!(state.active_interaction().action_count, 1);
 
-        // Click active card 3 again: launches AI Babies!
-        assert!(state.handle_event(&click(10, 13), &regions));
+        // Click active card 4 again: launches Shell HUD!
+        assert!(state.handle_event(&click(10, 10), &regions));
         let Some(LauncherOutcome::Launch(target)) = &state.outcome else {
             panic!("expected launch outcome");
         };
-        assert_eq!(target.experience, ExperienceId::AiBabies);
-        assert_eq!(target.args[0], "ai-babies");
-        assert_eq!(target.args[1], "--animate");
+        assert_eq!(target.experience, ExperienceId::ShellHud);
+        assert_eq!(target.args, vec!["hud", "--tab", "tasks"]);
 
         // Wheel navigation works cleanly.
         let mut wheel_state = LauncherState::new();
@@ -673,14 +722,14 @@ mod tests {
             modifiers: KeyModifiers::NONE,
         });
         assert!(wheel_state.handle_event(&wheel_down, &regions));
-        assert_eq!(wheel_state.selected, ExperienceId::FunctionPlotter);
+        assert_eq!(wheel_state.selected, ExperienceId::Clockwork);
         assert!(!wheel_state.auto_tour);
 
         // Hover tracking, pointer leave, and clicking the header Auto-Tour pill.
         let move_card = Event::Mouse(MouseEvent {
             kind: MouseEventKind::Moved,
             column: 10,
-            row: 17,
+            row: 12,
             modifiers: KeyModifiers::NONE,
         });
         assert!(wheel_state.handle_event(&move_card, &regions));
@@ -695,20 +744,40 @@ mod tests {
     #[test]
     fn launch_targets_match_experience_and_variant() {
         assert_eq!(
-            LaunchTarget::for_experience(ExperienceId::Jellyfish, 0).args,
-            vec!["jellyfish"]
+            LaunchTarget::for_experience(ExperienceId::Voxel, 0).args,
+            vec!["voxel"]
+        );
+        assert_eq!(
+            LaunchTarget::for_experience(ExperienceId::Voxel, 1).args,
+            vec!["voxel", "--night"]
+        );
+        assert_eq!(
+            LaunchTarget::for_experience(ExperienceId::Clockwork, 1).args,
+            vec!["clockwork", "--form", "2"]
+        );
+        assert_eq!(
+            LaunchTarget::for_experience(ExperienceId::Desk, 0).args,
+            vec!["desk"]
+        );
+        assert_eq!(
+            LaunchTarget::for_experience(ExperienceId::Desk, 1).args,
+            vec!["desk", "--page", "motion"]
+        );
+        assert_eq!(
+            LaunchTarget::for_experience(ExperienceId::ShellHud, 2).args,
+            vec!["hud", "--tab", "quick"]
         );
         assert_eq!(
             LaunchTarget::for_experience(ExperienceId::DeepseekPet, 0).args,
             vec!["pet"]
         );
         assert_eq!(
-            LaunchTarget::for_experience(ExperienceId::AiBabies, 0).args,
-            vec!["ai-babies", "--animate"]
+            LaunchTarget::for_experience(ExperienceId::Jellyfish, 0).args,
+            vec!["jellyfish"]
         );
         assert_eq!(
-            LaunchTarget::for_experience(ExperienceId::AiBabies, 2).args,
-            vec!["ai-babies", "--animate", "--character", "deepseek"]
+            LaunchTarget::for_experience(ExperienceId::Doctor, 0).args,
+            vec!["doctor"]
         );
         let draw = LaunchTarget::for_experience(ExperienceId::FunctionPlotter, 0);
         assert_eq!(draw.args[0], "draw");

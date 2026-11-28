@@ -5,7 +5,7 @@ use rsille::{
     render::raster_output::{CellPixels, InlineRasterSession, RasterBackend},
 };
 
-use crate::ai_babies::{scene::Character, INLINE_HEIGHT};
+use crate::{scene::Character, INLINE_HEIGHT};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Output {

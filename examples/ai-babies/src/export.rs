@@ -4,7 +4,7 @@ use std::{error::Error, fs, time::Instant};
 use crossterm::style::Color;
 use rsille::render::{area::Size, buffer::Buffer, chunk::Chunk, Draw};
 
-use crate::ai_babies::{
+use crate::{
     options::{Options, Output},
     Nursery, PREVIEW_WIDTH,
 };
@@ -104,15 +104,15 @@ pub fn command(args: &[String], options: Options) -> Result<(), Box<dyn Error>> 
         "--frames" if args.len() == 2 => {
             fs::create_dir_all(&args[1])?;
             let mut nursery = Nursery::new(options)?;
-            for index in 0..(crate::ai_babies::scene::PERIOD * 24.0).ceil() as usize {
+            for index in 0..(crate::scene::PERIOD * 24.0).ceil() as usize {
                 nursery.time = index as f64 / 24.0;
                 let path = std::path::Path::new(&args[1]).join(format!("{index:04}.ppm"));
                 save(path, &frame(&mut nursery, (PREVIEW_WIDTH, height).into())?)?;
             }
-            println!("Saved {} seconds at 24 FPS to {}", crate::ai_babies::scene::PERIOD, args[1]);
+            println!("Saved {} seconds at 24 FPS to {}", crate::scene::PERIOD, args[1]);
         }
         "--action" if args.len() == 3 => {
-            let action = crate::ai_babies::scene::Action::ALL.into_iter()
+            let action = crate::scene::Action::ALL.into_iter()
                 .find(|action| action.name() == args[1]).ok_or("Unknown action; use idle/wave/walk/hop/think/sleep")?;
             fs::create_dir_all(&args[2])?;
             let mut nursery = Nursery::new(options)?;

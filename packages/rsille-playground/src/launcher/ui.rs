@@ -10,9 +10,11 @@ use rsille::{
     },
 };
 
+use crate::doctor::RasterSupport;
+
 use super::{
     fx,
-    scenes::{ExperienceId, SceneEngine},
+    scenes::{ExperienceId, SceneEngine, EXPERIENCE_COUNT},
     state::{ExperienceSpec, HitRegions, LauncherState, WIDE_LAYOUT_MIN_WIDTH},
 };
 
@@ -46,12 +48,12 @@ pub struct ComputedLayout {
     pub header_divider_y: Option<u16>,
     pub rail_header: Option<Area>,
     pub rail_footer: Option<Area>,
-    pub dock: Area,
     pub regions: HitRegions,
+    pub dock: Area,
 }
 
 impl ComputedLayout {
-    pub fn compute(size: Size) -> Self {
+    pub fn compute(size: Size, selected: ExperienceId) -> Self {
         let w = size.width;
         let h = size.height;
         let empty = Self {
@@ -94,7 +96,6 @@ impl ComputedLayout {
             Area::default()
         };
 
-        // Top-right auto-tour pill hit area (matches draw_header placement).
         let pill_w = if w >= 52 { 15u16 } else { 10u16 }.min(w / 2);
         let margin_x: u16 = if w >= 50 { 1 } else { 0 };
         let tour_pill = Area::new(
@@ -102,7 +103,7 @@ impl ComputedLayout {
             (pill_w, 1).into(),
         );
 
-        let mut cards = [Area::default(); 4];
+        let mut cards = [Area::default(); EXPERIENCE_COUNT];
         let mut stage = Area::default();
         let mut rail_header = None;
         let mut rail_footer = None;
@@ -119,64 +120,53 @@ impl ComputedLayout {
             let stage_w = inner_w.saturating_sub(rail_w + gap);
             stage = Area::new((stage_x, middle_y).into(), (stage_w, middle_h).into());
 
-            // Vertical card distribution in the left rail.
-            if middle_h >= 18 {
-                // Standard & tall rail (22+ row frame): header (1) + subtle rule (1) +
-                // 4 cards * 3 rows + 3 gaps (15) = 17 rows, aligning Card 4 cleanly with
-                // the stage canvas bottom. Only add rail_footer on extra-tall terminals
-                // where there is genuine breathing space above the bottom dock.
+            let count_u16 = EXPERIENCE_COUNT as u16;
+            if middle_h >= 19 {
+                // Standard 23-26 row frame: header (1) + subtle rule (1) +
+                // 8 cards * 2 rows (16) + footer (1) = 19 rows; all 8 visible at once!
                 rail_header = Some(Area::new((outer_x, middle_y).into(), (rail_w, 1).into()));
                 let cards_y = middle_y + 2;
                 for (i, slot) in cards.iter_mut().enumerate() {
-                    let y = cards_y + (i as u16) * 4;
-                    *slot = Area::new((outer_x, y).into(), (rail_w, 3).into());
+                    let y = cards_y + (i as u16) * 2;
+                    *slot = Area::new((outer_x, y).into(), (rail_w, 2).into());
                 }
                 let footer_y = middle_y + middle_h - 1;
-                if middle_h >= 20 && footer_y >= cards_y + 16 {
+                if footer_y >= cards_y + count_u16 * 2 {
                     rail_footer = Some(Area::new((outer_x, footer_y).into(), (rail_w, 1).into()));
                 }
             } else if middle_h >= 17 {
-                // 21-row rail: header (1) + 4 cards * 3 rows + 3 gaps (15).
+                // Header (1) + 8 cards * 2 rows (16) = 17 rows.
                 rail_header = Some(Area::new((outer_x, middle_y).into(), (rail_w, 1).into()));
                 let cards_y = middle_y + 1;
                 for (i, slot) in cards.iter_mut().enumerate() {
-                    let y = cards_y + (i as u16) * 4;
-                    *slot = Area::new((outer_x, y).into(), (rail_w, 3).into());
+                    let y = cards_y + (i as u16) * 2;
+                    *slot = Area::new((outer_x, y).into(), (rail_w, 2).into());
                 }
-            } else if middle_h >= 15 {
-                // 4 cards * 3 rows + 3 gaps = 15 rows.
-                for (i, slot) in cards.iter_mut().enumerate() {
-                    let y = middle_y + (i as u16) * 4;
-                    *slot = Area::new((outer_x, y).into(), (rail_w, 3).into());
-                }
-            } else if middle_h >= 13 {
-                // Section header (1) + 4 cards * 3 rows = 13 rows.
+            } else if middle_h > count_u16 {
+                // Header (1) + 8 single-row cards so every experience stays clickable.
                 rail_header = Some(Area::new((outer_x, middle_y).into(), (rail_w, 1).into()));
                 let cards_y = middle_y + 1;
                 for (i, slot) in cards.iter_mut().enumerate() {
-                    let y = cards_y + (i as u16) * 3;
-                    *slot = Area::new((outer_x, y).into(), (rail_w, 3).into());
-                }
-            } else if middle_h >= 11 {
-                // 4 cards * 2 rows + 3 gaps = 11 rows.
-                for (i, slot) in cards.iter_mut().enumerate() {
-                    let y = middle_y + (i as u16) * 3;
-                    *slot = Area::new((outer_x, y).into(), (rail_w, 2).into());
-                }
-            } else if middle_h >= 8 {
-                // 4 cards * 2 rows = 8 rows.
-                for (i, slot) in cards.iter_mut().enumerate() {
-                    let y = middle_y + (i as u16) * 2;
-                    *slot = Area::new((outer_x, y).into(), (rail_w, 2).into());
-                }
-            } else if middle_h >= 4 {
-                for (i, slot) in cards.iter_mut().enumerate() {
-                    let y = middle_y + i as u16;
+                    let y = cards_y + i as u16;
                     *slot = Area::new((outer_x, y).into(), (rail_w, 1).into());
+                }
+            } else if middle_h >= 1 {
+                // Sliding window around the selected item for ultra-short terminals.
+                let visible = usize::from(middle_h).min(EXPERIENCE_COUNT);
+                let sel = selected.index();
+                let start = sel
+                    .saturating_sub(visible / 2)
+                    .min(EXPERIENCE_COUNT - visible);
+                for offset in 0..visible {
+                    let idx = start + offset;
+                    cards[idx] = Area::new(
+                        (outer_x, middle_y + offset as u16).into(),
+                        (rail_w, 1).into(),
+                    );
                 }
             }
         } else {
-            // Compact layout: top tab strip + full-width live HalfBlock stage.
+            // Compact layout: top expanding tab strip + full-width live HalfBlock stage.
             let outer_x = if w >= 50 { 1u16 } else { 0u16 };
             let inner_w = w.saturating_sub(outer_x * 2);
             let strip_h: u16 = if middle_h >= 6 {
@@ -186,17 +176,48 @@ impl ComputedLayout {
             } else {
                 0
             };
-            if strip_h > 0 && inner_w >= 8 {
-                let tab_gap: u16 = if inner_w >= 44 { 1 } else { 0 };
-                let total_gaps = tab_gap * 3;
-                let usable = inner_w.saturating_sub(total_gaps);
-                let base_w = usable / 4;
-                let extra = usable % 4;
+            if strip_h > 0 && inner_w >= EXPERIENCE_COUNT as u16 * 3 {
+                // Give the active tab extra breathing room for its title while keeping all 8 clickable.
+                let sel = selected.index();
+                let active_w = if inner_w >= 54 {
+                    15u16
+                } else if inner_w >= 40 {
+                    12u16
+                } else {
+                    inner_w / 3
+                };
+                let rest_count = (EXPERIENCE_COUNT - 1) as u16;
+                let rem_w = inner_w.saturating_sub(active_w);
+                let base_other = rem_w / rest_count;
+                let extra_other = rem_w % rest_count;
                 let mut cursor_x = outer_x;
+                let mut other_i = 0u16;
                 for (i, slot) in cards.iter_mut().enumerate() {
-                    let tw = base_w + u16::from((i as u16) < extra);
+                    let tw = if i == sel {
+                        active_w
+                    } else {
+                        let w = base_other + u16::from(other_i < extra_other);
+                        other_i += 1;
+                        w
+                    };
                     *slot = Area::new((cursor_x, middle_y).into(), (tw, strip_h).into());
-                    cursor_x = cursor_x.saturating_add(tw + tab_gap);
+                    cursor_x = cursor_x.saturating_add(tw);
+                }
+            } else if strip_h > 0 && inner_w >= 8 {
+                // Very narrow terminal: 4-slot sliding tab window centered on `selected`.
+                let visible = 4usize;
+                let sel = selected.index();
+                let start = sel
+                    .saturating_sub(visible / 2)
+                    .min(EXPERIENCE_COUNT - visible);
+                let base_w = inner_w / visible as u16;
+                let extra = inner_w % visible as u16;
+                let mut cursor_x = outer_x;
+                for offset in 0..visible {
+                    let idx = start + offset;
+                    let tw = base_w + u16::from((offset as u16) < extra);
+                    cards[idx] = Area::new((cursor_x, middle_y).into(), (tw, strip_h).into());
+                    cursor_x = cursor_x.saturating_add(tw);
                 }
             }
             let stage_y = middle_y + strip_h;
@@ -258,12 +279,11 @@ impl LauncherRenderer {
         mut chunk: Chunk<'_>,
     ) -> Result<ComputedLayout, DrawErr> {
         let size = chunk.area().size();
-        let layout = ComputedLayout::compute(size);
+        let layout = ComputedLayout::compute(size, state.selected);
         if size.width == 0 || size.height == 0 {
             return Ok(layout);
         }
 
-        // Paint solid obsidian canvas backdrop so every cell has clean TrueColor contrast.
         chunk.fill(0, 0, size.width, size.height, ' ', bg_style(BG_SHELL))?;
 
         if size.width < 10 || size.height < 4 {
@@ -320,10 +340,9 @@ impl LauncherRenderer {
             0
         };
 
-        // Animated HalfBlock prismatic emblem on rows 0..2.
         if emblem_w > 0 {
             let pw = emblem_w as usize;
-            let ph = 4usize; // 2 cell rows * 2 HalfBlock vertical pixels
+            let ph = 4usize;
             fx::render_emblem(
                 pw,
                 ph,
@@ -350,7 +369,6 @@ impl LauncherRenderer {
             margin_x
         };
 
-        // Right-aligned live status pill on Row 0.
         let breath = (state.time * 3.2).sin() as f32 * 0.5 + 0.5;
         let pill_rect = layout.regions.tour_pill;
         let pill_x = pill_rect.x();
@@ -380,7 +398,6 @@ impl LauncherRenderer {
             let _ = chunk.set_string(cx, 0, &rest, fg_bg_bold(label_col, pill_bg));
         }
 
-        // Row 0 left: Iridescent RSILLE PLAYGROUND title.
         let title_budget = pill_x.saturating_sub(title_x + 1) as usize;
         let title = if title_budget >= 17 {
             "RSILLE PLAYGROUND"
@@ -397,7 +414,6 @@ impl LauncherRenderer {
             let _ = chunk.set_char(title_x + i as u16, 0, ch, fg_bg_bold(bright, BG_HEADER));
         }
 
-        // Row 1: Subtle studio tagline on left + live `$ rsille <cmd>` pill on right.
         let target = state.current_launch_target();
         let cmd_text = target.display_command;
         let max_cmd_w = if w >= 76 {
@@ -410,7 +426,7 @@ impl LauncherRenderer {
 
         let mut cmd_start_x = w.saturating_sub(margin_x);
         if max_cmd_w >= 12 {
-            let inner_budget = max_cmd_w.saturating_sub(4); // " $ " + trailing " "
+            let inner_budget = max_cmd_w.saturating_sub(4);
             let shown_cmd = truncate_with_ellipsis(&cmd_text, inner_budget);
             let shown_w = display_width(&shown_cmd);
             let box_w = (shown_w + 4) as u16;
@@ -432,17 +448,19 @@ impl LauncherRenderer {
             if tag_budget >= 10 {
                 let dot_col = fx::lerp_rgb(accent, secondary, 0.4);
                 let _ = chunk.set_char(title_x, 1, '●', fg_bg(dot_col, BG_HEADER));
-                let subtitle = if tag_budget >= 36 {
-                    "Interactive Terminal Graphics Studio"
-                } else {
-                    "Terminal Graphics Studio"
+                let subtitle = match state.caps.raster {
+                    RasterSupport::Kitty | RasterSupport::Both => {
+                        "Terminal UI, 3D & Overlay · Kitty ready"
+                    }
+                    RasterSupport::Sixel => "Terminal UI, 3D & Overlay · Sixel ready",
+                    RasterSupport::None => "Terminal UI, 3D & Overlay · Unicode mode",
+                    RasterSupport::Unknown => "Interactive Terminal Graphics Studio",
                 };
                 let shown = truncate_with_ellipsis(subtitle, tag_budget.saturating_sub(2));
                 let _ = chunk.set_string(title_x + 2, 1, &shown, fg_bg(FG_MUTED, BG_HEADER));
             }
         }
 
-        // Row 2 (wide tall header): full-width iridescent chromatic hairline.
         if let Some(div_y) = layout.header_divider_y {
             for x in 0..w {
                 let pos = x as f32 / w.max(1) as f32;
@@ -464,13 +482,12 @@ impl LauncherRenderer {
         secondary: [u8; 3],
         chunk: &mut Chunk<'_>,
     ) -> Result<(), DrawErr> {
-        // Optional section header above the 4 cards.
         if let Some(hdr) = layout.rail_header {
             let x = hdr.x();
             let y = hdr.y();
             let w = hdr.width();
             let _ = chunk.set_string(x + 1, y, "EXPERIENCES", fg_bg_bold(FG_DIM, BG_SHELL));
-            let counter = format!("{}/{}", state.selected.index() + 1, ExperienceId::ALL.len());
+            let counter = format!("{}/{}", state.selected.index() + 1, EXPERIENCE_COUNT);
             let cw = counter.len() as u16;
             if w > cw + 14 {
                 let _ = chunk.set_string(x + w - cw - 1, y, &counter, fg_bg(accent, BG_SHELL));
@@ -492,6 +509,7 @@ impl LauncherRenderer {
 
         let breath = (state.time * 3.0).sin() as f32 * 0.5 + 0.5;
         let pulse = state.active_pulse_strength();
+        let raster_missing = state.caps.raster == RasterSupport::None;
 
         for exp in ExperienceId::ALL {
             let card = layout.regions.cards[exp.index()];
@@ -508,7 +526,7 @@ impl LauncherRenderer {
                 fx::lerp_rgb(
                     [15, 21, 35],
                     exp_accent,
-                    0.14 + 0.04 * breath + 0.08 * pulse,
+                    0.15 + 0.04 * breath + 0.08 * pulse,
                 )
             } else if is_hovered {
                 BG_CARD_HOVER
@@ -525,7 +543,6 @@ impl LauncherRenderer {
                 bg_style(card_bg),
             )?;
 
-            // Left luminous gradient pillar on active card; refined hairline on inactive cards.
             for dy in 0..card.height() {
                 let frac = if card.height() <= 1 {
                     0.0
@@ -546,7 +563,7 @@ impl LauncherRenderer {
                 }
             }
 
-            // Row 0: index + icon + title + active chevron.
+            // Row 0: index + icon + title + badge/chevron.
             let num_ch = char::from(b'1' + exp.index() as u8);
             let num_col = if is_selected {
                 exp_accent
@@ -564,6 +581,8 @@ impl LauncherRenderer {
                 FG_PRIMARY
             } else if is_hovered {
                 [224, 232, 246]
+            } else if spec.requires_raster && raster_missing {
+                FG_MUTED
             } else {
                 [194, 206, 226]
             };
@@ -572,7 +591,15 @@ impl LauncherRenderer {
             let _ = chunk.set_char(card.x() + 2, row0, num_ch, fg_bg_bold(num_col, card_bg));
             let _ = chunk.set_string(card.x() + 4, row0, spec.icon, fg_bg_bold(icon_col, card_bg));
 
-            let title_budget = card.width().saturating_sub(9) as usize;
+            // Right-side badge on inactive cards (or chevron on active card)
+            let right_reserve: usize = if is_selected {
+                3
+            } else if card.width() >= 28 {
+                display_width(spec.badge) + 2
+            } else {
+                2
+            };
+            let title_budget = (card.width() as usize).saturating_sub(6 + right_reserve);
             let shown_title = truncate_with_ellipsis(spec.title, title_budget);
             let title_style = if is_selected {
                 fg_bg_bold(title_col, card_bg)
@@ -589,6 +616,15 @@ impl LauncherRenderer {
                     '▸',
                     fg_bg_bold(arrow_col, card_bg),
                 );
+            } else if card.width() >= 28 {
+                let bw = display_width(spec.badge) as u16;
+                let bx = card.x() + card.width().saturating_sub(bw + 1);
+                let badge_fg = if spec.requires_raster && raster_missing {
+                    [198, 138, 92]
+                } else {
+                    FG_DIM
+                };
+                let _ = chunk.set_string(bx, row0, spec.badge, fg_bg(badge_fg, card_bg));
             } else if is_hovered && card.width() >= 10 {
                 let _ = chunk.set_char(
                     card.x() + card.width() - 2,
@@ -598,22 +634,9 @@ impl LauncherRenderer {
                 );
             }
 
-            // Row 1: crisp subtitle.
+            // Row 1: active variant selector pill OR concise subtitle.
             if card.height() >= 2 {
-                let sub_budget = card.width().saturating_sub(6) as usize;
-                let shown_sub = truncate_with_ellipsis(spec.subtitle, sub_budget);
-                let sub_col = if is_selected { FG_SECONDARY } else { FG_MUTED };
-                let _ = chunk.set_string(
-                    card.x() + 4,
-                    card.y() + 1,
-                    &shown_sub,
-                    fg_bg(sub_col, card_bg),
-                );
-            }
-
-            // Row 2: active variant selector pill OR inactive runtime badge.
-            if card.height() >= 3 {
-                let row2 = card.y() + 2;
+                let row1 = card.y() + 1;
                 let budget = card.width().saturating_sub(6) as usize;
                 if is_selected {
                     let variant = state.interaction(exp).variant;
@@ -635,57 +658,42 @@ impl LauncherRenderer {
                     };
                     let tw = display_width(&text).min(budget) as u16;
                     if tw > 0 {
-                        chunk.fill(card.x() + 4, row2, tw, 1, ' ', bg_style(chip_bg))?;
+                        chunk.fill(card.x() + 4, row1, tw, 1, ' ', bg_style(chip_bg))?;
                         let _ =
-                            chunk.set_string(card.x() + 4, row2, &text, fg_bg(chip_fg, chip_bg));
+                            chunk.set_string(card.x() + 4, row1, &text, fg_bg(chip_fg, chip_bg));
                         if count > 1 && tw >= 5 {
                             let _ =
-                                chunk.set_char(card.x() + 5, row2, '◂', fg_bg(arrow_fg, chip_bg));
+                                chunk.set_char(card.x() + 5, row1, '◂', fg_bg(arrow_fg, chip_bg));
                             let _ = chunk.set_char(
                                 card.x() + 4 + tw - 2,
-                                row2,
+                                row1,
                                 '▸',
                                 fg_bg(arrow_fg, chip_bg),
                             );
                         }
                     }
                 } else {
-                    let badge_bg = fx::lerp_rgb(card_bg, [30, 40, 62], 0.5);
-                    let badge_text = format!(
-                        " {} ",
-                        truncate_with_ellipsis(spec.badge, budget.saturating_sub(2))
-                    );
-                    let bw = display_width(&badge_text).min(budget) as u16;
-                    if bw > 0 {
-                        chunk.fill(card.x() + 4, row2, bw, 1, ' ', bg_style(badge_bg))?;
-                        let _ = chunk.set_string(
-                            card.x() + 4,
-                            row2,
-                            &badge_text,
-                            fg_bg(FG_DIM, badge_bg),
-                        );
-                    }
+                    let sub_text = if spec.requires_raster && raster_missing {
+                        "Needs Kitty or Sixel terminal"
+                    } else {
+                        spec.subtitle
+                    };
+                    let shown_sub = truncate_with_ellipsis(sub_text, budget);
+                    let sub_col = if spec.requires_raster && raster_missing {
+                        [150, 122, 98]
+                    } else {
+                        FG_MUTED
+                    };
+                    let _ =
+                        chunk.set_string(card.x() + 4, row1, &shown_sub, fg_bg(sub_col, card_bg));
                 }
             }
         }
 
-        // Optional quick-launch footer beneath the cards.
         if let Some(ftr) = layout.rail_footer {
             let x = ftr.x();
             let y = ftr.y();
             let w = ftr.width() as usize;
-            let last_card = layout.regions.cards[3];
-            if y >= last_card.y() + last_card.height() + 2 && ftr.width() > 2 {
-                let rule_col = fx::lerp_rgb(BG_SHELL, BORDER_DIM, 0.75);
-                chunk.fill(
-                    x + 1,
-                    y - 1,
-                    ftr.width() - 2,
-                    1,
-                    '─',
-                    fg_bg(rule_col, BG_SHELL),
-                )?;
-            }
             let key_bg = fx::lerp_rgb(BG_KEYCAP, accent, 0.25);
             let _ = chunk.set_string(x + 1, y, " ↵ Enter ", fg_bg_bold(FG_PRIMARY, key_bg));
             let rest_x = x + 11;
@@ -713,7 +721,7 @@ impl LauncherRenderer {
         let breath = (state.time * 3.0).sin() as f32 * 0.5 + 0.5;
         for exp in ExperienceId::ALL {
             let tab = layout.regions.cards[exp.index()];
-            if tab.width() < 3 || tab.height() == 0 {
+            if tab.width() < 2 || tab.height() == 0 {
                 continue;
             }
             let spec = ExperienceSpec::for_id(exp);
@@ -732,15 +740,15 @@ impl LauncherRenderer {
 
             chunk.fill(tab.x(), tab.y(), tab.width(), 1, ' ', bg_style(tab_bg))?;
 
-            let budget = tab.width().saturating_sub(2) as usize;
+            let budget = tab.width().saturating_sub(1) as usize;
             let full_label = format!("{} {} {}", exp.index() + 1, spec.icon, spec.compact_title);
-            let short_label = format!("{} {}", exp.index() + 1, spec.compact_title);
+            let icon_label = format!("{} {}", exp.index() + 1, spec.icon);
             let label = if display_width(&full_label) <= budget {
                 full_label
-            } else if display_width(&short_label) <= budget {
-                short_label
+            } else if display_width(&icon_label) <= budget {
+                icon_label
             } else {
-                truncate_to_width(&format!("{} {}", exp.index() + 1, spec.icon), budget).to_owned()
+                format!("{}", exp.index() + 1)
             };
 
             let lw = display_width(&label) as u16;
@@ -754,7 +762,6 @@ impl LauncherRenderer {
             };
             let _ = chunk.set_string(tab.x() + pad, tab.y(), &label, style);
 
-            // Second row of compact strip: luminous underline bar for active tab, hairline for others.
             if tab.height() >= 2 {
                 let uy = tab.y() + 1;
                 for dx in 0..tab.width() {
@@ -807,7 +814,6 @@ impl LauncherRenderer {
             fx::lerp_rgb(tinted, [255, 255, 255], 0.16 * pulse)
         };
 
-        // Rounded outer bezel: top, bottom, and side edges.
         let _ = chunk.set_char(sx, sy, '╭', fg_bg(border_color_at(0.0), BG_SHELL));
         let _ = chunk.set_char(sx + sw - 1, sy, '╮', fg_bg(border_color_at(1.0), BG_SHELL));
         let _ = chunk.set_char(sx, sy + sh - 1, '╰', fg_bg(border_color_at(0.25), BG_SHELL));
@@ -830,13 +836,9 @@ impl LauncherRenderer {
             let _ = chunk.set_char(sx + sw - 1, sy + dy, '│', fg_bg(right_col, BG_SHELL));
         }
 
-        // Top bezel embedded title + variant label + pagination dots.
         self.draw_stage_top_bar(state, stage, accent, secondary, chunk)?;
-
-        // Bottom bezel embedded luminous Auto-Tour shimmer progress bar.
         self.draw_stage_bottom_bar(state, stage, accent, secondary, chunk)?;
 
-        // Live 30 FPS HalfBlock Canvas inside the stage bezel.
         let pw = inner_w as usize;
         let ph = inner_h as usize * 2;
         let pixels = if let Some(tr) = state.transition {
@@ -877,7 +879,6 @@ impl LauncherRenderer {
             inner_chunk,
         )?;
 
-        // Floating HUD corner pills overlaid along the bottom row of the live stage.
         if inner_h >= 6 && inner_w >= 20 {
             self.draw_stage_hud_pills(state, sx + 1, sy + inner_h, inner_w, accent, chunk)?;
         }
@@ -896,7 +897,7 @@ impl LauncherRenderer {
         let sx = stage.x();
         let sy = stage.y();
         let sw = stage.width();
-        let inner_w = sw.saturating_sub(4) as usize; // space between "╭─" and "─╮"
+        let inner_w = sw.saturating_sub(4) as usize;
         if inner_w < 8 {
             return Ok(());
         }
@@ -906,7 +907,6 @@ impl LauncherRenderer {
         let vlabel = SceneEngine::variant_label(state.selected, variant);
         let vcount = state.selected.variant_count().max(1);
 
-        // Right-side variant dots (e.g. " ● ○ ○ ").
         let dots_w: usize = if vcount > 1 && inner_w >= 28 {
             vcount * 2 + 1
         } else {
@@ -928,7 +928,6 @@ impl LauncherRenderer {
             }
         }
 
-        // Left-side embedded title + variant pill.
         let left_budget = inner_w.saturating_sub(dots_w + 1);
         let mut cx = sx + 2;
         let title_piece = format!(" {} {} ", spec.icon, spec.title.to_uppercase());
@@ -976,7 +975,6 @@ impl LauncherRenderer {
             return Ok(());
         }
 
-        // Optional right-aligned tour status tag along bottom border.
         let badge = if state.auto_tour {
             let rem = (super::state::AUTO_TOUR_INTERVAL_SECS - state.tour_elapsed)
                 .clamp(0.0, super::state::AUTO_TOUR_INTERVAL_SECS);
@@ -1129,7 +1127,7 @@ impl LauncherRenderer {
                 ("Space", "Interact"),
                 ("←→", "Variant"),
                 ("a", tour_label),
-                ("1-4", "Jump"),
+                ("1-8", "Jump"),
                 ("q", "Quit"),
             ]
         } else if w >= 72 {
@@ -1156,7 +1154,7 @@ impl LauncherRenderer {
         let mut cx = margin_x;
 
         for (idx, &(key, label)) in items.iter().enumerate() {
-            let key_w = display_width(key) as u16 + 2; // " key "
+            let key_w = display_width(key) as u16 + 2;
             let label_w = display_width(label) as u16;
             let sep_w: u16 = if idx == 0 { 0 } else { 2 };
             let total = sep_w + key_w + 1 + label_w;
@@ -1309,29 +1307,33 @@ mod tests {
     }
 
     #[test]
-    fn wide_layout_renders_header_cards_stage_and_dock_cleanly() {
+    fn wide_layout_renders_header_all_eight_cards_stage_and_dock_cleanly() {
         let mut state = LauncherState::new();
         state.set_time(1.25);
-        let (buffer, layout) = render_buffer(&state, (110, 24).into());
+        let (buffer, layout) = render_buffer(&state, (112, 24).into());
         assert_eq!(layout.mode, LayoutMode::Wide);
         assert!(layout.regions.stage.width() >= 55);
         assert!(layout.regions.stage.height() >= 18);
         for card in layout.regions.cards {
-            assert_eq!(card.height(), 3);
+            assert_eq!(card.height(), 2);
             assert!(card.width() >= 30);
             assert!(!card.intersects(&layout.regions.stage));
         }
         let text = buffer_text(&buffer);
         assert!(text.contains("RSILLE PLAYGROUND"));
         assert!(text.contains("AUTO-TOUR"));
-        assert!(text.contains("Jellyfish"));
-        assert!(text.contains("Function Plotter"));
-        assert!(text.contains("AI Babies"));
+        assert!(text.contains("Voxel Sandbox"));
+        assert!(text.contains("Clockwork"));
+        assert!(text.contains("Lumen Desk"));
+        assert!(text.contains("Shell HUD"));
         assert!(text.contains("DeepSeek Pet"));
-        assert!(text.contains("rsille jellyfish"));
+        assert!(text.contains("Function"));
+        assert!(text.contains("Jellyfish"));
+        assert!(text.contains("Terminal"));
+        assert!(text.contains("rsille voxel"));
         let expected_top = format!(
-            "◎ JELLYFISH · {}",
-            SceneEngine::variant_label(ExperienceId::Jellyfish, 0)
+            "▣ VOXEL SANDBOX · {}",
+            SceneEngine::variant_label(ExperienceId::Voxel, 0)
         );
         assert!(text.contains(&expected_top));
         assert!(text.contains('╭') && text.contains('╯'));
@@ -1340,7 +1342,7 @@ mod tests {
     #[test]
     fn compact_layout_stacks_strip_above_full_width_stage() {
         let mut state = LauncherState::new();
-        state.select_immediate(ExperienceId::AiBabies);
+        state.select_immediate(ExperienceId::Desk);
         state.set_time(2.0);
         let (buffer, layout) = render_buffer(&state, (68, 18).into());
         assert_eq!(layout.mode, LayoutMode::Compact);
@@ -1352,13 +1354,13 @@ mod tests {
         }
         let text = buffer_text(&buffer);
         assert!(text.contains("RSILLE PLAYGROUND"));
-        assert!(text.contains("AI BABIES"));
+        assert!(text.contains("LUMEN DESK"));
     }
 
     #[test]
     fn handles_tiny_and_extreme_sizes_without_panicking() {
         let mut state = LauncherState::new();
-        state.set_transition(ExperienceId::Jellyfish, ExperienceId::DeepseekPet, 0.45);
+        state.set_transition(ExperienceId::Voxel, ExperienceId::Doctor, 0.45);
         for (w, h) in [
             (0, 0),
             (1, 1),
@@ -1384,7 +1386,7 @@ mod tests {
             state.set_time(1.0);
             state.trigger_interaction();
             state.set_time(1.4);
-            let (buffer, _) = render_buffer(&state, (110, 22).into());
+            let (buffer, _) = render_buffer(&state, (112, 24).into());
             let text = buffer_text(&buffer);
             assert!(
                 !text.contains("Space Space"),
@@ -1395,11 +1397,10 @@ mod tests {
                 "duplicate caption prefix in HUD for {exp:?}"
             );
         }
-        // Also verify ambient DeepSeek Pet caption without pulse.
         let mut pet = LauncherState::new();
         pet.select_immediate(ExperienceId::DeepseekPet);
         pet.set_time(1.2);
-        let (buffer, _) = render_buffer(&pet, (110, 22).into());
+        let (buffer, _) = render_buffer(&pet, (112, 24).into());
         let text = buffer_text(&buffer);
         assert!(text.contains("~ patrolling your terminal"));
         assert!(!text.contains("✦ ~"));

@@ -1,13 +1,19 @@
 # rsille Playground
 
-在交互终端中直接运行 `rsille` 启动内联交互式展台（实时 30 FPS 预览并可一键进入体验）；在非 TTY / 管道环境中运行则输出 `--help`。也可使用子命令直接启动对应模式。
+在交互终端中直接运行 `rsille` 启动内联交互式展台（实时 30 FPS 预览、终端图形协议自动探测并可一键进入体验）；在非 TTY / 管道环境中运行则输出 `--help`。也可使用子命令直接启动对应模式。
 
-| 命令 | 功能 |
-| --- | --- |
-| [`rsille draw`](function-plotter/README_cn.md) | 打开函数绘图器，支持 Kitty 和 Sixel。`draw` 是 `function-plotter` 的别名。 |
-| [`rsille pet`](deepseek-pet/README.md) | 在支持 Kitty 或 Sixel 的交互终端启动 DeepSeek 宠物。 |
-| [`rsille ai-babies`](ai-babies/README_cn.md) | 显示三位像素角色，加 `--animate` 播放动画。 |
-| [`rsille jellyfish`](jellyfish/README_cn.md) | 在终端观看水母游动。 |
+| 命令 | 功能 | 终端要求 |
+| --- | --- | --- |
+| `rsille voxel`（别名 `craft`） | 第一人称 3D 方块沙盒：探索地形、木屋与湖泊，挖掘搭建、飞行、昼夜切换。 | 任意真彩色终端 |
+| `rsille clockwork` | 132 个零件拆解重组为步行机、扑翼机与机械花，支持磁力震散、爆炸视图与拖拽视角。 | 任意真彩色终端 |
+| `rsille desk`（别名 `lumen`） | 桌面式 TUI 工作台：可拖拽缩放浮窗、Dock、动态曲线、视觉特效、命令面板与多主题。 | 任意真彩色终端 |
+| `rsille hud` | 浮在真实 shell 上方的实用工具栏：可拖拽目录树（一键 `cd here`）、命令耗时徽章、待办清单与快捷宏。 | 任意终端（PTY / ConPTY） |
+| [`rsille pet`](deepseek-pet/README.md) | 浮在真实 shell（或 `vim` 等程序）上方的 DeepSeek 小鲸鱼宠物，响应命令输入与鼠标互动。 | Kitty / Sixel |
+| [`rsille draw`](function-plotter/README_cn.md) | 内联 2D/3D 函数绘图 REPL，支持极坐标、参数方程、旋转 3D 曲面与 `:grid` 多图布局。`draw` 是 `function-plotter` 的别名。 | Kitty / Sixel |
+| [`rsille jellyfish`](jellyfish/README_cn.md) | 深海发光水母水族箱，使用 Unicode 半块字符流畅播放。 | 任意真彩色终端 |
+| `rsille doctor` | 探测终端 Kitty / Sixel / 单元格像素能力，并同屏四路对比 Braille、HalfBlock、Quadrant 与原生像素渲染（支持 `--plain` 纯文本输出）。 | 任意终端 |
+
+*原 `ai-babies` 演示已移至仓库独立示例 [`examples/ai-babies`](../../examples/ai-babies/README_cn.md)，以保持 Playground 安装包更轻量。*
 
 ## 安装
 

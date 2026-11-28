@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="description" content="直接下载 rsille Playground 可执行文件（Linux、macOS、Windows），在终端体验 shell 宠物、2D/3D 函数绘图、像素角色与深海水母。">
+  <meta name="description" content="直接下载 rsille Playground 可执行文件（Linux、macOS、Windows），在终端体验 3D 方块沙盒、发条机械、浮窗 TUI、Live Shell HUD、鲸鱼宠物与函数绘图。">
   <meta property="og:title" content="Download rsille Playground">
   <meta property="og:description" content="Standalone rsille CLI binaries for Linux, macOS, and Windows — no Rust or Cargo required.">
   <meta property="og:type" content="website">
@@ -68,8 +68,8 @@
             <span data-i18n-en>Download rsille Playground</span>
           </h1>
           <p class="hero-lead">
-            <span data-i18n-zh>把 <strong>shell 悬浮鲸鱼宠物</strong>、<strong>2D/3D 函数绘图器</strong>、<strong>动态像素角色</strong>与<strong>深海发光水母</strong>装进单个可执行文件。下载即可运行，无需安装 Rust 或 Cargo。</span>
-            <span data-i18n-en>A <strong>live shell whale pet</strong>, <strong>2D/3D math plotter</strong>, <strong>animated pixel characters</strong>, and <strong>deep-sea jellyfish</strong> in one binary. Download and run — no Rust or Cargo needed.</span>
+            <span data-i18n-zh>把 <strong>3D 方块沙盒</strong>、<strong>132 零件发条机械</strong>、<strong>可拖拽浮窗 TUI</strong>、<strong>Live Shell HUD</strong>、<strong>鲸鱼桌宠</strong>与<strong>2D/3D 函数绘图</strong>装进单个可执行文件。下载即可运行，无需安装 Rust 或 Cargo。</span>
+            <span data-i18n-en>A <strong>3D voxel sandbox</strong>, <strong>132-part clockwork engine</strong>, <strong>floating-window TUI</strong>, <strong>live shell HUD</strong>, <strong>whale pet</strong>, and <strong>2D/3D math plotter</strong> in one binary. Download and run — no Rust or Cargo needed.</span>
           </p>
           <div class="cmd-bar">
             <div class="cmd-bar-text"><span class="prompt">$</span><code>cargo install rsille-playground --locked</code></div>
@@ -86,8 +86,8 @@
             <img src="/media/baby-pet.gif" width="140" height="112" alt="Animated pixel character">
           </div>
           <div class="trio-caption">
-            <span data-i18n-zh>内置四项体验：rsille pet · draw · ai-babies · jellyfish</span>
-            <span data-i18n-en>Four modes inside: rsille pet · draw · ai-babies · jellyfish</span>
+            <span data-i18n-zh>内置八项体验：voxel · clockwork · desk · hud · pet · draw · jellyfish · doctor</span>
+            <span data-i18n-en>Eight modes inside: voxel · clockwork · desk · hud · pet · draw · jellyfish · doctor</span>
           </div>
         </div>
       </div>
@@ -101,6 +101,26 @@
           <div class="section-kicker">Included Commands</div>
           <div class="play-grid" style="margin-top: 12px; margin-bottom: 0;">
             <div class="play-card">
+              <span class="play-cmd">rsille voxel</span>
+              <p><span data-i18n-zh>第一人称 3D 方块沙盒，支持挖掘搭建、飞行与昼夜切换。</span><span data-i18n-en>First-person 3D block sandbox with mining, building, flight, and day/night.</span></p>
+              <div class="play-proto">Any True Color terminal</div>
+            </div>
+            <div class="play-card">
+              <span class="play-cmd">rsille clockwork</span>
+              <p><span data-i18n-zh>132 零件发条变形机械，支持磁力脉冲震散、爆炸视图与拖拽视角。</span><span data-i18n-en>132-part kinetic creatures with magnetic pulse scatter, explode view &amp; orbit.</span></p>
+              <div class="play-proto">Any True Color terminal</div>
+            </div>
+            <div class="play-card">
+              <span class="play-cmd">rsille desk</span>
+              <p><span data-i18n-zh>桌面式 TUI 工作台，含可拖拽浮窗、Dock、动效、笔记与命令面板。</span><span data-i18n-en>Desktop TUI workspace with draggable floating windows, Dock, FX &amp; command palette.</span></p>
+              <div class="play-proto">Any True Color terminal</div>
+            </div>
+            <div class="play-card">
+              <span class="play-cmd">rsille hud</span>
+              <p><span data-i18n-zh>浮在真实 shell 上的实用工具栏：目录树 <code>cd here</code>、命令计时、待办与快捷宏。</span><span data-i18n-en>Live shell HUD with folder tree <code>cd here</code>, command timer, checklist &amp; macros.</span></p>
+              <div class="play-proto">Any terminal · Ctrl+] exit</div>
+            </div>
+            <div class="play-card">
               <span class="play-cmd">rsille pet</span>
               <p><span data-i18n-zh>浮在真实 shell（或 <code>vim</code>）上方的互动小鲸鱼，按 <code>Ctrl+]</code> 退出。</span><span data-i18n-en>Interactive whale floating over your shell (or <code>vim</code>). Press <code>Ctrl+]</code> to exit.</span></p>
               <div class="play-proto">Kitty / Sixel</div>
@@ -111,14 +131,14 @@
               <div class="play-proto">Kitty / Sixel</div>
             </div>
             <div class="play-card">
-              <span class="play-cmd">rsille ai-babies --animate</span>
-              <p><span data-i18n-zh>播放三位像素角色动画，支持 Kitty、Sixel 或纯四分块字符。</span><span data-i18n-en>Animate three pixel characters via Kitty, Sixel, or pure Unicode Quadrants.</span></p>
-              <div class="play-proto">Kitty / Sixel / Quadrant</div>
-            </div>
-            <div class="play-card">
               <span class="play-cmd">rsille jellyfish</span>
               <p><span data-i18n-zh>Unicode 半块字符渲染的深海水母水族箱，任意真彩色终端可用。</span><span data-i18n-en>Unicode Half-Block deep-sea jellyfish aquarium for any True Color terminal.</span></p>
               <div class="play-proto">Any True Color terminal</div>
+            </div>
+            <div class="play-card">
+              <span class="play-cmd">rsille doctor</span>
+              <p><span data-i18n-zh>终端图形能力探测 + Braille / HalfBlock / Quadrant / 原生像素同屏对比。</span><span data-i18n-en>Terminal capability probe + 4-backend live calibration lab (<code>--plain</code> supported).</span></p>
+              <div class="play-proto">Any terminal</div>
             </div>
           </div>
         </div>

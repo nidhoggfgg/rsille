@@ -17,7 +17,11 @@ use rsille::{
         Builder, Draw, DrawErr, Update,
     },
 };
-use std::{error::Error, time::Instant};
+use std::{
+    error::Error,
+    io::{self, IsTerminal},
+    time::Instant,
+};
 
 const INLINE_HEIGHT: u16 = 24;
 const PREVIEW_WIDTH: u16 = 80;
@@ -229,9 +233,16 @@ fn playback_builder(
     builder
 }
 
+fn require_terminal() -> Result<(), Box<dyn Error>> {
+    if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
+        return Err("This experience needs an interactive terminal.".into());
+    }
+    Ok(())
+}
+
 pub fn run(args: &[String]) -> Result<(), Box<dyn Error>> {
     if args.is_empty() {
-        crate::require_terminal()?;
+        require_terminal()?;
         let (width, height) = crossterm::terminal::size()?;
         let rows = (width / 6).min(height).min(24);
         if rows > 0 {
@@ -247,7 +258,7 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn Error>> {
         return export::command(args, options);
     }
 
-    crate::require_terminal()?;
+    require_terminal()?;
     let (width, height) = crossterm::terminal::size()?;
     // Resolve metrics before any input reader starts, and retain this snapshot.
     let session = options.session((width, height))?;
@@ -258,6 +269,11 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn Error>> {
         .run()?;
     println!();
     Ok(())
+}
+
+fn main() -> Result<(), Box<dyn Error>> {
+    let args: Vec<_> = std::env::args().skip(1).collect();
+    run(&args)
 }
 
 #[cfg(test)]

@@ -15,13 +15,13 @@ playlist loops in about 17 seconds.
 
 ## Run
 
-In an interactive terminal, run
+From the repository root, run:
 
 ```bash
-# With no options, rsille ai-babies draws the static trio.
-rsille ai-babies --animate
-rsille ai-babies --character deepseek
-rsille ai-babies --character claude --height 24
+# With no options, AI Babies draws the static trio.
+cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --animate
+cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --character deepseek
+cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --character claude --height 24
 ```
 
 All animation modes use inline output on the normal screen, without an alternate
@@ -45,10 +45,10 @@ These opt-in animation modes leave default transparent Quadrant playback, static
 and existing exports unchanged:
 
 ```bash
-rsille ai-babies --kitty
-rsille ai-babies --sixel
-rsille ai-babies --sixel --character claude
-rsille ai-babies --sixel --cell-pixels 8x16
+cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --kitty
+cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --sixel
+cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --sixel --character claude
+cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --sixel --cell-pixels 8x16
 ```
 
 - `--kitty` uses inline Kitty graphics. On Unix it checks protocol support before playback. Kitty needs no bottom guard rows.
@@ -108,12 +108,12 @@ restarts its first frame. Both operations preserve the paused state.
 ## Verify and export animation
 
 ```bash
-cargo test -p rsille-playground ai_babies::
-rsille ai-babies --headless
-rsille ai-babies --snapshot /tmp/ai-babies.ppm 0
-rsille ai-babies --character deepseek --height 24 --frames /tmp/deepseek-frames
-rsille ai-babies --character claude --action wave /tmp/claude-wave
-rsille ai-babies --sixel --headless
+cargo test --manifest-path examples/ai-babies/Cargo.toml
+cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --headless
+cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --snapshot /tmp/ai-babies.ppm 0
+cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --character deepseek --height 24 --frames /tmp/deepseek-frames
+cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --character claude --action wave /tmp/claude-wave
+cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --sixel --headless
 ```
 
 Place `--character`, `--height` and any new rendering arguments before the export
@@ -139,7 +139,7 @@ Use fresh output directories to avoid mixing old and new frames. With Pillow ins
 create previews from both files (transparent only for the legacy path):
 
 ```bash
-python3 packages/rsille-playground/ai-babies/tools/preview_actions.py /tmp/deepseek-frames --name deepseek
+python3 examples/ai-babies/tools/preview_actions.py /tmp/deepseek-frames --name deepseek
 ```
 
 The preview script writes `preview-<name>.png` and replaces `preview-<name>.gif` in this
@@ -153,8 +153,8 @@ encoded colors and stable pixels in idle/wave animations.
 ![Static trio preview](preview-static.png)
 
 ```bash
-rsille ai-babies --static
-rsille ai-babies --static --height 20 --snapshot /tmp/ai-babies-static.ppm
+cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --static
+cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --static --height 20 --snapshot /tmp/ai-babies-static.ppm
 ```
 
 `--static` must come first. This mode prints once and exits, using Quadrant encoding
@@ -164,11 +164,11 @@ and the reference image's white background. The default is 144 columns × 24 row
 
 ## Assets and source
 
-[scene.rs](../src/ai_babies/scene.rs) selects clips and samples embedded RGBA frames;
-[mod.rs](../src/ai_babies/mod.rs) handles playback and input; [raster.rs](../src/ai_babies/raster.rs) decodes
-and caches high-resolution canvases; [options.rs](../src/ai_babies/options.rs) validates rendering
-options; [export.rs](../src/ai_babies/export.rs) reconstructs
-encoded terminal cells; [static_image.rs](../src/ai_babies/static_image.rs) implements static mode.
+[scene.rs](src/scene.rs) selects clips and samples embedded RGBA frames;
+[main.rs](src/main.rs) handles playback and input; [raster.rs](src/raster.rs) decodes
+and caches high-resolution canvases; [options.rs](src/options.rs) validates rendering
+options; [export.rs](src/export.rs) reconstructs
+encoded terminal cells; [static_image.rs](src/static_image.rs) implements static mode.
 Previews reconstruct block cells and may differ from a terminal font's seams or proportions.
 
 | Files | Purpose |
@@ -186,9 +186,9 @@ alpha, with shared body pixels for idle and wave. To rebuild pixel data, install
 and run the corresponding script:
 
 ```bash
-python3 packages/rsille-playground/ai-babies/tools/pack_actions.py
-python3 packages/rsille-playground/ai-babies/tools/pack_companions.py
-python3 packages/rsille-playground/ai-babies/tools/pack_static.py
+python3 examples/ai-babies/tools/pack_actions.py
+python3 examples/ai-babies/tools/pack_companions.py
+python3 examples/ai-babies/tools/pack_static.py
 ```
 
-[Playground](../README.md)
+[All examples](../README.md)

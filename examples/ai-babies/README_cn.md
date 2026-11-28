@@ -14,13 +14,13 @@
 
 ## 运行
 
-在交互终端运行
+在仓库根目录执行：
 
 ```bash
 # 不带参数时显示三位角色的静态图。
-rsille ai-babies --animate
-rsille ai-babies --character deepseek
-rsille ai-babies --character claude --height 24
+cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --animate
+cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --character deepseek
+cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --character claude --height 24
 ```
 
 默认动画使用 inline 模式、True Color 和 2 × 2 Quadrant 编码。默认高度上限为 24 行，
@@ -39,9 +39,9 @@ rsille ai-babies --character claude --height 24
 以下可选动画模式不改变默认的透明 Quadrant 播放、静态模式及现有导出行为：
 
 ```bash
-rsille ai-babies --kitty
-rsille ai-babies --sixel --character claude
-rsille ai-babies --sixel --cell-pixels 8x16
+cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --kitty
+cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --sixel --character claude
+cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --sixel --cell-pixels 8x16
 ```
 
 - `--kitty` 使用 inline Kitty 图形。在 Unix 上，程序先验证协议支持再开始播放。Kitty 无需底部保护行。
@@ -89,12 +89,12 @@ Raster 不再提供字符预览；默认 Canvas 模式保持不变。
 ## 动画验证与导出
 
 ```bash
-cargo test -p rsille-playground ai_babies::
-rsille ai-babies --headless
-rsille ai-babies --snapshot /tmp/ai-babies.ppm 0
-rsille ai-babies --character deepseek --height 24 --frames /tmp/deepseek-frames
-rsille ai-babies --character claude --action wave /tmp/claude-wave
-rsille ai-babies --sixel --headless
+cargo test --manifest-path examples/ai-babies/Cargo.toml
+cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --headless
+cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --snapshot /tmp/ai-babies.ppm 0
+cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --character deepseek --height 24 --frames /tmp/deepseek-frames
+cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --character claude --action wave /tmp/claude-wave
+cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --sixel --headless
 ```
 
 `--character`、`--height` 及新的渲染参数必须放在导出选项之前，彼此顺序不限。
@@ -119,7 +119,7 @@ rsille ai-babies --sixel --headless
 （仅旧路径保留透明度）：
 
 ```bash
-python3 packages/rsille-playground/ai-babies/tools/preview_actions.py /tmp/deepseek-frames --name deepseek
+python3 examples/ai-babies/tools/preview_actions.py /tmp/deepseek-frames --name deepseek
 ```
 
 预览脚本会在ai-babies 目录写入 `preview-<name>.png`，并替换 `preview-<name>.gif`。
@@ -131,8 +131,8 @@ python3 packages/rsille-playground/ai-babies/tools/preview_actions.py /tmp/deeps
 ![静态三角色预览](preview-static.png)
 
 ```bash
-rsille ai-babies --static
-rsille ai-babies --static --height 20 --snapshot /tmp/ai-babies-static.ppm
+cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --static
+cargo run --release --manifest-path examples/ai-babies/Cargo.toml -- --static --height 20 --snapshot /tmp/ai-babies-static.ppm
 ```
 
 `--static` 必须放在最前面。此模式输出一次后退出，使用 Quadrant 编码并保留参考图白底。
@@ -141,9 +141,9 @@ rsille ai-babies --static --height 20 --snapshot /tmp/ai-babies-static.ppm
 
 ## 素材与源码
 
-[scene.rs](../src/ai_babies/scene.rs) 选择动作并采样内嵌 RGBA 帧，[mod.rs](../src/ai_babies/mod.rs) 管理播放与输入，
-[raster.rs](../src/ai_babies/raster.rs) 解码并缓存高分辨率画布，[options.rs](../src/ai_babies/options.rs) 校验渲染选项。
-[export.rs](../src/ai_babies/export.rs) 还原编码后的终端字符格，[static_image.rs](../src/ai_babies/static_image.rs)
+[scene.rs](src/scene.rs) 选择动作并采样内嵌 RGBA 帧，[main.rs](src/main.rs) 管理播放与输入，
+[raster.rs](src/raster.rs) 解码并缓存高分辨率画布，[options.rs](src/options.rs) 校验渲染选项。
+[export.rs](src/export.rs) 还原编码后的终端字符格，[static_image.rs](src/static_image.rs)
 实现静态模式。预览通过字符块还原，接缝和比例可能与实际终端字体不同。
 
 | 文件 | 用途 |
@@ -160,9 +160,9 @@ rsille ai-babies --static --height 20 --snapshot /tmp/ai-babies-static.ppm
 需要重建像素数据时，安装 Pillow 后运行对应脚本：
 
 ```bash
-python3 packages/rsille-playground/ai-babies/tools/pack_actions.py
-python3 packages/rsille-playground/ai-babies/tools/pack_companions.py
-python3 packages/rsille-playground/ai-babies/tools/pack_static.py
+python3 examples/ai-babies/tools/pack_actions.py
+python3 examples/ai-babies/tools/pack_companions.py
+python3 examples/ai-babies/tools/pack_static.py
 ```
 
-[Playground](../README.md)
+[全部示例](../README_cn.md)

@@ -31,6 +31,7 @@ directory name in the table. Prefer release builds for animations and 3D scenes.
 | [Minecraft](minecraft/README.md) | `minecraft` | A first-person voxel sandbox with mining, building and flight. |
 | [Clockwork](clockwork/README.md) | `clockwork` | 132 parts assemble into three animated mechanical creatures. |
 | [Pokémon Battle](pokemon-battle/README.md) | `pokemon-battle` | Pikachu versus Blastoise in an interactive 3D turn-based battle. |
+| [AI Babies](ai-babies/README.md) | `ai-babies` | Three animated pixel characters with Quadrant, Kitty, and Sixel rendering. |
 
 Interactive demos need a TTY. Use a True Color terminal and a Unicode monospace font;
 mouse support is needed for pointer interactions. See each guide for window sizes,

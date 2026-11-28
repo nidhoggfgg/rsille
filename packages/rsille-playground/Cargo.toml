@@ -9,7 +9,6 @@ repository = "https://github.com/nidhoggfgg/rsille"
 readme = "README.md"
 include = [
     "/Cargo.toml", "/README.md", "/build.rs", "/src/**", "/tests/**",
-    "/ai-babies/assets/*.rgb", "/ai-babies/assets/*.rgba", "/ai-babies/assets/*-320x320.png",
     "/deepseek-pet/assets/animations/**", "/deepseek-pet/assets/commands.yaml",
 ]
 

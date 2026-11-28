@@ -8,7 +8,7 @@
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENCE)
 [![platforms](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-informational.svg)](#10-秒体验)
 
-<img align="right" src="packages/rsille-playground/ai-babies/preview-deepseek.gif" width="108" alt="DeepSeek 终端宠物">
+<img align="right" src="examples/ai-babies/preview-deepseek.gif" width="108" alt="DeepSeek 终端宠物">
 
 **让你的终端，真正活起来。**
 
@@ -32,14 +32,18 @@
 
 ## 10 秒体验
 
-想立刻在自己的终端里上手？不用写一行 Rust 代码，独立的 **`rsille` Playground** 把四个终端互动体验打包进了同一个可执行文件：
+想立刻在自己的终端里上手？不用写一行 Rust 代码，直接运行 **`rsille`** 即可打开内联 30 FPS 互动展台，或通过子命令直达**八种内置终端体验**：
 
 | 命令 | 运行后能玩到什么 |
 | --- | --- |
-| **`rsille pet`** | 在你日常的 shell（`bash`、`zsh`、`fish`、PowerShell）上养一只会游动的小鲸鱼，也可以直接套在任意程序外面（如 `rsille pet -- vim README.md`）。你敲 `git`/`cargo`/`npm` 时它会接话吐槽，能追鼠标、吹泡泡、吃小鱼干，饿了还会啃屏幕上的字符。*（Kitty / Sixel）* |
-| **`rsille draw`** | 内联数学函数绘图 REPL：支持 2D 笛卡尔、极坐标、参数曲线与实时旋转的 3D 曲面/空间曲线，还内置 `:grid` 交互式多图排版。*（Kitty / Sixel）* |
-| **`rsille ai-babies --animate`** | 三位动态像素角色，支持 `--kitty`、`--sixel`，也支持在任意真彩色终端运行的纯字符四分块模式。 |
-| **`rsille jellyfish`** | 用 Unicode 半块字符渲染的深海发光水母水族箱，直接在普通终端屏幕流畅播放。 |
+| **`rsille voxel`** | 在任意真彩色终端玩第一人称 3D 方块沙盒：探索草地、湖泊与木屋，挖掘搭建、飞行、切换昼夜。*（别名 `craft`）* |
+| **`rsille clockwork`** | 132 个黄铜、钢与陶瓷零件自动拆解重组为步行机、扑翼机与机械花，支持磁力脉冲震散、爆炸视图与拖拽视角。*（任意真彩色终端）* |
+| **`rsille desk`** | 桌面式 TUI 工作台：可拖拽缩放的浮窗、Dock、实时曲线、视觉动效、命令面板（`Ctrl+K`）与多主题。*（别名 `lumen`，任意真彩色终端）* |
+| **`rsille hud`** | 浮在真实 shell 上方的实用工具栏：可拖拽目录树（一键 `cd here`）、命令耗时/状态徽章、待办清单与快捷宏。*（任意终端可用）* |
+| **`rsille pet`** | 在你日常的 shell（`bash`、`zsh`、`fish`、PowerShell）上养一只会游动的小鲸鱼，也可套在 `vim` 外面；能接话吐槽命令、追鼠标、吹泡泡、吃小鱼干。*（Kitty / Sixel）* |
+| **`rsille draw`** | 内联数学函数绘图 REPL：支持 2D 笛卡尔、极坐标、参数曲线与实时旋转的 3D 曲面/空间曲线，内置 `:grid` 交互式多图排版。*（Kitty / Sixel）* |
+| **`rsille jellyfish`** | 用 Unicode 半块字符渲染的深海发光水母水族箱，直接在普通终端屏幕流畅播放。*（任意真彩色终端）* |
+| **`rsille doctor`** | 自动探测 Kitty / Sixel / 单元格像素与真彩色能力，并同屏四路实时对比 Braille、HalfBlock、Quadrant 与原生像素渲染（支持 `--plain` 纯文本报告）。 |
 
 ### 直接下载可执行文件（无需安装 Rust）
 
@@ -60,9 +64,11 @@ mv rsille-linux-x64 rsille && chmod +x rsille
 
 ```sh
 cargo install rsille-playground --locked
-rsille pet          # 启动 shell 宠物（随时按 Ctrl+] 退出）
-rsille draw         # 启动内联 2D/3D 函数绘图器
-rsille jellyfish    # 观看终端深海水母
+rsille              # 打开 30 FPS 内联互动展台
+rsille voxel        # 第一人称 3D 方块沙盒
+rsille desk         # 可拖拽浮窗 TUI 工作台
+rsille hud          # 真实 shell 悬浮工具栏（随时按 Ctrl+] 退出）
+rsille pet          # 启动 shell 宠物（Kitty / Sixel）
 ```
 
 在仓库根目录也可以直接 `cargo run -p rsille-playground -- pet` 运行。自定义宠物台词、组合 `--features` 与更多玩法详见 [Playground 使用指南](packages/rsille-playground/README.md) 和 [DeepSeek 终端宠物说明](packages/rsille-playground/deepseek-pet/README.md)。
@@ -88,7 +94,7 @@ cargo run -p rsille-overlay --example status_badge   # 实时显示上一条命�
 
 ## 背后是一套顺手的 Rust 框架
 
-<img align="right" src="packages/rsille-playground/ai-babies/preview-pet.gif" width="96" alt="">
+<img align="right" src="examples/ai-babies/preview-pet.gif" width="96" alt="">
 
 在这些演示背后，**`rsille`** 把组件布局、彩色图形、动画特效、shell 叠加层和键鼠交互统一进了一套简洁的 Rust API：
 
@@ -179,9 +185,9 @@ fn main() -> std::io::Result<()> {
 
 `Canvas` 既可独立绘图，也能直接嵌入 TUI 布局。`Encoding::Quadrant` 将每个字符格细分为 **2 × 2 个采样点**并拟合前景色与背景色——仅 120 × 20 字符格就能呈现 240 × 40 的像素轮廓。
 
-[![120 × 20 字符格中使用 2 × 2 四分块编码渲染的像素角色](imgs/readme-canvas-quadrant.png)](packages/rsille-playground/ai-babies/README_cn.md)
+[![120 × 20 字符格中使用 2 × 2 四分块编码渲染的像素角色](imgs/readme-canvas-quadrant.png)](examples/ai-babies/README_cn.md)
 
-*上图为 [AI Babies 静态模式](packages/rsille-playground/ai-babies/README_cn.md) 的实际 Canvas 输出，仅占 **20 行**；预览按字符格比例放大以便查看细节。*
+*上图为 [AI Babies 静态模式](examples/ai-babies/README_cn.md) 的实际 Canvas 输出，仅占 **20 行**；预览按字符格比例放大以便查看细节。*
 
 | 编码 | 每格采样数 | 适用场景 |
 | --- | --- | --- |
@@ -220,7 +226,7 @@ npx skills add nidhoggfgg/rsille.skills --skill rsille
 | `rsille-overlay` / `rsille::overlay` | 在 Unix PTY / Windows ConPTY 实时 shell 上浮动组件与 Kitty/Sixel 图像 | [packages/rsille-overlay](packages/rsille-overlay/README_cn.md) |
 | `rsille-syntect` | 基于 Syntect 的 `CodeViewer` 代码高亮扩展（`CodeViewer::from_lines`） | [packages/rsille-syntect](packages/rsille-syntect/README.md) |
 | `rsille-typst` | 进程内将 Typst 数学公式渲染为 `RasterCanvas`，不向核心引入 Typst 依赖 | [packages/rsille-typst](packages/rsille-typst/README_cn.md) |
-| `rsille-playground` | 独立的 `rsille` 命令行体验包（内置 `pet`、`draw`、`ai-babies`、`jellyfish`） | [packages/rsille-playground](packages/rsille-playground/README.md) |
+| `rsille-playground` | 独立的 `rsille` 命令行体验包（内置 `voxel`、`clockwork`、`desk`、`hud`、`pet`、`draw`、`jellyfish`、`doctor`） | [packages/rsille-playground](packages/rsille-playground/README.md) |
 
 ## 更多资料
 
